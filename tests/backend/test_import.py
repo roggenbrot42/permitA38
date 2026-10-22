@@ -514,3 +514,17 @@ def test_accounting_hook_is_called_for_each_imported_document(store, svc, monkey
     monkeypatch.setattr(importer_service, "IMPORT_HOOKS", [lambda coll, rec: seen.append((coll, rec["number"]))])
     svc.run(_b(INVOICE_CSV), "x.csv", "invoices")
     assert seen == [("invoices", "RE-2025-0001"), ("invoices", "RE-2025-0002")]
+
+
+def test_editing_an_imported_invoice_keeps_the_importer_fields(boss_client):
+    c = boss_client
+    cust = c.post("/api/customers", json={"name": "Demo GmbH"}).json()
+    csv_text = "Nummer;Datum;Kunde;Netto\nX-1;01.01.2026;Demo GmbH;100\n"
+    r = c.post("/api/import/run", data={"type": "invoices"}, files={"file": ("x.csv", csv_text.encode())})
+    assert r.status_code == 200, r.text
+    inv = next(i for i in c.get("/api/invoices").json() if i["number"] == "X-1")
+    body = {"customer_id": inv["customer_id"], "status": "sent", "date": "2026-01-01", "lines": inv["lines"]}
+    assert c.put(f"/api/invoices/{inv['id']}", json=body).status_code == 200
+    after = c.get(f"/api/invoices/{inv['id']}").json()
+    assert after["imported"] is True and after["original_number"] == "X-1" and after["external_id"]
+    assert cust["id"]

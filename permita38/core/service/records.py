@@ -15,6 +15,18 @@ MEMBER_READ = {"projects", "tasks", "entries", "absences", "users"}
 MEMBER_WRITE_OWN = {"entries", "absences"}
 
 
+_IMPORT_FIELDS = (
+    "imported",
+    "original_number",
+    "external_id",
+    "import_batch",
+    "totals_unverified",
+    "original_pdf",
+    "original_pdf_sha256",
+    "given_totals",
+)
+
+
 class RecordService:
     def __init__(self, store: Repository):
         self.store = store
@@ -138,6 +150,9 @@ class RecordService:
         st = effective_settings(self.store.settings())
         if old:
             doc["number"] = old.get("number")  # numbers are only assigned via finalize
+            for k in _IMPORT_FIELDS:  # owned by the importer: an edit must not lose the legal original
+                if k in old:
+                    doc[k] = old[k]
         else:
             doc["status"] = "draft"
             doc.pop("number", None)
