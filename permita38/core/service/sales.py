@@ -5,6 +5,7 @@ from datetime import date, timedelta
 
 from permita38.core import calc, documents
 from permita38.core.errors import ServiceError
+from permita38.core.money import hours_from_minutes, to_float
 from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
@@ -132,7 +133,7 @@ class SalesService:
         lines = [
             dict(
                 description=g["p"]["name"] + (" – " + g["t"]["name"] if g["t"] else ""),
-                qty=round(g["minutes"] / 60, 2),
+                qty=to_float(hours_from_minutes(g["minutes"])),
                 unit="h",
                 price=g["rate"],
             )
