@@ -1,0 +1,32 @@
+# Opens a checklist issue every quarter so the tax rules in permita38/core/tax.py are reviewed against current law.
+name: Tax rules review reminder
+on:
+  schedule:
+    - cron: "23 6 2 1,4,7,10 *" # 2nd of Jan/Apr/Jul/Oct
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Create the review issue unless one is already open
+        run: |
+          quarter="$(date -u +%Y)-Q$(( ($(date -u +%-m) - 1) / 3 + 1 ))"
+          open="$(gh issue list --label tax-rules --state open --search 'in:title "Tax rules review"' --json number --jq 'length')"
+          if [ "$open" != "0" ]; then
+            echo "A tax rules review issue is already open; not creating another one for $quarter."
+            exit 0
+          fi
+          gh label create tax-rules --description "Statutory tax rule changes and reviews" --color 0e8a16 2>/dev/null || true
+          gh issue create --label tax-rules --title "Tax rules review $quarter" --body-file .github/tax-review-checklist.md

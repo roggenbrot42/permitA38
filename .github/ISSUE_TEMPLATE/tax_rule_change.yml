@@ -1,0 +1,20 @@
+name: Tax rule change
+description: A statutory rate, limit or form changed (or is wrong in permitA38)
+labels: [tax-rules]
+body:
+  - type: input
+    id: rule
+    attributes: {label: "Which rule?", placeholder: "e.g. Kleinunternehmer limit, UStVA box 81, income tax tariff"}
+    validations: {required: true}
+  - type: input
+    id: source
+    attributes: {label: "Source (law section, BMF letter or official URL)"}
+    validations: {required: true}
+  - type: input
+    id: valid
+    attributes: {label: "Valid from", placeholder: "2027-01-01"}
+    validations: {required: true}
+  - type: textarea
+    id: change
+    attributes: {label: "Old value", new value and what in permitA38 is affected}
+    validations: {required: true}

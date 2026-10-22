@@ -1,0 +1,22 @@
+name: Alpha feedback
+description: Feedback on a pre-release (alpha, beta, rc)
+labels: [alpha-feedback]
+body:
+  - type: input
+    id: version
+    attributes: {label: "Pre-release version", placeholder: "0.4.0-alpha.1"}
+    validations: {required: true}
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Install / start, Login and 2FA, Time tracking, Planning, Customers and projects, Offers and invoices, Expenses, Tax estimates, Backup and migration, Docker, Documentation, Other]
+    validations: {required: true}
+  - type: dropdown
+    id: severity
+    attributes: {label: "How bad is it?", options: [Data loss or wrong numbers, Blocks my work, Annoying, Idea / polish]}
+    validations: {required: true}
+  - type: textarea
+    id: feedback
+    attributes: {label: "What happened / what do you think?"}
+    validations: {required: true}
