@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Customer prefill from the Impressum of a company website** (`POST /api/customers/lookup-impressum`, boss only):
+  deterministic parser (schema.org JSON-LD/microdata, German/English legal-notice wording, obfuscated e-mail
+  addresses, ISO-8859-1/UTF-8) with validators (USt-IdNr check digit, ZIP, e-mail, phone), per-field confidence and
+  evidence, and a review UI in the customer form that never overwrites existing input. Read-only: nothing is saved.
+- **SSRF-safe fetching** (`permita38/core/netsafe.py`): http(s) on ports 80/443 only, no credentials, public
+  addresses only (IPv4/IPv6, metadata, CGNAT, NAT64/6to4/Teredo, ULA) re-checked on every redirect with the
+  connection pinned to the checked address, max 3 redirects, request budget, timeouts incl. an overall deadline,
+  2 MB cap (also for gzip), content-type allow-list, per-user rate limit. Switch: `features.impressum_lookup`
+  (`PERMITA38_FEATURE_IMPRESSUM_LOOKUP`).
 - Docker support: multi-stage `Dockerfile` (non-root, health check, pinned dependencies), `docker-compose.yml`
   (hardened), HTTPS reverse-proxy examples (Caddy, nginx) and `docs/docker.md`.
 - Environment-variable configuration for server hosting (`PERMITA38_*`: host, port, secret key / key file, CORS,

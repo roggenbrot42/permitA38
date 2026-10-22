@@ -39,6 +39,7 @@ That's it. Everything else is planning and billing, which you do when you need t
 ## 4. Add customers and projects (3 min)
 
 - **Customers → + New customer.** Company, address, tax number/VAT ID, point of contact, notes and an optional default hourly rate.
+- **Save typing: prefill from the Impressum.** At the top of the form, enter the customer's website (e.g. `www.example.com`) and press **Look up**. permitA38 reads their legal notice and fills the empty fields (marked *from Impressum* – hover to see where each value came from). Check everything, change what is wrong, then **Save**. Fields you typed yourself are never overwritten unless you click **Use**. Note that the app requests the web page you entered; the switch is `features.impressum_lookup` in the config.
 - **Projects → + New project.** Choose the customer (or tick *Personal project* for things like learning or admin – never billed). Optionally set a project rate and an hour budget.
 - **Tasks (optional)** – open a project and add tasks when different work has a different price, e.g. *Consulting 130 €/h* vs *Development 95 €/h*.
 
@@ -100,6 +101,7 @@ Under **Team → + Add person** create members. Give each person a username and 
 
 - **"Address already in use"** – start with another port: `--port 8766`.
 - **Python not found on Windows** – install Python 3 from python.org and tick *Add to PATH*.
+- **"No Impressum was found"** – open the customer's Impressum page in your browser and paste *that* address; sites that load the notice with JavaScript can't be read.
 - **A change from another device is missing** – wait for Syncthing to finish, then reload the page.
 - **⚠ banner about sync-conflict files** – open the named file next to its original, keep the version you want, delete the other.
 - **PDF has no logo** – the logo must be a JPEG (Settings → Your business).
