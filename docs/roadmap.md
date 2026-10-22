@@ -39,6 +39,8 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | **Calendar connection** (Proton "Share via link" ICS URL, ICS file; works with any ICS source): meetings reduce capacity | in progress |
 | **Adjustable document numbering** (pattern, start number, yearly reset, preview) and an adopter checklist | in progress |
 | **Import of existing documents** (invoices/offers/customers/expenses from CSV/XLSX/JSON, originals attached, undo) | in progress |
+| **Subcontractors**: external people (with or without login) you allocate time to, who send offers you can accept; treated like team members in capacity and costs | planned (needs the planner merged first) |
+| **Gantt chart** for the overall plan and for project subtasks | later |
 
 ## v0.4.0-alpha.3
 
