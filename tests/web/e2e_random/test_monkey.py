@@ -73,6 +73,8 @@ ROUTES = [
     "money/1999",
     "team",
     "settings",
+    "numbering",
+    "import",
     "timeoff",
     "customer/doesnotexist",
     "project/doesnotexist",
