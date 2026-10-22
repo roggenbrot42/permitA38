@@ -40,6 +40,8 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | **Adjustable document numbering** (pattern, start number, yearly reset, preview) and an adopter checklist | in progress |
 | **Import of existing documents** (invoices/offers/customers/expenses from CSV/XLSX/JSON, originals attached, undo) | in progress |
 | **Subcontractors**: external people (with or without login) you allocate time to, who send offers you can accept; treated like team members in capacity and costs | planned (needs the planner merged first) |
+| **Itemised expenses**: a bill can have several lines, each with its own VAT rate and deductible share (business lunch, hotel with breakfast/city tax) | planned |
+| **Bill extraction from PDF/image** (prefill vendor, date, lines, VAT rates; also e-invoice XML); local OCR/LLM, you confirm before saving | later (see AI ideas) |
 | **Gantt chart** for the overall plan and for project subtasks | later |
 
 ## v0.4.0-alpha.3
