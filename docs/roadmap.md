@@ -27,6 +27,19 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | Full data export as JSON and CSV, re-importable by the app (round-trip tested) | in progress |
 | Quarterly **tax-rule review process** (issue reminder, checklist, rule tables with source and valid-from date) | planned (reminder workflow already in place) |
 
+### Maintainer priorities (added after the first alpha, highest first)
+
+| Item | Status |
+|---|---|
+| **Interactive vacation and capacity planner** with what-if scenarios: drag vacation and contracts around, see over-capacity weeks instantly, apply or discard | in progress |
+| **Binding offers in capacity planning**: every open offer counts (worst case "all accepted"); warnings when an offer does not fit into the free hours of its time frame | in progress |
+| **Revenue forecast basis**: contractually owed hours first, intended weekly hours only where nothing is contracted; each row shows its basis | in progress |
+| **Projects have a start and an end**; extended manually or by an offer, with history | in progress |
+| **"Numbers don't add up" warnings** for offers and billing (hours vs. offered hours, price vs. rate, billed vs. offered budget) | in progress |
+| **Calendar connection** (Proton "Share via link" ICS URL, ICS file; works with any ICS source): meetings reduce capacity | in progress |
+| **Adjustable document numbering** (pattern, start number, yearly reset, preview) and an adopter checklist | in progress |
+| **Import of existing documents** (invoices/offers/customers/expenses from CSV/XLSX/JSON, originals attached, undo) | in progress |
+
 ## v0.4.0-alpha.3
 
 | Item | Status |
