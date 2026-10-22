@@ -25,7 +25,10 @@ def totp(secret_b32: str, step: int) -> str:
 
 
 def sign_in(page, url, user="boss", password=PASSWORD):
-    page.goto(url)
+    if page.url in ("", "about:blank"):
+        page.goto(url)
+    # after "Sign out" the app shows the login form by itself; reloading here would race with the logout request
+    page.wait_for_selector("#l_user")
     page.fill("#l_user", user)
     page.fill("#l_pw", password)
     page.click("#l_go")
