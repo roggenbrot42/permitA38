@@ -2,8 +2,8 @@
 
 from permita38.core import calc
 from permita38.core.errors import ServiceError
+from permita38.core.repository import COLLECTIONS, ID_RE, Repository
 from permita38.core.settings import effective_settings
-from permita38.core.store import COLLECTIONS, Store
 
 from .auth import public_user
 
@@ -12,7 +12,7 @@ MEMBER_WRITE_OWN = {"entries", "absences"}
 
 
 class RecordService:
-    def __init__(self, store: Store):
+    def __init__(self, store: Repository):
         self.store = store
 
     def _check(self, coll: str):
@@ -101,12 +101,13 @@ class RecordService:
             own = coll in MEMBER_WRITE_OWN and old.get("user_id") == me["id"] and not old.get("invoice_id")
             if not own:
                 raise ServiceError(403, "Forbidden")
-        if coll == "invoices":  # release billed time entries
-            for e in self.store.list("entries"):
-                if e.get("invoice_id") == rid:
-                    e.pop("invoice_id", None)
-                    self.store.save("entries", e)
-        self.store.delete(coll, rid)
+        with self.store.transaction():
+            if coll == "invoices":  # release billed time entries
+                for e in self.store.list("entries"):
+                    if e.get("invoice_id") == rid:
+                        e.pop("invoice_id", None)
+                        self.store.save("entries", e)
+            self.store.delete(coll, rid)
 
     def list_users(self, me: dict) -> list[dict]:
         users = self.store.list("users")
@@ -116,8 +117,6 @@ class RecordService:
 
 
 def _valid_id(rid: str) -> bool:
-    from permita38.core.store import ID_RE
-
     return bool(ID_RE.match(rid))
 
 

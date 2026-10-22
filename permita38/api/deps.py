@@ -7,12 +7,12 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from permita38.core.config import Config
+from permita38.core.repository import Repository, auto_backup, create_repository
 from permita38.core.service.auth import AuthService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.settings import SettingsService
 from permita38.core.service.time import TimeService
-from permita38.core.store import Store
 
 COOKIE_NAME = "authorization"
 
@@ -20,7 +20,7 @@ COOKIE_NAME = "authorization"
 @dataclass
 class Services:
     config: Config
-    store: Store
+    store: Repository
     auth: AuthService
     records: RecordService
     sales: SalesService
@@ -29,7 +29,7 @@ class Services:
 
     @classmethod
     def create(cls, config: Config) -> "Services":
-        store = Store(str(config.data_dir))
+        store = create_repository(config)
         records = RecordService(store)
         return cls(
             config=config,
@@ -40,6 +40,14 @@ class Services:
             time=TimeService(store),
             settings=SettingsService(store),
         )
+
+
+def startup_services(services: Services) -> None:
+    """Open the database (migrating if needed; refuses a newer one) and take the daily backup."""
+    services.store.startup()
+    db = services.config.database
+    if db.auto_backup:
+        auto_backup(services.store, db.backup_keep)
 
 
 def get_services(request: Request) -> Services:

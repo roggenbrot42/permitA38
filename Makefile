@@ -3,7 +3,7 @@ OPENAPI = api/openapi.json
 
 .PHONY: test
 test:
-	$(PYTHON) -m pytest -q
+	$(PYTHON) -m pytest tests/backend -q
 
 .PHONY: lint
 lint: ruff mypy

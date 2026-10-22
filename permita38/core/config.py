@@ -3,9 +3,23 @@
 import os
 import secrets
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
+
+
+class DatabaseConfig(BaseModel):
+    backend: Literal["sqlite", "postgresql", "mariadb"] = "sqlite"
+    # sqlite: database file (relative paths are inside data_dir); default <data_dir>/permita38.sqlite3
+    path: Path | None = None
+    # server backends (not implemented yet, see docs/porting-to-postgres.md)
+    url: str | None = None
+    # WAL is faster but creates side files that sync badly -> off by default
+    sqlite_wal: bool = False
+    auto_migrate: bool = True
+    auto_backup: bool = True
+    backup_keep: int = 14
 
 
 class Config(BaseModel):
@@ -19,6 +33,7 @@ class Config(BaseModel):
     serve_web: bool = True
     web_dir: Path | None = None
     token_ttl_hours: int = 12
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
 
 def config_dir() -> Path:

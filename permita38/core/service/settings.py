@@ -1,13 +1,13 @@
 from permita38.core import documents
 from permita38.core.holidays import STATES
+from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
-from permita38.core.store import Store
 
 from .auth import public_user
 
 
 class SettingsService:
-    def __init__(self, store: Store):
+    def __init__(self, store: Repository):
         self.store = store
 
     def get(self) -> dict:

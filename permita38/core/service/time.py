@@ -4,15 +4,15 @@ import time as _time
 
 from permita38.core import calc
 from permita38.core.errors import ServiceError
-from permita38.core.store import Store
+from permita38.core.repository import Repository
 
 
 class TimeService:
-    def __init__(self, store: Store):
+    def __init__(self, store: Repository):
         self.store = store
 
     def _write_timer(self, user_id: str, data: dict):
-        self.store._write_json(self.store._path("timers", user_id), data)
+        self.store.save("timers", {**data, "id": user_id})
 
     def get_timer(self, me: dict) -> dict:
         return self.store.get("timers", me["id"]) or {"running": False}
@@ -60,9 +60,10 @@ class TimeService:
         if user_id and user_id != me["id"]:
             if me["role"] != "boss":
                 raise ServiceError(403, "Forbidden")
-            target = self.store.get("users", user_id)
-            if not target:
+            found = self.store.get("users", user_id)
+            if not found:
                 raise ServiceError(404, "User not found")
+            target = found
         return calc.dashboard(self.store, target)
 
     def forecast(self, weeks: int, user_id: str | None, include_offers: bool) -> dict:

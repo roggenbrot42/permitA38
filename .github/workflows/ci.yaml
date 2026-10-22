@@ -30,7 +30,7 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[dev]"
-      - run: python -m pytest -q
+      - run: python -m pytest tests/backend -q
 
   openapi:
     runs-on: ubuntu-latest

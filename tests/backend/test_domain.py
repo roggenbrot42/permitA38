@@ -1,11 +1,7 @@
-import os
-import shutil
-import tempfile
 from datetime import date
 
 from permita38.core import tax
 from permita38.core.holidays import easter, holidays
-from permita38.core.store import Store
 
 
 def test_tariff_2026_continuity():
@@ -36,16 +32,3 @@ def test_holidays():
     assert date(2026, 4, 3) in by  # Good Friday
     assert date(2026, 1, 6) in by
     assert date(2026, 1, 6) not in holidays(2026, "NW")
-
-
-def test_store_ignores_conflict_files():
-    tmp = tempfile.mkdtemp()
-    try:
-        s = Store(tmp)
-        r = s.save("customers", {"name": "A"})
-        with open(os.path.join(tmp, "customers", r["id"] + ".sync-conflict-20260101-ABC.json"), "w") as f:
-            f.write("{}")
-        assert len(s.list("customers")) == 1
-        assert len(s.conflicts()) == 1
-    finally:
-        shutil.rmtree(tmp)
