@@ -1611,6 +1611,52 @@
         }
       }
     },
+    "/api/customers/lookup-impressum": {
+      "post": {
+        "tags": [
+          "customers"
+        ],
+        "summary": "read business data from a website's Impressum (nothing is saved)",
+        "operationId": "lookup_impressum_api_customers_lookup_impressum_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LookupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImpressumLookup"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/customers": {
       "get": {
         "tags": [
@@ -3876,6 +3922,39 @@
         ],
         "title": "Body_upload_api_attachments_post"
       },
+      "Candidate": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Value"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "evidence": {
+            "type": "string",
+            "title": "Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "confidence",
+          "evidence"
+        ],
+        "title": "Candidate"
+      },
       "ChangePasswordPayload": {
         "properties": {
           "old_password": {
@@ -4877,6 +4956,83 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "ImpressumLookup": {
+        "properties": {
+          "source_url": {
+            "type": "string",
+            "title": "Source Url"
+          },
+          "impressum_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impressum Url"
+          },
+          "fields": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Fields"
+          },
+          "confidence": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Confidence"
+          },
+          "evidence": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Evidence"
+          },
+          "candidates": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/Candidate"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Candidates"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_url",
+          "fields",
+          "confidence",
+          "evidence",
+          "candidates",
+          "warnings"
+        ],
+        "title": "ImpressumLookup"
+      },
       "Line": {
         "properties": {
           "description": {
@@ -5004,6 +5160,21 @@
         "type": "object",
         "title": "LoginResult",
         "description": "Either a session (`token` + `user`) or, for accounts with two-factor authentication, a challenge\n(`mfa_required` + `mfa_token`) that POST /auth/login/totp turns into a session."
+      },
+      "LookupRequest": {
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048,
+            "title": "Url",
+            "description": "Address of the company website or its Impressum page"
+          }
+        },
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "title": "LookupRequest"
       },
       "PasswordPayload": {
         "properties": {

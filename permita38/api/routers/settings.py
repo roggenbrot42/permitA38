@@ -10,6 +10,7 @@ routers = [router]
 @router.get("/bootstrap", summary="everything the web app needs after sign-in")
 def bootstrap(user: CurrentUser, services: ServicesDep) -> dict:
     out = services.settings.bootstrap(user, services.time.get_timer(user))
+    out["features"] = {"impressum_lookup": services.config.features.impressum_lookup}
     if user["role"] == "boss":  # the server's folder path is not for everyone
         out["data_dir"] = str(services.config.data_dir)
     return out

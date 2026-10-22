@@ -19,11 +19,84 @@ const CUSTOMER_FIELDS = [
 A.editCustomer = el => {
   const c = el?.dataset?.id ? S.d.customers.find(x => x.id === el.dataset.id) : {};
   openForm({
-    title: c.id ? 'Edit customer' : 'New customer', fields: CUSTOMER_FIELDS, vals: c, wide: true,
+    title: c.id ? 'Edit customer' : 'New customer', fields: CUSTOMER_FIELDS, vals: c, wide: true, note: impressumRow(),
     save: async v => { if (!v.name) throw new Error('Name is required'); const r = await save('customers', v); if (!c.id) location.hash = '#/customer/' + r.id; else render(); },
     del: c.id ? async () => { await api('DELETE', 'customers/' + c.id); location.hash = '#/customers'; await loadAll(['customers']); render(); } : null
   });
+  bindImpressum();
 };
+
+/* ---- prefill a customer from the Impressum (legal notice) of their website -------------------------------
+   The server only reads and parses the page; nothing is saved. Everything that comes from the server is put into
+   the page with textContent / dataset (never as HTML). Existing input is never overwritten without a click. */
+const IMP_FIELDS = ['name', 'street', 'zip', 'city', 'country', 'email', 'phone', 'vat_id', 'tax_number', 'contact'];
+const IMP_LABELS = { name: 'Company', street: 'Street', zip: 'ZIP', city: 'City', country: 'Country', email: 'E-mail', phone: 'Phone', vat_id: 'VAT ID', tax_number: 'Tax number', contact: 'Contact', notes: 'Notes' };
+let IMP = null;
+function impressumRow() {
+  if (S.features && S.features.impressum_lookup === false) return '';
+  return `<div class="hint imp-box"><label for="imp_url">Prefill from a company website (Impressum)</label>
+    <div class="row" style="align-items:center"><input id="imp_url" type="text" inputmode="url" autocomplete="off" placeholder="www.example.com – or the address of the Impressum page"><div class="auto"><button type="button" id="imp_go">Look up</button></div></div>
+    <div class="small muted" style="margin-top:6px">permitA38 requests this web page and reads the legal notice. Nothing is saved until you press Save.</div><div id="imp_out" class="imp-out"></div></div>`;
+}
+function impEl(tag, text, cls) { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
+function impBadge(key, evidence, confidence) {
+  const label = $('label[for="f_' + key + '"]'); if (!label) return;
+  label.querySelectorAll('.imp-badge').forEach(b => b.remove());
+  const b = impEl('span', 'from Impressum', 'pill blue imp-badge');
+  b.title = (confidence != null ? 'Confidence ' + Math.round(confidence * 100) + ' % – ' : '') + (evidence || '');
+  label.appendChild(b);
+}
+function impSet(key, value, evidence, confidence) {
+  const input = $('#f_' + key); if (!input) return false;
+  input.value = value; impBadge(key, evidence, confidence); return true;
+}
+function impNotes(res) {
+  const f = res.fields, parts = [];
+  const reg = [f.register_number, f.register_court].filter(Boolean).join(', ');
+  if (reg) parts.push('Handelsregister: ' + reg);
+  if (Array.isArray(f.managing_directors) && f.managing_directors.length) parts.push('Geschäftsführer: ' + f.managing_directors.join(', '));
+  return parts.join('\n');
+}
+function impShow(out, res) {
+  out.replaceChildren();
+  const filled = [], conflicts = [];
+  for (const k of IMP_FIELDS) {
+    const v = res.fields[k]; if (typeof v !== 'string' || !v) continue;
+    const input = $('#f_' + k); if (!input) continue;
+    if (!input.value.trim()) { impSet(k, v, res.evidence[k], res.confidence[k]); filled.push(k); }
+    else if (input.value.trim() !== v) conflicts.push(k);
+  }
+  const notes = $('#f_notes'), noteText = impNotes(res);
+  if (noteText && notes && !notes.value.trim()) { notes.value = noteText; impBadge('notes', 'Register data and managing directors from the Impressum', 0.7); filled.push('notes'); }
+  out.appendChild(impEl('div', filled.length ? 'Filled in: ' + filled.map(k => IMP_LABELS[k]).join(', ') + '. Please check the values before saving.' : 'Nothing new to fill in – the form already has these values.', 'imp-summary'));
+  if (conflicts.length || Object.keys(res.candidates || {}).some(k => IMP_FIELDS.includes(k))) {
+    const list = impEl('ul', undefined, 'imp-list');
+    const addOption = (k, label, value, evidence, confidence) => {
+      const li = impEl('li'); li.appendChild(impEl('span', label + ': ', 'muted')); li.appendChild(impEl('b', value));
+      const btn = impEl('button', 'Use', 'sm'); btn.type = 'button'; btn.dataset.a = 'impUse'; btn.dataset.k = k; btn.dataset.v = value; btn.dataset.e = evidence || ''; btn.dataset.c = confidence != null ? String(confidence) : '';
+      li.appendChild(document.createTextNode(' ')); li.appendChild(btn); list.appendChild(li);
+    };
+    for (const k of conflicts) addOption(k, IMP_LABELS[k] + ' (Impressum says; you typed something else)', res.fields[k], res.evidence[k], res.confidence[k]);
+    for (const k of IMP_FIELDS) for (const c of (res.candidates?.[k] || []).slice(0, 3)) if (typeof c.value === 'string') addOption(k, 'Other ' + IMP_LABELS[k] + ' found', c.value, c.evidence, c.confidence);
+    if (list.childNodes.length) { out.appendChild(impEl('div', 'Different or alternative values – click Use to replace the field:', 'small muted')); out.appendChild(list); }
+  }
+  if (res.warnings && res.warnings.length) { const w = impEl('ul', undefined, 'imp-list imp-warn'); res.warnings.forEach(t => w.appendChild(impEl('li', '⚠ ' + t))); out.appendChild(w); }
+  const src = res.impressum_url || res.source_url;
+  if (src && /^https?:\/\//i.test(src)) { const p = impEl('div', 'Source: ', 'small muted'); const a = impEl('a', src); a.href = src; a.target = '_blank'; a.rel = 'noopener noreferrer'; p.appendChild(a); out.appendChild(p); }
+}
+A.impUse = el => { impSet(el.dataset.k, el.dataset.v, el.dataset.e, el.dataset.c === '' ? null : Number(el.dataset.c)); el.disabled = true; el.textContent = 'Used'; };
+function bindImpressum() {
+  const go = $('#imp_go'), url = $('#imp_url'), out = $('#imp_out'); if (!go) return;
+  const run = async () => {
+    const value = url.value.trim(); if (!value) { url.focus(); return; }
+    go.disabled = true; go.textContent = 'Looking up…'; out.replaceChildren(impEl('div', 'Reading the website …', 'small muted'));
+    try { IMP = await api.post('customers/lookup-impressum', { url: value }); impShow(out, IMP); }
+    catch (e) { out.replaceChildren(impEl('div', e.message || 'The lookup failed.', 'imp-error')); }
+    finally { go.disabled = false; go.textContent = 'Look up'; }
+  };
+  go.onclick = run;
+  url.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); run(); } };  // Enter must not submit the form
+}
 PAGES.customer = async id => {
   await loadAll(['customers', 'projects', 'invoices', 'offers', 'entries']);
   const c = S.d.customers.find(x => x.id === id); if (!c) return '<div class="card">Customer not found.</div>';

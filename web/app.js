@@ -31,7 +31,7 @@ async function loadAll(only) {
 }
 async function bootstrap() {
   const b = await api('GET', 'bootstrap');
-  Object.assign(S, { me: b.me, settings: b.settings, timer: b.timer, states: b.states, conflicts: b.conflicts, templates: b.templates, data_dir: b.data_dir });
+  Object.assign(S, { me: b.me, settings: b.settings, timer: b.timer, states: b.states, conflicts: b.conflicts, templates: b.templates, data_dir: b.data_dir, features: b.features });
   await loadAll();
 }
 

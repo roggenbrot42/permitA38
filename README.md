@@ -34,7 +34,7 @@ It runs on **Windows and Linux** (anything with Python 3.10+), needs **no databa
 | **📈 Forecast** | Enter contracts (hours per week *or* a total hour budget between two dates). permitA38 lays them out week by week, compares them with your capacity and shows free hours and expected revenue. Open offers appear as *tentative* load. |
 | **🏖 Holidays & time off** | Vacation, personal days, sick days – plus German public holidays for your federal state. They reduce capacity in the forecast. |
 | **💶 Rates** | Hourly rate per customer, project, **task**, or person. The most specific one wins: *task → project → customer → person → default*. |
-| **👥 Customers** | Address, tax number, VAT ID, point of contact, notes, default rate – and a history of their projects, offers and invoices. |
+| **👥 Customers** | Address, tax number, VAT ID, point of contact, notes, default rate – and a history of their projects, offers and invoices. **Prefill a new customer from the Impressum of their website** (you check and confirm every value). |
 | **🧾 Offers & invoices** | Create an offer → send → mark accepted (creates project and contract) → bill by tracked time or by items. PDFs from templates you choose (DIN 5008 layout, German or English, logo support). Gap-free numbering, VAT per line, Kleinunternehmer (§19 UStG) support. |
 | **💳 Expenses** | Enter bills with an attached PDF/photo, assign them to a project or keep them as general expenses. VAT is split out automatically. |
 | **🏛 Taxes (Germany)** | Dashboard for revenue, profit, VAT and income-based taxes for **Freiberufler**, **Gewerbetreibende** (incl. Gewerbesteuer with §35 credit) or **UG/GmbH**. Shows your monthly *set-aside* and what's left for you. |
@@ -147,6 +147,18 @@ Set your **company type**, **federal state**, **Kleinunternehmer** status and **
 
 ---
 
+## Prefill customers from their Impressum
+
+![Customer form prefilled from an Impressum (demo data)](docs/img/impressum-prefill.png)
+
+In **Customers → New customer** you can enter a company's website (or the address of its Impressum page) and press **Look up**. permitA38 reads the legal notice that German and many EU websites must publish and fills in what it finds: company name and legal form, address, e-mail, phone, USt-IdNr, Handelsregister entry, managing directors and a contact person.
+
+- **You stay in control.** Nothing is saved by the lookup. Empty fields are filled and marked *from Impressum* (hover for the text it was derived from and a confidence value); fields you already typed are never overwritten unless you click **Use**. Alternatives (e.g. a second e-mail address) are offered the same way.
+- **Checked, not guessed.** There is no AI involved: the page is parsed with fixed rules (schema.org data first, then the usual German notice wording). A USt-IdNr must pass the official check-digit test, ZIP codes, e-mail addresses and phone numbers are validated, and anything that fails is shown as a warning instead of being filled in.
+- **Privacy:** the lookup makes an outbound web request **from the machine that runs permitA38** to the website you entered (and at most a few of its own Impressum/Kontakt pages). No customer data is sent. If you do not want this, set `features.impressum_lookup: false` in the config (or `PERMITA38_FEATURE_IMPRESSUM_LOOKUP=false`); the button then disappears.
+- **Safe by design:** only `http(s)` on the standard ports, no credentials in addresses, and every address a host name resolves to must be a public one – internal networks, localhost and cloud-metadata addresses are refused, also after redirects. Responses are limited in size and time and are never executed (no JavaScript). The lookup is rate-limited per user and available to the boss role only.
+- **Limits:** web pages differ a lot. Always check the result; sites that build their Impressum with JavaScript, or show it as an image, cannot be read.
+
 ## Architecture
 
 permitA38 is split into a **backend** (HTTP API) and a **frontend** that only talks to that API. The layout follows the approach of [stustapay](https://github.com/stustapay/stustapay).
@@ -187,6 +199,8 @@ host: 127.0.0.1
 port: 8765
 cors_origins: []
 serve_web: true
+features:
+  impressum_lookup: true   # customer prefill reads a web page you enter; set false to switch it off
 database:
   backend: sqlite          # sqlite (default). postgresql / mariadb are prepared, not shipped yet
   # path: permita38.sqlite3  # default: <data_dir>/permita38.sqlite3

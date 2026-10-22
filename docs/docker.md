@@ -64,6 +64,7 @@ file > default. In a container no YAML file is needed or written.
 | `PERMITA38_COOKIE_SECURE` | auto | `true`/`false` forces the `Secure` flag on the login cookie. Automatic = on for https requests (or `X-Forwarded-Proto: https` with `TRUST_PROXY`). |
 | `PERMITA38_CORS_ORIGINS` | – | Comma-separated origins allowed to call the API (only needed when the frontend is hosted elsewhere). |
 | `PERMITA38_SERVE_WEB` | `true` | Serve the bundled web UI. `false` = API only. |
+| `PERMITA38_FEATURE_IMPRESSUM_LOOKUP` | `true` | Customer prefill from a website's Impressum. It makes outbound HTTP(S) requests from the container; set `false` to switch it off (or block egress at the network level). |
 | `PERMITA38_WEB_DIR` | `/app/web` | Location of the web UI inside the image. |
 | `PERMITA38_LOG_LEVEL` | `info` | `debug`, `info`, `warning`, `error`. |
 | `PERMITA38_IN_CONTAINER` | `1` (set by the image) | Container mode: no YAML config is written; the secret key lives in the data volume. |
