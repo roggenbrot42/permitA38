@@ -73,7 +73,7 @@ def _import_documents(services, args) -> None:
         return
     if not report["applied"]:
         sys.exit("Nothing was imported: fix the error rows above (or the mapping) and run again.")
-    print(f"Imported. Batch {report['batch_id']} (undo with the API or the import page).")
+    print(f"Imported. Batch {report['batch_id']} (undo: POST /api/import/batches/{report['batch_id']}/undo).")
     if report.get("next_number") and report.get("next_number") != report.get("next_number_before"):
         print(f"  the next number is now {report['next_number']} (was {report['next_number_before']})")
 

@@ -5,6 +5,22 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Document numbering with sequences**: per-type counters for invoices and offers, patterns with `{year}`, `{yy}`,
+  `{month}`, `{n}` / `{n:05d}`, reset scope never / yearly / monthly, optional shared sequence, adjustable next
+  number with a preview, safety warnings (backwards, gap, duplicate, unsortable) that need confirmation, and an audit
+  log (`/api/numbering`). Numbers are allocated atomically in the finalize transaction. See `docs/numbering.md`.
+- **Import of existing documents**: invoices, offers, customers and expenses from CSV, XLSX or permitA38 JSON, with
+  detected columns (German and English), totals checked to the cent, customer matching, duplicate handling, original
+  PDFs attached by number, dry run, all-or-nothing runs and undo (`permita38 import-documents`,
+  `/api/import/*`). See `docs/import.md`.
+- **Adoption guide** `docs/adopting.md`: what to change when you start using permitA38.
+
+### Changed
+- Numbered invoices can no longer be deleted (cancel them instead) so that the numbers stay gapless.
+- Database revision 3 (numbering counters, numbering log, import columns). Back up before upgrading; the app does this
+  automatically.
+
 ## [0.4.0-alpha.1] - 2026-10-22
 
 First public alpha. Expect rough edges and read [docs/release-plan.md](docs/release-plan.md) for the scope, known
