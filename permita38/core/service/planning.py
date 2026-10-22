@@ -26,6 +26,7 @@ from typing import Any, Iterable
 from permita38.core import calc
 from permita38.core.money import dec, q2
 from permita38.core.repository import Repository
+from permita38.core.settings import effective_settings
 
 from .busy import BusyTimeProvider, NullBusyProvider
 
@@ -143,7 +144,8 @@ def load(
     users = {u["id"]: u for u in ctx["users"].values() if u.get("active", True)}
     boss = next((u["id"] for u in users.values() if u.get("role") == "boss"), next(iter(users), None))
     projects, customers = ctx["projects"], ctx["customers"]
-    default_rate = calc.fnum(ctx["settings"].get("default_rate"))
+    settings = effective_settings(ctx["settings"])
+    default_rate = calc.fnum(settings.get("default_rate"))
     items: list[Item] = []
     expired: list[str] = []
     contracts = store.list("contracts")
@@ -167,7 +169,7 @@ def load(
         win = (
             calc.fnum(
                 plan.get("win_probability"),
-                calc.fnum(ctx["settings"].get("planning_default_win_probability", 100), 100.0),
+                calc.fnum(settings.get("planning_default_win_probability"), 100.0),
             )
             / 100.0
         )
@@ -232,7 +234,7 @@ def load(
         default_rate=default_rate,
         busy=busy or NullBusyProvider(),
         absences=absences,
-        settings=ctx["settings"],
+        settings=settings,
         expired_offers=expired,
     )
 

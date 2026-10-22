@@ -26,11 +26,17 @@ MAX_SCAN_DAYS = 400
 MAX_WINDOW_DAYS = 120
 
 
-def _cap_message(hours: float, free: float, over: list[tuple[str, float]], causes: list[str]) -> str:
-    parts = ", ".join(f"weeks of {w} (over by {_h(o)} h)" for w, o in over)
-    text = f"You offer {_h(hours)} h but only {_h(max(free, 0))} h are free in that period."
+def _cap_message(
+    hours: float, free: float, start: date, end: date, over: list[tuple[str, float]], causes: list[str]
+) -> str:
+    text = f"You offer {_h(hours)} h between {start:%d.%m.%Y} and {end:%d.%m.%Y}"
+    if free + 1e-9 < hours:
+        text += f" but only {_h(max(free, 0.0))} h are free in that period."
+    else:
+        text += " and enough hours are free in total, but the even spread overloads some weeks."
     if over:
-        text += f" Over capacity in {parts}."
+        parts = ", ".join(f"{w} (over by {_h(o)} h)" for w, o in over)
+        text += f" Over capacity in the weeks of {parts}."
     if causes:
         text += " Causes: " + "; ".join(causes) + "."
     return text
@@ -199,7 +205,7 @@ class PlanningService:
         causes = list(dict.fromkeys(causes))[:6]
         over_pairs = [(r["week"], -r["free_worst_case"]) for r in over]
         options = self._options(world, item, hours)
-        msg = _cap_message(hours, free, over_pairs, causes)
+        msg = _cap_message(hours, free, item.start, item.end, over_pairs, causes)
         return [
             pw.warning(
                 "capacity.offer_over",
