@@ -29,9 +29,19 @@ def seeded(srv):
     h = {"Authorization": "Bearer " + srv.token}
     me = httpx.get(srv.base + "/api/auth/me", headers=h).json()
     start = monday(date.today()) + timedelta(days=7)
-    httpx.post(srv.base + "/api/contracts", headers=h, json={
-        "title": "Retainer", "start": start.isoformat(), "end": (start + timedelta(days=13)).isoformat(),
-        "hours_per_week": 40, "rate": 90, "status": "confirmed", "user_ids": [me["id"]]})
+    httpx.post(
+        srv.base + "/api/contracts",
+        headers=h,
+        json={
+            "title": "Retainer",
+            "start": start.isoformat(),
+            "end": (start + timedelta(days=13)).isoformat(),
+            "hours_per_week": 40,
+            "rate": 90,
+            "status": "confirmed",
+            "user_ids": [me["id"]],
+        },
+    )
     return dict(me=me, week2=start)
 
 
@@ -42,13 +52,16 @@ def ui(browser, srv, seeded):
     pg = ctx.new_page()
     problems: list[str] = []
     pg.on("pageerror", lambda e: problems.append("pageerror: " + str(e)))
+
     def on_dialog(d):  # the Apply confirmation is expected; any other dialog is a problem
         if not d.message.startswith("Write "):
             problems.append("dialog: " + d.message)
         d.accept()
 
     pg.on("dialog", on_dialog)
-    pg.on("console", lambda m: m.type == "error" and "status of" not in m.text and problems.append("console: " + m.text))
+    pg.on(
+        "console", lambda m: m.type == "error" and "status of" not in m.text and problems.append("console: " + m.text)
+    )
     pg.goto(srv.base + "/#/plan/vacation")
     pg.wait_for_selector("#plnWrap .pln-bar")
     yield pg

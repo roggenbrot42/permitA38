@@ -24,15 +24,22 @@ MON = date(2026, 2, 2)
 def worlds(draw):
     n_users = draw(st.integers(1, 3))
     users = [
-        dict(name=f"U{i}", weekly_hours=draw(st.sampled_from([0, 10, 20, 24, 40])),
-             workdays=draw(st.sampled_from([[0, 1, 2, 3, 4], [0, 2, 4], [0, 1, 2]])), role="boss" if i == 0 else "member")
+        dict(
+            name=f"U{i}",
+            weekly_hours=draw(st.sampled_from([0, 10, 20, 24, 40])),
+            workdays=draw(st.sampled_from([[0, 1, 2, 3, 4], [0, 2, 4], [0, 1, 2]])),
+            role="boss" if i == 0 else "member",
+        )
         for i in range(n_users)
     ]
     contracts = [
-        dict(start=(MON + timedelta(days=draw(st.integers(-7, 40)))).isoformat(),
-             end=None, hours_per_week=draw(st.one_of(st.none(), st.floats(0, 60, allow_nan=False))),
-             total_hours=draw(st.one_of(st.none(), st.floats(0, 300, allow_nan=False))),
-             user=draw(st.integers(0, n_users - 1)))
+        dict(
+            start=(MON + timedelta(days=draw(st.integers(-7, 40)))).isoformat(),
+            end=None,
+            hours_per_week=draw(st.one_of(st.none(), st.floats(0, 60, allow_nan=False))),
+            total_hours=draw(st.one_of(st.none(), st.floats(0, 300, allow_nan=False))),
+            user=draw(st.integers(0, n_users - 1)),
+        )
         for _ in range(draw(st.integers(0, 4)))
     ]
     for c in contracts:
@@ -40,14 +47,21 @@ def worlds(draw):
         if c["hours_per_week"] is None and c["total_hours"] is None:
             c["hours_per_week"] = 5.0
     offers = [
-        dict(start=(MON + timedelta(days=draw(st.integers(0, 40)))).isoformat(), days=draw(st.integers(0, 60)),
-             hpw=draw(st.floats(0, 40, allow_nan=False)), user=draw(st.integers(0, n_users - 1)),
-             valid=draw(st.sampled_from([None, "2026-01-01", "2026-12-31"])))
+        dict(
+            start=(MON + timedelta(days=draw(st.integers(0, 40)))).isoformat(),
+            days=draw(st.integers(0, 60)),
+            hpw=draw(st.floats(0, 40, allow_nan=False)),
+            user=draw(st.integers(0, n_users - 1)),
+            valid=draw(st.sampled_from([None, "2026-01-01", "2026-12-31"])),
+        )
         for _ in range(draw(st.integers(0, 3)))
     ]
     absences = [
-        dict(user=draw(st.integers(0, n_users - 1)), start=(MON + timedelta(days=draw(st.integers(0, 40)))).isoformat(),
-             days=draw(st.integers(0, 10)))
+        dict(
+            user=draw(st.integers(0, n_users - 1)),
+            start=(MON + timedelta(days=draw(st.integers(0, 40)))).isoformat(),
+            days=draw(st.integers(0, 10)),
+        )
         for _ in range(draw(st.integers(0, 3)))
     ]
     return users, contracts, offers, absences
@@ -57,14 +71,31 @@ def build(repo, world):
     users, contracts, offers, absences = world
     ids = [repo.save("users", dict(u, username=f"u{i}", active=True))["id"] for i, u in enumerate(users)]
     for c in contracts:
-        repo.save("contracts", dict(title="C", start=c["start"], end=c["end"], hours_per_week=c["hours_per_week"],
-                                    total_hours=c["total_hours"], rate=50, status="confirmed",
-                                    user_ids=[ids[c["user"]]]))
+        repo.save(
+            "contracts",
+            dict(
+                title="C",
+                start=c["start"],
+                end=c["end"],
+                hours_per_week=c["hours_per_week"],
+                total_hours=c["total_hours"],
+                rate=50,
+                status="confirmed",
+                user_ids=[ids[c["user"]]],
+            ),
+        )
     for o in offers:
         end = (date.fromisoformat(o["start"]) + timedelta(days=o["days"])).isoformat()
-        repo.save("offers", dict(number="AN-1", status="sent", lines=[], valid_until=o["valid"],
-                                 plan=dict(start=o["start"], end=end, hours_per_week=round(o["hpw"], 2),
-                                           user_ids=[ids[o["user"]]])))
+        repo.save(
+            "offers",
+            dict(
+                number="AN-1",
+                status="sent",
+                lines=[],
+                valid_until=o["valid"],
+                plan=dict(start=o["start"], end=end, hours_per_week=round(o["hpw"], 2), user_ids=[ids[o["user"]]]),
+            ),
+        )
     for a in absences:
         end = (date.fromisoformat(a["start"]) + timedelta(days=a["days"])).isoformat()
         repo.save("absences", dict(user_id=ids[a["user"]], kind="vacation", start=a["start"], end=end))
@@ -93,8 +124,10 @@ def test_engine_invariants_hold_for_random_worlds(world):
                 if w["status"] == "over":
                     assert w["free_worst_case"] < 0 or w["capacity"] <= 1e-9
             before = dump(repo)
-            change = {"absences": [{"user_id": repo.list("users")[0]["id"], "start": "2026-02-10", "end": "2026-02-12"}],
-                      "commitments": []}
+            change = {
+                "absences": [{"user_id": repo.list("users")[0]["id"], "start": "2026-02-10", "end": "2026-02-12"}],
+                "commitments": [],
+            }
             s.simulate(change, 8, MON, None, today=MON)
             assert dump(repo) == before
         finally:

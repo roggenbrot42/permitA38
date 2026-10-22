@@ -474,5 +474,44 @@
     render.after = () => { bindPlanner(); };
     return `<div class="pln-page"><div id="pln">${view()}</div></div>`;
   };
+  /* ---------- non-blocking planning warnings (banner) and the project period box ---------- */
+  function showWarnings(list) {
+    const main = document.querySelector('main');
+    if (!main) return;
+    let box = document.getElementById('plnWarn');
+    if (!box) { box = document.createElement('div'); box.id = 'plnWarn'; box.className = 'banner plnwarn'; main.prepend(box); }
+    const rows = list.map(w => `<li><b>${esc(w.severity)}</b>: ${esc(w.message)}</li>`).join('');
+    box.innerHTML = `<div><b>${list.length} planning warning${list.length === 1 ? '' : 's'}</b> (saved – you can still continue)</div><ul class="plnwarn-list">${rows}</ul><button type="button" class="ghost sm" data-a="plnDismiss">Dismiss</button>`;
+  }
+  A.plnDismiss = () => { const b = document.getElementById('plnWarn'); if (b) b.remove(); };
+  api.onWarnings = showWarnings;
+  window.addEventListener('hashchange', () => { const b = document.getElementById('plnWarn'); if (b) b.remove(); });
+
+  async function projectPlanBox(id) {
+    let t;
+    try { t = await api('GET', `projects/${id}/planning`); } catch { return ''; }
+    const p = t.project;
+    const period = p.start && p.end ? `${fmtDate(p.start)} – ${fmtDate(p.end)}` : 'not set';
+    const hint = p.start && p.end ? '' : ' <span class="pill warn">set the dates</span>';
+    const ext = (t.extensions || []).slice().reverse().map(e => `<li>${e.kind === 'offer' ? 'Accepted offer' : 'Manual extension'}: end ${e.from ? fmtDate(e.from) : '–'} → ${fmtDate(e.to)}${e.reason ? ' – ' + esc(e.reason) : ''}</li>`).join('');
+    const warn = (t.warnings || []).map(w => `<li>${esc(w.message)}</li>`).join('');
+    return `<div class="card pln-proj"><h2>Project period</h2>
+      <div>Period: <b>${esc(period)}</b>${hint}</div>
+      ${warn ? `<ul class="small">${warn}</ul>` : ''}
+      <details><summary class="small">Extension history (${(t.extensions || []).length})</summary><ul class="small">${ext || '<li>None yet.</li>'}</ul></details>
+      ${p.start && p.end ? `<form class="pln-form" data-submit="projExtend"><div class="row"><div class="auto"><label for="projNewEnd">Extend end to</label><input id="projNewEnd" type="date" min="${esc(p.end)}" value="${esc(p.end)}"></div><div class="auto"><label for="projReason">Reason</label><input id="projReason" type="text" maxlength="2000"></div><div class="auto"><button type="button" data-a="projExtend" data-id="${esc(p.id)}">Extend</button></div></div></form>` : ''}
+    </div>`;
+  }
+  A.projExtend = guard(async el => {
+    const end = document.getElementById('projNewEnd').value;
+    const reason = document.getElementById('projReason').value.trim();
+    const r = await api('POST', `projects/${el.dataset.id}/extend`, { new_end: end, reason: reason || null });
+    if (!r.planning_warnings || !r.planning_warnings.length) toast('Project extended');
+    await loadAll(['projects']);
+    render();
+  });
+  const projectPage = PAGES.project;
+  PAGES.project = async id => (await projectPage(id)) + (await projectPlanBox(id));
+
   window.PLANNER = { paint, simulate, state: P };
 })();
