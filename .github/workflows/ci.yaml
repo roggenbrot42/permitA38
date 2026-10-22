@@ -61,7 +61,7 @@ jobs:
       - name: Browser tests
         shell: bash
         run: |
-          set -o pipefail
+          set +e
           python -m pytest tests/web -q -rfE --tb=short -p no:cacheprovider 2>&1 | tee /tmp/web-tests.log
           status=${PIPESTATUS[0]}
           if [ "$status" != 0 ]; then
