@@ -152,6 +152,10 @@ class RecordService:
         old = self.store.get(coll, rid) if _valid_id(rid) else None
         if not old:
             return
+        if coll == "invoices" and old.get("number"):  # gapless numbering: a numbered invoice is cancelled, not deleted
+            raise ServiceError(
+                409, "A numbered invoice cannot be deleted; cancel it instead (keeps the numbers gapless)"
+            )
         if me["role"] != "boss":
             own = coll in MEMBER_WRITE_OWN and old.get("user_id") == me["id"] and not old.get("invoice_id")
             if not own:

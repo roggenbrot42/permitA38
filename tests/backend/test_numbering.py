@@ -303,3 +303,15 @@ def test_numbering_api(boss_client):
     r = boss_client.put("/api/numbering", json={"type": "invoice", "next": 0})
     assert r.status_code == 422
     assert len(boss_client.get("/api/numbering/log", params={"type": "invoice"}).json()) == 2
+
+
+def test_numbered_invoice_cannot_be_deleted(store):
+    sales, _ = make_sales(store, date(2026, 5, 5))
+    cust = make_customer(store)
+    inv = sales.finalize("invoices", make_invoice(store, cust["id"], date(2026, 5, 5))["id"])
+    with pytest.raises(ServiceError) as e:
+        sales.records.delete({"role": "boss", "id": "x"}, "invoices", inv["id"])
+    assert e.value.status == 409
+    draft = make_invoice(store, cust["id"], date(2026, 5, 5))
+    sales.records.delete({"role": "boss", "id": "x"}, "invoices", draft["id"])  # drafts stay deletable
+    assert store.get("invoices", draft["id"]) is None
