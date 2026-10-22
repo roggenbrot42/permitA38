@@ -6,9 +6,12 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from permita38 import __version__
 from permita38.core.config import Config
+from permita38.core.netsafe import SafeFetcher
 from permita38.core.repository import Repository, auto_backup, create_repository
 from permita38.core.service.auth import AuthService
+from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.settings import SettingsService
@@ -26,6 +29,7 @@ class Services:
     sales: SalesService
     time: TimeService
     settings: SettingsService
+    impressum: ImpressumService
 
     @classmethod
     def create(cls, config: Config) -> "Services":
@@ -39,6 +43,10 @@ class Services:
             sales=SalesService(store, records),
             time=TimeService(store),
             settings=SettingsService(store),
+            impressum=ImpressumService(
+                SafeFetcher(f"permitA38/{__version__} (+https://github.com/roggenbrot42/permitA38)"),
+                enabled=config.features.impressum_lookup,
+            ),
         )
 
 

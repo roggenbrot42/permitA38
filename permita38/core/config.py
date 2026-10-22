@@ -22,6 +22,11 @@ class DatabaseConfig(BaseModel):
     backup_keep: int = 14
 
 
+class FeaturesConfig(BaseModel):
+    # outbound request to a website the user enters (customer prefill from the Impressum)
+    impressum_lookup: bool = True
+
+
 class Config(BaseModel):
     data_dir: Path = Field(default_factory=lambda: Path.home() / "permitA38")
     secret_key: str
@@ -42,6 +47,7 @@ class Config(BaseModel):
     web_dir: Path | None = None
     token_ttl_hours: int = 12
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
+    features: FeaturesConfig = Field(default_factory=FeaturesConfig)
 
 
 def config_dir() -> Path:
@@ -111,6 +117,9 @@ def apply_env(raw: dict) -> dict:
         b = _env_bool(name)
         if b is not None:
             raw[key] = b
+    lookup = _env_bool("PERMITA38_FEATURE_IMPRESSUM_LOOKUP")
+    if lookup is not None:
+        raw["features"] = {**(raw.get("features") or {}), "impressum_lookup": lookup}
     if in_container():
         raw["in_container"] = True
     return raw
