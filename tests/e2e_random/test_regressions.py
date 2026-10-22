@@ -120,9 +120,11 @@ def test_new_document_draft_survives_delete_line_and_status_menu_is_robust(make_
     page, watch = make_page(token=api.http.headers["Authorization"].split()[1])
     page.goto(live_server.url + "/#/doc/invoices/new")
     page.wait_for_selector("#d_totals")
-    page.click("[data-a=addLine]")
-    page.click("[data-a=addLine]")
-    assert page.locator("input[data-k=description]").count() == 3
+    lines = page.locator("input[data-k=description]")
+    for expected in (2, 3):
+        page.click("[data-a=addLine]")
+        page.wait_for_function(f"document.querySelectorAll('input[data-k=description]').length === {expected}")
     page.click("[data-a=delLine][data-i='1']")
-    assert page.locator("input[data-k=description]").count() == 2
+    page.wait_for_function("document.querySelectorAll('input[data-k=description]').length === 2")
+    assert lines.count() == 2
     watch.check()
