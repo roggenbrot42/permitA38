@@ -45,6 +45,15 @@
 - Commit messages use Conventional Commit prefixes (`feat:`, `fix:`, `chore:`, `docs:`), imperative summaries.
 - Licensed GPL-3.0-or-later; keep new files compatible.
 
+## Division of labour between models
+- **Architecture, planning and specifications** (data models, module interfaces and contracts, migration numbering,
+  security trade-offs, task breakdown) are decided by the stronger model (Sonnet 5.5) and written down in the task
+  specification before implementation starts.
+- **Implementation** (code, tests, docs) may be done by a smaller model. It executes the specification and does **not**
+  make architectural decisions: on ambiguity it picks the simplest option consistent with the spec and lists it under
+  "Open design decisions" in its report, so the reviewer can confirm or change it before the merge.
+- **Review** (code, tests, logic) is done by the stronger model, see "Merge gate".
+
 ## Merge gate (before anything lands on `main`)
 - Implementation work may be done with smaller/cheaper models, but **every branch is reviewed with Sonnet 5.5 before it is
   merged into `main`**, in three passes: (1) **code review** of the diff (correctness, security, edge cases),
