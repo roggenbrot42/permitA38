@@ -369,7 +369,7 @@ def test_attachment_paths_cannot_escape_the_data_folder(name):
 
 
 @pytest.mark.randomized
-@pytest.mark.parametrize("extra", [{"password_hash": "pbkdf2_sha256$1$00$00", "pw_changed": 0}, {"role": "boss", "id": "x"}])
+@pytest.mark.parametrize("extra", [{"password_hash": "pbkdf2_sha256$1$00$00", "pw_changed": 0}, {"is_boss": True, "id": "othersomeone", "active": True}])
 def test_user_records_cannot_be_mass_assigned(extra):
     """Extra fields on /users are ignored: they can neither replace a password hash nor smuggle a role."""
     world = World()
@@ -379,7 +379,8 @@ def test_user_records_cannot_be_mass_assigned(extra):
         r = world.http.put(f"/api/users/{world.member['id']}", json=body, headers=h)
         assert r.status_code == 200, r.text
         stored = world.svc.store.get("users", world.member["id"])
-        assert stored["role"] == "member" and stored["password_hash"].count("$") == 3 and stored["password_hash"] != extra.get("password_hash")
+        assert stored["role"] == "member" and stored["id"] == world.member["id"] and "is_boss" not in stored
+        assert stored["password_hash"].count("$") == 3 and stored["password_hash"] != extra.get("password_hash")
         login = world.http.post("/api/auth/login", json={"username": "mia", "password": "member-pass-1"})
         assert login.status_code == 200
     finally:
