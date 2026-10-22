@@ -115,7 +115,9 @@ def _unfold(text: str) -> list[str]:
 
 
 def _split_outside_quotes(text: str, sep: str) -> list[str]:
-    parts, buf, quoted = [], [], False
+    parts: list[str] = []
+    buf: list[str] = []
+    quoted = False
     for ch in text:
         if ch == '"':
             quoted = not quoted
