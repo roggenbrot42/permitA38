@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Calendars: meetings reduce your capacity.** Connect a personal calendar by its ICS link (Proton Calendar
+  "Share via link", Nextcloud, Google, Outlook, Apple, Fastmail: `https://` or `webcal://`) or by uploading an `.ics`
+  file. Read-only, refreshed every 6 hours by default, and the stored events are expanded recurrences (RRULE, EXDATE,
+  RECURRENCE-ID) inside a bounded window. Busy time counts only inside each person's working hours and time zone,
+  overlaps are merged, and a daily target caps it. No meeting titles are stored by default; the subscription link is
+  a secret, is never shown again and never logged. Out-of-office entries are offered as suggestions, never created.
+  Settings → Calendars includes a guided Proton Calendar card. Database migration 0003 (renumbered 0011 when the
+  feature branches are merged) adds the calendar tables and the per-user working time fields; the boss account
+  manages its own calendars. Command: `permita38 calendar refresh`. See [docs/calendar.md](docs/calendar.md).
+- `SafeFetcher.fetch_resource`: the SSRF-safe download for files (https only, conditional requests with ETag and
+  Last-Modified, size and content-type limits).
+
 ## [0.4.0-alpha.1] - 2026-10-22
 
 First public alpha. Expect rough edges and read [docs/release-plan.md](docs/release-plan.md) for the scope, known

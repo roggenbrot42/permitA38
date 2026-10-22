@@ -278,7 +278,7 @@ The full plan, assigned by release, is in [`docs/roadmap.md`](docs/roadmap.md); 
 [`docs/release-plan.md`](docs/release-plan.md).
 
 - **alpha.1** (first pre-release): everything above, TOTP two-factor login, Docker, Windows/Linux downloads
-- **alpha.2**: roles and rights, validation layer, JSON/CSV export, company-website (Impressum) import
+- **alpha.2**: roles and rights, validation layer, JSON/CSV export, company-website (Impressum) import, calendar import so meetings reduce planned capacity ([docs/calendar.md](docs/calendar.md))
 - **alpha.3**: accounting and the VAT return (Umsatzsteuer-Voranmeldung), DATEV/XLSX, XRechnung/ZUGFeRD e-invoices
 - **alpha.4**: legal-retention backups, GoBD and GDPR support, tax-audit export, per-IP throttling, session revocation
 - **beta**: optional local AI helpers (invoice scan pre-fill, bank matching, MCP server), German UI, signed downloads

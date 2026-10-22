@@ -345,6 +345,8 @@ A.editUser = el => {
     title: u.id ? 'Edit person' : 'Add person', vals: u,
     fields: [{ k: 'name', l: 'Name' }, { k: 'role', l: 'Role', t: 'select', o: [['member', 'Member – tracks own time'], ['boss', 'Boss – plans & sees everything']], row: 1 }, { k: 'color', l: 'Colour', t: 'color', row: 1 },
       { k: 'weekly_hours', l: 'Weekly hours', t: 'number', row: 2 }, { k: 'tracking_start', l: 'Tracking since', t: 'date', row: 2, h: 'Starts the flex-time balance' },
+      { k: 'work_start', l: 'Working day from', t: 'time', row: 4, h: 'Calendar busy time counts only inside this window' }, { k: 'work_end', l: 'Working day until', t: 'time', row: 4 },
+      { k: 'timezone', l: 'Time zone of the working day', ph: 'Europe/Berlin', h: 'IANA name, empty = Europe/Berlin' },
       { k: 'default_rate', l: 'Billing rate €/h', t: 'number', row: 3, h: 'Fallback when project/customer have none' }, { k: 'cost_rate', l: 'Cost €/h', t: 'number', row: 3, h: 'For project margins' },
       { k: 'username', l: 'Username', h: 'Used to sign in (letters, digits, . - _)' }, { k: 'password', l: u.id ? 'New password (leave empty to keep)' : 'Password (min. 8 characters)', t: 'password', h: 'At least 8 characters' }, { k: 'active', l: 'Active', t: 'check' }],
     extra: `<div class="field"><label>Working days</label>${WD.map((d, i) => `<label style="display:inline-block;margin-right:12px"><input type="checkbox" class="wd" value="${i}" ${(u.workdays || [0, 1, 2, 3, 4]).includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div>`,
