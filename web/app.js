@@ -107,7 +107,9 @@ function entryForm(e = {}, after) {
     save: async v => {
       let min = parseDur(v.dur);
       if ((min === null || isNaN(min)) && v.start && v.end) { const [a, b] = [v.start, v.end].map(x => +x.slice(0, 2) * 60 + +x.slice(3)); min = b - a; if (min <= 0) min += 1440; }
+      if (!v.date) throw new Error('Pick a date');
       if (min === null || isNaN(min) || min <= 0) throw new Error('Enter from/to times or a duration');
+      if (min > 1440) throw new Error('A time entry can be at most 24 hours');
       v.minutes = min; delete v.dur;
       await save('entries', { ...v, project_id: v.project_id || null, task_id: v.task_id || null });
       after && after();
@@ -263,7 +265,7 @@ PAGES.today = async () => {
   ${extras}
   <div class="card"><h2>Today · ${hm(dash.today_worked)} h</h2>${entries.length ? `<table>${entries.map(e => entryRow(e, projects)).join('')}</table>` : '<div class="empty">Nothing tracked yet today. Hit <b>Start</b> when you begin working.</div>'}</div>`;
 };
-const docTotal = d => (d.lines || []).reduce((a, l) => a + (l.amount || 0) * (1 + (S.settings.kleinunternehmer ? 0 : (l.vat ?? d.vat_rate ?? S.settings.vat_rate ?? 19) / 100)), 0);
+const docTotal = d => Money.docGross(d, S.settings);
 function entryRow(e, projects) {
   const p = projects[e.project_id];
   return `<tr class="click" data-a="editEntry" data-id="${e.id}"><td>${p ? `<span class="dot" style="background:${esc(p.color || '#888')}"></span><b>${esc(p.name)}</b>` : '<span class="muted">no project</span>'}${e.task_id ? ' · ' + esc(nameOf('tasks', e.task_id)) : ''}<div class="small muted">${esc(e.note || '')}</div></td>

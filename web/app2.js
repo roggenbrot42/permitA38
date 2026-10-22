@@ -171,10 +171,10 @@ function syncDoc() {
 }
 function recalcDoc() {
   syncDoc(); const d = DOC; if (!d || !$('#d_totals')) return;
-  const klein = S.settings.kleinunternehmer, dv = klein ? 0 : (d.vat_rate ?? S.settings.vat_rate ?? 19), by = {}; let net = 0;
-  d.lines.forEach((l, i) => { const a = l.qty * l.price; net += a; const r = klein ? 0 : (l.vat ?? dv); by[r] = (by[r] || 0) + a; const c = $('#amt' + i); if (c) c.textContent = eur(a); });
-  const vat = Object.entries(by).filter(([r]) => +r).map(([r, a]) => [r, a * r / 100]);
-  $('#d_totals').innerHTML = `Net <b>${eur(net)}</b>${vat.map(([r, v]) => ` · VAT ${r}% ${eur(v)}`).join('')} · <span style="font-size:20px">Total <b>${eur(net + vat.reduce((a, x) => a + x[1], 0))}</b></span>${klein ? '<div class="small muted">Kleinunternehmer (§19 UStG): no VAT charged.</div>' : ''}`;
+  const klein = S.settings.kleinunternehmer, t = Money.totals(d, S.settings);   // exact cents, half-up VAT per rate
+  t.lines.forEach((c, i) => { const el = $('#amt' + i); if (el) el.textContent = eur(Money.toNumber(c)); });
+  const vat = Object.entries(t.vat).filter(([r]) => +r);
+  $('#d_totals').innerHTML = `Net <b>${eur(Money.toNumber(t.net))}</b>${vat.map(([r, c]) => ` · VAT ${r}% ${eur(Money.toNumber(c))}`).join('')} · <span style="font-size:20px">Total <b>${eur(Money.toNumber(t.gross))}</b></span>${klein ? '<div class="small muted">Kleinunternehmer (§19 UStG): no VAT charged.</div>' : ''}`;
 }
 document.addEventListener('input', e => { if (e.target.closest('[data-l],#d_vat')) recalcDoc(); });
 A.addLine = () => { syncDoc(); DOC.lines.push({ description: '', qty: 1, unit: 'h', price: S.settings.default_rate || 0 }); render(); };
@@ -219,7 +219,9 @@ A.editExpense = el => {
     extra: `<div class="field"><label>Attach the bill (PDF / photo)</label><input type="file" id="e_file">${e.attachment ? `<div class="small"><a href="${api.url('attachments/' + e.attachment)}" target="_blank">Current attachment</a></div>` : ''}</div>`,
     save: async v => {
       if (!v.gross) throw new Error('Enter the amount'); const r = +v.vat_rate || 0;
-      v.net = Math.round(v.gross / (1 + r / 100) * 100) / 100; v.vat = Math.round((v.gross - v.net) * 100) / 100; v.vat_rate = r; delete v.gross; v.project_id = v.project_id || null;
+      if (v.gross < 0) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
+      if (!v.date) throw new Error('Pick the date you paid');
+      Object.assign(v, Money.splitGross(v.gross, r)); v.vat_rate = r; delete v.gross; v.project_id = v.project_id || null;
       const f = $('#e_file').files[0];
       if (f) v.attachment = (await api.upload(f)).name;
       await save('expenses', v); render();

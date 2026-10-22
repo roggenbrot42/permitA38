@@ -669,7 +669,9 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "maximum": 2100,
+                  "minimum": 2000
                 },
                 {
                   "type": "null"
@@ -727,7 +729,9 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "integer"
+                  "type": "integer",
+                  "maximum": 2100,
+                  "minimum": 2000
                 },
                 {
                   "type": "null"
@@ -854,7 +858,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Settings"
+                "$ref": "#/components/schemas/SettingsIn"
               }
             }
           },
@@ -1342,7 +1346,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Customer"
+                "$ref": "#/components/schemas/CustomerIn"
               }
             }
           },
@@ -1450,7 +1454,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Customer"
+                "$ref": "#/components/schemas/CustomerIn"
               }
             }
           }
@@ -1556,7 +1560,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Project"
+                "$ref": "#/components/schemas/ProjectIn"
               }
             }
           },
@@ -1664,7 +1668,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Project"
+                "$ref": "#/components/schemas/ProjectIn"
               }
             }
           }
@@ -1770,7 +1774,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Task"
+                "$ref": "#/components/schemas/TaskIn"
               }
             }
           },
@@ -1878,7 +1882,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Task"
+                "$ref": "#/components/schemas/TaskIn"
               }
             }
           }
@@ -1984,7 +1988,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Entry"
+                "$ref": "#/components/schemas/EntryIn"
               }
             }
           },
@@ -2092,7 +2096,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Entry"
+                "$ref": "#/components/schemas/EntryIn"
               }
             }
           }
@@ -2198,7 +2202,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Contract"
+                "$ref": "#/components/schemas/ContractIn"
               }
             }
           },
@@ -2306,7 +2310,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Contract"
+                "$ref": "#/components/schemas/ContractIn"
               }
             }
           }
@@ -2412,7 +2416,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Absence"
+                "$ref": "#/components/schemas/AbsenceIn"
               }
             }
           },
@@ -2520,7 +2524,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Absence"
+                "$ref": "#/components/schemas/AbsenceIn"
               }
             }
           }
@@ -2626,7 +2630,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Document"
+                "$ref": "#/components/schemas/DocumentIn"
               }
             }
           },
@@ -2734,7 +2738,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Document"
+                "$ref": "#/components/schemas/DocumentIn"
               }
             }
           }
@@ -2840,7 +2844,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Document"
+                "$ref": "#/components/schemas/DocumentIn"
               }
             }
           },
@@ -2948,7 +2952,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Document"
+                "$ref": "#/components/schemas/DocumentIn"
               }
             }
           }
@@ -3054,7 +3058,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Expense"
+                "$ref": "#/components/schemas/ExpenseIn"
               }
             }
           },
@@ -3162,7 +3166,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Expense"
+                "$ref": "#/components/schemas/ExpenseIn"
               }
             }
           }
@@ -3268,7 +3272,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Template"
+                "$ref": "#/components/schemas/TemplateIn"
               }
             }
           },
@@ -3376,7 +3380,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Template"
+                "$ref": "#/components/schemas/TemplateIn"
               }
             }
           }
@@ -3530,6 +3534,66 @@
           "start"
         ],
         "title": "Absence"
+      },
+      "AbsenceIn": {
+        "properties": {
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "vacation",
+              "holiday",
+              "sick",
+              "other"
+            ],
+            "title": "Kind",
+            "default": "vacation"
+          },
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "start"
+        ],
+        "title": "AbsenceIn"
       },
       "AuthStatus": {
         "properties": {
@@ -3722,6 +3786,126 @@
         ],
         "title": "Contract"
       },
+      "ContractIn": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "title": "End"
+          },
+          "hours_per_week": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 168.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hours Per Week"
+          },
+          "total_hours": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Hours"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "confirmed",
+              "done"
+            ],
+            "title": "Status",
+            "default": "confirmed"
+          },
+          "user_ids": {
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-z]{6,32}$"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "User Ids",
+            "default": []
+          },
+          "offer_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Id"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "title",
+          "start",
+          "end"
+        ],
+        "title": "ContractIn"
+      },
       "Customer": {
         "properties": {
           "id": {
@@ -3900,6 +4084,167 @@
           "name"
         ],
         "title": "Customer"
+      },
+      "CustomerIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "customer_no": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer No"
+          },
+          "street": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street"
+          },
+          "zip": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zip"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "tax_number": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Number"
+          },
+          "vat_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 30
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Id"
+          },
+          "contact": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CustomerIn"
       },
       "Document": {
         "properties": {
@@ -4163,6 +4508,261 @@
         "title": "Document",
         "description": "An offer or an invoice."
       },
+      "DocumentIn": {
+        "properties": {
+          "number": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "sent",
+              "accepted",
+              "rejected",
+              "paid",
+              "cancelled"
+            ],
+            "title": "Status",
+            "default": "draft"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          },
+          "paid_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid Date"
+          },
+          "service_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service From"
+          },
+          "service_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service To"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "",
+                  "de",
+                  "en"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "intro": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intro"
+          },
+          "outro": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outro"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "vat_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Rate"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/LineIn"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Lines",
+            "default": []
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlanIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "offer_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Id"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "DocumentIn",
+        "description": "An offer or an invoice."
+      },
       "Entry": {
         "properties": {
           "id": {
@@ -4308,6 +4908,127 @@
         ],
         "title": "Entry"
       },
+      "EntryIn": {
+        "properties": {
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "minutes": {
+            "type": "integer",
+            "maximum": 1440.0,
+            "minimum": 1.0,
+            "title": "Minutes"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "billable": {
+            "type": "boolean",
+            "title": "Billable",
+            "default": true
+          },
+          "invoice_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Id"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "minutes"
+        ],
+        "title": "EntryIn"
+      },
       "Expense": {
         "properties": {
           "id": {
@@ -4436,12 +5157,121 @@
         ],
         "title": "Expense"
       },
+      "ExpenseIn": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "net": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Net"
+          },
+          "vat": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Vat",
+            "default": 0
+          },
+          "vat_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Rate"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "deductible": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Deductible",
+            "default": 100
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}\\.[a-z0-9]{1,5}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "net"
+        ],
+        "title": "ExpenseIn"
+      },
       "FromTime": {
         "properties": {
           "customer_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
               },
               {
                 "type": "null"
@@ -4452,7 +5282,8 @@
           "project_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
               },
               {
                 "type": "null"
@@ -4553,6 +5384,71 @@
         "additionalProperties": true,
         "type": "object",
         "title": "Line"
+      },
+      "LineIn": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Description",
+            "default": ""
+          },
+          "qty": {
+            "type": "number",
+            "maximum": 10000000.0,
+            "minimum": -10000000.0,
+            "title": "Qty",
+            "default": 0
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 30
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "price": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": -1000000000.0,
+            "title": "Price",
+            "default": 0
+          },
+          "vat": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": -1000000000.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "LineIn"
       },
       "LoginPayload": {
         "properties": {
@@ -4658,6 +5554,84 @@
         "additionalProperties": true,
         "type": "object",
         "title": "Plan"
+      },
+      "PlanIn": {
+        "properties": {
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "hours_per_week": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 168.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hours Per Week"
+          },
+          "total_hours": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Hours"
+          },
+          "user_ids": {
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-z]{6,32}$"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "User Ids",
+            "default": []
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "PlanIn"
       },
       "Project": {
         "properties": {
@@ -4789,6 +5763,121 @@
           "name"
         ],
         "title": "Project"
+      },
+      "ProjectIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
+          },
+          "personal": {
+            "type": "boolean",
+            "title": "Personal",
+            "default": false
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          },
+          "budget_hours": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Hours"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "paused",
+              "done",
+              "archived"
+            ],
+            "title": "Status",
+            "default": "active"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "member_ids": {
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9a-z]{6,32}$"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "Member Ids",
+            "default": []
+          },
+          "offer_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Id"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ProjectIn"
       },
       "Settings": {
         "properties": {
@@ -4958,6 +6047,219 @@
         "type": "object",
         "title": "Settings"
       },
+      "SettingsIn": {
+        "properties": {
+          "company_name": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Company Name",
+            "default": ""
+          },
+          "owner_name": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Owner Name",
+            "default": ""
+          },
+          "street": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Street",
+            "default": ""
+          },
+          "zip": {
+            "type": "string",
+            "maxLength": 20,
+            "title": "Zip",
+            "default": ""
+          },
+          "city": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "City",
+            "default": ""
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 254,
+            "title": "Email",
+            "default": ""
+          },
+          "phone": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Phone",
+            "default": ""
+          },
+          "website": {
+            "type": "string",
+            "maxLength": 300,
+            "title": "Website",
+            "default": ""
+          },
+          "tax_number": {
+            "type": "string",
+            "maxLength": 50,
+            "title": "Tax Number",
+            "default": ""
+          },
+          "vat_id": {
+            "type": "string",
+            "maxLength": 30,
+            "title": "Vat Id",
+            "default": ""
+          },
+          "bank_name": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Bank Name",
+            "default": ""
+          },
+          "iban": {
+            "type": "string",
+            "maxLength": 40,
+            "title": "Iban",
+            "default": ""
+          },
+          "bic": {
+            "type": "string",
+            "maxLength": 20,
+            "title": "Bic",
+            "default": ""
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}\\.[a-z0-9]{1,5}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo"
+          },
+          "company_type": {
+            "type": "string",
+            "enum": [
+              "freiberufler",
+              "gewerbe",
+              "gmbh"
+            ],
+            "title": "Company Type",
+            "default": "freiberufler"
+          },
+          "accounting": {
+            "type": "string",
+            "enum": [
+              "eur",
+              "accrual"
+            ],
+            "title": "Accounting",
+            "default": "eur"
+          },
+          "kleinunternehmer": {
+            "type": "boolean",
+            "title": "Kleinunternehmer",
+            "default": false
+          },
+          "vat_rate": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Vat Rate",
+            "default": 19
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "default": ""
+          },
+          "hebesatz": {
+            "type": "number",
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Hebesatz",
+            "default": 400
+          },
+          "default_rate": {
+            "type": "number",
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Default Rate",
+            "default": 80
+          },
+          "payment_days": {
+            "type": "integer",
+            "maximum": 365.0,
+            "minimum": 0.0,
+            "title": "Payment Days",
+            "default": 14
+          },
+          "offer_valid_days": {
+            "type": "integer",
+            "maximum": 365.0,
+            "minimum": 0.0,
+            "title": "Offer Valid Days",
+            "default": 30
+          },
+          "default_template": {
+            "type": "string",
+            "pattern": "^[0-9a-z]{6,32}$",
+            "title": "Default Template",
+            "default": "classic"
+          },
+          "invoice_pattern": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Invoice Pattern",
+            "default": "RE-{year}-{n:04d}"
+          },
+          "offer_pattern": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Offer Pattern",
+            "default": "AN-{year}-{n:04d}"
+          },
+          "social_monthly": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Social Monthly",
+            "default": 0
+          },
+          "church_tax": {
+            "type": "number",
+            "maximum": 15.0,
+            "minimum": 0.0,
+            "title": "Church Tax",
+            "default": 0
+          },
+          "splitting": {
+            "type": "boolean",
+            "title": "Splitting",
+            "default": false
+          },
+          "other_income": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Other Income",
+            "default": 0
+          },
+          "other_deductions": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Other Deductions",
+            "default": 0
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "SettingsIn",
+        "description": "PUT /settings: any subset of the settings, each value checked."
+      },
       "SetupPayload": {
         "properties": {
           "username": {
@@ -5053,6 +6355,41 @@
           "name"
         ],
         "title": "Task"
+      },
+      "TaskIn": {
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "pattern": "^[0-9a-z]{6,32}$",
+            "title": "Project Id"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "project_id",
+          "name"
+        ],
+        "title": "TaskIn"
       },
       "Template": {
         "properties": {
@@ -5176,6 +6513,111 @@
         ],
         "title": "Template"
       },
+      "TemplateIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "layout": {
+            "type": "string",
+            "enum": [
+              "classic",
+              "modern",
+              "minimal"
+            ],
+            "title": "Layout",
+            "default": "classic"
+          },
+          "accent": {
+            "type": "string",
+            "title": "Accent",
+            "default": "#1f4e79"
+          },
+          "language": {
+            "type": "string",
+            "enum": [
+              "de",
+              "en"
+            ],
+            "title": "Language",
+            "default": "de"
+          },
+          "show_logo": {
+            "type": "boolean",
+            "title": "Show Logo",
+            "default": true
+          },
+          "intro_offer": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intro Offer"
+          },
+          "outro_offer": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outro Offer"
+          },
+          "intro_invoice": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intro Invoice"
+          },
+          "outro_invoice": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 5000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outro Invoice"
+          },
+          "closing": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "TemplateIn"
+      },
       "TimerStart": {
         "properties": {
           "project_id": {
@@ -5267,21 +6709,29 @@
           },
           "username": {
             "type": "string",
+            "maxLength": 64,
             "title": "Username"
           },
           "name": {
             "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Name"
           },
           "role": {
             "type": "string",
+            "enum": [
+              "boss",
+              "member"
+            ],
             "title": "Role",
             "default": "member"
           },
           "password": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 1000
               },
               {
                 "type": "null"
@@ -5291,6 +6741,8 @@
           },
           "weekly_hours": {
             "type": "number",
+            "maximum": 168.0,
+            "minimum": 0.0,
             "title": "Weekly Hours",
             "default": 40
           },
@@ -5299,6 +6751,8 @@
               "type": "integer"
             },
             "type": "array",
+            "maxItems": 7,
+            "minItems": 1,
             "title": "Workdays",
             "default": [
               0,
@@ -5311,7 +6765,9 @@
           "default_rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -5322,7 +6778,9 @@
           "cost_rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
