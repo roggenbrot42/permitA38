@@ -51,6 +51,7 @@ include = ["permita38*"]
 
 [tool.setuptools.package-data]
 "permita38.core" = ["templates/*.json"]
+"permita38.core.taxrules" = ["data/*.json"]
 "permita38.core.schema" = ["migrations/*/*.sql"]
 
 [tool.ruff]

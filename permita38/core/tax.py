@@ -108,3 +108,14 @@ def estimate(profit, year, s):
         out["total"] = round(out["est"] + out["soli"] + out["church"] + out["gewst"], 2)
     out["rate"] = out["total"] / profit if profit > 0 else 0
     return out
+
+
+def rules_metadata() -> dict:
+    """Validity/review metadata of the tables above (``core/taxrules/data/income_tax.json``).
+
+    The numbers stay in this module; the data file records which years they cover, when a maintainer last reviewed them
+    and which of them are still unverified, so they take part in the quarterly review and the staleness check.
+    """
+    from .taxrules import load
+
+    return load("income_tax").data

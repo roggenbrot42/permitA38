@@ -1,0 +1,19 @@
+{
+  "id": "income_tax",
+  "title": "Income tax tariff (§ 32a EStG), solidarity surcharge threshold, trade tax constants used by the tax estimates",
+  "valid_for_year": 2026,
+  "years_in_code": [2025, 2026],
+  "reviewed_on": "2026-10-22",
+  "next_review_due": "2027-01-22",
+  "review_note": "The numbers live in permita38/core/tax.py (TARIFFS, SOLI_FREIGRENZE, KLEIN_LIMIT_*). They were entered from memory in the first version and cross-checked for continuity only (the zone formulas join up at the zone limits); they have NOT been verified against the official tariff yet. The first quarterly review must verify them against § 32a EStG / the BMF Programmablaufplan.",
+  "sources": [
+    {"id": "estg-32a", "kind": "primary", "title": "§ 32a EStG Einkommensteuertarif", "url": "https://www.gesetze-im-internet.de/estg/__32a.html"},
+    {"id": "bmf-ppl", "kind": "primary", "title": "BMF: Programmablaufplan für den Lohnsteuerabzug / Einkommensteuertarif", "url": "https://www.bundesfinanzministerium.de"}
+  ],
+  "items": [
+    {"id": "tariff_2026", "label": "Income tax tariff 2026 (Grundfreibetrag 12,348 EUR and zone coefficients)", "verification": "unverified"},
+    {"id": "tariff_2025", "label": "Income tax tariff 2025", "verification": "unverified"},
+    {"id": "soli_threshold", "label": "Solidarity surcharge Freigrenze 2025 / 2026", "verification": "unverified"},
+    {"id": "gewst", "label": "Trade tax: Freibetrag 24,500 EUR, Messzahl 3.5 %, §35 factor 4.0", "verification": "unverified"}
+  ]
+}
