@@ -173,6 +173,9 @@ class UserOut(Record):
     active: bool | None = None
     has_password: bool | None = None
     totp_enabled: bool | None = None
+    work_start: str | None = None
+    work_end: str | None = None
+    timezone: str | None = None
 
 
 class UserIn(BaseModel):
@@ -189,6 +192,9 @@ class UserIn(BaseModel):
     color: v.OptColor = None
     tracking_start: v.OptDate = None
     active: bool = True
+    work_start: v.OptTime = None  # working time used for calendar capacity (default 09:00)
+    work_end: v.OptTime = None  # (default 17:00)
+    timezone: v.OptTimeZone = None  # IANA zone of the working time (default Europe/Berlin)
 
     @field_validator("workdays")
     @classmethod

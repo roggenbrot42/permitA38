@@ -84,6 +84,27 @@ class Repository(ABC):
     @abstractmethod
     def delete(self, coll: str, rid: str) -> bool: ...
 
+    def find(self, coll: str, **equals: Any) -> RecordList:
+        """Records whose columns equal the given values (``find("calendar_events", source_id=x)``), ordered like ``list``.
+
+        Only plain (non-JSON) columns can be matched. Backends should override this with an indexed query; this default
+        filters ``list`` and is only meant as a fallback for new backends.
+        """
+        return [r for r in self.list(coll) if all(r.get(k) == v for k, v in equals.items())]
+
+    def delete_where(self, coll: str, **equals: Any) -> int:
+        """Delete every record matching ``equals`` (see ``find``) atomically; returns how many were deleted."""
+        with self.transaction():
+            rows = self.find(coll, **equals)
+            for r in rows:
+                self.delete(coll, r["id"])
+        return len(rows)
+
+    def save_many(self, coll: str, objs: "RecordList") -> RecordList:
+        """Save several records atomically (all or none)."""
+        with self.transaction():
+            return [self.save(coll, o) for o in objs]
+
     @abstractmethod
     def transaction(self) -> AbstractContextManager[None]: ...
 

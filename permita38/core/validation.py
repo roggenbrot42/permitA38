@@ -10,6 +10,7 @@ import math
 import re
 from datetime import date
 from typing import Annotated, Any, Callable
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, model_validator
 
@@ -54,6 +55,16 @@ def _clock_time(value: str) -> str:
     return value
 
 
+def _timezone(value: str) -> str:
+    if len(value) > 64 or not re.match(r"^[A-Za-z][A-Za-z0-9_+\-]*(/[A-Za-z0-9_+\-]+)*$", value):
+        raise ValueError("must be an IANA time zone name like Europe/Berlin")
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ValueError("is not a known IANA time zone") from None
+    return value
+
+
 def _color(value: str) -> str:
     if not _COLOR_RE.match(value):
         raise ValueError("must be a colour like #2563eb")
@@ -67,6 +78,7 @@ def _optional(fn: Callable[[str], str]) -> Callable[[str | None], str | None]:
 ISODate = Annotated[str, AfterValidator(_iso_date)]
 OptDate = Annotated[str | None, BeforeValidator(blank_to_none), AfterValidator(_optional(_iso_date))]
 OptTime = Annotated[str | None, BeforeValidator(blank_to_none), AfterValidator(_optional(_clock_time))]
+OptTimeZone = Annotated[str | None, BeforeValidator(blank_to_none), AfterValidator(_optional(_timezone))]
 OptColor = Annotated[str | None, BeforeValidator(blank_to_none), AfterValidator(_optional(_color))]
 Color = Annotated[str, AfterValidator(_color)]
 
