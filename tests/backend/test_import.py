@@ -474,3 +474,12 @@ def test_cli_dry_run_and_import(tmp_path, capsys):
     main(["--data", str(data), "import-documents", str(f), "--type", "invoices"])
     out = capsys.readouterr().out
     assert "Imported. Batch" in out
+
+
+def test_accounting_hook_is_called_for_each_imported_document(store, svc, monkeypatch):
+    from permita38.core.service.importer import service as importer_service
+
+    seen = []
+    monkeypatch.setattr(importer_service, "IMPORT_HOOKS", [lambda coll, rec: seen.append((coll, rec["number"]))])
+    svc.run(_b(INVOICE_CSV), "x.csv", "invoices")
+    assert seen == [("invoices", "RE-2025-0001"), ("invoices", "RE-2025-0002")]

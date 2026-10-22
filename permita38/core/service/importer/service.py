@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from difflib import SequenceMatcher
-from typing import Any
+from typing import Any, Callable
 
 from permita38.core.errors import ServiceError
 from permita38.core.money import dec, line_amount, q2, to_float, vat_amount
@@ -34,6 +34,12 @@ FUZZY_MATCH = 0.9
 MAX_PDF_BYTES = 20 * 1024 * 1024
 LEGAL_FORMS = {"gmbh", "ag", "kg", "ug", "ohg", "gbr", "mbh", "co", "e", "k", "se", "ev"}
 _EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,20}$")
+
+
+#: Extension point for the accounting module (not implemented yet): every hook is called inside the import
+#: transaction with (collection, saved record) for each imported document or expense, and must raise to abort it.
+#: Hooks are registered at start-up: ``importer.service.IMPORT_HOOKS.append(fn)``.
+IMPORT_HOOKS: list[Callable[[str, dict], None]] = []
 
 
 @dataclass
@@ -128,6 +134,8 @@ class ImportService:
                 else:
                     saved = self.store.save(o.coll, {**rec, "import_batch": batch_id})
                     records.append([o.coll, saved["id"], _digest(saved)])
+                for hook in IMPORT_HOOKS:
+                    hook(o.coll, saved)
                 if o.coll in DOC_KINDS and rec.get("number"):
                     day = V.parse_date(rec.get("date"))
                     if day:

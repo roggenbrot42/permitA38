@@ -81,6 +81,12 @@ serves it instead of a new rendering. Unmatched PDFs are listed in the report.
   records of a batch. Undo is refused when a record of the batch changed or was deleted since the import, and for
   batches that overwrote documents. The number counter is not moved back.
 
+## Accounting hook
+
+`permita38.core.service.importer.service.IMPORT_HOOKS` is the extension point for the accounting module: each
+registered function receives `(collection, record)` for every imported document and expense, inside the import
+transaction. No posting is made today.
+
 ## Expenses
 
 Expenses need a date, a net amount (or gross and VAT) and optionally vendor, description, category and VAT rate.
