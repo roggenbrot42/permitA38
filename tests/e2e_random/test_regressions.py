@@ -5,6 +5,8 @@ import pytest
 
 pytestmark = pytest.mark.e2e_random
 
+COUNT_JS = "n => document.querySelectorAll('input[data-k=description]').length === n"
+
 
 def test_add_line_on_new_document(make_page, live_server, api):
     api.setup_boss()
@@ -123,8 +125,8 @@ def test_new_document_draft_survives_delete_line_and_status_menu_is_robust(make_
     lines = page.locator("input[data-k=description]")
     for expected in (2, 3):
         page.click("[data-a=addLine]")
-        page.wait_for_function(f"document.querySelectorAll('input[data-k=description]').length === {expected}")
+        page.wait_for_function(COUNT_JS, arg=expected)
     page.click("[data-a=delLine][data-i='1']")
-    page.wait_for_function("document.querySelectorAll('input[data-k=description]').length === 2")
+    page.wait_for_function(COUNT_JS, arg=2)
     assert lines.count() == 2
     watch.check()
