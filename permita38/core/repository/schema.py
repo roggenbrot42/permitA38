@@ -152,11 +152,46 @@ TABLES: dict[str, Table] = {
             "timers",
             _cols(_BASE + "running:bool started:int project_id:id task_id:id note:text" + _EXTRA),
         ),
+        Table(
+            "accounts",
+            _cols(
+                _BASE + "number:str name:str type:str side:str chart:str role:str tax_code:str active:bool "
+                "system:bool description:text valid_for_year:int reviewed_on:str" + _EXTRA
+            ),
+            (Index("idx_accounts_number", ("number",), unique=True), Index("idx_accounts_role", ("role",))),
+        ),
+        Table(
+            "journal_entries",
+            _cols(
+                _BASE + "fiscal_year:int booking_no:int date:str posting_date:str description:text source_type:str "
+                "source_id:id source_part:str reversal_of:id created_by:id prev_hash:str hash:str" + _EXTRA
+            ),
+            (
+                Index("idx_journal_entries_booking", ("fiscal_year", "booking_no"), unique=True),
+                Index("idx_journal_entries_source", ("source_type", "source_id")),
+                Index("idx_journal_entries_date", ("date",)),
+                Index("idx_journal_entries_reversal", ("reversal_of",)),
+            ),
+        ),
+        Table(
+            "journal_lines",
+            _cols(
+                _BASE + "entry_id:id line_no:int account:str debit_cents:int credit_cents:int tax_code:str "
+                "tax_amount_cents:int memo:text" + _EXTRA
+            ),
+            (Index("idx_journal_lines_entry", ("entry_id",)), Index("idx_journal_lines_account", ("account",))),
+        ),
+        Table(
+            "period_locks",
+            _cols(_BASE + "year:int month:int locked_by:id note:text" + _EXTRA),
+            (Index("idx_period_locks_period", ("year", "month"), unique=True),),
+        ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
 }
 
-# internal per-user collections that are not exposed through the CRUD API
-INTERNAL_COLLECTIONS = ["timers"]
+# internal collections that are not exposed through the generic CRUD API (timers; the accounting books have their
+# own immutable-by-design API in permita38/api/routers/accounting.py)
+INTERNAL_COLLECTIONS = ["timers", "accounts", "journal_entries", "journal_lines", "period_locks"]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]
