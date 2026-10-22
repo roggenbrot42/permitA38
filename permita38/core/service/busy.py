@@ -1,5 +1,4 @@
 """Busy time that reduces a person's capacity (calendar meetings etc.). Implemented by the calendar module."""
-
 from datetime import date
 from typing import Protocol
 
