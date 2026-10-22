@@ -89,7 +89,7 @@ TABLES: dict[str, Table] = {
             "projects",
             _cols(
                 _BASE + "name:str customer_id:id personal:bool rate:float budget_hours:float status:str color:str "
-                "notes:text member_ids:json offer_id:id" + _EXTRA
+                "notes:text member_ids:json offer_id:id start:str end:str extensions:json" + _EXTRA
             ),
             (Index("idx_projects_customer", ("customer_id",)),),
         ),
@@ -121,6 +121,11 @@ TABLES: dict[str, Table] = {
             "absences",
             _cols(_BASE + "user_id:id kind:str start:str end:str note:text" + _EXTRA),
             (Index("idx_absences_user", ("user_id",)),),
+        ),
+        Table(
+            "plan_scenarios",
+            _cols(_BASE + "name:str user_id:id changes:json" + _EXTRA),
+            (Index("idx_plan_scenarios_user", ("user_id",)),),
         ),
         _document_table("offers"),
         _document_table("invoices"),

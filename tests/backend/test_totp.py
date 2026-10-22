@@ -655,7 +655,7 @@ def test_upgrade_from_revision_one_keeps_users(tmp_path):
     assert repo.get_revision() == CURRENT_REVISION
     u = repo.get("users", "abcdef123456")
     assert u["username"] == "old" and not u.get("totp_enabled") and not u.get("totp_secret")
-    assert list((data / "backups").glob("pre-migration-r1-to-r2-*.sqlite3"))
+    assert list((data / "backups").glob(f"pre-migration-r1-to-r{CURRENT_REVISION}-*.sqlite3"))
     repo.save("users", {**u, "totp_enabled": True, "totp_secret": "ABC", "totp_last_step": 7, "totp_recovery": ["a$b"]})
     again = repo.get("users", "abcdef123456")
     assert again["totp_enabled"] is True and again["totp_last_step"] == 7 and again["totp_recovery"] == ["a$b"]
