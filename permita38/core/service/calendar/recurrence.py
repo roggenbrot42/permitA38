@@ -54,6 +54,13 @@ def _int(text: str, low: int, high: int) -> int:
     return value
 
 
+def _count(text: str) -> int:
+    """COUNT; absurdly large values (a hostile COUNT=1000000000) are clamped, the window bounds the expansion."""
+    if not text.isascii() or not text.isdigit() or int(text) < 1:
+        raise RruleError("bad integer")
+    return min(int(text), 1_000_000_000)
+
+
 def parse_rule(text: str) -> Rule:
     parts: dict[str, str] = {}
     for item in text.split(";")[:40]:
@@ -91,7 +98,7 @@ def parse_rule(text: str) -> Rule:
     return Rule(
         freq=freq,
         interval=_int(parts["INTERVAL"], 1, MAX_INTERVAL) if "INTERVAL" in parts else 1,
-        count=_int(parts["COUNT"], 1, 1_000_000_000) if "COUNT" in parts else None,
+        count=_count(parts["COUNT"]) if "COUNT" in parts else None,
         until=parts.get("UNTIL") or None,
         byday=tuple(byday),
         bymonthday=ints("BYMONTHDAY", -31, 31, zero=False),

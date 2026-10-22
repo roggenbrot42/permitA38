@@ -302,11 +302,11 @@ def test_deep_nesting_is_rejected():
     assert err.value.code == "too_deep"
 
 
-def test_huge_count_is_time_boxed_not_exhausted():
+def test_huge_count_stops_at_the_end_of_the_window():
     doc = ics_doc("UID:h@test\r\nDTSTART:20260105T100000Z\r\nRRULE:FREQ=DAILY;COUNT=999999999\r\nSUMMARY:Forever")
-    with pytest.raises(IcsError) as err:
-        run(doc, end=utc(2026, 1, 10))
-    assert err.value.code == "too_complex"
+    result = run(doc, end=utc(2026, 1, 10))
+    assert [o.start for o in result.occurrences][-1] == "2026-01-09T10:00:00Z"
+    assert len(result.occurrences) <= 6
 
 
 def test_deadline_is_enforced_with_an_injected_clock():
@@ -452,3 +452,15 @@ def test_dates_at_the_edge_of_the_calendar_range_do_not_crash():
         assert err.code in {"too_complex", "too_many_events"}
     else:
         assert isinstance(result.occurrences, list)
+
+
+@pytest.mark.parametrize("count", [100_000, 1_000_000_000, 99_999_999_999])
+def test_huge_count_is_bounded_by_the_window_not_rejected(count):
+    body = (
+        "BEGIN:VEVENT\r\nUID:big\r\nDTSTART:20260101T100000Z\r\nDTEND:20260101T110000Z\r\n"
+        f"RRULE:FREQ=DAILY;COUNT={count}\r\nEND:VEVENT\r\n"
+    )
+    data = f"BEGIN:VCALENDAR\r\n{body}END:VCALENDAR\r\n".encode()
+    window = (datetime(2026, 9, 1, tzinfo=UTC), datetime(2026, 9, 11, tzinfo=UTC))
+    result = parse_ics(data, default_tz=ZoneInfo("UTC"), window=window)
+    assert [o.start for o in result.occurrences] == [f"2026-09-{d:02d}T10:00:00Z" for d in range(1, 11)]

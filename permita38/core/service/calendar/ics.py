@@ -483,7 +483,7 @@ def _expand(master: _Master, overrides: set[str], ctx: _Context) -> list[tuple[_
                     and ctx.in_window(stamp, _end_of(stamp, master.duration))
                 ):
                     found.append((stamp, key))
-            if stamp.instant() > ctx.window_end and rule.count is None:
+            if stamp.instant() > ctx.window_end:  # ascending: nothing later can fall inside the window
                 break
             if generated % 1024 == 0:
                 ctx.check_time()
