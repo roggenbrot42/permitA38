@@ -528,3 +528,29 @@ def test_editing_an_imported_invoice_keeps_the_importer_fields(boss_client):
     after = c.get(f"/api/invoices/{inv['id']}").json()
     assert after["imported"] is True and after["original_number"] == "X-1" and after["external_id"]
     assert cust["id"]
+
+
+def test_legal_form_difference_is_similar_not_exact(store, svc):
+    store.save("customers", dict(name="Müller GmbH"))
+    csv_text = "Name;Netto;USt;Brutto\nMüller AG;10;1,90;11,90\n"
+    report = svc.plan(_b(csv_text), "k.csv", "customers")
+    assert report["rows"][0]["customer"]["action"] == "create"
+    assert report["rows"][0]["customer"]["score"] == 0.95
+    merged = svc.plan(_b(csv_text), "k.csv", "customers", options={"merge_similar": True})
+    assert merged["rows"][0]["customer"]["action"] == "merge"
+
+
+def test_undo_refused_while_an_outside_record_uses_an_imported_customer(store, svc):
+    run = svc.run(_b(INVOICE_CSV), "x.csv", "invoices")
+    customer_id = store.list("customers")[0]["id"]
+    store.save("offers", dict(customer_id=customer_id, number="AN-1", date="2026-01-01", lines=[], status="sent"))
+    with pytest.raises(ServiceError) as e:
+        svc.undo(run["batch_id"])
+    assert e.value.status == 409 and "still used" in e.value.message
+
+
+def test_settings_put_cannot_change_numbering(boss_client):
+    r = boss_client.put("/api/settings", json={"invoice_pattern": "X-{n}"})
+    assert r.status_code == 400 and "PUT /api/numbering" in r.json()["detail"]
+    same = boss_client.get("/api/settings").json()["invoice_pattern"]
+    assert boss_client.put("/api/settings", json={"invoice_pattern": same, "company_name": "Demo"}).status_code == 200

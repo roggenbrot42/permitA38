@@ -1,9 +1,13 @@
 from permita38.core import documents
+from permita38.core.errors import ServiceError
 from permita38.core.holidays import STATES
 from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
 from .auth import public_user
+
+#: numbering settings: changed only through the guarded numbering service
+NUMBERING_KEYS = ("invoice_pattern", "offer_pattern", "invoice_reset", "offer_reset", "numbering_shared")
 
 
 class SettingsService:
@@ -14,7 +18,15 @@ class SettingsService:
         return effective_settings(self.store.settings())
 
     def update(self, data: dict) -> dict:
-        merged = effective_settings({**self.get(), **data})
+        current = self.get()
+        changed = [k for k in NUMBERING_KEYS if k in data and data[k] != current.get(k)]
+        if changed:
+            raise ServiceError(
+                400,
+                "Numbering is changed with PUT /api/numbering (preview, warnings and confirmation), not with "
+                "PUT /api/settings. Remove: " + ", ".join(changed),
+            )
+        merged = effective_settings({**current, **data})
         self.store.save_settings(merged)
         return merged
 

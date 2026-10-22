@@ -18,6 +18,7 @@ from typing import Any, Callable
 from permita38.core.errors import ServiceError
 from permita38.core.money import dec, line_amount, q2, to_float, vat_amount
 from permita38.core.repository import Repository, new_id
+from permita38.core.repository.schema import COLLECTIONS
 from permita38.core.service.numbering import NumberingService
 from permita38.core.settings import effective_settings
 
@@ -177,8 +178,9 @@ class ImportService:
             raise ServiceError(409, "This import was already undone")
         if batch.get("overwrites"):
             raise ServiceError(409, "This import overwrote existing documents and cannot be undone automatically")
+        records = batch.get("records") or []
         changed = []
-        for coll, rid, updated in batch.get("records") or []:
+        for coll, rid, updated in records:
             cur = self.store.get(coll, rid)
             if cur is None or _digest(cur) != updated:
                 changed.append(f"{coll}/{rid}")
@@ -186,6 +188,17 @@ class ImportService:
             raise ServiceError(
                 409, f"{len(changed)} imported record(s) were changed or deleted since the import; undo refused"
             )
+        # a customer created by this batch must not be referenced by anything outside the batch
+        in_batch = {(coll, rid) for coll, rid, _ in records}
+        customer_ids = {rid for coll, rid, _ in records if coll == "customers"}
+        for coll in COLLECTIONS:
+            for rec in self.store.list(coll):
+                cid = rec.get("customer_id")
+                if cid in customer_ids and (coll, rec.get("id")) not in in_batch:
+                    raise ServiceError(
+                        409,
+                        f"An imported customer is still used by {coll} {rec.get('id')}; undo refused",
+                    )
         with self.store.transaction():
             for coll, rid, _ in batch.get("records") or []:
                 self.store.delete(coll, rid)
@@ -558,6 +571,7 @@ class ImportService:
             "rows_total": len(built.table.rows),
             "mapping": built.mapping,
             "options": built.options,
+            "headers": built.table.headers,
             "unmapped_headers": built.unmapped,
             "counts": counts,
             "rows": rows,
@@ -584,9 +598,9 @@ def text_or_empty(value) -> str:
     return "" if V.is_blank(value) else str(value).strip()
 
 
-def _normalized_name(name: str) -> str:
+def _normalized_name(name: str, strip_legal: bool = True) -> str:
     words = re.sub(r"[^a-z0-9äöüß]+", " ", (name or "").casefold()).split()
-    while words and words[-1] in LEGAL_FORMS:
+    while strip_legal and words and words[-1] in LEGAL_FORMS:
         words.pop()
     return " ".join(words)
 
@@ -647,12 +661,15 @@ class _CustomerIndex:
         if not name:
             return None, 0.0
         best, best_score = None, 0.0
+        exact_name = _normalized_name(rec.get("name", ""), strip_legal=False)
         for c in self.items:
             other = _normalized_name(c.get("name", ""))
             if not other:
                 continue
-            if other == name:
+            if _normalized_name(c.get("name", ""), strip_legal=False) == exact_name:
                 score = 1.0
+            elif other == name:
+                score = 0.95  # same name, different legal form (GmbH vs AG): similar, never exact
             elif re.findall(r"\d+", name) != re.findall(r"\d+", other):
                 continue  # "Schmidt Bau 1" and "Schmidt Bau 2" are different customers
             else:

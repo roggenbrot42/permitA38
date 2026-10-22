@@ -182,8 +182,12 @@ def test_settings_validation(boss_client):
         {"social_monthly": -5},
     ):
         _422(c.put("/api/settings", json=bad))
-    ok = c.put("/api/settings", json={"invoice_pattern": "R{year}/{n:05d}", "state": "BY", "hebesatz": 410})
-    assert ok.status_code == 200 and ok.json()["invoice_pattern"] == "R{year}/{n:05d}"
+    ok = c.put("/api/settings", json={"state": "BY", "hebesatz": 410})
+    assert ok.status_code == 200
+    # numbering changes go through the guarded numbering endpoint, which validates the pattern too
+    pattern = c.put("/api/numbering", json={"type": "invoice", "pattern": "R{year}/{n:05d}"})
+    assert pattern.status_code == 200 and pattern.json()["applied"] is True
+    assert c.get("/api/settings").json()["invoice_pattern"] == "R{year}/{n:05d}"
 
 
 def test_user_numbers_and_workdays(boss_client):
