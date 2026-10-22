@@ -317,3 +317,20 @@ def test_openapi_contract_never_contains_the_secret(app, boss_client):
 
     connect(boss_client)
     assert SECRET_TOKEN not in json.dumps(app.openapi())
+
+
+def test_deleting_a_person_removes_their_calendars_and_events(app, boss_client, boss2_client):
+    other_id = boss2_client.get("/api/auth/me").json()["id"]
+    connect(boss2_client)
+    store = app.state.services.store
+    assert store.find("calendar_sources", user_id=other_id) and store.list("calendar_events")
+    assert boss_client.delete(f"/api/users/{other_id}").status_code == 204
+    assert store.find("calendar_sources", user_id=other_id) == []
+    assert store.list("calendar_events") == []
+    assert boss_client.get("/api/calendars").status_code == 200  # the deleting boss is unaffected
+
+
+def test_oversized_validators_from_the_server_are_not_stored(app, boss_client, fake):
+    fake.etag = '"' + "x" * 400 + '"'
+    sid = connect(boss_client).json()["id"]
+    assert app.state.services.store.get("calendar_sources", sid).get("etag") is None

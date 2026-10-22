@@ -33,4 +33,5 @@ def update_user(user_id: str, body: UserIn, _: BossUser, services: ServicesDep):
 @router.delete("/{user_id}", status_code=204)
 def delete_user(user_id: str, user: BossUser, services: ServicesDep):
     services.auth.delete_user(user_id, user)
+    services.calendar.delete_all_for_user(user_id)  # their calendar links and events must not outlive them
     return Response(status_code=204)

@@ -85,6 +85,11 @@ def mask_url(url: str | None) -> str | None:
     return f"{parts.scheme}://{parts.netloc}/…/****"
 
 
+def _validator(value: str | None) -> str | None:
+    """ETag / Last-Modified come from the remote server: keep them only if they fit the column."""
+    return value if value and len(value) <= 255 else None
+
+
 def uid_hash(uid: str) -> str:
     return hashlib.sha256(uid.encode("utf-8")).hexdigest()[:24]
 
@@ -263,6 +268,13 @@ class CalendarService:
             self.store.delete_where("calendar_events", source_id=source_id)
             self.store.delete("calendar_sources", source_id)
 
+    def delete_all_for_user(self, user_id: str) -> None:
+        """Remove every calendar of a person (used when the person is deleted: no secret links or events remain)."""
+        with self.store.transaction():
+            for src in self.store.find("calendar_sources", user_id=user_id):
+                self.store.delete_where("calendar_events", source_id=src["id"])
+                self.store.delete("calendar_sources", src["id"])
+
     # ----------------------------------------------------------------------------- refresh
     def sync(self, user: dict, source_id: str) -> dict:
         src = self._own(user, source_id)
@@ -301,7 +313,7 @@ class CalendarService:
         """Refresh every subscription now (used by ``permita38 calendar refresh``). Returns (name, status) pairs."""
         out = []
         for src in self.store.list("calendar_sources"):
-            if src.get("kind") != "ics_url":
+            if src.get("kind") != "ics_url" or self.store.get("users", src.get("user_id")) is None:
                 continue
             if self._begin(src["id"]):
                 try:
@@ -374,7 +386,7 @@ class CalendarService:
         if res.status == 304:
             return None, (conditional or {}).get("etag"), None
         events = self._parse(res.body, owner, options)
-        return events, res.etag, res.last_modified
+        return events, _validator(res.etag), _validator(res.last_modified)
 
     def _parse(self, data: bytes, owner: dict, options: dict) -> list[Occurrence]:
         zone = user_zone(owner)
