@@ -1,0 +1,4 @@
+{"id":"modern","name":"Modern (header band, English)","layout":"modern","accent":"#0f766e","language":"en","show_logo":true,
+"intro_offer":"Dear {contact},\n\nthank you for your interest. Please find my offer below.","outro_offer":"This offer is valid until {valid_until}.",
+"intro_invoice":"Dear {contact},\n\nthank you for the great collaboration. Please find the invoice below.","outro_invoice":"Please transfer the amount by {due_date}, reference {number}.",
+"closing":"Best regards"}

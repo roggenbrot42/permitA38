@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# never commit real data or per-device config (contains the secret key)
+/permitA38/
+/Timely/
+/data/
+config.yaml
+*.sync-conflict-*
+.stfolder
+.stversions
+.DS_Store

@@ -1,0 +1,6 @@
+{"id":"classic","name":"Classic (blue accent)","layout":"classic","accent":"#1f4e79","language":"de","show_logo":true,
+"intro_offer":"Sehr geehrte Damen und Herren,\n\nvielen Dank für Ihre Anfrage. Gerne unterbreite ich Ihnen folgendes Angebot:",
+"outro_offer":"Dieses Angebot ist gültig bis {valid_until}. Ich freue mich auf Ihre Rückmeldung.",
+"intro_invoice":"Sehr geehrte Damen und Herren,\n\nfür meine Leistungen erlaube ich mir, Ihnen folgende Rechnung zu stellen:",
+"outro_invoice":"Bitte überweisen Sie den Rechnungsbetrag bis zum {due_date} unter Angabe der Rechnungsnummer {number}.",
+"closing":"Mit freundlichen Grüßen"}

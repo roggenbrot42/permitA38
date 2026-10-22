@@ -1,0 +1,58 @@
+"""FastAPI application factory."""
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from permita38 import __version__
+from permita38.core.config import Config
+from permita38.core.errors import ServiceError
+
+from .deps import Services
+from .routers import auth, files, finance, health, planning, records, sales, settings, time, users
+
+CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
+
+
+def get_app(config: Config) -> FastAPI:
+    app = FastAPI(
+        title="permitA38 API",
+        version=__version__,
+        license_info={"name": "GPL-3.0-or-later", "url": "https://www.gnu.org/licenses/gpl-3.0.html"},
+        docs_url="/api/docs",
+        redoc_url=None,
+        openapi_url="/api/openapi.json",
+    )
+    app.state.services = Services.create(config)
+
+    if config.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=config.cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+
+    @app.exception_handler(ServiceError)
+    async def service_error_handler(_: Request, exc: ServiceError):
+        return JSONResponse({"detail": exc.message}, status_code=exc.status)
+
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        if not request.url.path.startswith("/api"):
+            response.headers["Content-Security-Policy"] = CSP
+            response.headers["Cache-Control"] = "no-store"
+        return response
+
+    for module in (health, auth, users, time, planning, finance, settings, files, sales, records):
+        for router in module.routers:
+            app.include_router(router, prefix="/api")
+
+    if config.serve_web and config.web_dir and config.web_dir.is_dir():
+        app.mount("/", StaticFiles(directory=config.web_dir, html=True), name="web")
+    return app

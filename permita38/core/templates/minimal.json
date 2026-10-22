@@ -1,0 +1,4 @@
+{"id":"minimal","name":"Minimal (black & white)","layout":"minimal","accent":"#000000","language":"de","show_logo":true,
+"intro_offer":"Guten Tag,\n\nhier mein Angebot für Sie:","outro_offer":"Gültig bis {valid_until}.",
+"intro_invoice":"Guten Tag,\n\nvielen Dank für die Zusammenarbeit. Hiermit berechne ich:","outro_invoice":"Zahlbar bis {due_date}, Verwendungszweck {number}.",
+"closing":"Viele Grüße"}
