@@ -1,8 +1,7 @@
 # Roadmap
 
 > **MAINTAINER TODO: Review and finalise the release assignment of each roadmap item (reminder requested by the
-> maintainer).** The assignment below is a proposal. Items marked *(confirm intended meaning)* were dictated and are
-> ambiguous. Remove this notice when the assignment is final.
+> maintainer).** The assignment below is a proposal. Remove this notice when the assignment is final.
 
 Release trains and gates are described in [`release-plan.md`](release-plan.md). Status legend: **done** = merged,
 **planned** = assigned to that release, **research** = needs investigation before it can be scheduled.
@@ -16,23 +15,23 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | Username/password login and **TOTP two-factor authentication** | done |
 | Docker image and compose files | done |
 | Release engineering: signed annotated tags, reproducible bundles (Windows, Linux), SBOM, attestations | done |
-| Customer data extraction from a company website's *Impressum* (legal notice): fills name, address, VAT id, contact | planned for alpha.1 if finished, otherwise alpha.2 (feature is built separately) |
+| Customer data extraction from a company website's *Impressum* (legal notice): fills name, address, VAT id, contact | done |
 
 ## v0.4.0-alpha.2
 
 | Item | Status |
 |---|---|
-| **Roles and rights** (boss / employee / accountant, per-area permissions) | planned |
-| **Validation and sanity-check layer** (plausibility checks for invoices, dates, tax ids, totals) | planned |
+| **Roles and rights** (boss / employee / accountant, per-area permissions) | in progress |
+| **Validation and sanity-check layer** (plausibility checks for invoices, dates, tax ids, totals) | in progress |
 | Impressum extraction (if not in alpha.1) | planned |
-| Full data export as JSON and CSV, re-importable by the app (round-trip tested) | planned |
+| Full data export as JSON and CSV, re-importable by the app (round-trip tested) | in progress |
 | Quarterly **tax-rule review process** (issue reminder, checklist, rule tables with source and valid-from date) | planned (reminder workflow already in place) |
 
 ## v0.4.0-alpha.3
 
 | Item | Status |
 |---|---|
-| **Accounting** (chart of accounts SKR03/SKR04, journal, receipts) and the **German VAT return (Umsatzsteuer-Voranmeldung)** | planned |
+| **Accounting** (chart of accounts SKR03/SKR04, journal, receipts) and the **German VAT return (Umsatzsteuer-Voranmeldung)** | in progress |
 | XLSX export; **DATEV export** (Buchungsstapel) | planned |
 | **E-invoice export**: XRechnung / ZUGFeRD (EN 16931); import of e-invoice XML (parse and pre-fill) | planned |
 | Scoped **API tokens** (read-only / per area) as the base for integrations | planned |
@@ -41,12 +40,12 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 
 | Item | Status |
 |---|---|
-| **Legal-retention backup module** (scheduled, verified, encrypted backups with retention periods) | planned |
-| **GoBD compliance** (immutability of booked/finalised documents, change log, *Verfahrensdokumentation* template, retention rules) *(confirm intended meaning: GoBD)* | planned |
-| **GDPR / DSGVO compliance** (record of processing activities, data export per person, erasure/anonymisation with respect to legal retention, privacy notice) *(confirm intended meaning: dictated as "grape compliance")* | planned |
+| **Legal-retention backup module** (scheduled, verified, encrypted backups with retention periods) | in progress |
+| **GoBD compliance** (immutability of booked/finalised documents, change log, *Verfahrensdokumentation* template, retention rules) | planned |
+| **GDPR / DSGVO compliance** (record of processing activities, data export per person, erasure/anonymisation with respect to legal retention, privacy notice) | planned |
 | **GDPdU / Z3 audit export** for tax audits (Betriebsprüfung) | planned |
-| **Per-IP login throttling** (on top of the existing per-account throttling) | planned |
-| **Server-side session revocation** (token ids with a denylist, or a session table; "log out everywhere") | planned |
+| **Per-IP login throttling** (on top of the existing per-account throttling) | in progress |
+| **Server-side session revocation** (token ids with a denylist, or a session table; "log out everywhere") | in progress |
 
 ## v0.5.0-beta (feature complete for 1.0)
 
@@ -77,6 +76,34 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | **ELSTER transmission** | research: certificate handling, ERiC library licensing, or an export for the official software |
 | Recurring invoices, credit notes, reminders (Mahnungen) | |
 | macOS and Linux arm64 bundles | needs signing and notarisation |
+
+## Compliance and regulatory radar (proposed, added after the first alpha)
+
+Plain-language explanations for every item are in [`compliance.md`](compliance.md). **GoBD** (rules for keeping books
+electronically) and **GDPR/DSGVO** are confirmed. The rows below are suggestions for the maintainer to assign to a
+release; `proposed` means not yet scheduled.
+
+| Item | Why it matters | Proposed release |
+|---|---|---|
+| **E-invoice receiving** (parse XRechnung/ZUGFeRD XML, archive the original) | Receiving e-invoices is already mandatory since 2025 *(verify)* | alpha.3 (first) |
+| **E-invoice issuing** (XRechnung / ZUGFeRD export) | Mandatory for all domestic B2B from 2028, for large businesses 2027 *(verify)* | alpha.3 |
+| **GoBD change log (audit trail)** and **Verfahrensdokumentation generator** | GoBD core requirements | alpha.4 |
+| **Zusammenfassende Meldung (ZM)** for EU B2B services | Separate mandatory report next to the UStVA | alpha.3 |
+| **Annual VAT return** and **EÜR form export** (*Anlage EÜR*) | Year-end filing | alpha.4 |
+| **Income-tax advance-payment reminders** (10 Mar/Jun/Sep/Dec) | Cash planning | alpha.3 |
+| **Asset register and depreciation (AfA)** | Needed for correct EÜR/balance sheet | beta |
+| **Invoice lifecycle**: credit notes/cancellations, advance and final invoices, early-payment discount | Everyday invoicing needs | alpha.3 |
+| **Reminders (Mahnwesen)** with default interest and flat fee (§ 288 BGB) | Getting paid | alpha.3 |
+| **Bank statement import** (CAMT.053/MT940/CSV) and payment matching; **EPC GiroCode QR** on invoices | Faster payment and reconciliation | alpha.4 |
+| **SEPA direct-debit file export** | Optional collection of recurring payments | beta |
+| **Working-time law checks** (ArbZG breaks, rest, 10 h) as sanity warnings; absence entitlement (BUrlG) | Teams with employees | alpha.2 (warnings in progress), entitlement beta |
+| **Scheinselbständigkeit hint** (one customer dominates the forecast) | Informational risk hint for freelancers | beta |
+| **One-Stop-Shop (OSS)** support | EU sales to private customers | later |
+| **Security baseline self-assessment (OWASP ASVS L2)** and **CRA readiness** review | Trust, regulatory outlook | beta |
+| **Accessibility audit (WCAG 2.2 AA)** | Usability, legal outlook | beta (PWA work starts it) |
+| **Privacy pack** (privacy notice, Art. 28 agreement outline, breach checklist, erasure concept) | GDPR for hosted instances | alpha.4 (with GDPR tooling) |
+| **Mobile web app (PWA)** with offline-tolerant time tracking | Phone use before a native app exists | alpha.3 (in progress) |
+
 
 ## Recurring: quarterly tax-rule review
 
