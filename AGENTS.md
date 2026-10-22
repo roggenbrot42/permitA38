@@ -45,6 +45,15 @@
 - Commit messages use Conventional Commit prefixes (`feat:`, `fix:`, `chore:`, `docs:`), imperative summaries.
 - Licensed GPL-3.0-or-later; keep new files compatible.
 
+## Merge gate (before anything lands on `main`)
+- Implementation work may be done with smaller/cheaper models, but **every branch is reviewed with Sonnet 5.5 before it is
+  merged into `main`**, in three passes: (1) **code review** of the diff (correctness, security, edge cases),
+  (2) **test review** (do the tests prove the intent, are assertions meaningful, are cases missing, would they fail if
+  the code were wrong), (3) **logic review** of the domain rules (recompute key numbers by hand or with an independent
+  oracle: capacity, VAT/rounding, numbering, calendar hours, permissions). Findings go back to the branch and are fixed
+  first. Only then: merge, regenerate `api/openapi.json`, run `make test lint`, push.
+- Releases are always tagged (annotated) from `main`, see `RELEASING.md`.
+
 ## Security
 - Secrets live in the per-device config, never in the synced data folder or the repo.
 - Do not commit real data folders or `config.yaml`.
