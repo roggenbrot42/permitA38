@@ -26,6 +26,9 @@
 
 ## Conventions
 - Routers stay thin; logic belongs in `core/service/`. Services raise `ServiceError`, never HTTP exceptions.
+- Request bodies are validated by the strict `*In` models (`core/models.py`, primitives in `core/validation.py`);
+  the lenient models describe responses. Add every new field to both, with a hard bound. Money is computed only with
+  `core/money.py` (exact decimals, half-up cents) – never with floats. See `docs/validation.md`.
 - Never write personal, customer or business data into the repo, tests or screenshots; use fake demo data.
 - Services, calc, documents and the API depend only on the `Repository` interface. No SQL and no `sqlite3` outside
   `permita38/core/repository/`; run new storage behaviour through `tests/backend/test_repository_contract.py`.

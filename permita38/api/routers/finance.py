@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from permita38.api.deps import BossUser, ServicesDep
 from permita38.core import calc
@@ -11,7 +11,7 @@ routers = [router]
 
 
 @router.get("/finance", summary="revenue, expenses, profit, VAT and tax estimates for a year")
-def finance(_: BossUser, services: ServicesDep, year: int | None = None) -> dict[str, Any]:
+def finance(_: BossUser, services: ServicesDep, year: int | None = Query(None, ge=2000, le=2100)) -> dict[str, Any]:
     return calc.finance(services.store, year or date.today().year)
 
 

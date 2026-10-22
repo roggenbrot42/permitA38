@@ -1,5 +1,5 @@
-"""Regressions for genuine bugs found by the random tests. Tests still marked strict xfail pin known backend
-bugs: they flip to a failure as soon as the bug is fixed, so the marker gets removed then."""
+"""Regressions for genuine bugs found by the random tests (all fixed; a test that is marked strict xfail would pin
+a bug that is still open and flips to a failure as soon as it is fixed)."""
 
 import pytest
 
@@ -37,11 +37,6 @@ def test_mark_paid_sets_paid_date(make_page, live_server, api):
     assert rec.get("paid_date") == date.today().isoformat()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="permita38/core/calc.py doc_totals/finance use round() on binary floats: 19% of "
-    "621.50 is booked as 118.08 although the editor shows 118,09 (half-up); use Decimal ROUND_HALF_UP",
-)
 def test_vat_rounding_is_half_up(api):
     from datetime import date
 
@@ -65,12 +60,6 @@ def test_unknown_document_shows_not_found(make_page, live_server, api):
     watch.check()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="permita38/core/models.py: dates and numbers are not validated (plain str/float), "
-    "so one bad record makes /dashboard, /forecast or /finance answer 500 for everybody (and, via sync, "
-    "on every device). Validate (datetime.date, bounded numbers) and make calc.py skip bad data.",
-)
 @pytest.mark.parametrize(
     "coll, body, breaks",
     [
@@ -84,18 +73,22 @@ def test_invalid_values_do_not_break_dashboards(api, coll, body, breaks):
     if "user_id" not in body and coll in ("absences", "entries"):
         body = {**body, "user_id": api.get("/auth/me")["id"]}
     r = api.http.post(f"/{coll}", json=body)
-    if r.status_code >= 400:
-        assert r.status_code < 500  # rejected up front: the right behaviour
-        return
-    # accepted -> the aggregate endpoints must still answer
-    assert api.http.get(breaks).status_code < 500
+    assert r.status_code == 422, r.text  # rejected up front, with a readable message
+    assert api.http.get(breaks).status_code == 200
 
 
-def test_negative_expense_does_not_break_money_page(make_page, live_server, api):
+def test_negative_expense_is_rejected_and_credit_notes_do_not_break_money_page(make_page, live_server, api):
     from datetime import date
 
     api.setup_boss()
-    api.post("/expenses", {"date": date.today().isoformat(), "net": -5000.0, "vat": 0, "vendor": "Gutschrift"})
+    today = date.today().isoformat()
+    r = api.http.post("/expenses", json={"date": today, "net": -5000.0, "vat": 0, "vendor": "Gutschrift"})
+    assert r.status_code == 422, r.text
+    cust = api.post("/customers", {"name": "Gutschrift GmbH"})
+    inv = api.post("/invoices", {"customer_id": cust["id"], "lines": [{"description": "Gutschrift", "qty": 1, "price": -5000}]})
+    inv = api.post(f"/invoices/{inv['id']}/finalize")
+    inv["status"], inv["paid_date"] = "paid", today
+    assert api.http.put(f"/invoices/{inv['id']}", json=inv).status_code == 200  # negative revenue this month
     page, watch = make_page(token=api.http.headers["Authorization"].split()[1])
     page.goto(live_server.url + "/#/money")
     page.wait_for_selector("main .kpi")

@@ -938,7 +938,10 @@ class ApiMachine(RuleBasedStateMachine):
             return
         norm = oracle.normalize_username(username)
         taken = any(u["username"] == norm for u in self.m["users"].values())
-        if not norm or role not in ("boss", "member") or taken or len(password) < 8:
+        if role not in ("boss", "member"):
+            assert r.status_code == 422, (body, r.text)  # rejected by the request model before any service rule
+            return
+        if not norm or taken or len(password) < 8:
             assert r.status_code == 400, (body, r.text)
             return
         assert r.status_code == 200, r.text

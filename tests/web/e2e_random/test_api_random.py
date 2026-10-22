@@ -92,10 +92,14 @@ class ApiSim:
             }
         elif coll == "entries":
             d = week_start(self.today) - timedelta(days=r.randint(0, 6))
+            room = self.free_minutes(d.isoformat())
+            if room < 1:
+                self.say(f"skip entry: {d.isoformat()} is full (max 24 h per person and day)")
+                return
             b = {
                 "user_id": self.boss_id,
                 "date": d.isoformat(),
-                "minutes": r.randint(1, 600),
+                "minutes": r.randint(1, min(600, room)),
                 "project_id": r.choice(self.ids("projects") or [None]),
                 "billable": r.random() < 0.8,
                 "note": f"n{self.n} ünï",
@@ -133,6 +137,14 @@ class ApiSim:
     def can(self, coll) -> bool:
         need = {"projects": [], "tasks": ["projects"]}.get(coll, [])
         return all(self.model[c] for c in need)
+
+    DAY_LIMIT = 1380  # a person may log at most 24 h a day; stay 60 min below it so timers and member entries fit
+
+    def free_minutes(self, day: str) -> int:
+        used = sum(
+            e["minutes"] for e in self.model["entries"].values() if e.get("date") == day and e.get("user_id") == self.boss_id
+        )
+        return self.DAY_LIMIT - used
 
     def op_create(self):
         coll = self.rng.choice([c for c in COLLS if self.can(c)])
@@ -292,6 +304,9 @@ class ApiSim:
     # ---------------------------------------------------------------- invoice from tracked time
     def op_from_time(self):
         r = self.rng
+        if self.free_minutes(self.today.isoformat()) < 700:
+            self.say("skip from-time scenario: not enough free time today")
+            return
         cust = self.boss.post("/customers", {"name": f"Zeitkunde {self.n}", "rate": r.choice([None, 90])})
         self.n += 1
         proj = self.boss.post(
@@ -302,7 +317,7 @@ class ApiSim:
         expect: dict[str, tuple[int, float]] = {}
         for _ in range(r.randint(2, 6)):
             use_task = r.random() < 0.4
-            minutes = r.randint(5, 300)
+            minutes = r.randint(5, 80)
             self.boss.post(
                 "/entries",
                 {
@@ -522,8 +537,7 @@ class ApiSim:
             assert resp.status_code < 500, (junk_path, resp.status_code, resp.text[:200])
         removed = self.sanitize()
         self.say(
-            f"fuzzed 12 payloads + path tricks without a 5xx (removed {removed} poisoned records, "
-            "see test_regressions.py::test_invalid_values_do_not_break_dashboards)"
+            f"fuzzed 12 payloads + path tricks without a 5xx (removed {removed} poisoned records)"
         )
         for coll in COLLS:  # fuzzing must not have damaged the stored data or the model
             self.fix_model_after_fuzz(coll)
@@ -532,8 +546,8 @@ class ApiSim:
     NUM_FIELDS = ("minutes", "rate", "net", "vat", "hours_per_week", "total_hours", "budget_hours", "deductible")
 
     def sanitize(self) -> int:
-        """The backend accepts unvalidated dates/numbers (a known bug: they later make /dashboard, /forecast and
-        /finance answer 500). Delete such fuzz-created records so the session can continue."""
+        """Safety net: the backend now rejects invalid dates/numbers, so there should be nothing to delete. Kept so a
+        regression shows up as a count instead of as a poisoned session."""
         removed = 0
         for coll in COLLS + ["offers", "invoices"]:
             for rec in self.boss.get(f"/{coll}"):

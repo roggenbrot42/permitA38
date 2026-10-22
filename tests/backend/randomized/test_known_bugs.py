@@ -1,8 +1,10 @@
 """Regression tests for real bugs found by the randomized tests.
 
-Each test states the *correct* behaviour and is marked `xfail(strict=True)`: it documents the bug today and
-turns red (XPASS) the moment the bug is fixed, which is the signal to delete the marker and the matching
-workaround in test_api_fuzz.py / test_api_stateful.py.
+Each test states the *correct* behaviour. Fixed bugs are plain tests; a bug that is still open is marked
+`xfail(strict=True)`: it documents the bug today and turns red (XPASS) the moment it is fixed, which is the
+signal to delete the marker.
+
+Fixed in 0.4.0: input validation (dates, numbers, ranges, lone surrogates) and VAT rounding.
 """
 
 import pytest
@@ -44,11 +46,6 @@ def _member(api):
 
 
 # ------------------------------------------------------------------ input validation: dates and ranges
-@pytest.mark.xfail(
-    strict=True,
-    reason="GET /holidays?year=10000 or year=-1 -> 500 (date() overflow in "
-    "core/holidays.py); the `year` query parameter needs a range (1..9999) like `weeks` has",
-)
 @pytest.mark.parametrize("year", [10000, 99999, -1])
 def test_holidays_year_out_of_range_is_a_client_error(api, year):
     _boss(api)
@@ -56,11 +53,6 @@ def test_holidays_year_out_of_range_is_a_client_error(api, year):
     assert r.status_code in (400, 422), r.status_code
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Absence dates are unvalidated strings; one bad absence makes /dashboard and "
-    "/forecast return 500 for EVERY user (core/calc.py Capacity.__init__ -> d(a['start']))",
-)
 def test_one_invalid_absence_must_not_break_everybody_elses_dashboard(api):
     boss = _boss(api)
     member = _member(api)
@@ -70,22 +62,12 @@ def test_one_invalid_absence_must_not_break_everybody_elses_dashboard(api):
     assert api.get("/api/forecast").status_code == 200
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="POST /absences without user_id (optional for a boss) is stored without an owner; "
-    "then /dashboard and /forecast return 500 for everyone (core/calc.py Capacity: a['user_id'])",
-)
 def test_absence_without_user_id_must_not_break_the_dashboard(api):
     _boss(api)
     r = api.post("/api/absences", json={"start": "2026-10-19", "end": "2026-10-22"})
     assert r.status_code in (400, 422) or api.get("/api/dashboard").status_code == 200
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Expense date '2026-13-45' is stored; afterwards GET /finance returns 500 "
-    "(core/calc.py finance -> d(x['date']))",
-)
 def test_invalid_expense_date_must_not_break_finance(api):
     _boss(api)
     r = api.post("/api/expenses", json={"date": "2026-13-45", "net": 1})
@@ -93,9 +75,6 @@ def test_invalid_expense_date_must_not_break_finance(api):
     assert api.get("/api/finance").status_code == 200
 
 
-@pytest.mark.xfail(
-    strict=True, reason="Contract dates are unvalidated; one bad contract makes GET /forecast return 500"
-)
 def test_invalid_contract_date_must_not_break_forecast(api):
     _boss(api)
     r = api.post("/api/contracts", json={"title": "x", "start": "nope", "end": "2026-12-31", "hours_per_week": 5})
@@ -103,9 +82,6 @@ def test_invalid_contract_date_must_not_break_forecast(api):
     assert api.get("/api/forecast").status_code == 200
 
 
-@pytest.mark.xfail(
-    strict=True, reason="minutes=10**400 -> OverflowError (int conversion / SQLite binding) -> 500 instead of 422"
-)
 def test_absurd_minutes_value_is_a_client_error(api):
     _boss(api)
     r = api.post("/api/entries", content=b'{"date":"2026-10-22","minutes":' + b"1" + b"0" * 400 + b"}",
@@ -114,11 +90,6 @@ def test_absurd_minutes_value_is_a_client_error(api):
 
 
 # ------------------------------------------------------------------ unicode
-@pytest.mark.xfail(
-    strict=True,
-    reason="A lone surrogate (JSON escape \\ud83d) in a string field -> UnicodeEncodeError "
-    "while binding the SQLite parameter -> 500 instead of 422 (the repository / models should reject it)",
-)
 def test_lone_surrogate_is_rejected_cleanly_and_stores_nothing(api):
     _boss(api)
     r = api.post("/api/customers", content=b'{"name": "\\ud83d"}', headers={"Content-Type": "application/json"})
@@ -126,11 +97,6 @@ def test_lone_surrogate_is_rejected_cleanly_and_stores_nothing(api):
     assert api.get("/api/customers").json() == [], "a rejected request must not leave a half-written record"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="A lone surrogate inside an INVALID field makes the 422 handler fail to encode "
-    "the echoed input -> 500 instead of 422",
-)
 def test_lone_surrogate_in_invalid_field_gives_422(api):
     _boss(api)
     r = api.post("/api/entries", content=b'{"date":"2026-01-01","minutes":"\\ud83d"}',

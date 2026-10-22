@@ -1,9 +1,13 @@
 """Generic CRUD with role-based permissions."""
 
+from decimal import Decimal
+
 from permita38.core import calc
 from permita38.core.errors import ServiceError
+from permita38.core.money import dec
 from permita38.core.repository import COLLECTIONS, ID_RE, Repository
 from permita38.core.settings import effective_settings
+from permita38.core.validation import ALLOWED_VAT_RATES, MAX_MONEY
 
 from .auth import public_user
 
@@ -67,10 +71,15 @@ class RecordService:
                 raise ServiceError(403, "Forbidden")
             data["user_id"] = me["id"]
         if coll in ("offers", "invoices"):
+            self._check_vat_rates(data.get("vat_rate"), *(ln.get("vat") for ln in data.get("lines") or []))
             data = self.prepare_document(data, old)
+            self._check_document_amounts(data)
+        elif coll == "expenses":
+            self._check_vat_rates(data.get("vat_rate"))
         elif coll == "entries":
             data["minutes"] = int(round(float(data.get("minutes") or 0)))
             data.setdefault("billable", True)
+            self._check_day_total(data, old)
             if old and old.get("invoice_id"):
                 if not boss:
                     raise ServiceError(403, "Entry already invoiced")
@@ -78,6 +87,36 @@ class RecordService:
         if data.get("created") is None:
             data.pop("created", None)
         return self.store.save(coll, data)
+
+    # -- sanity checks that need stored data or settings ---------------------------------------------
+    def _check_vat_rates(self, *rates) -> None:
+        allowed = {float(r) for r in ALLOWED_VAT_RATES}
+        allowed.add(float(effective_settings(self.store.settings())["vat_rate"]))
+        for rate in rates:
+            if rate is not None and float(rate) not in allowed:
+                shown = ", ".join(f"{r:g}" for r in sorted(allowed))
+                raise ServiceError(422, f"VAT rate {float(rate):g} % is not allowed (allowed: {shown} %)")
+
+    def _check_day_total(self, data: dict, old: dict | None) -> None:
+        """One person cannot work more than 24 hours in a day."""
+        total = data["minutes"]
+        for e in self.store.list("entries"):
+            same_day = e.get("user_id") == data.get("user_id") and e.get("date") == data.get("date")
+            if same_day and e.get("id") != (old or {}).get("id"):
+                total += int(e.get("minutes") or 0)
+        if total > 1440:
+            raise ServiceError(422, f"That would be {total / 60:.1f} hours on {data.get('date')}; a day has only 24")
+
+    @staticmethod
+    def _check_document_amounts(doc: dict) -> None:
+        net = Decimal(0)
+        for i, ln in enumerate(doc.get("lines") or [], 1):
+            amount = dec(ln.get("amount"))
+            if abs(amount) > Decimal(str(MAX_MONEY)):
+                raise ServiceError(422, f"Line {i}: the amount is unrealistically large")
+            net += amount
+        if abs(net) > Decimal(str(MAX_MONEY)):
+            raise ServiceError(422, "The document total is unrealistically large")
 
     def prepare_document(self, doc: dict, old: dict | None) -> dict:
         st = effective_settings(self.store.settings())

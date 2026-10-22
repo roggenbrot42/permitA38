@@ -5,6 +5,7 @@ from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
 from permita38.api.deps import BossUser, ServicesDep
+from permita38.core import validation as v
 from permita38.core.models import Document
 
 router = APIRouter(tags=["sales"])
@@ -12,10 +13,10 @@ routers = [router]
 
 
 class FromTime(BaseModel):
-    customer_id: str | None = None
-    project_id: str | None = None
-    date_from: str | None = Field(None, alias="from")
-    date_to: str | None = Field(None, alias="to")
+    customer_id: v.OptId = None
+    project_id: v.OptId = None
+    date_from: v.OptDate = Field(None, alias="from")
+    date_to: v.OptDate = Field(None, alias="to")
 
 
 def _pdf(services, coll: str, rid: str) -> Response:

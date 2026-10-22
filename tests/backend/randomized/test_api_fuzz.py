@@ -7,9 +7,6 @@ negative values, impossible dates. They are sent as boss, member and anonymous.
 For every response we assert: never a 5xx, never a traceback, errors are JSON with `detail`, strangers get
 401, path traversal never reaches files outside the data folder, strangers/members never write where they
 must not, and afterwards the data folder is still consistent and the app restarts on it.
-
-A few real bugs are known (see test_known_bugs.py). To keep this test useful until they are fixed the
-generator avoids exactly those triggers; set PERMITA38_FUZZ_KNOWN_BUGS=1 to let it hit them again.
 """
 
 import hashlib
@@ -31,7 +28,6 @@ from hypothesis import strategies as st
 from permita38.api.server import get_app
 from permita38.core.config import Config
 
-AVOID_KNOWN_BUGS = os.environ.get("PERMITA38_FUZZ_KNOWN_BUGS") != "1"
 DEAD_ID = "deadbeef0000"
 DATE_FIELDS = {"date", "start", "end", "due_date", "valid_until", "paid_date", "service_from", "service_to",
                "tracking_start", "from", "to"}  # fmt: skip
@@ -132,13 +128,7 @@ class Gen:
 
     # -- values
     def junk(self):
-        v = self.r.choice(JUNK)
-        if AVOID_KNOWN_BUGS:
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and abs(v) > 10**15:
-                return 0  # known bug: absurdly large numbers
-            if isinstance(v, str) and any(0xD800 <= ord(ch) <= 0xDFFF for ch in v):
-                return "\ufffd"  # known bug: lone surrogates -> 500
-        return v
+        return self.r.choice(JUNK)
 
     def an_id(self):
         x = self.r.random()
@@ -157,12 +147,8 @@ class Gen:
         schema = self.resolve(schema)
         if depth > 5:
             return None
-        if AVOID_KNOWN_BUGS and name == "user_id":  # known bug: an absence without owner breaks every dashboard
-            return self.r.choice([self.w.boss["id"], self.w.member["id"], DEAD_ID])
         if self.r.random() < 0.08:
-            if not (AVOID_KNOWN_BUGS and name in DATE_FIELDS):
-                return self.junk()
-            return self.r.choice([None, 0, [], {}, True])  # wrong type, but never a malformed date string
+            return self.junk()
         for key in ("anyOf", "oneOf"):
             if key in schema:
                 return self.schema_value(self.r.choice(schema[key]), name, depth + 1)
@@ -172,7 +158,7 @@ class Gen:
         if t == "object" or "properties" in schema:
             props = schema.get("properties", {})
             out = {k: self.schema_value(v, k, depth + 1) for k, v in props.items()
-                   if k in schema.get("required", []) or self.r.random() < 0.6 or (AVOID_KNOWN_BUGS and k == "user_id")}  # fmt: skip
+                   if k in schema.get("required", []) or self.r.random() < 0.6}  # fmt: skip
             if self.r.random() < 0.1:
                 out[self.r.choice(["__class__", "id", "created", "$where", "../x", "x" * 50])] = self.junk()
             return out
@@ -256,7 +242,7 @@ class Gen:
         if "anyOf" in t:
             t = self.resolve(next(x for x in t["anyOf"] if x.get("type") != "null"))
         if name == "year":
-            return self.r.choice([2025, 2026, 2027, 0, "abc"] if AVOID_KNOWN_BUGS else [2026, 0, 10000, 99999, -5])
+            return self.r.choice([2025, 2026, 2027, 0, "abc", 10000, 99999, -5])
         if name == "user_id":
             return self.an_id()
         if t.get("type") == "integer":

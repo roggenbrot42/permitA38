@@ -33,6 +33,23 @@ All notable changes to this project are documented here. The format is based on
   (version/CHANGELOG/tag checks, always-annotated tags), `make release`, `RELEASING.md`, `docs/release-plan.md`,
   `docs/roadmap.md`, `docs/maintainer-setup.md`, `THIRD_PARTY_NOTICES.md` with a GPLv3 license gate, CodeQL,
   Dependabot, issue/PR templates and a quarterly tax-rule review reminder.
+### Fixed
+- **VAT and money rounding:** amounts were computed with binary floats, so 19 % of 621.50 was booked as 118.08 while
+  the editor showed 118,09. All money is now computed with exact decimals (`permita38/core/money.py`): line amounts
+  and VAT per rate are rounded half-up to whole cents, and the web editor (`web/money.js`) uses the identical rule
+  (checked against the backend by a cross-language test). See `docs/validation.md`.
+- **One damaged record could break everybody:** an invalid date or number in a stored record made `/forecast`,
+  `/dashboard` or `/finance` answer HTTP 500 (and, through file sync, on every device). Such records are now skipped
+  with a logged warning, list endpoints no longer re-validate stored records, and invalid values are rejected when
+  they are entered.
+- A lone Unicode surrogate, absurdly large numbers and out-of-range `year` parameters caused HTTP 500 instead of 422.
+
+### Added
+- **Input validation (first version of the sanity layer):** strict request models reject impossible dates
+  (`2026-13-45`, outside 2000-2100, end before start), times, minutes outside 1-1440, more than 24 h per person and
+  day, non-finite or unrealistic amounts and rates, negative expenses, unknown VAT rates, unknown status/kind/layout
+  values, bad colours/ids, over-long text and oversized documents. Errors are HTTP 422 naming the field, and never
+  echo the input. Invoice-number patterns can no longer contain arbitrary format fields. See `docs/validation.md`.
 
 ### Changed
 - The package version is single-sourced from `permita38.__version__` (PEP 440, e.g. `0.4.0a1` for tag `v0.4.0-alpha.1`).

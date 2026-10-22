@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -15,6 +16,11 @@ from .deps import Services, startup_services
 from .routers import auth, files, finance, health, impressum, planning, records, sales, settings, time, totp, users
 
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
+
+
+def _clean_msg(msg: str) -> str:
+    msg = msg.removeprefix("Value error, ")
+    return msg[:300]
 
 
 def get_app(config: Config) -> FastAPI:
@@ -49,6 +55,20 @@ def get_app(config: Config) -> FastAPI:
     @app.exception_handler(ServiceError)
     async def service_error_handler(_: Request, exc: ServiceError):
         return JSONResponse({"detail": exc.message}, status_code=exc.status)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(_: Request, exc: RequestValidationError):
+        # Never echo the offending input back (it can be huge or contain unencodable characters); keep the
+        # field path and a readable message, which is all a client needs.
+        detail = [
+            {
+                "loc": [x if isinstance(x, int) else str(x) for x in e["loc"]],
+                "msg": _clean_msg(e["msg"]),
+                "type": e["type"],
+            }
+            for e in exc.errors()
+        ]
+        return JSONResponse({"detail": detail}, status_code=422)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
