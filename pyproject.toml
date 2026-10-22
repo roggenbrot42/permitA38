@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "permita38"
-version = "0.2.0"
+version = "0.3.0"
 description = "Time tracking, planning, offers, invoices and tax reserves for freelancers and small businesses in Germany."
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
@@ -37,6 +37,7 @@ include = ["permita38*"]
 
 [tool.setuptools.package-data]
 "permita38.core" = ["templates/*.json"]
+"permita38.core.schema" = ["migrations/*/*.sql"]
 
 [tool.ruff]
 line-length = 120
@@ -54,4 +55,4 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests"]
+testpaths = ["tests/backend"]

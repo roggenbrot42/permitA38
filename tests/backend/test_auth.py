@@ -3,7 +3,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import PASSWORD
+from .conftest import PASSWORD
 
 
 def test_status_and_setup_only_once(client):

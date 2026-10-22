@@ -5,14 +5,14 @@ from datetime import date, timedelta
 
 from permita38.core import calc, documents
 from permita38.core.errors import ServiceError
+from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
-from permita38.core.store import Store
 
 from .records import RecordService
 
 
 class SalesService:
-    def __init__(self, store: Store, records: RecordService):
+    def __init__(self, store: Repository, records: RecordService):
         self.store = store
         self.records = records
 
@@ -61,10 +61,14 @@ class SalesService:
         return data, (doc.get("number") or "draft") + ".pdf"
 
     def accept_offer(self, rid: str) -> dict:
+        with self.store.transaction():
+            return self._accept_offer(rid)
+
+    def _accept_offer(self, rid: str) -> dict:
         o = self._get("offers", rid)
         o["status"] = "accepted"
         o = self.store.save("offers", o)
-        cust = self.store.get("customers", o.get("customer_id")) if o.get("customer_id") else None
+        cust = self.store.get("customers", o["customer_id"]) if o.get("customer_id") else None
         proj = self.store.save(
             "projects",
             dict(
@@ -147,8 +151,9 @@ class SalesService:
         if project_id:
             inv["project_id"] = project_id
         inv = {k: v for k, v in inv.items() if v is not None}
-        inv = self.store.save("invoices", self.records.prepare_document(inv, None))
-        for e in picked:
-            e["invoice_id"] = inv["id"]
-            self.store.save("entries", e)
+        with self.store.transaction():  # the invoice and the "billed" marks on the entries succeed or fail together
+            inv = self.store.save("invoices", self.records.prepare_document(inv, None))
+            for e in picked:
+                e["invoice_id"] = inv["id"]
+                self.store.save("entries", e)
         return inv

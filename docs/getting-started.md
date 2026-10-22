@@ -67,7 +67,9 @@ Open **Planning**:
 
 1. Install [Syncthing](https://syncthing.net/) on every computer and share the data folder.
 2. Run permitA38 on each with `--data <that folder>` (once – it remembers).
-3. Done. One small file per record means different devices don't step on each other. If Syncthing ever reports a conflict, permitA38 shows a banner and you delete the copy you don't want.
+3. Done. Your data is one SQLite file (`permita38.sqlite3`) plus an `attachments/` folder, so work on **one device at a time**: quit permitA38, let Syncthing finish, then open it on the other device.
+4. Safety nets: permitA38 makes a daily backup in `backups/` (and one before every upgrade of the database), and you should switch on Syncthing's *file versioning* for the folder. If two devices were edited offline at the same time, Syncthing creates a conflict copy of the whole database; permitA38 shows a warning banner – keep the version you want and delete the other.
+5. Upgrading from the earlier JSON-file version? Run `permita38 import-json <old data folder>` once.
 
 ## 8. Expenses and your tax picture
 

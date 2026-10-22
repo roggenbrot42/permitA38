@@ -3,7 +3,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 **Time tracking, planning, offers, invoices and tax reserves for freelancers and small businesses in Germany.**
-One small app, one folder of plain files, synced across all your devices with Syncthing.
+One small app, one SQLite database in a folder you own, synced across all your devices with Syncthing.
 
 ![Login](docs/img/login.png)
 
@@ -36,7 +36,7 @@ It runs on **Windows and Linux** (anything with Python 3.10+), needs **no databa
 | **💳 Expenses** | Enter bills with an attached PDF/photo, assign them to a project or keep them as general expenses. VAT is split out automatically. |
 | **🏛 Taxes (Germany)** | Dashboard for revenue, profit, VAT and income-based taxes for **Freiberufler**, **Gewerbetreibende** (incl. Gewerbesteuer with §35 credit) or **UG/GmbH**. Shows your monthly *set-aside* and what's left for you. |
 | **🧑‍🤝‍🧑 Team & roles** | Add people to your workforce. **Members** track their own time and time off. **You, the boss,** plan, bill and see the money. Every person has their own login. |
-| **🔄 Sync-friendly** | Every record is its own small JSON file → Syncthing, Nextcloud or Dropbox merge changes from different devices without conflicts. |
+| **🗄 SQLite storage** | All data lives in one SQLite file (`permita38.sqlite3`) in your data folder – transactional, versioned schema migrations, automatic daily backups. Syncs with Syncthing, Nextcloud or Dropbox. |
 
 ### A look around
 
@@ -96,7 +96,7 @@ Your browser opens at <http://localhost:8765>. On the first start you create you
 
 ## Using permitA38 on all your devices (sync)
 
-permitA38 has no cloud. **The data folder *is* the database**, and a file-sync tool moves it between your computers. This is the simplest approach that works offline, keeps your data private and costs nothing.
+permitA38 has no cloud. **The data folder holds the database** (one SQLite file plus your attachments), and a file-sync tool moves it between your computers. This works offline, keeps your data private and costs nothing.
 
 **With Syncthing (recommended):**
 
@@ -104,17 +104,17 @@ permitA38 has no cloud. **The data folder *is* the database**, and a file-sync t
 2. On every device, start permitA38 once with `--data` pointing at that folder.
 3. Use it on any device with the same logins. Changes appear on the others within seconds (reload the page).
 
-**Why this works well**
+**How syncing a single database file behaves – honestly**
 
-- **One file per record** (`entries/<id>.json`, `invoices/<id>.json`, …) with random IDs. Two devices almost never edit the same file, so there is nothing to conflict.
-- Files are written atomically; half-synced files are ignored until complete.
-- If a conflict ever happens anyway, Syncthing creates a `*.sync-conflict-*` file. permitA38 **ignores** those and shows a warning banner so you can compare and delete the one you don't need.
+- **One device writes at a time: works great.** Work on the laptop, quit permitA38 (or just stop typing), let Syncthing finish, then open it on the desktop. SQLite writes are transactional and the database uses a plain rollback journal (no `-wal`/`-shm` side files), so a synced copy is always a complete, consistent database.
+- **Two devices edit offline at the same time: you get a conflict copy of the *whole* database** (`permita38.sync-conflict-….sqlite3`). permitA38 detects these files, shows a warning banner, and will not merge them for you – you keep the version you want (and can copy missing entries over by hand). A row-level merge/sync mode is on the roadmap.
+- **Rule of thumb:** quit permitA38 on a device before you switch to another one.
+- **Safety nets:** permitA38 takes an **automatic daily backup** (newest 14 are kept in `<data folder>/backups/`) and a backup **before every schema migration**. Turn on Syncthing's *file versioning* (Staggered) for the data folder as a second undo history. `permita38 backup` makes one on demand.
+- **Newer app version on another device?** The database records its schema revision. An older permitA38 refuses to open a database that a newer version already upgraded – update the older device instead of risking your data.
 - Your running timer is stored per person, so you can start it on the laptop and stop it on the desktop.
-- Each device has its own `config.yaml` (with its own secret signing key) – it is **not** in the synced folder, so sessions are per device.
+- Each device has its own `config.yaml` (with its own secret signing key) – it is **not** in the synced folder, so logins/sessions are per device.
 
-**Alternatives:** Nextcloud, Dropbox, OneDrive, a NAS share or a USB stick work just as well. Keep Syncthing's file versioning on – it doubles as a free undo history.
-
-**Back-ups:** the data is plain, human-readable JSON. Back up the folder like any other – and keep one copy that is *not* synced.
+**Alternatives:** Nextcloud, Dropbox, OneDrive, a NAS share or a USB stick work the same way. For several people editing at once you want a server instead – see the roadmap (the storage layer is built so a PostgreSQL/MariaDB backend can be added: [docs/porting-to-postgres.md](docs/porting-to-postgres.md)).
 
 ---
 
@@ -148,19 +148,30 @@ Set your **company type**, **federal state**, **Kleinunternehmer** status and **
 permitA38 is split into a **backend** (HTTP API) and a **frontend** that only talks to that API. The layout follows the approach of [stustapay](https://github.com/stustapay/stustapay).
 
 ```
-web/                      vanilla-JS single-page app (no build step)  ──HTTP/JSON──┐
-                                                                                   ▼
-permita38/api/            FastAPI app: thin routers + auth dependencies (one router per domain)
-permita38/core/service/   services: business rules, permissions, numbering, timers, documents
-permita38/core/           pure domain logic (rates, capacity, forecast, tax, holidays, PDF) + pydantic models
-permita38/core/store.py   repository layer: one JSON file per record in the data folder
-api/openapi.json          the generated API contract
+web/                          vanilla-JS single-page app (no build step)   ──HTTP/JSON──┐
+                                                                                       ▼
+permita38/api/                FastAPI app: thin routers + auth dependencies (router per domain)
+permita38/core/service/       services: business rules, permissions, numbering, timers, documents
+permita38/core/               pure domain logic (rates, capacity, forecast, tax, holidays, PDF) + pydantic models
+        │  depends only on the interface ▼
+permita38/core/repository/    Repository interface (base.py)  ← the ONLY thing services/API may import
+   ├─ schema.py               the database schema described once, dialect-neutral
+   ├─ dialect.py              SQLite / PostgreSQL / MariaDB: DDL, upserts, placeholders (pure strings)
+   ├─ sql.py                  generic SQL repository (records, settings, transactions, migrations)
+   ├─ sqlite.py               SQLiteRepository – the default (and only shipped) backend
+   ├─ factory.py              create_repository(config) picks the backend
+   └─ importer.py, backups.py import of the old JSON layout, automatic backups
+permita38/core/schema/migrations/<dialect>/0001_initial.sql   numbered migrations per dialect
+api/openapi.json              the generated API contract
 ```
+
+Layers: **web → API routers → services → `Repository` interface → backend/dialect → database file or server.**
 
 - **Contract first:** the API is described by OpenAPI. `api/openapi.json` is committed (`make generate-openapi`, checked in CI); interactive docs are served at `/api/docs`. A mobile app or a different frontend can be generated from it.
 - **Services, not routers, hold the logic.** Routers parse requests and call a service; services raise domain errors that the API maps to `{"detail": …}` responses.
 - **Typed records, tolerant files:** pydantic models describe every record, but unknown fields are preserved so files written by a newer version or another device survive a round-trip.
-- **Storage is a layer:** everything goes through `core/store.py`. Another backend (SQLite, Postgres) could be swapped in for a hosted multi-user mode without touching routers or the frontend.
+- **Storage is a layer:** services, calculations, documents and the API depend only on the `Repository` interface (`core/repository/base.py`) – no SQL, no `sqlite3` outside the repository package. The default backend is **SQLite**; the interface, the dialect-neutral schema, per-dialect DDL/upsert generation and a backend-independent contract test suite are in place so a **PostgreSQL or MariaDB** backend is mostly wiring a driver ([porting guide](docs/porting-to-postgres.md)). *Honest status: only SQLite is implemented and tested; the PostgreSQL/MariaDB dialect classes and migration files are prepared but never ran against a real server.*
+- **Versioned schema migrations**, stustapay-style: numbered SQL files per dialect (`0001_initial.sql`, …), the database stores its revision, `CURRENT_REVISION` in `core/database.py` says what the app expects. On start permitA38 applies pending migrations (after taking a backup) and **refuses to start** on a database that is newer than the app. `permita38 create-migration <name>` creates the next numbered file for every dialect.
 - **Frontend hosted separately?** By default the API serves `web/` itself. To host the frontend elsewhere set `serve_web: false` and `cors_origins: ["https://your-frontend"]` in the config, and point the frontend at the API URL.
 
 **Per-device config** (`~/.config/permita38/config.yaml`, on Windows `%APPDATA%\permita38\config.yaml`) is created on first run:
@@ -172,27 +183,35 @@ host: 127.0.0.1
 port: 8765
 cors_origins: []
 serve_web: true
+database:
+  backend: sqlite          # sqlite (default). postgresql / mariadb are prepared, not shipped yet
+  # path: permita38.sqlite3  # default: <data_dir>/permita38.sqlite3
+  sqlite_wal: false        # WAL syncs badly (extra files) – keep off for synced folders
+  auto_migrate: true
+  auto_backup: true        # one backup per day in <data_dir>/backups, newest 14 kept
+  backup_keep: 14
 ```
 
 **Inspired by stustapay:** FastAPI + service layer + pydantic, OpenAPI contract between backend and frontend, bearer-token auth via dependencies, CLI sub-commands, ruff/mypy/pre-commit/CI conventions.
-**Deliberately different:** no PostgreSQL and no always-on server – the synced folder is the database so it works offline on a laptop; no React/Nx build – the UI is plain JS you can read and change in a text editor.
+**Deliberately different:** SQLite instead of PostgreSQL and no always-on server – the synced folder holds the database so it works offline on a laptop (PostgreSQL is a prepared option, see above); no React/Nx build – the UI is plain JS you can read and change in a text editor.
 
 ---
 
 ## Where is my data?
 
 ```
-permitA38/               ← your data folder (sync this)
-├── settings.json        company data, tax settings, defaults
-├── users/ customers/ projects/ tasks/
-├── entries/             one file per time entry
-├── contracts/ absences/ offers/ invoices/ expenses/
-├── templates/           your own document templates
-├── attachments/         uploaded bills and your logo
-└── timers/              the running timer of each person
+permitA38/                  ← your data folder (sync this)
+├── permita38.sqlite3       everything: users, customers, projects, time entries, contracts,
+│                           offers, invoices, expenses, absences, templates, settings, timers
+├── attachments/            uploaded bills and your logo (files)
+└── backups/                automatic daily backups + one before each migration
 ```
 
-Everything is UTF-8 JSON – easy to read, back up, script or migrate.
+The database is a normal SQLite file – open it with any SQLite tool (`sqlite3 permita38.sqlite3 .tables`), back it up like any file, or script against it. Real tables and typed columns (no JSON blob table); fields the app does not know yet are kept in a per-row `extra` JSON column so data written by a newer version survives. There are deliberately **no foreign-key constraints**: deleting a customer never blocks on or cascades into projects and invoices – the history stays intact.
+
+**Coming from the earlier JSON-file version?** Import it once: `permita38 import-json <old data folder>` (idempotent; keeps ids and timestamps; old users get a derived username and need `permita38 set-password <username>`).
+
+**Command line:** `permita38 migrate` · `permita38 backup [--dest FILE]` · `permita38 import-json DIR` · `permita38 create-migration NAME` · `permita38 dump-ddl --dialect postgresql` · `permita38 set-password USER`.
 
 ---
 
@@ -206,8 +225,8 @@ Invoices include what German law requires (§14 UStG): both addresses, tax numbe
 
 ## Roadmap
 
-- 📱 **Android companion app** – see [`docs/mobile-concept.md`](docs/mobile-concept.md): a small offline-first app that reads/writes the same synced folder (via Syncthing-Fork).
-- Optional **server mode** (hosted instance, database storage backend) for teams
+- 📱 **Android companion app** – see [`docs/mobile-concept.md`](docs/mobile-concept.md): a small offline-first app on SQLite (native on Android), syncing the same database file or talking to a server.
+- Optional **server mode**: a PostgreSQL/MariaDB backend behind the existing `Repository` interface ([porting guide](docs/porting-to-postgres.md)), and a row-level merge for the synced-file setup
 - Recurring invoices, credit notes, reminders (Mahnungen)
 - DATEV / CSV export for your tax advisor
 - UI translations (currently English UI, German document templates)
@@ -222,7 +241,7 @@ Ideas and pull requests are welcome.
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 
-make test              # pytest (FastAPI TestClient, no network needed)
+make test              # pytest tests/backend (unit, API, repository contract, migrations)
 make lint              # ruff + mypy
 make format            # ruff formatter
 make run               # start the server on :8765

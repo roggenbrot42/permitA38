@@ -1,5 +1,7 @@
 """FastAPI application factory."""
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -9,14 +11,23 @@ from permita38 import __version__
 from permita38.core.config import Config
 from permita38.core.errors import ServiceError
 
-from .deps import Services
+from .deps import Services, startup_services
 from .routers import auth, files, finance, health, planning, records, sales, settings, time, users
 
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
 
 
 def get_app(config: Config) -> FastAPI:
+    services = Services.create(config)
+
+    @asynccontextmanager
+    async def lifespan(_: FastAPI):
+        startup_services(services)
+        yield
+        services.store.close()
+
     app = FastAPI(
+        lifespan=lifespan,
         title="permitA38 API",
         version=__version__,
         license_info={"name": "GPL-3.0-or-later", "url": "https://www.gnu.org/licenses/gpl-3.0.html"},
@@ -24,7 +35,7 @@ def get_app(config: Config) -> FastAPI:
         redoc_url=None,
         openapi_url="/api/openapi.json",
     )
-    app.state.services = Services.create(config)
+    app.state.services = services
 
     if config.cors_origins:
         app.add_middleware(

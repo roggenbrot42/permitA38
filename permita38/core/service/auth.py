@@ -10,8 +10,8 @@ import threading
 import time
 
 from permita38.core.errors import ServiceError
+from permita38.core.repository import Repository
 from permita38.core.settings import DEFAULT_SETTINGS
-from permita38.core.store import Store
 
 PBKDF2_ITERATIONS = 200_000
 USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
@@ -63,7 +63,7 @@ def normalize_username(username: str) -> str:
 
 
 class AuthService:
-    def __init__(self, store: Store, secret_key: str, token_ttl_hours: int = 12):
+    def __init__(self, store: Repository, secret_key: str, token_ttl_hours: int = 12):
         self.store = store
         self.secret = secret_key.encode()
         self.ttl = token_ttl_hours * 3600

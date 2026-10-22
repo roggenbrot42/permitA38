@@ -133,5 +133,5 @@ def test_openapi_in_sync(app):
     import json
     from pathlib import Path
 
-    committed = json.loads((Path(__file__).parents[1] / "api" / "openapi.json").read_text(encoding="utf-8"))
+    committed = json.loads((Path(__file__).parents[2] / "api" / "openapi.json").read_text(encoding="utf-8"))
     assert app.openapi() == committed, "api/openapi.json is stale: run `make generate-openapi`"
