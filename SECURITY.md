@@ -73,6 +73,9 @@ degrade service for others, and report privately – we will not pursue legal ac
 - Create the first boss account with the `PERMITA38_BOOTSTRAP_*` variables so nobody else can claim the instance
   through the setup page.
 - Use strong, unique passwords; give people only the roles and rights they need.
+- Turn on **two-factor authentication (TOTP)** for every boss account (account menu, "Two-factor authentication") and
+  keep the recovery codes offline. The TOTP secret is stored in the database, so protect the database file and your
+  backups at rest: it cannot be encrypted with the per-device key because the database may be shared between devices.
 - Keep `PERMITA38_SECRET_KEY` secret; rotating it signs everybody out.
 - Keep the data folder and backups readable only by the service user, and encrypt backups that leave the machine.
 - Keep the application and the container image up to date and watch the repository's security advisories.

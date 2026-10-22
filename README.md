@@ -84,6 +84,7 @@ Your browser opens at <http://localhost:8765>. On the first start you create you
 - **Everyday use:** sign in with username and password. The server hands out a signed token (valid 12 hours); the web app sends it as `Authorization: Bearer …`. A same-site `HttpOnly` cookie carries the same token so that PDFs and attachments open in a new tab.
 - **Team members:** the boss creates accounts under **Team** (username + initial password). Members can change their password via the account menu.
 - **Protection:** passwords are stored only as salted PBKDF2-SHA256 hashes; five failed attempts lock a username out for a few minutes; changing a password signs out every other session.
+- **Two-factor authentication (optional, recommended for bosses):** account menu → *Two-factor authentication*. Scan the QR code with any TOTP app (FreeOTP, Aegis, Google Authenticator, …), confirm with a first code and store the ten **one-time recovery codes** (shown only once). Afterwards signing in asks for the 6-digit code (RFC 6238: SHA-1, 30 s, ±1 step; every code works only once). Wrong codes count towards the same lockout as wrong passwords. The secret is stored in the database (protect the database file; it cannot be encrypted per device because the file is shared). Lost phone? Use a recovery code, ask a boss (**Team → Reset 2FA**) or run `permita38 reset-totp <username>` on the machine with the data.
 - **Forgot your password?** Run on the machine that has the data:
 
   ```bash
@@ -211,7 +212,7 @@ The database is a normal SQLite file – open it with any SQLite tool (`sqlite3 
 
 **Coming from the earlier JSON-file version?** Import it once: `permita38 import-json <old data folder>` (idempotent; keeps ids and timestamps; old users get a derived username and need `permita38 set-password <username>`).
 
-**Command line:** `permita38 migrate` · `permita38 backup [--dest FILE]` · `permita38 import-json DIR` · `permita38 create-migration NAME` · `permita38 dump-ddl --dialect postgresql` · `permita38 set-password USER`.
+**Command line:** `permita38 migrate` · `permita38 backup [--dest FILE]` · `permita38 import-json DIR` · `permita38 create-migration NAME` · `permita38 dump-ddl --dialect postgresql` · `permita38 set-password USER` · `permita38 reset-totp USER`.
 
 ---
 

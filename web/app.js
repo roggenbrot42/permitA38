@@ -144,7 +144,7 @@ async function render() {
   app.innerHTML = `<div class="shell"><nav class="side"><div class="brand"><i></i>permitA38</div>
     ${nav.map(([k, ic, l]) => `<a class="nav ${k === active ? 'on' : ''}" href="#/${k}"><span>${ic}</span>${l}</a>`).join('')}
     <div class="spacer"></div><div class="me"><b>${esc(S.me.name)}</b><br>${S.me.role === 'boss' ? 'Boss' : 'Member'}</div>
-    <a class="nav" data-a="changePassword">🔑 Change password</a><a class="nav" data-a="logout">↩ Sign out</a></nav><main>${S.conflicts?.length ? `<div class="banner">⚠ ${S.conflicts.length} sync conflict file(s) found in your data folder (e.g. <code>${esc(S.conflicts[0])}</code>). Compare and delete the copy you do not need.</div>` : ''}${html}</main></div>`;
+    <a class="nav" data-a="changePassword">🔑 Change password</a><a class="nav" data-a="twoFactor">🛡 Two-factor authentication</a><a class="nav" data-a="logout">↩ Sign out</a></nav><main>${S.conflicts?.length ? `<div class="banner">⚠ ${S.conflicts.length} sync conflict file(s) found in your data folder (e.g. <code>${esc(S.conflicts[0])}</code>). Compare and delete the copy you do not need.</div>` : ''}${html}</main></div>`;
   if (render.after) { const f = render.after; render.after = null; f(); }
 }
 window.addEventListener('hashchange', guard(render));
@@ -199,8 +199,11 @@ async function renderLogin(app) {
     e.preventDefault(); const btn = $('#l_go'), u = $('#l_user').value.trim(), p = $('#l_pw').value;
     if (!u || !p) return authError('Please enter your username and password.');
     authError(''); authBusy(btn, true);
-    try { const r = await api.post('auth/login', { username: u, password: p }, { noAuthRedirect: true }); await enterApp(r.token); }
-    catch (err) { authError(err.message); authBusy(btn, false, 'Sign in'); $('#l_pw').select(); }
+    try {
+      const r = await api.post('auth/login', { username: u, password: p }, { noAuthRedirect: true });
+      if (r.mfa_required) return renderMfa(app, r.mfa_token);   // second step, see twofactor.js
+      await enterApp(r.token);
+    } catch (err) { authError(err.message); authBusy(btn, false, 'Sign in'); $('#l_pw').select(); }
   };
 }
 async function enterApp(token) {

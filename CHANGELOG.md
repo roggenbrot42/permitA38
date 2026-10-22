@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- Optional TOTP two-factor authentication (RFC 6238): enrolment with QR code, two-step login, replay protection,
+  attempt throttling, ten hashed one-time recovery codes, boss reset (`POST /api/users/{id}/totp/reset`) and
+  `permita38 reset-totp`. Database migration 0002 adds the columns; new dependency `segno`.
 - Docker support: multi-stage `Dockerfile` (non-root, health check, pinned dependencies), `docker-compose.yml`
   (hardened), HTTPS reverse-proxy examples (Caddy, nginx) and `docs/docker.md`.
 - Environment-variable configuration for server hosting (`PERMITA38_*`: host, port, secret key / key file, CORS,
