@@ -44,6 +44,9 @@ class Project(Record):
     notes: str | None = None
     member_ids: list[str] = []
     offer_id: str | None = None
+    start: str | None = None
+    end: str | None = None
+    extensions: list[dict] | None = None
 
 
 class Task(Record):
@@ -119,6 +122,7 @@ class Plan(BaseModel):
     total_hours: float | None = None
     user_ids: list[str] = []
     rate: float | None = None
+    win_probability: float | None = None
 
 
 class Document(Record):
@@ -188,6 +192,8 @@ class UserIn(BaseModel):
     cost_rate: v.Rate | None = None
     color: v.OptColor = None
     tracking_start: v.OptDate = None
+    vacation_days_per_year: Annotated[float, Field(ge=0, le=366, allow_inf_nan=False)] | None = None
+    vacation_carry_over: Annotated[float, Field(ge=0, le=366, allow_inf_nan=False)] | None = None
     active: bool = True
 
     @field_validator("workdays")
@@ -231,6 +237,8 @@ class Settings(BaseModel):
     splitting: bool = False
     other_income: float = 0
     other_deductions: float = 0
+    planning_min_rate: float = 0
+    planning_default_win_probability: float = 100
 
 
 # ======================================================================================================
@@ -268,6 +276,13 @@ class ProjectIn(v.StrictRecord):
     notes: v.Note | None = None
     member_ids: v.IdList = []
     offer_id: v.OptId = None
+    start: v.OptDate = None
+    end: v.OptDate = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        v.check_period(self.start, self.end, "project end")
+        return self
 
 
 class TaskIn(v.StrictRecord):
@@ -353,6 +368,7 @@ class PlanIn(BaseModel):
     total_hours: v.TotalHours | None = None
     user_ids: v.IdList = []
     rate: v.Rate | None = None
+    win_probability: v.Percent | None = None
 
     @model_validator(mode="after")
     def _period(self):
@@ -438,6 +454,8 @@ class SettingsIn(v.StrictRecord):
     splitting: bool = False
     other_income: v.NonNegAmount = 0
     other_deductions: v.NonNegAmount = 0
+    planning_min_rate: v.Rate = 0
+    planning_default_win_probability: v.Percent = 100
 
     @field_validator("state")
     @classmethod
@@ -452,3 +470,55 @@ class SettingsIn(v.StrictRecord):
         if not _PATTERN_OK.match(value) or "{n" not in value:
             raise ValueError("may only use {year} and {n} / {n:04d} and must contain {n}")
         return value
+
+
+# ---- planning: what-if changes and named scenarios -------------------------------------------------------------
+class AbsenceChange(BaseModel):
+    """Changes one absence (``id`` given) or adds one (no ``id``). ``delete`` removes an existing one."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: v.OptId = None
+    delete: bool = False
+    user_id: v.OptId = None
+    kind: Literal["vacation", "holiday", "sick", "other"] = "vacation"
+    start: v.OptDate = None
+    end: v.OptDate = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        v.check_period(self.start, self.end)
+        return self
+
+
+class CommitmentChange(BaseModel):
+    """Overrides the period or hours of an existing contract or open offer. Omitted fields keep their value."""
+
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["contract", "offer"]
+    id: v.Id
+    start: v.OptDate = None
+    end: v.OptDate = None
+    hours_per_week: v.Hours | None = None
+    total_hours: v.TotalHours | None = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        v.check_period(self.start, self.end)
+        return self
+
+
+class ScenarioChanges(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    absences: list[AbsenceChange] = Field(default=[], max_length=500)
+    commitments: list[CommitmentChange] = Field(default=[], max_length=500)
+
+
+class ScenarioIn(v.StrictRecord):
+    name: v.Name
+    changes: ScenarioChanges = ScenarioChanges()
+
+
+class PlanScenario(Record):
+    name: str
+    user_id: str | None = None
+    changes: dict = {}

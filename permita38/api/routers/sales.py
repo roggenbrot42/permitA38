@@ -12,6 +12,16 @@ router = APIRouter(tags=["sales"])
 routers = [router]
 
 
+class DocumentResult(Document):
+    """A saved offer or invoice plus its non-blocking planning warnings (never stored)."""
+
+    planning_warnings: list[dict] | None = None
+
+
+def _doc(services, coll: str, doc: dict) -> dict:
+    return {**doc, "planning_warnings": services.planning.warnings_for(coll, doc)}
+
+
 class FromTime(BaseModel):
     customer_id: v.OptId = None
     project_id: v.OptId = None
@@ -25,15 +35,16 @@ def _pdf(services, coll: str, rid: str) -> Response:
     return Response(data, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{safe}"'})
 
 
-@router.post("/invoices/from-time", response_model=Document, response_model_exclude_none=True)
+@router.post("/invoices/from-time", response_model=DocumentResult, response_model_exclude_none=True)
 def invoice_from_time(body: FromTime, _: BossUser, services: ServicesDep):
     """Group unbilled, billable time by project/task/rate into a draft invoice."""
-    return services.sales.invoice_from_time(body.customer_id, body.project_id, body.date_from, body.date_to)
+    inv = services.sales.invoice_from_time(body.customer_id, body.project_id, body.date_from, body.date_to)
+    return _doc(services, "invoices", inv)
 
 
-@router.post("/invoices/{rid}/finalize", response_model=Document, response_model_exclude_none=True)
+@router.post("/invoices/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
 def finalize_invoice(rid: str, _: BossUser, services: ServicesDep):
-    return services.sales.finalize("invoices", rid)
+    return _doc(services, "invoices", services.sales.finalize("invoices", rid))
 
 
 @router.get("/invoices/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})
@@ -41,9 +52,9 @@ def invoice_pdf(rid: str, _: BossUser, services: ServicesDep):
     return _pdf(services, "invoices", rid)
 
 
-@router.post("/offers/{rid}/finalize", response_model=Document, response_model_exclude_none=True)
+@router.post("/offers/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
 def finalize_offer(rid: str, _: BossUser, services: ServicesDep):
-    return services.sales.finalize("offers", rid)
+    return _doc(services, "offers", services.sales.finalize("offers", rid))
 
 
 @router.get("/offers/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})
@@ -51,11 +62,15 @@ def offer_pdf(rid: str, _: BossUser, services: ServicesDep):
     return _pdf(services, "offers", rid)
 
 
-@router.post("/offers/{rid}/accept", summary="mark accepted; creates a project and, if planned, a contract")
+@router.post("/offers/{rid}/accept", summary="mark accepted; creates or extends a project and, if planned, a contract")
 def accept_offer(rid: str, _: BossUser, services: ServicesDep) -> dict[str, Any]:
-    return services.sales.accept_offer(rid)
+    out = services.sales.accept_offer(rid)
+    out["planning_warnings"] = services.planning.warnings_for("projects", out["project"])
+    if out.get("contract"):
+        out["planning_warnings"] += services.planning.warnings_for("contracts", out["contract"])
+    return out
 
 
-@router.post("/offers/{rid}/to-invoice", response_model=Document, response_model_exclude_none=True)
+@router.post("/offers/{rid}/to-invoice", response_model=DocumentResult, response_model_exclude_none=True)
 def offer_to_invoice(rid: str, _: BossUser, services: ServicesDep):
-    return services.sales.offer_to_invoice(rid)
+    return _doc(services, "invoices", services.sales.offer_to_invoice(rid))
