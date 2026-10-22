@@ -31,7 +31,7 @@ async function loadAll(only) {
 }
 async function bootstrap() {
   const b = await api('GET', 'bootstrap');
-  Object.assign(S, { me: b.me, settings: b.settings, timer: b.timer, states: b.states, conflicts: b.conflicts, templates: b.templates });
+  Object.assign(S, { me: b.me, settings: b.settings, timer: b.timer, states: b.states, conflicts: b.conflicts, templates: b.templates, data_dir: b.data_dir });
   await loadAll();
 }
 
@@ -168,7 +168,7 @@ async function renderLogin(app) {
   try { st = await api.get('auth/status', { noAuthRedirect: true }); }
   catch (e) { app.innerHTML = `<div class="auth-wrap"><div class="auth-card">${BRAND}<div class="banner">${esc(e.message)}</div></div></div>`; return; }
   const expired = S.expired;
-  const foot = `<p class="small muted auth-foot">Your data stays in <code>${esc(st.data_dir || 'your data folder')}</code> – no cloud.${st.version ? ' · v' + esc(st.version) : ''}</p>`;
+  const foot = `<p class="small muted auth-foot">Your data stays on your own server or computer – no cloud.${st.version ? ' · v' + esc(st.version) : ''}</p>`;
   if (st.setup_needed) {
     app.innerHTML = `<div class="auth-wrap"><form class="auth-card" id="setup-form" autocomplete="on" novalidate>${BRAND}<h1>Welcome 👋</h1><p class="muted">Create your boss account. You can add team members later.</p>
       <div class="field"><label for="s_name">Your name</label><input id="s_name" autocomplete="name" autofocus></div>

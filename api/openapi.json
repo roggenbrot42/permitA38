@@ -3545,17 +3545,12 @@
           "version": {
             "type": "string",
             "title": "Version"
-          },
-          "data_dir": {
-            "type": "string",
-            "title": "Data Dir"
           }
         },
         "type": "object",
         "required": [
           "setup_needed",
-          "version",
-          "data_dir"
+          "version"
         ],
         "title": "AuthStatus"
       },

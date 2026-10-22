@@ -15,7 +15,6 @@ class AuthStatus(BaseModel):
     setup_needed: bool
     app: str = "permitA38"
     version: str
-    data_dir: str
 
 
 class SetupPayload(BaseModel):
@@ -62,9 +61,7 @@ def _set_cookie(response: Response, token: str, max_age: int, secure: bool = Fal
 
 @router.get("/status", response_model=AuthStatus, summary="public: is the first-run setup still needed?")
 def status(services: ServicesDep):
-    return AuthStatus(
-        setup_needed=services.auth.needs_setup(), version=__version__, data_dir=str(services.config.data_dir)
-    )
+    return AuthStatus(setup_needed=services.auth.needs_setup(), version=__version__)
 
 
 @router.post("/setup", response_model=UserOut, summary="create the first boss account")
