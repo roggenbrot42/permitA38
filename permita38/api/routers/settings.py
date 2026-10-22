@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
 from permita38.api.deps import BossUser, CurrentUser, ServicesDep
-from permita38.core.models import Settings
+from permita38.core.models import Settings, SettingsIn
 
 router = APIRouter(tags=["settings"])
 routers = [router]
@@ -21,5 +21,5 @@ def get_settings(_: BossUser, services: ServicesDep):
 
 
 @router.put("/settings", response_model=Settings, summary="merge the given values into the settings")
-def update_settings(body: Settings, _: BossUser, services: ServicesDep):
+def update_settings(body: SettingsIn, _: BossUser, services: ServicesDep):
     return services.settings.update(body.model_dump(exclude_unset=True))

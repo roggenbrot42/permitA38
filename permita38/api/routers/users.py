@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Response
 
 from permita38.api.deps import BossUser, CurrentUser, ServicesDep
+from permita38.api.responses import StoredJSON
 from permita38.core.models import UserIn, UserOut
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -14,7 +15,7 @@ def _dump(body: UserIn) -> dict:
 @router.get("", response_model=list[UserOut], response_model_exclude_none=True)
 def list_users(user: CurrentUser, services: ServicesDep):
     """Boss: full records. Members: id, name and role only."""
-    return services.records.list_users(user)
+    return StoredJSON(services.records.list_users(user))
 
 
 @router.post("", response_model=UserOut)

@@ -20,7 +20,7 @@ def forecast(
 
 
 @router.get("/holidays", summary="public holidays of the configured federal state")
-def holidays(_: CurrentUser, services: ServicesDep, year: int | None = None) -> dict[str, str]:
+def holidays(_: CurrentUser, services: ServicesDep, year: int | None = Query(None, ge=2000, le=2100)) -> dict[str, str]:
     from datetime import date
 
     return services.time.holidays(year or date.today().year, services.settings.get()["state"])

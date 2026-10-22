@@ -456,7 +456,9 @@ def project_report(store):
     ctx = context(store)
     rows: dict[str, dict[str, Any]] = {}
     for p in ctx["projects"].values():
-        rows[p["id"]] = {k: ZERO for k in ("hours", "revenue", "cost", "expenses", "unbilled_hours", "unbilled_revenue")}
+        rows[p["id"]] = {
+            k: ZERO for k in ("hours", "revenue", "cost", "expenses", "unbilled_hours", "unbilled_revenue")
+        }
         rows[p["id"]]["id"] = p["id"]
     for e in store.list("entries"):
         r = rows.get(e.get("project_id"))

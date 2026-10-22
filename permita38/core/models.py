@@ -1,7 +1,13 @@
 """Typed records. `extra="allow"` keeps unknown fields so files written by newer versions or
 other devices survive a round-trip through this version."""
 
-from pydantic import BaseModel, ConfigDict
+import re
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+
+from . import validation as v
+from .holidays import STATES
 
 
 class Record(BaseModel):
@@ -171,17 +177,24 @@ class UserOut(Record):
 class UserIn(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str | None = None
-    username: str
-    name: str
-    role: str = "member"
-    password: str | None = None
-    weekly_hours: float = 40
-    workdays: list[int] = [0, 1, 2, 3, 4]
-    default_rate: float | None = None
-    cost_rate: float | None = None
-    color: str | None = None
-    tracking_start: str | None = None
+    username: str = Field(max_length=64)
+    name: v.Name
+    role: Literal["boss", "member"] = "member"
+    password: str | None = Field(default=None, max_length=1000)
+    weekly_hours: v.Hours = 40
+    workdays: list[int] = Field(default=[0, 1, 2, 3, 4], min_length=1, max_length=7)
+    default_rate: v.Rate | None = None
+    cost_rate: v.Rate | None = None
+    color: v.OptColor = None
+    tracking_start: v.OptDate = None
     active: bool = True
+
+    @field_validator("workdays")
+    @classmethod
+    def _workdays(cls, days: list[int]) -> list[int]:
+        if any(d < 0 or d > 6 for d in days) or len(set(days)) != len(days):
+            raise ValueError("must be unique weekday numbers 0 (Monday) to 6 (Sunday)")
+        return sorted(days)
 
 
 class Settings(BaseModel):
@@ -217,3 +230,224 @@ class Settings(BaseModel):
     splitting: bool = False
     other_income: float = 0
     other_deductions: float = 0
+
+
+# ======================================================================================================
+# Strict request models. They accept exactly what is sane; the lenient classes above describe responses
+# (a record stored by an older version or another device must never turn a *response* into an error).
+# ======================================================================================================
+DOC_STATUS = Literal["draft", "sent", "accepted", "rejected", "paid", "cancelled"]
+_PATTERN_OK = re.compile(r"^(?:[^{}]|\{year\}|\{n(?::0?\d{1,2}d)?\})*$")
+
+
+class CustomerIn(v.StrictRecord):
+    name: v.Name
+    customer_no: v.Short | None = None
+    street: v.Short | None = None
+    zip: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)] | None = None
+    city: v.Short | None = None
+    country: v.Short | None = None
+    tax_number: Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)] | None = None
+    vat_id: Annotated[str, StringConstraints(strip_whitespace=True, max_length=30)] | None = None
+    contact: v.Short | None = None
+    email: Annotated[str, StringConstraints(strip_whitespace=True, max_length=254)] | None = None
+    phone: Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)] | None = None
+    notes: v.Note | None = None
+    rate: v.Rate | None = None
+
+
+class ProjectIn(v.StrictRecord):
+    name: v.Name
+    customer_id: v.OptId = None
+    personal: bool = False
+    rate: v.Rate | None = None
+    budget_hours: v.TotalHours | None = None
+    status: Literal["active", "paused", "done", "archived"] = "active"
+    color: v.OptColor = None
+    notes: v.Note | None = None
+    member_ids: v.IdList = []
+    offer_id: v.OptId = None
+
+
+class TaskIn(v.StrictRecord):
+    project_id: v.Id
+    name: v.Name
+    rate: v.Rate | None = None
+
+
+class EntryIn(v.StrictRecord):
+    user_id: v.OptId = None
+    date: v.ISODate
+    minutes: v.Minutes
+    project_id: v.OptId = None
+    task_id: v.OptId = None
+    note: v.Note | None = None
+    start: v.OptTime = None
+    end: v.OptTime = None
+    billable: bool = True
+    invoice_id: v.OptId = None
+    rate: v.Rate | None = None
+
+
+class ContractIn(v.StrictRecord):
+    title: v.Name
+    customer_id: v.OptId = None
+    project_id: v.OptId = None
+    start: v.ISODate
+    end: v.ISODate
+    hours_per_week: v.Hours | None = None
+    total_hours: v.TotalHours | None = None
+    rate: v.Rate | None = None
+    status: Literal["confirmed", "done"] = "confirmed"
+    user_ids: v.IdList = []
+    offer_id: v.OptId = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        v.check_period(self.start, self.end)
+        return self
+
+
+class AbsenceIn(v.StrictRecord):
+    user_id: v.OptId = None
+    kind: Literal["vacation", "holiday", "sick", "other"] = "vacation"
+    start: v.ISODate
+    end: v.OptDate = None
+    note: v.Note | None = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        v.check_period(self.start, self.end)
+        return self
+
+
+class ExpenseIn(v.StrictRecord):
+    date: v.ISODate
+    net: v.NonNegAmount
+    vat: v.NonNegAmount = 0
+    vat_rate: v.Percent | None = None
+    vendor: v.Short | None = None
+    description: v.Desc | None = None
+    category: v.Short | None = None
+    project_id: v.OptId = None
+    deductible: v.Percent = 100
+    attachment: v.OptAttachment = None
+
+
+class LineIn(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    description: v.Desc = ""
+    qty: v.Qty = 0
+    unit: Annotated[str, StringConstraints(max_length=30)] | None = None
+    price: v.Amount = 0
+    vat: v.Percent | None = None
+    amount: v.Amount | None = None  # ignored: always recomputed on the server
+
+
+class PlanIn(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    start: v.OptDate = None
+    end: v.OptDate = None
+    hours_per_week: v.Hours | None = None
+    total_hours: v.TotalHours | None = None
+    user_ids: v.IdList = []
+    rate: v.Rate | None = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        v.check_period(self.start, self.end)
+        return self
+
+
+class DocumentIn(v.StrictRecord):
+    """An offer or an invoice."""
+
+    number: Annotated[str, StringConstraints(max_length=50)] | None = None
+    customer_id: v.OptId = None
+    project_id: v.OptId = None
+    status: DOC_STATUS = "draft"
+    date: v.OptDate = None
+    due_date: v.OptDate = None
+    valid_until: v.OptDate = None
+    paid_date: v.OptDate = None
+    service_from: v.OptDate = None
+    service_to: v.OptDate = None
+    title: v.Short | None = None
+    reference: v.Short | None = None
+    template_id: v.OptId = None
+    language: Literal["", "de", "en"] | None = None
+    intro: v.Note | None = None
+    outro: v.Note | None = None
+    notes: v.Note | None = None
+    vat_rate: v.Percent | None = None
+    lines: list[LineIn] = Field(default=[], max_length=v.MAX_LINES)
+    plan: PlanIn | None = None
+    offer_id: v.OptId = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        v.check_period(self.service_from, self.service_to, "service period end")
+        return self
+
+
+class TemplateIn(v.StrictRecord):
+    name: v.Name
+    layout: Literal["classic", "modern", "minimal"] = "classic"
+    accent: v.Color = "#1f4e79"
+    language: Literal["de", "en"] = "de"
+    show_logo: bool = True
+    intro_offer: v.Note | None = None
+    outro_offer: v.Note | None = None
+    intro_invoice: v.Note | None = None
+    outro_invoice: v.Note | None = None
+    closing: v.Short | None = None
+
+
+class SettingsIn(v.StrictRecord):
+    """PUT /settings: any subset of the settings, each value checked."""
+
+    company_name: v.Short = ""
+    owner_name: v.Short = ""
+    street: v.Short = ""
+    zip: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)] = ""
+    city: v.Short = ""
+    email: Annotated[str, StringConstraints(strip_whitespace=True, max_length=254)] = ""
+    phone: Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)] = ""
+    website: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)] = ""
+    tax_number: Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)] = ""
+    vat_id: Annotated[str, StringConstraints(strip_whitespace=True, max_length=30)] = ""
+    bank_name: v.Short = ""
+    iban: Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)] = ""
+    bic: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)] = ""
+    logo: v.OptAttachment = None
+    company_type: Literal["freiberufler", "gewerbe", "gmbh"] = "freiberufler"
+    accounting: Literal["eur", "accrual"] = "eur"
+    kleinunternehmer: bool = False
+    vat_rate: v.Percent = 19
+    state: str = ""
+    hebesatz: Annotated[float, Field(ge=0, le=1000, allow_inf_nan=False)] = 400
+    default_rate: v.Rate = 80
+    payment_days: Annotated[int, Field(ge=0, le=365)] = 14
+    offer_valid_days: Annotated[int, Field(ge=0, le=365)] = 30
+    default_template: v.Id = "classic"
+    invoice_pattern: Annotated[str, StringConstraints(max_length=100)] = "RE-{year}-{n:04d}"
+    offer_pattern: Annotated[str, StringConstraints(max_length=100)] = "AN-{year}-{n:04d}"
+    social_monthly: v.NonNegAmount = 0
+    church_tax: Annotated[float, Field(ge=0, le=15, allow_inf_nan=False)] = 0
+    splitting: bool = False
+    other_income: v.NonNegAmount = 0
+    other_deductions: v.NonNegAmount = 0
+
+    @field_validator("state")
+    @classmethod
+    def _state(cls, value: str) -> str:
+        if value not in STATES:
+            raise ValueError("is not a German federal state code")
+        return value
+
+    @field_validator("invoice_pattern", "offer_pattern")
+    @classmethod
+    def _numbering_pattern(cls, value: str) -> str:
+        if not _PATTERN_OK.match(value) or "{n" not in value:
+            raise ValueError("may only use {year} and {n} / {n:04d} and must contain {n}")
+        return value
