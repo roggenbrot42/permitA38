@@ -16,7 +16,16 @@ All notable changes to this project are documented here. The format is based on
 - The auth cookie gets the `Secure` flag on https / behind a trusted proxy; logging goes to stdout.
 - GitHub Actions workflow building the image on pull requests and publishing multi-arch images to ghcr.io on tags.
 
+- Release engineering: tag-triggered `Release` workflow (sdist/wheel, PyInstaller bundles for Windows and Linux,
+  multi-arch image, CycloneDX SBOM, SHA256SUMS, build provenance attestations, draft pre-release), `scripts/release.py`
+  (version/CHANGELOG/tag checks, always-annotated tags), `make release`, `RELEASING.md`, `docs/release-plan.md`,
+  `docs/roadmap.md`, `docs/maintainer-setup.md`, `THIRD_PARTY_NOTICES.md` with a GPLv3 license gate, CodeQL,
+  Dependabot, issue/PR templates and a quarterly tax-rule review reminder.
+
 ### Changed
+- The package version is single-sourced from `permita38.__version__` (PEP 440, e.g. `0.4.0a1` for tag `v0.4.0-alpha.1`).
+- `docker.yaml` only validates pull requests; publishing the image moved into the Release workflow (no `latest` tag for
+  pre-releases).
 - Precedence of `PERMITA38_DATA` is now command line > environment > YAML (it used to be below the YAML file), and
   environment values are no longer written into the YAML file.
 

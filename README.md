@@ -1,6 +1,9 @@
 # ⏱ permitA38
 
+[![CI](https://github.com/roggenbrot42/permitA38/actions/workflows/ci.yaml/badge.svg)](https://github.com/roggenbrot42/permitA38/actions/workflows/ci.yaml)
+[![Release](https://img.shields.io/github/v/release/roggenbrot42/permitA38?include_prereleases&sort=semver)](https://github.com/roggenbrot42/permitA38/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Python 3.10-3.13](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.13-blue.svg)](pyproject.toml)
 
 **Time tracking, planning, offers, invoices and tax reserves for freelancers and small businesses in Germany.**
 One small app, one SQLite database in a folder you own, synced across all your devices with Syncthing.
@@ -236,13 +239,35 @@ docker compose up -d --build
 Non-root, read-only filesystem, health check, HTTPS via the included Caddy proxy file, data in one volume.
 See **[docs/docker.md](docs/docker.md)** for configuration, backups, HTTPS and a security checklist.
 
+## Releases & downloads
+
+Every release is an annotated git tag (`v0.4.0-alpha.1`) with a [GitHub release](https://github.com/roggenbrot42/permitA38/releases)
+containing a Windows `.zip`, a Linux `.tar.gz`, the Python wheel/sdist, a CycloneDX SBOM and `SHA256SUMS`. The container
+image is `ghcr.io/roggenbrot42/permita38:<version>`. Versions containing `alpha`, `beta` or `rc` are pre-releases:
+keep backups. Release process and policy: [`RELEASING.md`](RELEASING.md), [`docs/release-plan.md`](docs/release-plan.md).
+
+Verify what you downloaded:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing                       # Windows: Get-FileHash <file> -Algorithm SHA256
+gh attestation verify permita38-0.4.0-alpha.1-linux-x86_64.tar.gz --repo roggenbrot42/permitA38   # build provenance
+gh attestation verify oci://ghcr.io/roggenbrot42/permita38:0.4.0-alpha.1 --repo roggenbrot42/permitA38
+git tag -v v0.4.0-alpha.1                                      # signature of the release tag (in a clone)
+```
+
+Third-party licenses: [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
 ## Roadmap
 
-- 📱 **Android companion app** – see [`docs/mobile-concept.md`](docs/mobile-concept.md): a small offline-first app on SQLite (native on Android), syncing the same database file or talking to a server.
-- Optional **server mode**: a PostgreSQL/MariaDB backend behind the existing `Repository` interface ([porting guide](docs/porting-to-postgres.md)), and a row-level merge for the synced-file setup
-- Recurring invoices, credit notes, reminders (Mahnungen)
-- DATEV / CSV export for your tax advisor
-- UI translations (currently English UI, German document templates)
+The full plan, assigned by release, is in [`docs/roadmap.md`](docs/roadmap.md); how releases are made is in
+[`docs/release-plan.md`](docs/release-plan.md).
+
+- **alpha.1** (first pre-release): everything above, TOTP two-factor login, Docker, Windows/Linux downloads
+- **alpha.2**: roles and rights, validation layer, JSON/CSV export, company-website (Impressum) import
+- **alpha.3**: accounting and the VAT return (Umsatzsteuer-Voranmeldung), DATEV/XLSX, XRechnung/ZUGFeRD e-invoices
+- **alpha.4**: legal-retention backups, GoBD and GDPR support, tax-audit export, per-IP throttling, session revocation
+- **beta**: optional local AI helpers (invoice scan pre-fill, bank matching, MCP server), German UI, signed downloads
+- **later**: 📱 [Android companion app](docs/mobile-concept.md), PostgreSQL/MariaDB server mode ([porting guide](docs/porting-to-postgres.md)), row-level sync, SSO, ELSTER research
 
 Ideas and pull requests are welcome.
 
