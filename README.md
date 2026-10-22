@@ -264,6 +264,10 @@ make check-openapi     # fail if the contract is stale (also runs in CI)
 
 See [AGENTS.md](AGENTS.md) for repository conventions and [CHANGELOG.md](CHANGELOG.md) for what changed.
 
+## Contributing
+
+Contributions are welcome – see [CONTRIBUTING.md](CONTRIBUTING.md) (includes the sign-off / Developer Certificate of Origin all commits need) and [SECURITY.md](SECURITY.md) for vulnerability reports.
+
 ## License
 
 permitA38 is free software, licensed under the **GNU General Public License v3.0 or later** – see [LICENSE](LICENSE). You may use, study, change and share it; derived works must stay under the same license.
