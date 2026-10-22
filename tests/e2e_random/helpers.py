@@ -81,8 +81,28 @@ def pick_weighted(rng: random.Random, items: list[tuple[str, int]]) -> str:
     return rng.choices(names, weights=weights, k=1)[0]
 
 
-WORDS = ["Nordlicht", "Brandt", "Müller", "Kaffee", "Atlas", "Fjord", "Lindner", "Hopfen", "Quelle", "Aurora",
-         "Kiefer", "Öko", "Bärlauch", "Sonnen", "Wiesen", "Zeitgeist", "Pixel", "Handwerk", "Köhler", "Strauß"]
+WORDS = [
+    "Nordlicht",
+    "Brandt",
+    "Müller",
+    "Kaffee",
+    "Atlas",
+    "Fjord",
+    "Lindner",
+    "Hopfen",
+    "Quelle",
+    "Aurora",
+    "Kiefer",
+    "Öko",
+    "Bärlauch",
+    "Sonnen",
+    "Wiesen",
+    "Zeitgeist",
+    "Pixel",
+    "Handwerk",
+    "Köhler",
+    "Strauß",
+]
 SUFFIXES = ["GmbH", "UG", "& Söhne", "Studio", "AG", "e.K.", "Consulting"]
 
 

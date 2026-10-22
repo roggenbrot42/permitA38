@@ -135,9 +135,11 @@ class Watch:
 
     problems: list[str] = field(default_factory=list)
     http_4xx: list[str] = field(default_factory=list)
+    writes: int = 0  # successful POST/PUT/DELETE calls (proves the simulated user really changed data)
     xss_dialogs: list[str] = field(default_factory=list)
     accept_confirm: float = 1.0  # probability of accepting window.confirm() (the app's delete prompts)
     rng: object = None
+    ignore: list = field(default_factory=list)  # regexes of known console errors (each has a xfail regression)
 
     def check(self):
         assert not self.problems, "browser problems:\n  " + "\n  ".join(self.problems)
@@ -164,11 +166,15 @@ def make_page(browser, live_server):
             # the browser logs every failed fetch; 4xx are legitimate API answers (validation, auth)
             if "Failed to load resource" in text and "status of 4" in text:
                 return
+            if any(rx.search(text) for rx in watch.ignore):
+                return
             watch.problems.append("console.error: " + text[:300])
 
         def on_response(resp):
             if resp.status >= 500:
                 watch.problems.append(f"HTTP {resp.status} {resp.request.method} {resp.url}")
+            elif resp.status < 400 and resp.request.method != "GET" and "/api/" in resp.url:
+                watch.writes += 1
             elif resp.status >= 400:
                 watch.http_4xx.append(f"{resp.status} {resp.request.method} {resp.url.replace(live_server.url, '')}")
 

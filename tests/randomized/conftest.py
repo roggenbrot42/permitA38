@@ -58,3 +58,12 @@ class FakeClock:
 
     def as_module(self):
         return types.SimpleNamespace(time=self.time)
+
+if os.environ.get("PERMITA38_NO_SHRINK"):  # quick triage: report the first failure without minimising it
+    from hypothesis import Phase
+
+    settings.register_profile(
+        "noshrink", settings.get_profile(os.environ.get("HYPOTHESIS_PROFILE", "ci")),
+        phases=[Phase.explicit, Phase.reuse, Phase.generate],
+    )  # fmt: skip
+    settings.load_profile("noshrink")
