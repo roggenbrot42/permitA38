@@ -82,6 +82,10 @@ Open **Planning**:
 
 Under **Team → + Add person** create members. Give each person a username and an initial password; they sign in on the login screen, can change the password from the account menu, track their own time, and book their own time off. You see everyone's week at a glance and can plan with their capacity in the forecast. Set a **cost rate** per person to see real project margins.
 
+### Turn on two-factor authentication
+
+Open the account menu (bottom left) → **Two-factor authentication**. Enter your password, scan the QR code with an authenticator app, type the 6-digit code it shows and click **Turn on**. Save the ten recovery codes (copy or download them) and tick "I stored them safely". From now on sign-in asks for a code after the password. A boss can reset a team member's 2FA under **Team → Reset 2FA**; if you are locked out yourself, run `permita38 reset-totp <username>` on the machine that holds the data.
+
 ## Cheat sheet
 
 | I want to… | Go to… |

@@ -221,6 +221,314 @@
         ]
       }
     },
+    "/api/auth/login/totp": {
+      "post": {
+        "tags": [
+          "two-factor"
+        ],
+        "summary": "sign in, second step: authenticator or recovery code",
+        "operationId": "login_totp_api_auth_login_totp_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TotpLoginPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/totp/status": {
+      "get": {
+        "tags": [
+          "two-factor"
+        ],
+        "summary": "Totp Status",
+        "operationId": "totp_status_api_auth_totp_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotpStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/totp/setup": {
+      "post": {
+        "tags": [
+          "two-factor"
+        ],
+        "summary": "start enrolment (needs the current password)",
+        "operationId": "totp_setup_api_auth_totp_setup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotpSetupResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/totp/enable": {
+      "post": {
+        "tags": [
+          "two-factor"
+        ],
+        "summary": "confirm enrolment with a first code",
+        "operationId": "totp_enable_api_auth_totp_enable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnableResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/totp/disable": {
+      "post": {
+        "tags": [
+          "two-factor"
+        ],
+        "summary": "turn two-factor authentication off",
+        "operationId": "totp_disable_api_auth_totp_disable_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisablePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/auth/totp/recovery-codes/regenerate": {
+      "post": {
+        "tags": [
+          "two-factor"
+        ],
+        "summary": "replace all recovery codes (old ones stop working)",
+        "operationId": "totp_regenerate_api_auth_totp_recovery_codes_regenerate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegeneratePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryCodesResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/users/{user_id}/totp/reset": {
+      "post": {
+        "tags": [
+          "two-factor"
+        ],
+        "summary": "boss: remove a user's two-factor authentication (lock-out recovery)",
+        "operationId": "totp_reset_api_users__user_id__totp_reset_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPayload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/users": {
       "get": {
         "tags": [
@@ -3586,6 +3894,19 @@
         ],
         "title": "ChangePasswordPayload"
       },
+      "CodePayload": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "CodePayload"
+      },
       "Contract": {
         "properties": {
           "id": {
@@ -3901,6 +4222,41 @@
         ],
         "title": "Customer"
       },
+      "DisablePayload": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "recovery_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "title": "DisablePayload"
+      },
       "Document": {
         "properties": {
           "id": {
@@ -4162,6 +4518,28 @@
         "type": "object",
         "title": "Document",
         "description": "An offer or an invoice."
+      },
+      "EnableResult": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "recovery_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recovery Codes",
+            "description": "shown exactly once; only hashes are stored"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "recovery_codes"
+        ],
+        "title": "EnableResult"
       },
       "Entry": {
         "properties": {
@@ -4575,19 +4953,70 @@
       "LoginResult": {
         "properties": {
           "token": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Token"
           },
           "user": {
-            "$ref": "#/components/schemas/UserOut"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mfa_required": {
+            "type": "boolean",
+            "title": "Mfa Required",
+            "default": false
+          },
+          "mfa_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mfa Token"
+          },
+          "recovery_codes_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Codes Left"
+          }
+        },
+        "type": "object",
+        "title": "LoginResult",
+        "description": "Either a session (`token` + `user`) or, for accounts with two-factor authentication, a challenge\n(`mfa_required` + `mfa_token`) that POST /auth/login/totp turns into a session."
+      },
+      "PasswordPayload": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "title": "Password"
           }
         },
         "type": "object",
         "required": [
-          "token",
-          "user"
+          "password"
         ],
-        "title": "LoginResult"
+        "title": "PasswordPayload"
       },
       "Plan": {
         "properties": {
@@ -4789,6 +5218,54 @@
           "name"
         ],
         "title": "Project"
+      },
+      "RecoveryCodesResult": {
+        "properties": {
+          "recovery_codes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Recovery Codes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "recovery_codes"
+        ],
+        "title": "RecoveryCodesResult"
+      },
+      "RegeneratePayload": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password",
+          "code"
+        ],
+        "title": "RegeneratePayload"
+      },
+      "ResetPayload": {
+        "properties": {
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "the boss's own password, as confirmation"
+          }
+        },
+        "type": "object",
+        "required": [
+          "password"
+        ],
+        "title": "ResetPayload"
       },
       "Settings": {
         "properties": {
@@ -5239,6 +5716,101 @@
         ],
         "title": "TokenResult"
       },
+      "TotpLoginPayload": {
+        "properties": {
+          "mfa_token": {
+            "type": "string",
+            "title": "Mfa Token"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code",
+            "description": "6-digit code from the authenticator app"
+          },
+          "recovery_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Code",
+            "description": "one-time recovery code (instead of `code`)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mfa_token"
+        ],
+        "title": "TotpLoginPayload"
+      },
+      "TotpSetupResult": {
+        "properties": {
+          "secret": {
+            "type": "string",
+            "title": "Secret",
+            "description": "base32 secret for manual entry"
+          },
+          "otpauth_uri": {
+            "type": "string",
+            "title": "Otpauth Uri"
+          },
+          "qr_svg": {
+            "type": "string",
+            "title": "Qr Svg",
+            "description": "QR code as an SVG data URI"
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "account": {
+            "type": "string",
+            "title": "Account"
+          }
+        },
+        "type": "object",
+        "required": [
+          "secret",
+          "otpauth_uri",
+          "qr_svg",
+          "issuer",
+          "account"
+        ],
+        "title": "TotpSetupResult"
+      },
+      "TotpStatus": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "pending_setup": {
+            "type": "boolean",
+            "title": "Pending Setup"
+          },
+          "recovery_codes_left": {
+            "type": "integer",
+            "title": "Recovery Codes Left"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "pending_setup",
+          "recovery_codes_left"
+        ],
+        "title": "TotpStatus"
+      },
       "Uploaded": {
         "properties": {
           "name": {
@@ -5523,6 +6095,17 @@
               }
             ],
             "title": "Has Password"
+          },
+          "totp_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totp Enabled"
           }
         },
         "additionalProperties": true,

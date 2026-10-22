@@ -60,25 +60,26 @@ def test_fresh_database_reaches_current_revision(tmp_path):
 
 def test_upgrade_applies_pending_migrations_and_backs_up_first(tmp_path, monkeypatch):
     data = tmp_path / "data"
-    old = SQLiteRepository(data)  # revision 1 (the real app)
+    old = SQLiteRepository(data)  # the current revision (the real app)
     rec = old.save("customers", {"name": "Keep me"})
     old.close()
     root = tmp_path / "migrations"
     for d in DIALECT_NAMES:
         shutil.copytree(MIGRATIONS_DIR / d, root / d)
-    (root / "sqlite" / "0002_add_fax.sql").write_text('ALTER TABLE "customers" ADD COLUMN "fax" TEXT;\n')
+    nxt = CURRENT_REVISION + 1
+    (root / "sqlite" / f"{nxt:04d}_add_fax.sql").write_text('ALTER TABLE "customers" ADD COLUMN "fax" TEXT;\n')
     monkeypatch.setattr(sql_module, "list_migrations", lambda dialect: database.list_migrations(dialect, root))
-    monkeypatch.setattr(sql_module, "CURRENT_REVISION", 2)
+    monkeypatch.setattr(sql_module, "CURRENT_REVISION", nxt)
 
     new = SQLiteRepository(data)
     new.startup()
-    assert new.get_revision() == 2
+    assert new.get_revision() == nxt
     assert new.get("customers", rec["id"])["name"] == "Keep me"
     assert "fax" in [r[1] for r in new.conn.execute('PRAGMA table_info("customers")')]
-    backups = list((data / "backups").glob("pre-migration-r1-to-r2-*.sqlite3"))
+    backups = list((data / "backups").glob(f"pre-migration-r{CURRENT_REVISION}-to-r{nxt}-*.sqlite3"))
     assert len(backups) == 1
     snap = sqlite3.connect(backups[0])
-    assert snap.execute("PRAGMA user_version").fetchone()[0] == 1  # the backup is the OLD revision
+    assert snap.execute("PRAGMA user_version").fetchone()[0] == CURRENT_REVISION  # the backup is the OLD revision
     assert snap.execute("SELECT name FROM customers").fetchone()[0] == "Keep me"
     snap.close()
     new.close()
@@ -90,13 +91,14 @@ def test_failed_migration_is_rolled_back(tmp_path, monkeypatch):
     root = tmp_path / "migrations"
     for d in DIALECT_NAMES:
         shutil.copytree(MIGRATIONS_DIR / d, root / d)
-    (root / "sqlite" / "0002_bad.sql").write_text("CREATE TABLE half_done (x TEXT);\nTHIS IS NOT SQL;\n")
+    nxt = CURRENT_REVISION + 1
+    (root / "sqlite" / f"{nxt:04d}_bad.sql").write_text("CREATE TABLE half_done (x TEXT);\nTHIS IS NOT SQL;\n")
     monkeypatch.setattr(sql_module, "list_migrations", lambda dialect: database.list_migrations(dialect, root))
-    monkeypatch.setattr(sql_module, "CURRENT_REVISION", 2)
+    monkeypatch.setattr(sql_module, "CURRENT_REVISION", nxt)
     repo = SQLiteRepository(data)
     with pytest.raises(RuntimeError, match="rolled back"):
         repo.startup()
-    assert repo.get_revision() == 1
+    assert repo.get_revision() == CURRENT_REVISION
     tables = [r[0] for r in repo.conn.execute("SELECT name FROM sqlite_master WHERE name='half_done'")]
     assert tables == []  # the partial CREATE TABLE did not survive
     repo.close()

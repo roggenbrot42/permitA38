@@ -47,6 +47,8 @@ def main(argv: list[str] | None = None):
     sub.add_parser("show-openapi", help="print the OpenAPI contract as JSON")
     sp = sub.add_parser("set-password", help="reset the password of a user")
     sp.add_argument("username")
+    rp = sub.add_parser("reset-totp", help="turn off two-factor authentication of a user (lock-out recovery)")
+    rp.add_argument("username")
     sub.add_parser("migrate", help="apply pending database migrations (a backup is taken first)")
     bp = sub.add_parser("backup", help="write a consistent copy of the database")
     bp.add_argument("--dest", type=Path, help="target file (default: <data>/backups/permita38-<timestamp>.sqlite3)")
@@ -113,6 +115,14 @@ def main(argv: list[str] | None = None):
                     + ", ".join(report.users_without_password)
                     + "\nRun `permita38 set-password <username>` for each of them."
                 )
+            return
+        if command == "reset-totp":
+            services.store.startup()
+            try:
+                services.totp.reset_by_username(args.username)
+            except ServiceError as e:
+                sys.exit(e.message)
+            print(f"Two-factor authentication of {args.username!r} is off. They are signed out everywhere.")
             return
         if command == "set-password":
             pw = getpass.getpass("New password: ")

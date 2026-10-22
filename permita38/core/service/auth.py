@@ -6,19 +6,19 @@ import hmac
 import json
 import re
 import secrets
-import threading
 import time
 
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 from permita38.core.settings import DEFAULT_SETTINGS
 
+from .throttle import AttemptThrottle
+
 PBKDF2_ITERATIONS = 200_000
 USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
 MIN_PASSWORD_LENGTH = 8
-MAX_FAILURES = 5
-FAILURE_WINDOW = 300  # seconds
-_PRIVATE = ("password_hash", "pw_changed")
+# never leave the server: credentials and second-factor state
+_PRIVATE = ("password_hash", "pw_changed", "totp_secret", "totp_last_step", "totp_recovery")
 
 
 def hash_password(password: str, salt: str | None = None) -> str:
@@ -47,7 +47,14 @@ def _unb64(s: str) -> bytes:
 def public_user(u: dict) -> dict:
     out = {k: v for k, v in u.items() if k not in _PRIVATE}
     out["has_password"] = bool(u.get("password_hash"))
+    out["totp_enabled"] = bool(u.get("totp_enabled"))
     return out
+
+
+def next_session_version(user: dict | None = None) -> int:
+    """New value of `pw_changed` (the session version): strictly greater than the old one, so every session issued
+    before a password / 2FA change ends, even if the change happens in the same second as the login."""
+    return max(int(time.time()), int((user or {}).get("pw_changed") or 0) + 1)
 
 
 def validate_password(password: str):
@@ -67,8 +74,7 @@ class AuthService:
         self.store = store
         self.secret = secret_key.encode()
         self.ttl = token_ttl_hours * 3600
-        self._failures: dict[str, list[float]] = {}
-        self._lock = threading.Lock()
+        self.throttle = AttemptThrottle()
 
     # ---------- tokens ----------
     def _sign(self, signing_input: str) -> str:
@@ -77,7 +83,14 @@ class AuthService:
     def create_token(self, user: dict) -> str:
         now = int(time.time())
         head = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
-        body = _b64(json.dumps({"sub": user["id"], "iat": now, "exp": now + self.ttl}).encode())
+        claims = {
+            "sub": user["id"],
+            "iat": now,
+            "exp": now + self.ttl,
+            "use": "session",
+            "pwv": int(user.get("pw_changed") or 0),
+        }
+        body = _b64(json.dumps(claims).encode())
         return f"{head}.{body}.{self._sign(head + '.' + body)}"
 
     def user_from_token(self, token: str | None) -> dict | None:
@@ -86,42 +99,42 @@ class AuthService:
             if not hmac.compare_digest(sig, self._sign(f"{head}.{body}")):
                 return None
             claims = json.loads(_unb64(body))
-            if claims["exp"] < time.time():
-                return None
+            if claims["exp"] < time.time() or claims.get("use", "session") != "session":
+                return None  # expired, or not a session token (e.g. the two-factor challenge)
             user = self.store.get("users", claims["sub"])
         except (ValueError, KeyError, TypeError):
             return None
-        if not user or not user.get("active", True) or claims["iat"] < user.get("pw_changed", 0):
-            return None  # deactivated, or the password changed after this token was issued
+        if not user or not user.get("active", True):
+            return None
+        if "pwv" in claims:
+            if claims["pwv"] != int(user.get("pw_changed") or 0):
+                return None  # password / 2FA changed after this token was issued
+        elif claims["iat"] < int(user.get("pw_changed") or 0):
+            return None  # token without a version claim (older release)
         return user
 
     # ---------- login ----------
     def needs_setup(self) -> bool:
         return not self.store.list("users")
 
-    def _check_throttle(self, key: str):
-        now = time.time()
-        with self._lock:
-            recent = [t for t in self._failures.get(key, []) if now - t < FAILURE_WINDOW]
-            self._failures[key] = recent
-            if len(recent) >= MAX_FAILURES:
-                raise ServiceError(429, "Too many failed attempts. Please wait a few minutes and try again.")
-
-    def _record_failure(self, key: str):
-        with self._lock:
-            self._failures.setdefault(key, []).append(time.time())
-
-    def login(self, username: str, password: str) -> tuple[str, dict]:
+    def check_credentials(self, username: str, password: str) -> dict:
+        """First factor: username + password, throttled. Returns the user record or raises 401/429."""
         key = (username or "").strip().lower()
-        self._check_throttle(key)
+        self.throttle.check(key)
         user = next((u for u in self.store.list("users") if u.get("username") == key), None)
         stored = user.get("password_hash") if user else None
         ok = verify_password(password, stored or hash_password("x", "00" * 16))  # constant-ish time
         if not (user and stored and ok and user.get("active", True)):
-            self._record_failure(key)
+            self.throttle.fail(key)
             raise ServiceError(401, "Wrong username or password")
-        with self._lock:
-            self._failures.pop(key, None)
+        self.throttle.clear(key)
+        return user
+
+    def login(self, username: str, password: str) -> tuple[str, dict]:
+        """Session for a user WITHOUT two-factor authentication. Users with 2FA must go through TotpService."""
+        user = self.check_credentials(username, password)
+        if user.get("totp_enabled"):
+            raise ServiceError(401, "Two-factor code required")
         return self.create_token(user), public_user(user)
 
     def setup(self, username: str, name: str, password: str, company_name: str = "", weekly_hours: float = 40):
@@ -144,7 +157,7 @@ class AuthService:
                     workdays=[0, 1, 2, 3, 4],
                     color="#2563eb",
                     password_hash=hash_password(password),
-                    pw_changed=int(time.time()),
+                    pw_changed=next_session_version(),
                 ),
             )
         )
@@ -175,7 +188,7 @@ class AuthService:
         rec = {**(old or {}), **data}
         if password:
             validate_password(password)
-            rec["password_hash"], rec["pw_changed"] = hash_password(password), int(time.time())
+            rec["password_hash"], rec["pw_changed"] = hash_password(password), next_session_version(old)
         elif not old:
             raise ServiceError(400, "A password is required for new users")
         if old and old["role"] == "boss" and (rec["role"] != "boss" or not rec.get("active", True)):
@@ -197,7 +210,7 @@ class AuthService:
         if not verify_password(old_password, user.get("password_hash")):
             raise ServiceError(400, "Current password is wrong")
         validate_password(new_password)
-        rec = {**user, "password_hash": hash_password(new_password), "pw_changed": int(time.time())}
+        rec = {**user, "password_hash": hash_password(new_password), "pw_changed": next_session_version(user)}
         saved = self.store.save("users", rec)
         return self.create_token(saved)  # other sessions are invalidated, this one continues
 
@@ -207,4 +220,6 @@ class AuthService:
         user = next((u for u in self.store.list("users") if u.get("username") == username.strip().lower()), None)
         if not user:
             raise ServiceError(404, "No such user")
-        self.store.save("users", {**user, "password_hash": hash_password(new_password), "pw_changed": int(time.time())})
+        self.store.save(
+            "users", {**user, "password_hash": hash_password(new_password), "pw_changed": next_session_version(user)}
+        )
