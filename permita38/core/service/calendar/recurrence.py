@@ -177,7 +177,13 @@ def iter_dates(rule: Rule, start: date, clock: Callable[[], float], deadline: fl
     for index in range(MAX_PERIODS):
         if index % 256 == 255 and clock() > deadline:
             raise ExpansionLimit()
-        dates = _period_dates(rule, start, index)
+        try:
+            dates = _period_dates(rule, start, index)
+        except (
+            ValueError,
+            OverflowError,
+        ):  # ran past the calendar range (year 1 or 9999): stop, nothing after it exists
+            return
         if rule.bysetpos and dates:
             picked = set()
             for pos in rule.bysetpos:

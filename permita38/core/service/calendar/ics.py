@@ -581,7 +581,7 @@ def parse_ics(
     for comp in events:
         try:
             master = _read_event(comp, ctx)
-        except _Bad:
+        except (_Bad, ValueError, OverflowError):  # ValueError/OverflowError: a date outside the calendar range
             warnings.append("bad_event")
             continue
         if master is None:
@@ -604,6 +604,9 @@ def parse_ics(
                 out.append(_occurrence(master, stamp, None))
         except ExpansionLimit:
             raise IcsError("too_complex", "The calendar is too complex to process in time.") from None
+        except (ValueError, OverflowError):
+            warnings.append("out_of_range")
+            continue
         if len(out) > MAX_OCCURRENCES:
             raise IcsError("too_many_events", "The calendar has too many events in the period (max 20,000).")
     for uid, by_key in overrides.items():

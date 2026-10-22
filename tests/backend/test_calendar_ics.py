@@ -439,3 +439,16 @@ def test_expanded_dates_are_strictly_ascending_and_start_no_earlier_than_dtstart
         pass
     assert all(d >= start for d in seen)
     assert all(a < b for a, b in zip(seen, seen[1:], strict=False))
+
+
+def test_dates_at_the_edge_of_the_calendar_range_do_not_crash():
+    doc = ics_doc(
+        "UID:far@test\r\nDTSTART:99991230T100000Z\r\nDTEND:99991231T100000Z\r\nRRULE:FREQ=DAILY\r\nSUMMARY:Far",
+        "UID:far2@test\r\nDTSTART;VALUE=DATE:99991231\r\nRRULE:FREQ=YEARLY;INTERVAL=7;BYSETPOS=2\r\nSUMMARY:Edge",
+    )
+    try:
+        result = run(doc, utc(9999, 12, 1), utc(9999, 12, 31, 23))
+    except IcsError as err:  # a refusal is acceptable, a crash is not
+        assert err.code in {"too_complex", "too_many_events"}
+    else:
+        assert isinstance(result.occurrences, list)
