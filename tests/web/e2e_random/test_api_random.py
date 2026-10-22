@@ -1,7 +1,7 @@
 """Seeded random *API* sessions against a real server (no browser): a boss and a member fire random,
 state-dependent requests; every response is compared with an independent model of what should have happened.
 
-Replay a failing run with:  PERMITA38_E2E_SEED=<seed> pytest tests/e2e_random/test_api_random.py
+Replay a failing run with:  PERMITA38_E2E_SEED=<seed> pytest tests/web/e2e_random/test_api_random.py
 """
 
 import base64

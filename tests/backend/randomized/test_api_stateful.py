@@ -766,8 +766,6 @@ class ApiMachine(RuleBasedStateMachine):
         self.tick()
         s = data.draw(self.actor())
         rid = data.draw(st.sampled_from(list(self.m[coll]) + [DEAD_ID]))
-        if self.m[coll].get(rid, {}).get("customer_id") is None and rid in self.m[coll]:
-            return  # known bug (test_known_bugs.py): PDF of a document without customer -> 500
         r = self.call("GET", f"/{coll}/{rid}/pdf", s)
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g

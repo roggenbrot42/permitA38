@@ -4,7 +4,7 @@ A model of what the user did (customers, projects, hours, offers, invoices, expe
 the test, computed only from the random inputs. After every action the page is compared with the model and the
 backend state (read through the API) is compared with the model, too.
 
-Replay a failing run with:  PERMITA38_E2E_SEED=<seed> pytest tests/e2e_random/test_user_journeys_random.py
+Replay a failing run with:  PERMITA38_E2E_SEED=<seed> pytest tests/web/e2e_random/test_user_journeys_random.py
 """
 
 import random

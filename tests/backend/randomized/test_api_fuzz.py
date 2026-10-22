@@ -12,10 +12,12 @@ A few real bugs are known (see test_known_bugs.py). To keep this test useful unt
 generator avoids exactly those triggers; set PERMITA38_FUZZ_KNOWN_BUGS=1 to let it hit them again.
 """
 
+import hashlib
 import json
 import os
 import random
 import shutil
+import sqlite3
 import tempfile
 import uuid
 from pathlib import Path
@@ -44,7 +46,7 @@ TRAVERSAL = ["../../etc/passwd", "..%2f..%2fsecret.txt", "..\\..\\secret.txt", "
              "....//....//secret.txt", "/etc/passwd", "secret.txt%00.png", "a/../../secret.txt"]  # fmt: skip
 PUBLIC = {("get", "/api/health"), ("get", "/api/auth/status"), ("post", "/api/auth/setup"),
                  ("post", "/api/auth/login"), ("post", "/api/auth/logout")}  # fmt: skip
-MEMBER_WRITE_DIRS = {"entries", "absences", "timers"}  # the only places a member may write to
+MEMBER_WRITE_TABLES = {"entries", "absences", "timers"}  # the only tables a member may write to
 
 
 class World:
@@ -61,6 +63,7 @@ class World:
         self.http = TestClient(self.app, raise_server_exceptions=os.environ.get("PERMITA38_FUZZ_RAISE") == "1")
         self.http.__enter__()
         self.svc = self.app.state.services
+        self.db_file = self.svc.store.db_path
         a = self.svc.auth
         self.boss = a.setup("boss", "Bea Boss", "boss-password-1", "Fuzz Co", 40)
         self.member = a.save_user(dict(username="mia", name="Mia", role="member", password="member-pass-1"))
@@ -91,12 +94,26 @@ class World:
             return None
         return self.svc.auth.create_token(self.svc.store.get("users", user["id"]))
 
-    def snapshot(self) -> dict[str, tuple[int, int]]:
-        out = {}
-        for p in self.data.rglob("*"):
-            if p.is_file():
-                st_ = p.stat()
-                out[str(p.relative_to(self.data))] = (st_.st_size, st_.st_mtime_ns)
+    def snapshot(self) -> dict[str, str]:
+        """Digest of every table (read through a separate read-only connection) and of the attachments folder."""
+        out: dict[str, str] = {}
+        con = sqlite3.connect(f"file:{self.db_file}?mode=ro", uri=True)
+        try:
+            tables = [
+                r[0]
+                for r in con.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+            ]
+            for t in sorted(tables):
+                rows = con.execute(f'SELECT * FROM "{t}" ORDER BY 1').fetchall()
+                out[t] = hashlib.sha256(repr(rows).encode()).hexdigest()
+        finally:
+            con.close()
+        files = sorted(
+            (str(p.relative_to(self.data)), p.stat().st_size)
+            for p in (self.data / "attachments").rglob("*")
+            if p.is_file()
+        )
+        out["attachments"] = hashlib.sha256(repr(files).encode()).hexdigest()
         return out
 
     def close(self):
@@ -120,7 +137,7 @@ class Gen:
             if isinstance(v, (int, float)) and not isinstance(v, bool) and abs(v) > 10**15:
                 return 0  # known bug: absurdly large numbers
             if isinstance(v, str) and any(0xD800 <= ord(ch) <= 0xDFFF for ch in v):
-                return "\ufffd"  # known bug: lone surrogates -> 500 and a stray temp file
+                return "\ufffd"  # known bug: lone surrogates -> 500
         return v
 
     def an_id(self):
@@ -190,12 +207,9 @@ class Gen:
     def pick_operation(self):
         """Two thirds of the traffic are writes: that is where permissions and consistency can break."""
         writes = [o for o in self.ops if o[0] != "get"]
-        while True:
-            x = self.r.random()
-            method, path, op = self.r.choice(self.focus if x < 0.6 else writes if x < 0.85 else self.ops)
-            if AVOID_KNOWN_BUGS and path.endswith("/pdf"):
-                continue  # known bug: PDF of a document without customer -> 500 (stateful test covers PDFs)
-            return method, path, op
+        x = self.r.random()
+        method, path, op = self.r.choice(self.focus if x < 0.6 else writes if x < 0.85 else self.ops)
+        return method, path, op
 
     # -- one request
     def request(self):
@@ -293,12 +307,12 @@ def run_session(seed: int, steps: int):
                     if r.status_code == 400 and r.json().get("detail") == "There was an error parsing the body":
                         ok = {400}  # the body is read before the auth dependency runs (FastAPI order)
                     assert r.status_code in ok, f"stranger got {r.status_code} on {method} {url}: {r.text[:200]}"
-                assert world.snapshot() == before, f"a stranger changed the data folder via {method} {url}"
+                assert world.snapshot() == before, f"a stranger changed the database via {method} {url}"
             if who == "member":
                 after = world.snapshot()
                 changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
-                own = {f"users/{world.member['id']}.json"} if url.endswith("/auth/change-password") else set()
-                bad = {k for k in changed if k.split("/")[0] not in MEMBER_WRITE_DIRS and k not in own}
+                own = {"users"} if url.endswith("/auth/change-password") else set()
+                bad = {k for k in changed if k not in MEMBER_WRITE_TABLES and k not in own}
                 assert not bad, f"{who} {method} {url} wrote to {sorted(bad)}"
         verify_consistency(world)
     finally:
@@ -306,12 +320,16 @@ def run_session(seed: int, steps: int):
 
 
 def verify_consistency(world: World):
-    """Every stored file parses, at least one active boss remains, and a restarted app still serves everything."""
-    for p in world.data.rglob("*.json"):
-        json.loads(p.read_text(encoding="utf-8"))
-    leftovers = [p.name for p in world.data.rglob("*") if ".tmp-" in p.name]
+    """The database passes SQLite's integrity check, no temp files are left behind, at least one active boss
+    remains, and a restarted app still serves everything."""
+    con = sqlite3.connect(f"file:{world.db_file}?mode=ro", uri=True)
+    try:
+        assert con.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+    finally:
+        con.close()
+    leftovers = [p.name for p in world.data.rglob("*") if ".tmp" in p.name]
     assert not leftovers, f"stray temp files after failed writes: {leftovers}"
-    users = [json.loads(p.read_text()) for p in (world.data / "users").glob("*.json")]
+    users = world.svc.store.list("users")
     boss = next((u for u in users if u["role"] == "boss" and u.get("active", True)), None)
     assert boss, "all active bosses are gone"
     app2 = get_app(world.cfg)  # "restart" on the same folder
@@ -359,18 +377,20 @@ def test_openapi_covers_every_route():
 @pytest.mark.randomized
 @pytest.mark.parametrize("name", TRAVERSAL + ["../" * 8 + "etc/passwd", "a" * 5000, "😀.png", "x.png\x00", ""])
 def test_attachment_paths_cannot_escape_the_data_folder(name):
-    from permita38.core.store import Store
+    from permita38.core.repository import create_repository
 
     tmp = Path(tempfile.mkdtemp(prefix="p38-trav-"))
     try:
         (tmp / "secret.png").write_bytes(b"secret")
-        store = Store(str(tmp / "data"))
-        assert store.attachment_path(name) is None
+        repo = create_repository(Config(data_dir=tmp / "data", secret_key="trav-secret-key-0123456789", web_dir=None))
+        repo.startup()
+        assert repo.attachment_path(name) is None
         for coll in ("customers", "users", "timers"):
             try:
-                assert store.get(coll, name) is None
+                assert repo.get(coll, name) is None
             except (ValueError, KeyError):
                 pass  # rejecting the id outright is fine too
+        repo.close()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

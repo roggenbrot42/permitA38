@@ -5,7 +5,7 @@ HTTP 5xx, no script executed from injected markup, injected HTML rendered as tex
 modal can always be closed and the session survives navigation. A second run does the same as a *member* and
 asserts that no boss-only data is ever shown.
 
-Replay: PERMITA38_E2E_SEED=<seed> pytest tests/e2e_random/test_monkey.py
+Replay: PERMITA38_E2E_SEED=<seed> pytest tests/web/e2e_random/test_monkey.py
 """
 
 import random

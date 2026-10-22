@@ -5,9 +5,9 @@ compare what they see with an independent model of what should have happened.
 
 ```bash
 pip install playwright httpx            # + a Chromium (see below); the API tests need only httpx
-pytest tests/e2e_random -q              # everything, ~3 minutes
-pytest tests/e2e_random -m e2e_random   # same, selected by marker
-pytest tests/e2e_random/test_api_random.py -q          # no browser needed, ~45 s
+pytest tests/web/e2e_random -q              # everything, ~3 minutes
+pytest tests/web/e2e_random -m e2e_random   # same, selected by marker
+pytest tests/web/e2e_random/test_api_random.py -q          # no browser needed, ~45 s
 ```
 
 | File | What it does |
@@ -22,7 +22,7 @@ pytest tests/e2e_random/test_api_random.py -q          # no browser needed, ~45 
 * Default seeds: `11 23 42 1337 2026` (journeys, API) and `7 99` (monkey).
 * `PERMITA38_E2E_SEED="5 6 7"` – run other seeds (any number of them) in all three files.
 * A failing run prints the seed and the action log (`journey seed=… failed; replay with PERMITA38_E2E_SEED=…`) and
-  saves a screenshot to `/tmp/e2e_*.png`. Replay: `PERMITA38_E2E_SEED=1337 pytest tests/e2e_random/test_user_journeys_random.py -x -s`.
+  saves a screenshot to `/tmp/e2e_*.png`. Replay: `PERMITA38_E2E_SEED=1337 pytest tests/web/e2e_random/test_user_journeys_random.py -x -s`.
 * Length: `PERMITA38_E2E_ACTIONS` (journey, default 20), `PERMITA38_E2E_MONKEY_STEPS` (default 110),
   `PERMITA38_E2E_API_STEPS` (default 80). Run `PERMITA38_E2E_SEED=$RANDOM` in a loop to explore.
 

@@ -5,8 +5,6 @@ turns red (XPASS) the moment the bug is fixed, which is the signal to delete the
 workaround in test_api_fuzz.py / test_api_stateful.py.
 """
 
-import pathlib
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -105,7 +103,9 @@ def test_invalid_contract_date_must_not_break_forecast(api):
     assert api.get("/api/forecast").status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason="minutes=10**400 -> OverflowError in RecordService._write -> 500 instead of 422")
+@pytest.mark.xfail(
+    strict=True, reason="minutes=10**400 -> OverflowError (int conversion / SQLite binding) -> 500 instead of 422"
+)
 def test_absurd_minutes_value_is_a_client_error(api):
     _boss(api)
     r = api.post("/api/entries", content=b'{"date":"2026-10-22","minutes":' + b"1" + b"0" * 400 + b"}",
@@ -117,16 +117,13 @@ def test_absurd_minutes_value_is_a_client_error(api):
 @pytest.mark.xfail(
     strict=True,
     reason="A lone surrogate (JSON escape \\ud83d) in a string field -> UnicodeEncodeError "
-    "while writing the file -> 500, and a stray '*.json.tmp-<pid>' is left in the synced data folder "
-    "(core/store.py _write_json should reject/clean up)",
+    "while binding the SQLite parameter -> 500 instead of 422 (the repository / models should reject it)",
 )
-def test_lone_surrogate_is_rejected_cleanly_without_leaving_temp_files(api):
+def test_lone_surrogate_is_rejected_cleanly_and_stores_nothing(api):
     _boss(api)
     r = api.post("/api/customers", content=b'{"name": "\\ud83d"}', headers={"Content-Type": "application/json"})
     assert r.status_code in (400, 422), r.status_code
-    root = pathlib.Path(api.app_ref.state.services.store.root)
-    leftovers = [p.name for p in root.rglob("*") if ".tmp-" in p.name]
-    assert not leftovers, leftovers
+    assert api.get("/api/customers").json() == [], "a rejected request must not leave a half-written record"
 
 
 @pytest.mark.xfail(
@@ -142,11 +139,7 @@ def test_lone_surrogate_in_invalid_field_gives_422(api):
 
 
 # ------------------------------------------------------------------ documents
-@pytest.mark.xfail(
-    strict=True,
-    reason="PDF of an offer/invoice without customer_id -> TypeError in Store.get(None) "
-    "(core/documents.py render) -> 500; drafts without customer are accepted by POST /invoices",
-)
+# Fixed by the repository layer (get(None) returns None instead of raising); kept as a regression test.
 @pytest.mark.parametrize("coll", ["invoices", "offers"])
 def test_pdf_of_draft_without_customer_works(api, coll):
     _boss(api)
