@@ -10,12 +10,18 @@
 - `permita38/cli/` – command line entry point (`serve`, `show-openapi`, `set-password`).
 - `web/` – vanilla-JS single-page frontend, no build step. It only talks to the HTTP API.
 - `api/openapi.json` – generated API contract. Regenerate with `make generate-openapi` after changing routers or models.
-- `tests/backend/` – Python backend tests (unit, API via `TestClient`, repository contract, migrations); fixtures in
-  `tests/backend/conftest.py`. `tests/web/` is for the browser UI, `tests/android/` for the future app.
+- `tests/` is organised per subsystem:
+  - `tests/backend/` – Python backend tests (unit, API via `TestClient`, repository contract, migrations); fixtures in
+    `tests/backend/conftest.py`. `tests/backend/randomized/` holds the hypothesis state machine and the schema fuzzer
+    (only collected when asked for, see below).
+  - `tests/web/` – browser UI tests with Playwright plus seeded random user simulations (`tests/web/e2e_random/`).
+  - `tests/android/` – placeholder and test plan for the future Android app.
 - `docs/` – user documentation and the mobile concept.
 
 ## Commands
-- `make test` – run pytest (`tests/backend`). `make lint` – ruff + mypy. `make format` / `make check-format` – ruff formatter.
+- `make test` – fast backend suite (`tests/backend`, excludes the randomized suite). `make test-random` – randomized API
+  tests (`HYPOTHESIS_PROFILE=thorough` for a long run). `make test-web` – browser/e2e tests (needs Chromium: set
+  `PERMITA38_CHROMIUM` or run `python -m playwright install chromium`). `make test-all` – everything. `make lint` – ruff + mypy. `make format` / `make check-format` – ruff formatter.
 - `make run` – start the server without opening a browser. `make check-openapi` – verify the contract is current.
 
 ## Conventions

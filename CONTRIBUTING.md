@@ -103,7 +103,10 @@ section and [AGENTS.md](AGENTS.md).
 - **Database changes:** add a numbered migration for **every** SQL dialect (`make create-migration`), never edit an
   existing migration, and bump `CURRENT_REVISION`. See `docs/porting-to-postgres.md`.
 - **Tests:** every bug fix needs a regression test, every feature needs tests. Backend tests live in
-  `tests/backend/`, browser tests in `tests/web/`. Randomised/monkey tests must stay reproducible by seed.
+  `tests/backend/` (`make test`), the randomized API tests in `tests/backend/randomized/` (`make test-random`),
+  browser tests in `tests/web/` (`make test-web`) and the future Android app's in `tests/android/`. Randomised/monkey
+  tests must stay reproducible by seed. CI runs the backend suite on Linux and Windows (Python 3.10–3.13), and the
+  randomized and browser suites with their default deterministic seeds; a nightly workflow explores with fresh seeds.
 - **Money and taxes:** use exact decimal arithmetic, never floats. Changes to tax rules, rates, VAT-return boxes or
   account mappings must cite an official source (law text, BMF/ELSTER/DATEV documentation) in the pull request.
   permitA38 provides planning estimates, not tax advice – keep wording and disclaimers accurate.

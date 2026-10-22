@@ -1,3 +1,5 @@
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -5,6 +7,19 @@ from permita38.api.server import get_app
 from permita38.core.config import Config
 
 PASSWORD = "correct horse battery"
+
+
+def pytest_ignore_collect(collection_path, config):
+    """`pytest` / `make test` is the fast suite. The randomized suite (tests/backend/randomized) is only collected
+    when it is asked for: by path, with `-m randomized`, or with PERMITA38_RANDOM=1."""
+    if collection_path.name != "randomized" or not collection_path.is_dir():
+        return None
+    asked = (
+        os.environ.get("PERMITA38_RANDOM") == "1"
+        or "randomized" in (config.getoption("markexpr") or "")
+        or any("randomized" in str(a) for a in config.invocation_params.args)
+    )
+    return None if asked else True
 
 
 @pytest.fixture

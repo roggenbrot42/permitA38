@@ -32,6 +32,38 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: python -m pytest tests/backend -q
 
+  random:
+    # randomized API tests (hypothesis state machine + schema fuzzer), deterministic "ci" profile
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - run: make test-random
+
+  web:
+    # browser UI + live-server random user simulations (Playwright / Chromium), default seeds only
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: pip install -e ".[dev]"
+      - run: python -m playwright install --with-deps chromium
+      - run: make test-web
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-test-screenshots
+          path: /tmp/e2e_*.png
+          if-no-files-found: ignore
+
   openapi:
     runs-on: ubuntu-latest
     steps:

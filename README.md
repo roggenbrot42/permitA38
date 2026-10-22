@@ -254,7 +254,10 @@ Ideas and pull requests are welcome.
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 
-make test              # pytest tests/backend (unit, API, repository contract, migrations)
+make test              # fast backend suite: unit, API, repository contract, migrations (~20 s)
+make test-random       # randomized API tests: hypothesis state machine + schema fuzzer (~1 min)
+make test-web          # browser UI + random user simulations, needs Chromium (~3 min)
+make test-all          # all of the above
 make lint              # ruff + mypy
 make format            # ruff formatter
 make run               # start the server on :8765

@@ -1,9 +1,23 @@
 PYTHON ?= python3
 OPENAPI = api/openapi.json
 
-.PHONY: test
-test:
+.PHONY: test test-backend test-random test-web test-all
+# fast backend suite (unit, API, repository contract, migrations) - what CI runs on every OS/Python
+test: test-backend
+
+test-backend:
 	$(PYTHON) -m pytest tests/backend -q
+
+# randomized API tests: hypothesis state machine + schema fuzzer (default "ci" profile, deterministic, ~1 min).
+# HYPOTHESIS_PROFILE=thorough for a long non-deterministic run.
+test-random:
+	$(PYTHON) -m pytest tests/backend/randomized -q
+
+# browser UI + live-server random user simulations (needs `playwright install chromium` or PERMITA38_CHROMIUM, ~3 min)
+test-web:
+	$(PYTHON) -m pytest tests/web -q
+
+test-all: test-backend test-random test-web
 
 .PHONY: lint
 lint: ruff mypy
