@@ -63,6 +63,7 @@ ROUTES = [
     "plan",
     "plan/contracts",
     "plan/timeoff",
+    "plan/vacation",
     "customers",
     "projects",
     "sales",
@@ -336,7 +337,7 @@ class Monkey:
         idx = self.page.evaluate(LIST_VISIBLE_JS.replace("arguments[1]", f"'{FORBIDDEN}'"), self.OPENERS)
         if not idx:
             top = self.rng.choice(
-                ["customers", "projects", "time", "expenses", "plan/contracts", "plan/timeoff", "team", "sales"]
+                ["customers", "projects", "time", "expenses", "plan/contracts", "plan/timeoff", "plan/vacation", "team", "sales"]
             )
             self.say(f"episode: no form opener here, going to #/{top}")
             self.page.evaluate("h => { location.hash = h; }", f"#/{top}")

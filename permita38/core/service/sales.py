@@ -9,6 +9,7 @@ from permita38.core.money import hours_from_minutes, to_float
 from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
+from .plan_service import PlanningService
 from .records import RecordService
 
 
@@ -70,18 +71,24 @@ class SalesService:
         o["status"] = "accepted"
         o = self.store.save("offers", o)
         cust = self.store.get("customers", o["customer_id"]) if o.get("customer_id") else None
-        proj = self.store.save(
-            "projects",
-            dict(
-                name=o.get("title") or "Project for " + (cust or {}).get("name", ""),
-                customer_id=o.get("customer_id"),
-                status="active",
-                color="#2563eb",
-                offer_id=rid,
-            ),
-        )
+        plan = o.get("plan") or {}
+        existing = self.store.get("projects", o["project_id"]) if o.get("project_id") else None
+        if existing:  # the offer belongs to a project: widen its period to cover the plan (recorded)
+            proj = self.store.save("projects", PlanningService.cover_plan(existing, plan, rid))
+        else:
+            proj = self.store.save(
+                "projects",
+                dict(
+                    name=o.get("title") or "Project for " + (cust or {}).get("name", ""),
+                    customer_id=o.get("customer_id"),
+                    status="active",
+                    color="#2563eb",
+                    offer_id=rid,
+                    start=plan.get("start"),
+                    end=plan.get("end"),
+                ),
+            )
         out = {"offer": o, "project": proj, "contract": None}
-        plan = o.get("plan")
         if plan and plan.get("start") and plan.get("end"):
             c = dict(
                 title=o.get("title") or "Contract " + (o.get("number") or ""),
