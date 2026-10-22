@@ -1,6 +1,5 @@
 """Offers and invoices: numbering, finalizing, conversion, billing tracked time, PDF."""
 
-import re
 from datetime import date, timedelta
 
 from permita38.core import calc, documents
@@ -9,28 +8,21 @@ from permita38.core.money import hours_from_minutes, to_float
 from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
+from .numbering import NumberingService
 from .records import RecordService
 
 
 class SalesService:
-    def __init__(self, store: Repository, records: RecordService):
+    def __init__(self, store: Repository, records: RecordService, numbering: NumberingService | None = None):
         self.store = store
         self.records = records
+        self.numbering = numbering or NumberingService(store)
 
     def settings(self) -> dict:
         return effective_settings(self.store.settings())
 
     def next_number(self, coll: str) -> str:
-        pattern = self.settings()["invoice_pattern" if coll == "invoices" else "offer_pattern"]
-        year = date.today().year
-        prefix_re = re.escape(pattern.split("{")[0])
-        nums = []
-        for x in self.store.list(coll):
-            num = x.get("number") or ""
-            m = re.match(prefix_re + r".*?(\d+)$", num)
-            if m and str(year) in num:
-                nums.append(int(m.group(1)))
-        return pattern.format(year=year, n=max(nums, default=0) + 1)
+        return self.numbering.preview(coll, 1)[0]
 
     def _get(self, coll: str, rid: str) -> dict:
         doc = self.store.get(coll, rid)
@@ -39,25 +31,33 @@ class SalesService:
         return doc
 
     def finalize(self, coll: str, rid: str) -> dict:
-        doc = self._get(coll, rid)
-        st = self.settings()
-        if not doc.get("customer_id"):
-            raise ServiceError(400, "Choose a customer first")
-        if not doc.get("lines"):
-            raise ServiceError(400, "Add at least one line")
-        if not doc.get("number"):
-            doc["number"] = self.next_number(coll)
-        if doc.get("status", "draft") == "draft":
-            doc["status"] = "sent"
-        base = calc.d(doc.get("date")) or date.today()
-        if coll == "invoices" and not doc.get("due_date"):
-            doc["due_date"] = (base + timedelta(days=int(st["payment_days"]))).isoformat()
-        if coll == "offers" and not doc.get("valid_until"):
-            doc["valid_until"] = (base + timedelta(days=int(st["offer_valid_days"]))).isoformat()
-        return self.store.save(coll, doc)
+        # the number is taken in the same transaction that saves the document: a failed finalize gives it back
+        with self.store.transaction():
+            doc = self._get(coll, rid)
+            st = self.settings()
+            if not doc.get("customer_id"):
+                raise ServiceError(400, "Choose a customer first")
+            if not doc.get("lines"):
+                raise ServiceError(400, "Add at least one line")
+            base = calc.d(doc.get("date")) or date.today()
+            if not doc.get("number"):
+                doc["number"] = self.numbering.allocate(coll, base)
+            if doc.get("status", "draft") == "draft":
+                doc["status"] = "sent"
+            if coll == "invoices" and not doc.get("due_date"):
+                doc["due_date"] = (base + timedelta(days=int(st["payment_days"]))).isoformat()
+            if coll == "offers" and not doc.get("valid_until"):
+                doc["valid_until"] = (base + timedelta(days=int(st["offer_valid_days"]))).isoformat()
+            return self.store.save(coll, doc)
 
     def pdf(self, coll: str, rid: str) -> tuple[bytes, str]:
         doc = self._get(coll, rid)
+        if doc.get("original_pdf"):  # imported: the original is the legal record, never re-rendered
+            path = self.store.attachment_path(doc["original_pdf"])
+            if path is None:
+                raise ServiceError(404, "The original PDF is missing")
+            with open(path, "rb") as fh:
+                return fh.read(), (doc.get("number") or "original") + ".pdf"
         data = documents.render(self.store, coll[:-1], doc)
         return data, (doc.get("number") or "draft") + ".pdf"
 
