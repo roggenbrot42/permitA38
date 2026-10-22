@@ -17,3 +17,7 @@ config.yaml
 .stfolder
 .stversions
 .DS_Store
+
+# docker
+.env
+secrets/

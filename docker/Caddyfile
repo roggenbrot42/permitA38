@@ -1,0 +1,16 @@
+# Caddy obtains and renews the TLS certificate automatically.
+# PERMITA38_DOMAIN comes from the environment (docker-compose.proxy.yml); the fallback is a placeholder.
+{$PERMITA38_DOMAIN:permita.example.com} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	request_body {
+		max_size 25MB
+	}
+
+	reverse_proxy permita38:8765
+}

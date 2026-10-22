@@ -204,6 +204,19 @@ Invoices include what German law requires (§14 UStG): both addresses, tax numbe
 
 ---
 
+## Run with Docker
+
+Prefer one hosted instance over syncing folders? Run permitA38 as a container (Raspberry Pi, NAS, VPS) and use it
+from every device's browser:
+
+```bash
+cp .env.example .env     # choose the boss username/password (created on first start)
+docker compose up -d --build
+```
+
+Non-root, read-only filesystem, health check, HTTPS via the included Caddy proxy file, data in one volume.
+See **[docs/docker.md](docs/docker.md)** for configuration, backups, HTTPS and a security checklist.
+
 ## Roadmap
 
 - 📱 **Android companion app** – see [`docs/mobile-concept.md`](docs/mobile-concept.md): a small offline-first app that reads/writes the same synced folder (via Syncthing-Fork).
