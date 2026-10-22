@@ -32,6 +32,52 @@ def build_log_config(level: str = "info") -> dict:
     }
 
 
+def _import_documents(services, args) -> None:
+    from permita38.core.errors import ServiceError
+
+    services.store.startup()
+    options = {
+        "on_duplicate": args.on_duplicate,
+        "accept_unverified": args.accept_unverified,
+        "decimal": args.decimal,
+        "date_order": args.date_order,
+    }
+    kwargs = dict(
+        mapping=args.mapping.read_text(encoding="utf-8") if args.mapping else None,
+        options=options,
+        pdfs=args.pdfs.read_bytes() if args.pdfs else None,
+        sheet=args.sheet,
+        delimiter=args.delimiter,
+    )
+    data = args.file.read_bytes()
+    try:
+        if args.dry_run:
+            report = services.imports.plan(data, args.file.name, args.type, **kwargs)
+        else:
+            report = services.imports.run(data, args.file.name, args.type, **kwargs)
+    except ServiceError as e:
+        sys.exit(e.message)
+    counts = report["counts"]
+    print(
+        f"{args.type}: {report['rows_total']} rows - create {counts['create']}, skip {counts['skip']}, "
+        f"overwrite {counts['overwrite']}, errors {counts['error']}; customers created {counts['customers_created']}, "
+        f"merged {counts['customers_merged']}"
+    )
+    for row in report["rows"]:
+        for msg in row["messages"]:
+            print(f"  row {row['row']}: {row['action']}: {msg}")
+    if report.get("unmapped_headers"):
+        print("  columns not used:", ", ".join(report["unmapped_headers"]))
+    if args.dry_run:
+        print("Dry run: nothing was written.")
+        return
+    if not report["applied"]:
+        sys.exit("Nothing was imported: fix the error rows above (or the mapping) and run again.")
+    print(f"Imported. Batch {report['batch_id']} (undo with the API or the import page).")
+    if report.get("next_number") and report.get("next_number") != report.get("next_number_before"):
+        print(f"  the next number is now {report['next_number']} (was {report['next_number_before']})")
+
+
 def main(argv: list[str] | None = None):
     ap = argparse.ArgumentParser(
         prog="permita38",
@@ -54,6 +100,18 @@ def main(argv: list[str] | None = None):
     bp.add_argument("--dest", type=Path, help="target file (default: <data>/backups/permita38-<timestamp>.sqlite3)")
     ip = sub.add_parser("import-json", help="import data from the old JSON-file layout")
     ip.add_argument("old_data_dir", type=Path)
+    idp = sub.add_parser("import-documents", help="import invoices, offers, customers or expenses (CSV, XLSX, JSON)")
+    idp.add_argument("file", type=Path)
+    idp.add_argument("--type", required=True, choices=["invoices", "offers", "customers", "expenses"])
+    idp.add_argument("--mapping", type=Path, help="JSON mapping file (default: detect the columns by header names)")
+    idp.add_argument("--pdfs", type=Path, help="zip of original PDFs named by document number")
+    idp.add_argument("--dry-run", action="store_true", help="validate and report only; write nothing")
+    idp.add_argument("--on-duplicate", choices=["skip", "overwrite"], default=None)
+    idp.add_argument("--accept-unverified", action="store_true", help="import rows whose totals do not add up")
+    idp.add_argument("--sheet", help="worksheet name for XLSX files (default: the first sheet)")
+    idp.add_argument("--delimiter", help="CSV delimiter (default: detected)")
+    idp.add_argument("--decimal", choices=["auto", "comma", "point"], default=None)
+    idp.add_argument("--date-order", choices=["dmy", "mdy"], default=None)
     cp = sub.add_parser("create-migration", help="create the next numbered migration file (all dialects)")
     cp.add_argument("name")
     dp = sub.add_parser("dump-ddl", help="print the schema DDL generated for a SQL dialect")
@@ -116,6 +174,8 @@ def main(argv: list[str] | None = None):
                     + "\nRun `permita38 set-password <username>` for each of them."
                 )
             return
+        if command == "import-documents":
+            return _import_documents(services, args)
         if command == "reset-totp":
             services.store.startup()
             try:

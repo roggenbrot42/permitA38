@@ -11,6 +11,7 @@ from permita38.core.config import Config
 from permita38.core.netsafe import SafeFetcher
 from permita38.core.repository import Repository, auto_backup, create_repository
 from permita38.core.service.auth import AuthService
+from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
@@ -32,6 +33,7 @@ class Services:
     time: TimeService
     settings: SettingsService
     impressum: ImpressumService
+    imports: ImportService
 
     @classmethod
     def create(cls, config: Config) -> "Services":
@@ -45,6 +47,7 @@ class Services:
             totp=TotpService(auth),
             records=records,
             sales=SalesService(store, records),
+            imports=ImportService(store, numbering=None),
             time=TimeService(store),
             settings=SettingsService(store),
             impressum=ImpressumService(

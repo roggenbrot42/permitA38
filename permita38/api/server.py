@@ -18,6 +18,7 @@ from .routers import (
     files,
     finance,
     health,
+    imports,
     impressum,
     numbering,
     planning,
@@ -106,6 +107,7 @@ def get_app(config: Config) -> FastAPI:
         files,
         sales,
         numbering,
+        imports,
         impressum,
         records,
     ):
