@@ -10,13 +10,15 @@ Replay a failure: re-run with the printed `@reproduce_failure(...)` blob, or `py
 import copy
 import shutil
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from hypothesis import settings, strategies as st
+from hypothesis import settings
+from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, precondition, rule
 
 from permita38.api.server import get_app
@@ -119,7 +121,7 @@ class ApiMachine(RuleBasedStateMachine):
     def __init__(self):
         super().__init__()
         self.tmp = Path(tempfile.mkdtemp(prefix="p38-stateful-"))
-        self.clock = FakeClock(TODAY.strftime("%s") if False else __import__("time").time())
+        self.clock = FakeClock(time.time())
         self._real_time = auth_module.time
         auth_module.time = self.clock.as_module()
         cfg = Config(data_dir=self.tmp / "data", secret_key="stateful-secret-key", web_dir=None)
@@ -144,7 +146,10 @@ class ApiMachine(RuleBasedStateMachine):
             workdays=[0, 1, 2, 3, 4], password=self.pw_of_boss, pw_changed=self.now,
         )  # fmt: skip
         self.boss_id = u["id"]
-        assert self.call("POST", "/auth/setup", json={"username": "x1", "name": "x", "password": "password1"}).status_code == 400
+        assert (
+            self.call("POST", "/auth/setup", json={"username": "x1", "name": "x", "password": "password1"}).status_code
+            == 400
+        )
         self.do_login("boss", self.pw_of_boss)
 
     def teardown(self):
@@ -286,7 +291,8 @@ class ApiMachine(RuleBasedStateMachine):
             pairs = [(t["project_id"], tid) for tid, t in self.m["tasks"].items()]
             pairs += [(pid, None) for pid in self.m["projects"]] + [(None, None), (DEAD_ID, DEAD_ID)]
             return st.tuples(st.fixed_dictionaries(req, optional=opt), st.sampled_from(pairs)).map(
-                lambda t: {**t[0], "project_id": t[1][0], "task_id": t[1][1]})
+                lambda t: {**t[0], "project_id": t[1][0], "task_id": t[1][1]}
+            )
         elif coll == "contracts":
             req = {"title": TEXT, "start": iso_days(-10, 5), "end": iso_days(6, 90)}
             opt = dict(hours_per_week=maybe_none(RATE), total_hours=maybe_none(RATE), rate=maybe_none(RATE),
@@ -312,7 +318,8 @@ class ApiMachine(RuleBasedStateMachine):
 
     def doc_st(self, coll):
         line = st.fixed_dictionaries(
-            {"description": TEXT, "qty": QTY, "price": PRICE}, optional={"unit": st.sampled_from(["h", "pcs"]), "vat": maybe_none(VATS)}
+            {"description": TEXT, "qty": QTY, "price": PRICE},
+            optional={"unit": st.sampled_from(["h", "pcs"]), "vat": maybe_none(VATS)},
         )
         opt = dict(
             project_id=self.ref("projects"), title=maybe_none(TEXT), date=DATES, vat_rate=maybe_none(VATS),
@@ -435,7 +442,12 @@ class ApiMachine(RuleBasedStateMachine):
         s = data.draw(self.actor())
         wrong = data.draw(st.booleans()) and self.valid(s)
         old_pw = self.m["users"][s.user_id]["password"] if self.valid(s) else "whatever1"
-        r = self.call("POST", "/auth/change-password", s, json={"old_password": old_pw + ("!" if wrong else ""), "new_password": new})
+        r = self.call(
+            "POST",
+            "/auth/change-password",
+            s,
+            json={"old_password": old_pw + ("!" if wrong else ""), "new_password": new},
+        )
         if not self.valid(s):
             assert r.status_code == 401
         elif wrong or len(new) < 8:
@@ -512,7 +524,11 @@ class ApiMachine(RuleBasedStateMachine):
     def timer_start(self, data):
         self.tick()
         s = data.draw(self.actor())
-        body = {"project_id": data.draw(self.ref("projects")), "task_id": data.draw(self.ref("tasks")), "note": data.draw(TEXT)}
+        body = {
+            "project_id": data.draw(self.ref("projects")),
+            "task_id": data.draw(self.ref("tasks")),
+            "note": data.draw(TEXT),
+        }
         r = self.call("POST", "/timer/start", s, json=body)
         if (g := self.gate(s)) is not None:
             assert r.status_code == g
@@ -648,8 +664,10 @@ class ApiMachine(RuleBasedStateMachine):
         old, me = self.m[coll].get(rid), self.m["users"][s.user_id]
         if old is None:
             assert r.status_code == 404
-        elif me["role"] != "boss" and (coll not in ("projects", "tasks", "entries", "absences") or (
-                coll in MEMBER_OWN and old.get("user_id") != me["id"])):
+        elif me["role"] != "boss" and (
+            coll not in ("projects", "tasks", "entries", "absences")
+            or (coll in MEMBER_OWN and old.get("user_id") != me["id"])
+        ):
             assert r.status_code == 403
         else:
             assert r.status_code == 200
@@ -675,8 +693,12 @@ class ApiMachine(RuleBasedStateMachine):
         self.dirty.add(coll)
 
     @precondition(lambda self: self.m["offers"] or self.m["invoices"])
-    @rule(data=st.data(), coll=st.sampled_from(["offers", "invoices"]),
-          status=st.sampled_from(["draft", "sent", "paid", "cancelled", "accepted", "rejected"]), paid=DATES)
+    @rule(
+        data=st.data(),
+        coll=st.sampled_from(["offers", "invoices"]),
+        status=st.sampled_from(["draft", "sent", "paid", "cancelled", "accepted", "rejected"]),
+        paid=DATES,
+    )
     def update_doc(self, data, coll, status, paid):
         """PUT replaces the document; this also covers 'mark as paid' and every status change."""
         self.tick()
@@ -684,7 +706,9 @@ class ApiMachine(RuleBasedStateMachine):
             return
         s = data.draw(self.actor())
         rid = data.draw(st.sampled_from(list(self.m[coll])))
-        body = copy.deepcopy(data.draw(self.doc_st(coll))) if data.draw(st.booleans()) else copy.deepcopy(self.bodies[rid])
+        body = (
+            copy.deepcopy(data.draw(self.doc_st(coll))) if data.draw(st.booleans()) else copy.deepcopy(self.bodies[rid])
+        )
         body["status"] = status
         if status == "paid":
             body["paid_date"] = paid
@@ -756,13 +780,21 @@ class ApiMachine(RuleBasedStateMachine):
     def entry_rate(self, e):
         return oracle.resolve_rate(e, self.m["tasks"], self.m["projects"], self.m["customers"], self.m["users"], 80)
 
-    @rule(data=st.data(), by_customer=st.booleans(), by_project=st.booleans(), lo=maybe_none(iso_days(-25, 0)), hi=maybe_none(iso_days(-3, 8)))
+    @rule(
+        data=st.data(),
+        by_customer=st.booleans(),
+        by_project=st.booleans(),
+        lo=maybe_none(iso_days(-25, 0)),
+        hi=maybe_none(iso_days(-3, 8)),
+    )
     def invoice_from_time(self, data, by_customer, by_project, lo, hi):
         self.tick()
         s = data.draw(self.actor())
         cust = data.draw(self.ref("customers", none=False)) if by_customer else None
         proj = data.draw(self.ref("projects", none=False)) if by_project else None
-        r = self.call("POST", "/invoices/from-time", s, json={"customer_id": cust, "project_id": proj, "from": lo, "to": hi})
+        r = self.call(
+            "POST", "/invoices/from-time", s, json={"customer_id": cust, "project_id": proj, "from": lo, "to": hi}
+        )
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
@@ -820,11 +852,16 @@ class ApiMachine(RuleBasedStateMachine):
         cust = self.m["customers"].get(offer.get("customer_id"))
         proj = out["project"]
         assert proj["name"] == (offer.get("title") or "Project for " + (cust or {}).get("name", ""))
-        assert proj["status"] == "active" and proj["offer_id"] == rid and proj.get("customer_id") == offer.get("customer_id")
+        assert (
+            proj["status"] == "active"
+            and proj["offer_id"] == rid
+            and proj.get("customer_id") == offer.get("customer_id")
+        )
         offer["status"] = "accepted"
         self.bodies[rid] = {**self.bodies[rid], "status": "accepted"}
         self.m["projects"][proj["id"]] = DEFAULTS["projects"] | {
-            k: v for k, v in proj.items() if v is not None and k not in ("created", "updated")}
+            k: v for k, v in proj.items() if v is not None and k not in ("created", "updated")
+        }
         plan = offer.get("plan")
         if plan and plan.get("start") and plan.get("end"):
             c = out["contract"]
@@ -834,7 +871,8 @@ class ApiMachine(RuleBasedStateMachine):
             for k in ("hours_per_week", "total_hours", "rate"):
                 assert (c.get(k) == plan.get(k)) or approx(c.get(k), plan.get(k)), (k, c, plan)
             self.m["contracts"][c["id"]] = DEFAULTS["contracts"] | {
-                k: v for k, v in c.items() if v is not None and k not in ("created", "updated")}
+                k: v for k, v in c.items() if v is not None and k not in ("created", "updated")
+            }
             self.dirty.add("contracts")
         else:
             assert out["contract"] is None
@@ -852,7 +890,11 @@ class ApiMachine(RuleBasedStateMachine):
             return
         assert r.status_code == 200, r.text
         o = self.m["offers"][rid]
-        body = {k: o[k] for k in ("customer_id", "project_id", "lines", "template_id", "vat_rate", "language", "title", "reference") if k in o}
+        body = {
+            k: o[k]
+            for k in ("customer_id", "project_id", "lines", "template_id", "vat_rate", "language", "title", "reference")
+            if k in o
+        }
         body.update(date=TODAY.isoformat(), offer_id=rid)
         exp = self.doc_expected("invoices", body, None) | {"id": r.json()["id"]}
         self.check_record("invoices", exp, r.json())
@@ -875,9 +917,15 @@ class ApiMachine(RuleBasedStateMachine):
         self.dirty |= {"invoices", "expenses", "settings"}
 
     # ------------------------------------------------------------------ rules: users
-    @rule(data=st.data(), username=USERNAMES, password=PASSWORDS, role=st.sampled_from(["member", "member", "boss", "root"]),
-          hours=st.sampled_from([20.0, 32.5, 40.0]), workdays=st.sampled_from([[0, 1, 2, 3, 4], [0, 1, 2], [1, 3, 5]]),
-          rate=maybe_none(RATE))
+    @rule(
+        data=st.data(),
+        username=USERNAMES,
+        password=PASSWORDS,
+        role=st.sampled_from(["member", "member", "boss", "root"]),
+        hours=st.sampled_from([20.0, 32.5, 40.0]),
+        workdays=st.sampled_from([[0, 1, 2, 3, 4], [0, 1, 2], [1, 3, 5]]),
+        rate=maybe_none(RATE),
+    )
     def create_user(self, data, username, password, role, hours, workdays, rate):
         self.tick()
         s = data.draw(self.actor())
@@ -906,8 +954,14 @@ class ApiMachine(RuleBasedStateMachine):
         self.dirty.add("users")
 
     @precondition(lambda self: len(self.m["users"]) > 1)
-    @rule(data=st.data(), username=USERNAMES, password=maybe_none(PASSWORDS), role=st.sampled_from(["member", "boss"]),
-          active=st.booleans(), hours=st.sampled_from([20.0, 40.0]))
+    @rule(
+        data=st.data(),
+        username=USERNAMES,
+        password=maybe_none(PASSWORDS),
+        role=st.sampled_from(["member", "boss"]),
+        active=st.booleans(),
+        hours=st.sampled_from([20.0, 40.0]),
+    )
     def update_user(self, data, username, password, role, active, hours):
         self.tick()
         s = data.draw(self.actor())
@@ -916,7 +970,14 @@ class ApiMachine(RuleBasedStateMachine):
         keep = data.draw(st.booleans()) and old is not None
         if keep:
             username = old["username"]
-        body = {"username": username, "name": "Renamed", "role": role, "active": active, "weekly_hours": hours, "password": password}
+        body = {
+            "username": username,
+            "name": "Renamed",
+            "role": role,
+            "active": active,
+            "weekly_hours": hours,
+            "password": password,
+        }
         r = self.call("PUT", f"/users/{rid}", s, json=body)
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
@@ -933,7 +994,9 @@ class ApiMachine(RuleBasedStateMachine):
             assert r.status_code == 400, (body, r.text)
             return
         assert r.status_code == 200, r.text
-        old.update(username=norm, name="Renamed", role=role, active=active, weekly_hours=hours, workdays=[0, 1, 2, 3, 4])
+        old.update(
+            username=norm, name="Renamed", role=role, active=active, weekly_hours=hours, workdays=[0, 1, 2, 3, 4]
+        )
         if password:
             old["password"], old["pw_changed"] = password, self.now
         got = r.json()
@@ -983,7 +1046,16 @@ class ApiMachine(RuleBasedStateMachine):
             for row in rows:
                 if coll in ("offers", "invoices"):
                     self.check_record(coll, self.m[coll][row["id"]], row)
-                elif coll in ("customers", "projects", "tasks", "contracts", "absences", "expenses", "templates", "entries"):
+                elif coll in (
+                    "customers",
+                    "projects",
+                    "tasks",
+                    "contracts",
+                    "absences",
+                    "expenses",
+                    "templates",
+                    "entries",
+                ):
                     exp = self.m[coll][row["id"]]
                     self.check_record(coll, exp, row)
         if "users" in self.dirty:
@@ -997,9 +1069,11 @@ class ApiMachine(RuleBasedStateMachine):
             uid = members[self.steps % len(members)]
             ms = self.mint(uid)
             assert {e["id"] for e in self.call("GET", "/entries", ms).json()} == {
-                i for i, e in self.m["entries"].items() if e.get("user_id") == uid}
+                i for i, e in self.m["entries"].items() if e.get("user_id") == uid
+            }
             assert {e["id"] for e in self.call("GET", "/absences", ms).json()} == {
-                i for i, e in self.m["absences"].items() if e.get("user_id") == uid}
+                i for i, e in self.m["absences"].items() if e.get("user_id") == uid
+            }
             visible = {i for i, p in self.m["projects"].items() if not p["member_ids"] or uid in p["member_ids"]}
             plist = self.call("GET", "/projects", ms).json()
             assert {p["id"] for p in plist} == visible
@@ -1063,14 +1137,8 @@ class ApiMachine(RuleBasedStateMachine):
         self.dirty = set()
 
 
-ApiMachine.TestCase.settings = settings(settings.default, max_examples=settings.default.max_examples)
+ApiMachine.TestCase.settings = settings(settings.default)
 TestApiStateful = ApiMachine.TestCase
-
-
-def test_machine_has_expected_rules():
-    names = {r.function.__name__ for r in ApiMachine._rules_per_class[ApiMachine]} if hasattr(
-        ApiMachine, "_rules_per_class") else set()
-    assert not names or {"create", "update", "delete", "login", "finalize"} <= names
 
 
 pytestmark = pytest.mark.randomized

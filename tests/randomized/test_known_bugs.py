@@ -46,8 +46,11 @@ def _member(api):
 
 
 # ------------------------------------------------------------------ input validation: dates and ranges
-@pytest.mark.xfail(strict=True, reason="GET /holidays?year=10000 or year=-1 -> 500 (date() overflow in "
-                   "core/holidays.py); the `year` query parameter needs a range (1..9999) like `weeks` has")
+@pytest.mark.xfail(
+    strict=True,
+    reason="GET /holidays?year=10000 or year=-1 -> 500 (date() overflow in "
+    "core/holidays.py); the `year` query parameter needs a range (1..9999) like `weeks` has",
+)
 @pytest.mark.parametrize("year", [10000, 99999, -1])
 def test_holidays_year_out_of_range_is_a_client_error(api, year):
     _boss(api)
@@ -55,8 +58,11 @@ def test_holidays_year_out_of_range_is_a_client_error(api, year):
     assert r.status_code in (400, 422), r.status_code
 
 
-@pytest.mark.xfail(strict=True, reason="Absence dates are unvalidated strings; one bad absence makes /dashboard and "
-                   "/forecast return 500 for EVERY user (core/calc.py Capacity.__init__ -> d(a['start']))")
+@pytest.mark.xfail(
+    strict=True,
+    reason="Absence dates are unvalidated strings; one bad absence makes /dashboard and "
+    "/forecast return 500 for EVERY user (core/calc.py Capacity.__init__ -> d(a['start']))",
+)
 def test_one_invalid_absence_must_not_break_everybody_elses_dashboard(api):
     boss = _boss(api)
     member = _member(api)
@@ -66,16 +72,22 @@ def test_one_invalid_absence_must_not_break_everybody_elses_dashboard(api):
     assert api.get("/api/forecast").status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason="POST /absences without user_id (optional for a boss) is stored without an owner; "
-                   "then /dashboard and /forecast return 500 for everyone (core/calc.py Capacity: a['user_id'])")
+@pytest.mark.xfail(
+    strict=True,
+    reason="POST /absences without user_id (optional for a boss) is stored without an owner; "
+    "then /dashboard and /forecast return 500 for everyone (core/calc.py Capacity: a['user_id'])",
+)
 def test_absence_without_user_id_must_not_break_the_dashboard(api):
     _boss(api)
     r = api.post("/api/absences", json={"start": "2026-10-19", "end": "2026-10-22"})
     assert r.status_code in (400, 422) or api.get("/api/dashboard").status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason="Expense date '2026-13-45' is stored; afterwards GET /finance returns 500 "
-                   "(core/calc.py finance -> d(x['date']))")
+@pytest.mark.xfail(
+    strict=True,
+    reason="Expense date '2026-13-45' is stored; afterwards GET /finance returns 500 "
+    "(core/calc.py finance -> d(x['date']))",
+)
 def test_invalid_expense_date_must_not_break_finance(api):
     _boss(api)
     r = api.post("/api/expenses", json={"date": "2026-13-45", "net": 1})
@@ -83,7 +95,9 @@ def test_invalid_expense_date_must_not_break_finance(api):
     assert api.get("/api/finance").status_code == 200
 
 
-@pytest.mark.xfail(strict=True, reason="Contract dates are unvalidated; one bad contract makes GET /forecast return 500")
+@pytest.mark.xfail(
+    strict=True, reason="Contract dates are unvalidated; one bad contract makes GET /forecast return 500"
+)
 def test_invalid_contract_date_must_not_break_forecast(api):
     _boss(api)
     r = api.post("/api/contracts", json={"title": "x", "start": "nope", "end": "2026-12-31", "hours_per_week": 5})
@@ -100,9 +114,12 @@ def test_absurd_minutes_value_is_a_client_error(api):
 
 
 # ------------------------------------------------------------------ unicode
-@pytest.mark.xfail(strict=True, reason="A lone surrogate (JSON escape \\ud83d) in a string field -> UnicodeEncodeError "
-                   "while writing the file -> 500, and a stray '*.json.tmp-<pid>' is left in the synced data folder "
-                   "(core/store.py _write_json should reject/clean up)")
+@pytest.mark.xfail(
+    strict=True,
+    reason="A lone surrogate (JSON escape \\ud83d) in a string field -> UnicodeEncodeError "
+    "while writing the file -> 500, and a stray '*.json.tmp-<pid>' is left in the synced data folder "
+    "(core/store.py _write_json should reject/clean up)",
+)
 def test_lone_surrogate_is_rejected_cleanly_without_leaving_temp_files(api):
     _boss(api)
     r = api.post("/api/customers", content=b'{"name": "\\ud83d"}', headers={"Content-Type": "application/json"})
@@ -112,8 +129,11 @@ def test_lone_surrogate_is_rejected_cleanly_without_leaving_temp_files(api):
     assert not leftovers, leftovers
 
 
-@pytest.mark.xfail(strict=True, reason="A lone surrogate inside an INVALID field makes the 422 handler fail to encode "
-                   "the echoed input -> 500 instead of 422")
+@pytest.mark.xfail(
+    strict=True,
+    reason="A lone surrogate inside an INVALID field makes the 422 handler fail to encode "
+    "the echoed input -> 500 instead of 422",
+)
 def test_lone_surrogate_in_invalid_field_gives_422(api):
     _boss(api)
     r = api.post("/api/entries", content=b'{"date":"2026-01-01","minutes":"\\ud83d"}',
@@ -122,8 +142,11 @@ def test_lone_surrogate_in_invalid_field_gives_422(api):
 
 
 # ------------------------------------------------------------------ documents
-@pytest.mark.xfail(strict=True, reason="PDF of an offer/invoice without customer_id -> TypeError in Store.get(None) "
-                   "(core/documents.py render) -> 500; drafts without customer are accepted by POST /invoices")
+@pytest.mark.xfail(
+    strict=True,
+    reason="PDF of an offer/invoice without customer_id -> TypeError in Store.get(None) "
+    "(core/documents.py render) -> 500; drafts without customer are accepted by POST /invoices",
+)
 @pytest.mark.parametrize("coll", ["invoices", "offers"])
 def test_pdf_of_draft_without_customer_works(api, coll):
     _boss(api)
@@ -133,8 +156,11 @@ def test_pdf_of_draft_without_customer_works(api, coll):
 
 
 # ------------------------------------------------------------------ authentication
-@pytest.mark.xfail(strict=True, reason="Tokens use whole-second `iat`; a token issued in the same second as a password "
-                   "change is still accepted (core/service/auth.py: `claims['iat'] < pw_changed`)")
+@pytest.mark.xfail(
+    strict=True,
+    reason="Tokens use whole-second `iat`; a token issued in the same second as a password "
+    "change is still accepted (core/service/auth.py: `claims['iat'] < pw_changed`)",
+)
 def test_password_change_invalidates_tokens_issued_in_the_same_second(api, monkeypatch):
     class Frozen:
         @staticmethod
@@ -151,19 +177,27 @@ def test_password_change_invalidates_tokens_issued_in_the_same_second(api, monke
 
 
 # ------------------------------------------------------------------ member visibility
-@pytest.mark.xfail(strict=True, reason="GET /projects/{id} returns the full record (rate, notes, budget) to a member, "
-                   "even for projects they are not assigned to; GET /projects hides both (core/service/records.py get)")
+@pytest.mark.xfail(
+    strict=True,
+    reason="GET /projects/{id} returns the full record (rate, notes, budget) to a member, "
+    "even for projects they are not assigned to; GET /projects hides both (core/service/records.py get)",
+)
 def test_member_cannot_read_unassigned_project_details(api):
     _boss(api)
     member = _member(api)
-    p = api.post("/api/projects", json={"name": "Secret", "rate": 175, "notes": "margin 40%", "member_ids": ["nobody0000x"]}).json()
+    p = api.post(
+        "/api/projects", json={"name": "Secret", "rate": 175, "notes": "margin 40%", "member_ids": ["nobody0000x"]}
+    ).json()
     assert p["id"] not in {x["id"] for x in member.get("/api/projects").json()}  # hidden in the list...
     r = member.get(f"/api/projects/{p['id']}")
     assert r.status_code in (403, 404), "...so it must be hidden by id as well"
 
 
-@pytest.mark.xfail(strict=True, reason="GET /tasks returns every task incl. `rate` and tasks of projects the member is "
-                   "not assigned to; project rates are hidden from members, task rates are not")
+@pytest.mark.xfail(
+    strict=True,
+    reason="GET /tasks returns every task incl. `rate` and tasks of projects the member is "
+    "not assigned to; project rates are hidden from members, task rates are not",
+)
 def test_member_task_list_hides_rates_and_unassigned_projects(api):
     _boss(api)
     member = _member(api)
@@ -175,11 +209,16 @@ def test_member_task_list_hides_rates_and_unassigned_projects(api):
 
 
 # ------------------------------------------------------------------ mass assignment
-@pytest.mark.xfail(strict=True, reason="A member can set `rate` and `invoice_id` on their own time entries (mass "
-                   "assignment through the Entry model). `rate` overrides every other rate when the boss bills the "
-                   "time; `invoice_id` hides hours from invoicing. Both should be boss/system-only (core/service/records.py _write)")
+@pytest.mark.xfail(
+    strict=True,
+    reason="A member can set `rate` and `invoice_id` on their own time entries (mass "
+    "assignment through the Entry model). `rate` overrides every other rate when the boss bills the "
+    "time; `invoice_id` hides hours from invoicing. Both should be boss/system-only (core/service/records.py _write)",
+)
 def test_member_cannot_set_billing_fields_on_own_entries(api):
     _boss(api)
     member = _member(api)
-    r = member.post("/api/entries", json={"date": "2026-10-22", "minutes": 60, "rate": 10000, "invoice_id": "abcdef123456"})
+    r = member.post(
+        "/api/entries", json={"date": "2026-10-22", "minutes": 60, "rate": 10000, "invoice_id": "abcdef123456"}
+    )
     assert r.status_code in (400, 403, 422) or ("rate" not in r.json() and "invoice_id" not in r.json())

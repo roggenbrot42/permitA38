@@ -59,6 +59,7 @@ class FakeClock:
     def as_module(self):
         return types.SimpleNamespace(time=self.time)
 
+
 if os.environ.get("PERMITA38_NO_SHRINK"):  # quick triage: report the first failure without minimising it
     from hypothesis import Phase
 

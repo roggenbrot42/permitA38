@@ -23,7 +23,8 @@ from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from permita38.api.server import get_app
 from permita38.core.config import Config
@@ -70,7 +71,9 @@ class World:
         t = s.save("tasks", dict(name="Dev", project_id=p["id"], rate=120.0))
         e = s.save("entries", dict(user_id=self.member["id"], date="2026-10-20", minutes=90, project_id=p["id"],
                                    task_id=t["id"], billable=True))  # fmt: skip
-        s.save("entries", dict(user_id=self.boss["id"], date="2026-10-21", minutes=30, project_id=p["id"], billable=True))
+        s.save(
+            "entries", dict(user_id=self.boss["id"], date="2026-10-21", minutes=30, project_id=p["id"], billable=True)
+        )
         x = s.save("expenses", dict(date="2026-10-01", net=10.0, vat=1.9, deductible=100))
         ab = s.save("absences", dict(user_id=self.member["id"], kind="vacation", start="2026-12-24", end="2026-12-31"))
         k = s.save("contracts", dict(title="Retainer", customer_id=c["id"], start="2026-10-01", end="2027-03-01",
@@ -213,7 +216,9 @@ class Gen:
         if "requestBody" in op:
             content = op["requestBody"]["content"]
             if "multipart/form-data" in content:
-                name = self.r.choice(["bill.pdf", "a.png", "../../x.png", "x" * 300 + ".png", "no_ext", "ü.JPG", ".", "a.b.c.d"])
+                name = self.r.choice(
+                    ["bill.pdf", "a.png", "../../x.png", "x" * 300 + ".png", "no_ext", "ü.JPG", ".", "a.b.c.d"]
+                )
                 blob = self.r.choice([b"", b"%PDF-1.4 fake", b"\xff\xd8\xff", os.urandom(200), b"A" * 100_000])
                 if self.r.random() < 0.9:
                     kw["files"] = {"file": (name, blob, self.r.choice(["image/png", "application/pdf", "text/html"]))}
@@ -272,7 +277,9 @@ def run_session(seed: int, steps: int):
             if who in ("boss", "member") and tok:
                 headers["Authorization"] = "Bearer " + tok
             elif who == "forged":
-                headers["Authorization"] = "Bearer " + gen.r.choice(["a.b.c", tok.rsplit(".", 1)[0] + ".AAAA" if tok else "x", "", "x" * 2000])
+                headers["Authorization"] = "Bearer " + gen.r.choice(
+                    ["a.b.c", tok.rsplit(".", 1)[0] + ".AAAA" if tok else "x", "", "x" * 2000]
+                )
             elif who == "cookie" and tok:
                 world.http.cookies.set("authorization", tok)
             before = world.snapshot() if who != "boss" else None
@@ -369,7 +376,13 @@ def test_attachment_paths_cannot_escape_the_data_folder(name):
 
 
 @pytest.mark.randomized
-@pytest.mark.parametrize("extra", [{"password_hash": "pbkdf2_sha256$1$00$00", "pw_changed": 0}, {"is_boss": True, "id": "othersomeone", "active": True}])
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"password_hash": "pbkdf2_sha256$1$00$00", "pw_changed": 0},
+        {"is_boss": True, "id": "othersomeone", "active": True},
+    ],
+)
 def test_user_records_cannot_be_mass_assigned(extra):
     """Extra fields on /users are ignored: they can neither replace a password hash nor smuggle a role."""
     world = World()
