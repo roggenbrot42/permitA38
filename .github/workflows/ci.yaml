@@ -65,8 +65,9 @@ jobs:
           python -m pytest tests/web -q -rfE --tb=short -p no:cacheprovider 2>&1 | tee /tmp/web-tests.log
           status=${PIPESTATUS[0]}
           if [ "$status" != 0 ]; then
-            # surface the failures as annotations so they are visible without downloading logs
-            grep -E "^(FAILED|ERROR) |^E  " /tmp/web-tests.log | head -30 | while IFS= read -r line; do echo "::error::${line:0:400}"; done
+            # surface the result as an annotation so it is visible without downloading logs
+            msg=$(tail -n 60 /tmp/web-tests.log | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=web tests (exit $status)::${msg:0:30000}"
           fi
           exit "$status"
       - name: Upload failure screenshots
