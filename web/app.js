@@ -131,7 +131,8 @@ async function render() {
   const nav = isBoss() ? NAV_BOSS : NAV_MEMBER;
   const active = { customer: 'customers', project: 'projects', doc: 'sales' }[p] || p;
   let html;
-  try { html = await (PAGES[p] || PAGES.today)(...args); } catch (e) { html = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; console.error(e); }
+  try { html = await (PAGES[p] || PAGES.today)(...args); } catch (e) { if (!S.me) return; html = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; console.error(e); }
+  if (!S.me) return;
   app.innerHTML = `<div class="shell"><nav class="side"><div class="brand"><i></i>permitA38</div>
     ${nav.map(([k, ic, l]) => `<a class="nav ${k === active ? 'on' : ''}" href="#/${k}"><span>${ic}</span>${l}</a>`).join('')}
     <div class="spacer"></div><div class="me"><b>${esc(S.me.name)}</b><br>${S.me.role === 'boss' ? 'Boss' : 'Member'}</div>
@@ -157,7 +158,7 @@ async function renderLogin(app) {
   let st;
   try { st = await api.get('auth/status', { noAuthRedirect: true }); }
   catch (e) { app.innerHTML = `<div class="auth-wrap"><div class="auth-card">${BRAND}<div class="banner">${esc(e.message)}</div></div></div>`; return; }
-  const expired = S.expired; S.expired = false;
+  const expired = S.expired;
   const foot = `<p class="small muted auth-foot">Your data stays in <code>${esc(st.data_dir || 'your data folder')}</code> – no cloud.${st.version ? ' · v' + esc(st.version) : ''}</p>`;
   if (st.setup_needed) {
     app.innerHTML = `<div class="auth-wrap"><form class="auth-card" id="setup-form" autocomplete="on" novalidate>${BRAND}<h1>Welcome 👋</h1><p class="muted">Create your boss account. You can add team members later.</p>
@@ -194,11 +195,11 @@ async function renderLogin(app) {
   };
 }
 async function enterApp(token) {
-  api.token.set(token); await bootstrap();
+  api.token.set(token); S.expired = false; await bootstrap();
   if (route()[0] === 'login') location.hash = '#/today';
   render();
 }
-A.logout = async () => { try { await api.post('auth/logout', {}, { noAuthRedirect: true }); } catch { /* ignore */ } api.token.set(null); S.me = null; S.d = {}; render(); };
+A.logout = async () => { try { await api.post('auth/logout', {}, { noAuthRedirect: true }); } catch { /* ignore */ } api.token.set(null); S.expired = false; S.me = null; S.d = {}; render(); };
 A.changePassword = () => openForm({
   title: 'Change password', saveLabel: 'Change password', fields: [], vals: {},
   extra: `${pwField('cp_old', 'Current password', 'current-password')}${pwField('cp_new', 'New password (min. 8 characters)', 'new-password')}${pwField('cp_new2', 'Repeat new password', 'new-password')}`,
