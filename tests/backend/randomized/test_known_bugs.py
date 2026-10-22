@@ -4,7 +4,8 @@ Each test states the *correct* behaviour. Fixed bugs are plain tests; a bug that
 `xfail(strict=True)`: it documents the bug today and turns red (XPASS) the moment it is fixed, which is the
 signal to delete the marker.
 
-Fixed in 0.4.0: input validation (dates, numbers, ranges, lone surrogates) and VAT rounding.
+Fixed in 0.4.0: input validation (dates, numbers, ranges, lone surrogates), VAT rounding, member visibility of
+projects/tasks/rates, member-set billing fields and same-second token invalidation.
 """
 
 import pytest
@@ -115,11 +116,6 @@ def test_pdf_of_draft_without_customer_works(api, coll):
 
 
 # ------------------------------------------------------------------ authentication
-@pytest.mark.xfail(
-    strict=True,
-    reason="Tokens use whole-second `iat`; a token issued in the same second as a password "
-    "change is still accepted (core/service/auth.py: `claims['iat'] < pw_changed`)",
-)
 def test_password_change_invalidates_tokens_issued_in_the_same_second(api, monkeypatch):
     class Frozen:
         @staticmethod
@@ -136,11 +132,6 @@ def test_password_change_invalidates_tokens_issued_in_the_same_second(api, monke
 
 
 # ------------------------------------------------------------------ member visibility
-@pytest.mark.xfail(
-    strict=True,
-    reason="GET /projects/{id} returns the full record (rate, notes, budget) to a member, "
-    "even for projects they are not assigned to; GET /projects hides both (core/service/records.py get)",
-)
 def test_member_cannot_read_unassigned_project_details(api):
     _boss(api)
     member = _member(api)
@@ -152,11 +143,6 @@ def test_member_cannot_read_unassigned_project_details(api):
     assert r.status_code in (403, 404), "...so it must be hidden by id as well"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="GET /tasks returns every task incl. `rate` and tasks of projects the member is "
-    "not assigned to; project rates are hidden from members, task rates are not",
-)
 def test_member_task_list_hides_rates_and_unassigned_projects(api):
     _boss(api)
     member = _member(api)
@@ -168,12 +154,6 @@ def test_member_task_list_hides_rates_and_unassigned_projects(api):
 
 
 # ------------------------------------------------------------------ mass assignment
-@pytest.mark.xfail(
-    strict=True,
-    reason="A member can set `rate` and `invoice_id` on their own time entries (mass "
-    "assignment through the Entry model). `rate` overrides every other rate when the boss bills the "
-    "time; `invoice_id` hides hours from invoicing. Both should be boss/system-only (core/service/records.py _write)",
-)
 def test_member_cannot_set_billing_fields_on_own_entries(api):
     _boss(api)
     member = _member(api)

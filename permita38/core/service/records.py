@@ -33,9 +33,10 @@ class RecordService:
         if coll in ("entries", "absences"):
             rows = [r for r in rows if r.get("user_id") == me["id"]]
         elif coll == "projects":
-            rows = [p for p in rows if not p.get("member_ids") or me["id"] in p["member_ids"]]
-            keys = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
-            rows = [{k: p[k] for k in keys if k in p} for p in rows]
+            rows = [_member_project_view(p) for p in rows if _project_visible(p, me)]
+        elif coll == "tasks":
+            visible = {p["id"] for p in self.store.list("projects") if _project_visible(p, me)}
+            rows = [_member_task_view(t) for t in rows if t.get("project_id") in visible]
         return rows
 
     def get(self, me: dict, coll: str, rid: str) -> dict:
@@ -48,6 +49,16 @@ class RecordService:
                 raise ServiceError(403, "Forbidden")
             if coll in ("entries", "absences") and rec.get("user_id") != me["id"]:
                 raise ServiceError(403, "Forbidden")
+            if coll == "projects":
+                if not _project_visible(rec, me):
+                    raise ServiceError(404, "Not found")  # do not reveal that it exists
+                return _member_project_view(rec)
+            if coll == "tasks":
+                pid = rec.get("project_id")
+                project = self.store.get("projects", pid) if isinstance(pid, str) and _valid_id(pid) else None
+                if not project or not _project_visible(project, me):
+                    raise ServiceError(404, "Not found")
+                return _member_task_view(rec)
         return rec
 
     def create(self, me: dict, coll: str, data: dict) -> dict:
@@ -70,6 +81,11 @@ class RecordService:
             if old and old.get("user_id") != me["id"]:
                 raise ServiceError(403, "Forbidden")
             data["user_id"] = me["id"]
+            if coll == "entries":  # billing fields are boss/system-only: a member must not set rates or hide hours
+                for k in _ENTRY_BILLING_FIELDS:
+                    data.pop(k, None)
+                    if old and k in old:
+                        data[k] = old[k]
         if coll in ("offers", "invoices"):
             self._check_vat_rates(data.get("vat_rate"), *(ln.get("vat") for ln in data.get("lines") or []))
             data = self.prepare_document(data, old)
@@ -153,6 +169,23 @@ class RecordService:
         if me["role"] == "boss":
             return [public_user(u) for u in users]
         return [{"id": u["id"], "name": u.get("name"), "role": u.get("role")} for u in users]
+
+
+_ENTRY_BILLING_FIELDS = ("rate", "invoice_id")
+_MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
+
+
+def _project_visible(project: dict, me: dict) -> bool:
+    return not project.get("member_ids") or me["id"] in project["member_ids"]
+
+
+def _member_project_view(project: dict) -> dict:
+    """Members see which projects exist for them, never rates, budgets or internal notes."""
+    return {k: project[k] for k in _MEMBER_PROJECT_KEYS if k in project}
+
+
+def _member_task_view(task: dict) -> dict:
+    return {k: v for k, v in task.items() if k != "rate"}
 
 
 def _valid_id(rid: str) -> bool:

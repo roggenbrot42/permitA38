@@ -24,6 +24,7 @@ from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, pr
 from permita38.api.server import get_app
 from permita38.core.config import Config
 from permita38.core.service import auth as auth_module
+from permita38.core.service import throttle as throttle_module
 
 from . import oracle
 from .conftest import FakeClock
@@ -124,6 +125,8 @@ class ApiMachine(RuleBasedStateMachine):
         self.clock = FakeClock(time.time())
         self._real_time = auth_module.time
         auth_module.time = self.clock.as_module()
+        self._real_throttle_time = throttle_module.time
+        throttle_module.time = self.clock.as_module()
         cfg = Config(data_dir=self.tmp / "data", secret_key="stateful-secret-key", web_dir=None)
         self.app = get_app(cfg)
         self.http = TestClient(self.app)
@@ -154,6 +157,7 @@ class ApiMachine(RuleBasedStateMachine):
 
     def teardown(self):
         auth_module.time = self._real_time
+        throttle_module.time = self._real_throttle_time
         self.http.__exit__(None, None, None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
