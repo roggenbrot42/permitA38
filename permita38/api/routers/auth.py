@@ -31,8 +31,14 @@ class LoginPayload(BaseModel):
 
 
 class LoginResult(BaseModel):
-    token: str
-    user: UserOut
+    """Either a session (`token` + `user`) or, for accounts with two-factor authentication, a challenge
+    (`mfa_required` + `mfa_token`) that POST /auth/login/totp turns into a session."""
+
+    token: str | None = None
+    user: UserOut | None = None
+    mfa_required: bool = False
+    mfa_token: str | None = None
+    recovery_codes_left: int | None = None
 
 
 class ChangePasswordPayload(BaseModel):
@@ -73,9 +79,12 @@ def setup(payload: SetupPayload, services: ServicesDep):
 
 @router.post("/login", response_model=LoginResult, summary="sign in with username and password")
 def login(payload: LoginPayload, request: Request, response: Response, services: ServicesDep):
-    token, user = services.auth.login(payload.username, payload.password)
-    _set_cookie(response, token, services.auth.ttl, cookie_secure(request, services.config))
-    return {"token": token, "user": user}
+    step = services.totp.login(payload.username, payload.password)
+    if step.mfa_required:
+        return {"mfa_required": True, "mfa_token": step.mfa_token}
+    assert step.token is not None
+    _set_cookie(response, step.token, services.auth.ttl, cookie_secure(request, services.config))
+    return {"token": step.token, "user": step.user}
 
 
 @router.post("/logout", status_code=204, summary="sign out (clears the cookie)")

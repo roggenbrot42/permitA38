@@ -136,7 +136,8 @@ TABLES: dict[str, Table] = {
             "users",
             _cols(
                 _BASE + "username:str name:str role:str weekly_hours:float workdays:json default_rate:float "
-                "cost_rate:float color:str tracking_start:str active:bool password_hash:str pw_changed:int" + _EXTRA
+                "cost_rate:float color:str tracking_start:str active:bool password_hash:str pw_changed:int "
+                "totp_secret:str totp_enabled:bool totp_last_step:int totp_recovery:json" + _EXTRA
             ),
             (Index("idx_users_username", ("username",), unique=True),),
         ),

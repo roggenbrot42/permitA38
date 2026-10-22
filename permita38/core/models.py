@@ -166,6 +166,7 @@ class UserOut(Record):
     tracking_start: str | None = None
     active: bool | None = None
     has_password: bool | None = None
+    totp_enabled: bool | None = None
 
 
 class UserIn(BaseModel):

@@ -13,6 +13,7 @@ from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.settings import SettingsService
 from permita38.core.service.time import TimeService
+from permita38.core.service.totp import TotpService
 
 COOKIE_NAME = "authorization"
 
@@ -22,6 +23,7 @@ class Services:
     config: Config
     store: Repository
     auth: AuthService
+    totp: TotpService
     records: RecordService
     sales: SalesService
     time: TimeService
@@ -31,10 +33,12 @@ class Services:
     def create(cls, config: Config) -> "Services":
         store = create_repository(config)
         records = RecordService(store)
+        auth = AuthService(store, config.secret_key, config.token_ttl_hours)
         return cls(
             config=config,
             store=store,
-            auth=AuthService(store, config.secret_key, config.token_ttl_hours),
+            auth=auth,
+            totp=TotpService(auth),
             records=records,
             sales=SalesService(store, records),
             time=TimeService(store),
