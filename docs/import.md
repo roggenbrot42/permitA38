@@ -78,8 +78,10 @@ serves it instead of a new rendering. Unmatched PDFs are listed in the report.
 - The dry run and the import use the same code, so they report the same counts.
 - An import with any error row writes nothing. Fix the rows (or the mapping) and run again.
 - Each run is a batch. `GET /api/import/batches` lists them and `POST /api/import/batches/{id}/undo` removes the
-  records of a batch. Undo is refused when a record of the batch changed or was deleted since the import, and for
-  batches that overwrote documents. The number counter is not moved back.
+  records of a batch. Undo is refused when a record of the batch changed or was deleted since the import, when an
+  imported customer is still used by a record outside the batch, and for batches that overwrote documents.
+
+**Undo does not revert the number counter.** Example: an import of RE-2026-1001 to RE-2026-1043 moves the next invoice number to RE-2026-1044. After an undo those documents are gone, but the next number stays 1044, so 1001 to 1043 are a gap that has to be explained. Setting the counter back is a risky change: `PUT /api/numbering` asks for confirmation (`backwards`) and should only be used with your advisor's agreement.
 
 ## Accounting hook
 

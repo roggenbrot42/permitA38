@@ -65,6 +65,9 @@ All routes are for the boss only.
 | `PUT /api/numbering` | apply a change: `pattern`, `reset`, `next` (a number), `reason`, `confirm` |
 | `GET /api/numbering/log?type=invoice` | audit trail of every change |
 
+`PUT /api/settings` refuses to change the numbering settings (pattern, reset, shared sequence) with a 400 that
+points here, so every change goes through the checks. The web page is Settings → Numbering (`#/numbering`).
+
 `PUT /api/numbering` returns **409** with the warnings when a change is risky and `confirm` is not `true`. Nothing
 is written in that case.
 
