@@ -541,6 +541,12 @@ class PlanningService:
         return eng.entitlement(world, user, year)
 
     # ------------------------------------------------------------------ writes: apply, scenarios, extension
+    def _check_absence(self, absence: dict) -> None:
+        if not self.store.get("users", absence.get("user_id") or ""):
+            raise ServiceError(422, "Unknown person for an absence")
+        if absence.get("end") and absence.get("start") and absence["end"] < absence["start"]:
+            raise ServiceError(422, "The end must not be before the start")
+
     def apply(self, changes: dict, today: date | None = None) -> dict:
         """Write a change set (absences and commitment periods/hours) in one transaction."""
         applied = 0
@@ -557,19 +563,19 @@ class PlanningService:
                             **old,
                             **{k: ch[k] for k in ("user_id", "kind", "start", "end") if ch.get(k) is not None},
                         }
+                        self._check_absence(merged)
                         self.store.save("absences", merged)
                 else:
                     if ch.get("delete") or not ch.get("user_id") or not ch.get("start"):
                         raise ServiceError(422, "A new absence needs a person and a start date")
-                    self.store.save(
-                        "absences",
-                        dict(
-                            user_id=ch["user_id"],
-                            kind=ch.get("kind") or "vacation",
-                            start=ch["start"],
-                            end=ch.get("end") or ch["start"],
-                        ),
+                    new = dict(
+                        user_id=ch["user_id"],
+                        kind=ch.get("kind") or "vacation",
+                        start=ch["start"],
+                        end=ch.get("end") or ch["start"],
                     )
+                    self._check_absence(new)
+                    self.store.save("absences", new)
                 applied += 1
             converted = {c.get("offer_id") for c in self.store.list("contracts")}
             for c in changes.get("commitments") or []:
@@ -629,7 +635,7 @@ class PlanningService:
         old_end = proj.get("end") or proj.get("start")
         if not old_end:
             raise ServiceError(422, "Set the project start first")
-        if new_end < old_end:
+        if new_end <= old_end:
             raise ServiceError(422, "A project can only be extended (new end on or after the current end)")
         ext = list(proj.get("extensions") or [])
         ext.append(

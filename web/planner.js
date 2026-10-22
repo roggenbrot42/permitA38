@@ -134,7 +134,7 @@
       const sel = P.sel === key ? ' sel' : '';
       const dim = mine ? '' : ' dim';
       const hours = c.hours_per_week ? `${c.hours_per_week} h/week` : `${c.total_hours || 0} h total`;
-      const row = `<div class="pln-row${dim}"><div class="pln-label"><button type="button" class="pln-pick${sel}" data-a="plnSelect" data-key="${key}">${esc(it.title)}</button><div class="small muted">${esc(hours)}</div></div>
+      const row = `<div class="pln-row${dim}"><div class="pln-label"><button type="button" class="pln-pick${sel}" data-a="plnSelect" data-key="${esc(key)}">${esc(it.title)}</button><div class="small muted">${esc(hours)}</div></div>
         <div class="pln-lane" data-lane="com" style="width:${horizon() * DW}px">${cells()}${bar(c.start, c.end, `${it.sub}${P.com[key] ? ' draft' : ''}${sel}`, `${it.title}: ${fmtDate(c.start)} – ${fmtDate(c.end)}, ${hours}`, { kind: 'com', key, id: key })}</div></div>`;
       html += row;
     }
@@ -191,7 +191,7 @@
     const users = S.d.users.filter(u => u.active !== false);
     const n = dirty();
     return `<div class="pln-toolbar">
-      <div class="auto"><label for="plnWho">Who</label><select id="plnWho" data-change="plnWho"><option value="">Whole team</option>${users.map(u => `<option value="${u.id}" ${u.id === userId() ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
+      <div class="auto"><label for="plnWho">Who</label><select id="plnWho" data-change="plnWho"><option value="">Whole team</option>${users.map(u => `<option value="${esc(u.id)}" ${u.id === userId() ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
       <div class="auto"><label for="plnHor">Horizon</label><select id="plnHor" data-change="plnHorizon">${[13, 26, 52].map(x => `<option value="${x}" ${x === P.weeks ? 'selected' : ''}>${x} weeks</option>`).join('')}</select></div>
       <div class="pln-kpis small"><span>Free (worst case): <b>${num(tot.free_worst_case || 0, 0)} h</b></span><span>Over-capacity weeks: <b>${tot.over_weeks || 0}</b></span><span>Revenue: <b>${eur(tot.revenue || 0)}</b></span></div>
     </div>
@@ -228,7 +228,7 @@
       </div>
     </div>
     <div class="card"><h2>Week by week</h2><table><tr><th>Week of</th><th class="num">Capacity</th><th class="num">Contracts</th><th class="num">Offers</th><th class="num">Free</th><th class="num">Util.</th><th>Basis</th><th class="num">Revenue</th><th>Notes</th></tr>
-      ${W.map(w => `<tr title="${esc(explain(w))}"><td class="nowrap">${fmtDate(w.week)}</td><td class="num">${num(w.capacity, 1)}</td><td class="num">${num(w.confirmed, 1)}</td><td class="num muted">${w.binding_offers ? num(w.binding_offers, 1) : ''}</td><td class="num ${w.free_worst_case < 0 ? 'free-bad' : 'free-good'}">${num(w.free_worst_case, 1)}</td><td class="num ${statusClass(w.status)}">${pct(w.utilisation)}</td><td><span class="pill basis-${w.basis}">${esc(BASIS_LABEL[w.basis] || w.basis)}</span></td><td class="num">${eur(w.revenue)}</td><td class="small muted">${w.events.map(esc).join(', ')}</td></tr>`).join('')}</table></div>`;
+      ${W.map(w => `<tr title="${esc(explain(w))}"><td class="nowrap">${esc(fmtDate(w.week))}</td><td class="num">${num(w.capacity, 1)}</td><td class="num">${num(w.confirmed, 1)}</td><td class="num muted">${w.binding_offers ? num(w.binding_offers, 1) : ''}</td><td class="num ${w.free_worst_case < 0 ? 'free-bad' : 'free-good'}">${num(w.free_worst_case, 1)}</td><td class="num ${statusClass(w.status)}">${pct(w.utilisation)}</td><td><span class="pill basis-${w.basis}">${esc(BASIS_LABEL[w.basis] || w.basis)}</span></td><td class="num">${eur(w.revenue)}</td><td class="small muted">${w.events.map(esc).join(', ')}</td></tr>`).join('')}</table></div>`;
   }
   const BASIS_LABEL = { contract: 'contracted', 'offer-binding': 'open offers', intended: 'assumed' };
 
@@ -493,7 +493,7 @@
     const p = t.project;
     const period = p.start && p.end ? `${fmtDate(p.start)} – ${fmtDate(p.end)}` : 'not set';
     const hint = p.start && p.end ? '' : ' <span class="pill warn">set the dates</span>';
-    const ext = (t.extensions || []).slice().reverse().map(e => `<li>${e.kind === 'offer' ? 'Accepted offer' : 'Manual extension'}: end ${e.from ? fmtDate(e.from) : '–'} → ${fmtDate(e.to)}${e.reason ? ' – ' + esc(e.reason) : ''}</li>`).join('');
+    const ext = (t.extensions || []).slice().reverse().map(e => `<li>${e.kind === 'offer' ? 'Accepted offer' : 'Manual extension'}: end ${e.from ? esc(fmtDate(e.from)) : '–'} → ${esc(fmtDate(e.to))}${e.reason ? ' – ' + esc(e.reason) : ''}</li>`).join('');
     const warn = (t.warnings || []).map(w => `<li>${esc(w.message)}</li>`).join('');
     return `<div class="card pln-proj"><h2>Project period</h2>
       <div>Period: <b>${esc(period)}</b>${hint}</div>

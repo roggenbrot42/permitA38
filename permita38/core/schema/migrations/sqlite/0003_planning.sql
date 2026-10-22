@@ -8,17 +8,15 @@ ALTER TABLE "projects" ADD COLUMN "start" TEXT;
 ALTER TABLE "projects" ADD COLUMN "end" TEXT;
 ALTER TABLE "projects" ADD COLUMN "extensions" TEXT;
 
-UPDATE "projects" SET "start" = (
-    SELECT MIN(t.x) FROM (
-        SELECT "start" AS x FROM "contracts" WHERE "project_id" = "projects"."id"
-        UNION ALL SELECT "date" AS x FROM "entries" WHERE "project_id" = "projects"."id"
-    ) AS t
-), "end" = (
-    SELECT MAX(t.x) FROM (
-        SELECT "end" AS x FROM "contracts" WHERE "project_id" = "projects"."id"
-        UNION ALL SELECT "date" AS x FROM "entries" WHERE "project_id" = "projects"."id"
-    ) AS t
-);
+-- Backfill without derived tables (a derived table may not see the outer row in MariaDB): contracts first, then
+-- time entries widen the period where they lie outside it.
+UPDATE "projects" SET "start" = (SELECT MIN(contracts."start") FROM "contracts" WHERE contracts."project_id" = "projects"."id"), "end" = (SELECT MAX(contracts."end") FROM "contracts" WHERE contracts."project_id" = "projects"."id");
+UPDATE "projects" SET "start" = (SELECT MIN(entries."date") FROM "entries" WHERE entries."project_id" = "projects"."id")
+WHERE EXISTS (SELECT 1 FROM "entries" e0 WHERE e0."project_id" = "projects"."id")
+  AND ("start" IS NULL OR "start" > (SELECT MIN(e1."date") FROM "entries" e1 WHERE e1."project_id" = "projects"."id"));
+UPDATE "projects" SET "end" = (SELECT MAX(entries."date") FROM "entries" WHERE entries."project_id" = "projects"."id")
+WHERE EXISTS (SELECT 1 FROM "entries" e0 WHERE e0."project_id" = "projects"."id")
+  AND ("end" IS NULL OR "end" < (SELECT MAX(e1."date") FROM "entries" e1 WHERE e1."project_id" = "projects"."id"));
 
 CREATE TABLE "plan_scenarios" (
     "id" TEXT PRIMARY KEY,

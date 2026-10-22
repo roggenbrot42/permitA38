@@ -402,6 +402,25 @@ def test_apply_needs_confirmation_and_is_atomic(app_client):
     assert len(c.get("/api/absences").json()) == before  # the absence was rolled back with it
 
 
+def test_apply_rejects_inverted_or_unknown_absences_and_rolls_back(app_client):
+    c = app_client
+    me = c.get("/api/auth/me").json()
+    a = c.post(
+        "/api/absences", json={"user_id": me["id"], "kind": "vacation", "start": "2026-03-02", "end": "2026-03-06"}
+    )
+    aid = a.json()["id"]
+    # moving only the start behind the stored end would store an inverted range
+    r = c.post("/api/plan/apply", json={"confirm": True, "changes": {"absences": [{"id": aid, "start": "2026-04-01"}]}})
+    assert r.status_code == 422
+    r = c.post(
+        "/api/plan/apply",
+        json={"confirm": True, "changes": {"absences": [{"user_id": "nobody123456", "start": "2026-04-01"}]}},
+    )
+    assert r.status_code == 422
+    stored = [x for x in c.get("/api/absences").json() if x["id"] == aid][0]
+    assert (stored["start"], stored["end"]) == ("2026-03-02", "2026-03-06")
+
+
 def test_scenario_crud_and_apply(app_client):
     c = app_client
     me = c.get("/api/auth/me").json()
@@ -527,13 +546,22 @@ def test_revision_two_database_is_upgraded_and_projects_get_their_period(tmp_pat
     raw.execute(
         "INSERT INTO entries (id, project_id, date, minutes) VALUES ('entry0000001', 'proj00000001', '2026-01-20', 60)"
     )
+    raw.execute("INSERT INTO projects (id, name, status) VALUES ('proj00000003', 'Late', 'active')")
+    raw.execute(
+        "INSERT INTO entries (id, project_id, date, minutes) VALUES ('entry0000002', 'proj00000001', '2026-03-15', 60)"
+    )
+    raw.execute(
+        "INSERT INTO entries (id, project_id, date, minutes) VALUES ('entry0000003', 'proj00000003', '2026-05-04', 60)"
+    )
     raw.commit()
     raw.close()
     repo = SQLiteRepository(data)
     repo.startup()
     assert repo.get_revision() == CURRENT_REVISION == 3
     p = repo.get("projects", "proj00000001")
-    assert p["start"] == "2026-01-20" and p["end"] == "2026-03-01"
+    assert p["start"] == "2026-01-20" and p["end"] == "2026-03-15"  # entries widen the contract period
+    late = repo.get("projects", "proj00000003")
+    assert late["start"] == late["end"] == "2026-05-04"  # entries only
     assert repo.get("projects", "proj00000002").get("start") is None
     assert list((data / "backups").glob("pre-migration-r2-to-r3-*.sqlite3"))
     repo.close()
