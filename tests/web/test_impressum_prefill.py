@@ -11,7 +11,6 @@ import pytest
 
 pytest.importorskip("playwright.sync_api")
 import uvicorn  # noqa: E402
-from playwright.sync_api import sync_playwright  # noqa: E402
 
 from permita38.api.server import get_app  # noqa: E402
 from permita38.core.config import Config  # noqa: E402
@@ -70,17 +69,6 @@ class Server:
     def stop(self):
         self.server.should_exit = True
         self.thread.join(5)
-
-
-@pytest.fixture(scope="module")
-def browser():
-    exe = chromium()
-    if not exe:
-        pytest.skip("no Chromium available (set PERMITA38_CHROMIUM)")
-    with sync_playwright() as p:
-        b = p.chromium.launch(executable_path=exe, args=["--no-sandbox"])
-        yield b
-        b.close()
 
 
 @pytest.fixture
