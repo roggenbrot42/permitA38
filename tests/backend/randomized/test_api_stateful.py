@@ -354,6 +354,12 @@ class ApiMachine(RuleBasedStateMachine):
             exp["member_ids"] = list(body.get("member_ids") or [])
         if coll in ("entries", "absences") and actor_user["role"] != "boss":
             exp["user_id"] = actor_user["id"]
+        if coll == "entries" and actor_user["role"] != "boss":
+            # billing fields are boss/system-only: a member can neither set nor change them
+            for k in ("rate", "invoice_id"):
+                exp.pop(k, None)
+                if old and k in old:
+                    exp[k] = old[k]
         if coll == "entries" and old and old.get("invoice_id") and "invoice_id" not in exp:
             exp["invoice_id"] = old["invoice_id"]
         return exp
@@ -657,8 +663,6 @@ class ApiMachine(RuleBasedStateMachine):
     @rule(data=st.data(), coll=st.sampled_from((*CRUD, "offers", "invoices")))
     def get_one(self, data, coll):
         self.tick()
-        if coll == "projects":
-            return  # GET /projects/{id} for members is checked by a known-bug regression test
         s = data.draw(self.actor())
         rid = data.draw(st.sampled_from(list(self.m[coll]) + [DEAD_ID]))
         r = self.call("GET", f"/{coll}/{rid}", s)
@@ -668,6 +672,16 @@ class ApiMachine(RuleBasedStateMachine):
         old, me = self.m[coll].get(rid), self.m["users"][s.user_id]
         if old is None:
             assert r.status_code == 404
+        elif me["role"] != "boss" and coll in ("projects", "tasks"):
+            pid = rid if coll == "projects" else old.get("project_id")
+            proj = self.m["projects"].get(pid)
+            if proj is None or (proj["member_ids"] and me["id"] not in proj["member_ids"]):
+                assert r.status_code == 404  # existence of unassigned projects/tasks is not revealed
+            else:
+                assert r.status_code == 200
+                body = r.json()
+                assert body["id"] == rid
+                assert not ({"rate", "notes", "budget_hours"} & set(body)), body
         elif me["role"] != "boss" and (
             coll not in ("projects", "tasks", "entries", "absences")
             or (coll in MEMBER_OWN and old.get("user_id") != me["id"])
@@ -1083,6 +1097,9 @@ class ApiMachine(RuleBasedStateMachine):
             plist = self.call("GET", "/projects", ms).json()
             assert {p["id"] for p in plist} == visible
             assert all(not ({"rate", "notes", "budget_hours"} & set(p)) for p in plist)
+            tlist = self.call("GET", "/tasks", ms).json()
+            assert {t["id"] for t in tlist} == {i for i, t in self.m["tasks"].items() if t.get("project_id") in visible}
+            assert all("rate" not in t for t in tlist)
             assert all(set(u) <= {"id", "name", "role"} for u in self.call("GET", "/users", ms).json())
 
     def dashboard_matches_model(self):
