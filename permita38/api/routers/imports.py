@@ -33,6 +33,7 @@ def preview(
     mapping: Annotated[str | None, Form(max_length=20000)] = None,
     on_duplicate: Annotated[Literal["skip", "overwrite"] | None, Form()] = None,
     accept_unverified: Annotated[bool, Form()] = False,
+    merge_similar: Annotated[bool, Form()] = False,
     decimal: Annotated[Literal["auto", "comma", "point"] | None, Form()] = None,
     date_order: Annotated[Literal["dmy", "mdy"] | None, Form()] = None,
     sheet: Annotated[str | None, Form(max_length=200)] = None,
@@ -41,6 +42,7 @@ def preview(
     options = {
         "on_duplicate": on_duplicate,
         "accept_unverified": accept_unverified,
+        "merge_similar": merge_similar,
         "decimal": decimal,
         "date_order": date_order,
     }
@@ -58,6 +60,7 @@ def run(
     mapping: Annotated[str | None, Form(max_length=20000)] = None,
     on_duplicate: Annotated[Literal["skip", "overwrite"] | None, Form()] = None,
     accept_unverified: Annotated[bool, Form()] = False,
+    merge_similar: Annotated[bool, Form()] = False,
     decimal: Annotated[Literal["auto", "comma", "point"] | None, Form()] = None,
     date_order: Annotated[Literal["dmy", "mdy"] | None, Form()] = None,
     sheet: Annotated[str | None, Form(max_length=200)] = None,
@@ -66,6 +69,7 @@ def run(
     options = {
         "on_duplicate": on_duplicate,
         "accept_unverified": accept_unverified,
+        "merge_similar": merge_similar,
         "decimal": decimal,
         "date_order": date_order,
     }

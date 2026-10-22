@@ -4456,6 +4456,11 @@
             "title": "Accept Unverified",
             "default": false
           },
+          "merge_similar": {
+            "type": "boolean",
+            "title": "Merge Similar",
+            "default": false
+          },
           "decimal": {
             "anyOf": [
               {
@@ -4566,6 +4571,11 @@
           "accept_unverified": {
             "type": "boolean",
             "title": "Accept Unverified",
+            "default": false
+          },
+          "merge_similar": {
+            "type": "boolean",
+            "title": "Merge Similar",
             "default": false
           },
           "decimal": {

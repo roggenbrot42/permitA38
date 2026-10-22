@@ -121,10 +121,14 @@ def _decimal_separator(text: str, mode: str) -> str:
     has_c, has_p = "," in text, "." in text
     if has_c and has_p:
         return "," if text.rfind(",") > text.rfind(".") else "."
-    if has_c:
-        return "," if text.count(",") == 1 else ""
-    if has_p:
-        return "." if text.count(".") == 1 else ""
+    for ch, present in ((",", has_c), (".", has_p)):
+        if present:
+            if text.count(ch) != 1:
+                return ""  # repeated: thousands separators
+            whole, _, frac = text.partition(ch)
+            if len(frac) == 3 and whole.isdigit() and 1 <= len(whole) <= 3 and int(whole) > 0:
+                raise CellError(f"is ambiguous ({text} could be a thousands separator); set the decimal option")
+            return ch
     return ""
 
 

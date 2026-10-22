@@ -204,7 +204,13 @@ class ImportService:
             mapping, file_options = parse_mapping_file(mapping_raw)
         except ValueError:
             raise ServiceError(400, "The mapping file is not valid JSON") from None
-        options = {"decimal": "auto", "date_order": "dmy", "on_duplicate": "skip", "accept_unverified": False}
+        options = {
+            "decimal": "auto",
+            "date_order": "dmy",
+            "on_duplicate": "skip",
+            "accept_unverified": False,
+            "merge_similar": False,
+        }
         options.update(file_options)
         options.update({k: v for k, v in (options_raw or {}).items() if v is not None})
         if not mapping:
@@ -247,7 +253,7 @@ class ImportService:
 
     # ------------------------------------------------------------------ customers
     def _plan_customers(self, rows: list[_Row], options: dict) -> tuple[list[_Outcome], list[dict]]:
-        index = _CustomerIndex(self.store.list("customers"))
+        index = _CustomerIndex(self.store.list("customers"), bool(options.get("merge_similar")))
         outcomes = []
         new: list[dict] = []
         for row in rows:
@@ -269,6 +275,7 @@ class ImportService:
                 out.action = "create"
                 out.record = rec
                 out.customer = {"action": "create", "id": rec["id"], "score": score, "name": rec.get("name")}
+                _note_similar(out)
                 new.append(rec)
                 index.add(rec)
             outcomes.append(out)
@@ -277,7 +284,7 @@ class ImportService:
     # ------------------------------------------------------------------ documents and expenses
     def _plan_documents(self, doc_type, rows, index, options, pdf_entries):
         settings = effective_settings(self.store.settings())
-        customers = _CustomerIndex(self.store.list("customers"))
+        customers = _CustomerIndex(self.store.list("customers"), bool(options.get("merge_similar")))
         existing_numbers = {}
         existing_external = set()
         coll = doc_type
@@ -311,6 +318,7 @@ class ImportService:
                 outcomes.append(out)
                 continue
             out.customer = customer_info
+            _note_similar(out)
             out.totals = record.pop("_totals", None)
             out.messages.extend(record.pop("_messages", []))
             if doc_type == "expenses":
@@ -366,7 +374,7 @@ class ImportService:
         values = members[0].values
         if doc_type == "expenses":
             return self._expense(values, options, settings), None
-        number = text_or_none(values.get("number"), 60, "number")
+        number = text_or_none(values.get("number"), 50, "number")
         if number is None:
             raise V.CellError("number is missing")
         day = V.parse_date(values.get("date"), options["date_order"])
@@ -559,6 +567,15 @@ class ImportService:
 
 
 # ---------------------------------------------------------------------- helpers
+def _note_similar(out: _Outcome) -> None:
+    c = out.customer
+    if c and c["action"] == "create" and c["score"] >= FUZZY_MATCH:
+        out.messages.append(
+            f"new customer {c['name']!r} looks similar to an existing one (score {c['score']}); "
+            "created as new, enable merge_similar to merge instead"
+        )
+
+
 def text_or_none(value, limit: int, what: str) -> str | None:
     return V.text(value, limit, what)
 
@@ -611,7 +628,8 @@ def _customer_record(values: dict, required: bool = False) -> dict:
 class _CustomerIndex:
     """Matches customers by VAT ID, tax number, email, customer number, then normalised name (exact or >= 0.9)."""
 
-    def __init__(self, existing: list[dict]):
+    def __init__(self, existing: list[dict], merge_similar: bool = False):
+        self.merge_similar = merge_similar
         self.items: list[dict] = []
         for c in existing:
             self.add(c)
@@ -633,10 +651,15 @@ class _CustomerIndex:
             other = _normalized_name(c.get("name", ""))
             if not other:
                 continue
-            score = 1.0 if other == name else SequenceMatcher(None, name, other).ratio()
+            if other == name:
+                score = 1.0
+            elif re.findall(r"\d+", name) != re.findall(r"\d+", other):
+                continue  # "Schmidt Bau 1" and "Schmidt Bau 2" are different customers
+            else:
+                score = SequenceMatcher(None, name, other).ratio()
             if score > best_score:
                 best, best_score = c, score
-        if best is not None and best_score >= FUZZY_MATCH:
+        if best is not None and (best_score == 1.0 or (best_score >= FUZZY_MATCH and self.merge_similar)):
             return best, round(best_score, 3)
         return None, round(best_score, 3)
 

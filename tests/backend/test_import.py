@@ -4,6 +4,7 @@ import io
 import json
 import zipfile
 from datetime import date
+from decimal import Decimal
 
 import pytest
 
@@ -267,13 +268,43 @@ def test_customer_matching_by_vat_id_email_and_fuzzy_name(store, svc):
         "A-3;01.01.2026;Schmit Bau;;;10;1,90;11,90\n"  # fuzzy name, >= 0.9: merged
         "A-4;01.01.2026;Völlig Neu;;;10;1,90;11,90\n"  # new
     )
+    # fuzzy matches are only merged on request; by default they are created as new and flagged
     report = svc.plan(_b(csv_text), "x.csv", "invoices")
-    actions = [r["customer"]["action"] for r in report["rows"]]
-    assert actions == ["merge", "merge", "merge", "create"]
+    assert [r["customer"]["action"] for r in report["rows"]] == ["merge", "merge", "create", "create"]
     assert report["rows"][2]["customer"]["score"] >= 0.9
+    assert "merge_similar" in " ".join(report["rows"][2]["messages"])
+    report = svc.plan(_b(csv_text), "x.csv", "invoices", options={"merge_similar": True})
+    assert [r["customer"]["action"] for r in report["rows"]] == ["merge", "merge", "merge", "create"]
     assert report["counts"]["customers_created"] == 1
-    svc.run(_b(csv_text), "x.csv", "invoices")
+    svc.run(_b(csv_text), "x.csv", "invoices", options={"merge_similar": True})
     assert len(store.list("customers")) == 3  # no duplicate customer was created
+
+
+def test_customers_differing_only_in_digits_are_never_merged(store, svc):
+    store.save("customers", dict(name="Schmidt Bau 1"))
+    csv_text = "Nummer;Datum;Kunde;Netto\nA-1;01.01.2026;Schmidt Bau 2;10\n"
+    report = svc.plan(_b(csv_text), "x.csv", "invoices", options={"merge_similar": True})
+    assert report["rows"][0]["customer"]["action"] == "create"
+
+
+def test_ambiguous_thousands_amount_is_rejected_in_auto_mode():
+    from permita38.core.service.importer import values as V
+
+    for text in ("1.500", "1,500", "999.999"):
+        with pytest.raises(V.CellError, match="ambiguous"):
+            V.parse_amount(text)
+    assert V.parse_amount("1.500", "comma") == Decimal("1500.00")
+    assert V.parse_amount("1.500", "point") == Decimal("1.50")
+    assert V.parse_amount("0.500") == Decimal("0.50")
+    assert V.parse_amount("1.500,00") == Decimal("1500.00")
+
+
+def test_xlsx_cell_reference_beyond_last_column_is_refused():
+    from permita38.core.service.importer import xlsx_reader as X
+
+    with pytest.raises(X.XlsxError):
+        X._col_index("AAAAAAA1")
+    assert X._col_index("XFD1") == 16383
 
 
 def test_duplicate_numbers_are_skipped_by_default_and_reimport_is_idempotent(store, svc):

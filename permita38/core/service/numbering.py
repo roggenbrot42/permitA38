@@ -162,14 +162,13 @@ class NumberingService:
     def observe_imported(self, coll: str, number: str, day: date) -> bool:
         """An imported document carries its own number: move the counter so the next number follows it.
 
-        Returns True if the next number changed (the importer reports this to the user).
+        Returns True if the counter moved. (No previews here: this runs once per imported row.)
         """
         cfg = self.config(coll)
         pattern = parse_pattern(cfg.pattern)
         n = pattern.match(number)
         if n is None:
             return False
-        before = self.preview(coll, 1)[0]
         current = self._last(cfg, pattern, day)
         if n <= current:
             return False
@@ -182,7 +181,7 @@ class NumberingService:
                 last_value=n,
             ),
         )
-        return self.preview(coll, 1)[0] != before
+        return True
 
     # ------------------------------------------------------------------ guarded changes
     def check(

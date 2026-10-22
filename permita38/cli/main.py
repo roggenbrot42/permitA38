@@ -39,6 +39,7 @@ def _import_documents(services, args) -> None:
     options = {
         "on_duplicate": args.on_duplicate,
         "accept_unverified": args.accept_unverified,
+        "merge_similar": args.merge_similar,
         "decimal": args.decimal,
         "date_order": args.date_order,
     }
@@ -107,6 +108,7 @@ def main(argv: list[str] | None = None):
     idp.add_argument("--pdfs", type=Path, help="zip of original PDFs named by document number")
     idp.add_argument("--dry-run", action="store_true", help="validate and report only; write nothing")
     idp.add_argument("--on-duplicate", choices=["skip", "overwrite"], default=None)
+    idp.add_argument("--merge-similar", action="store_true", help="merge customers whose names are >= 90% similar")
     idp.add_argument("--accept-unverified", action="store_true", help="import rows whose totals do not add up")
     idp.add_argument("--sheet", help="worksheet name for XLSX files (default: the first sheet)")
     idp.add_argument("--delimiter", help="CSV delimiter (default: detected)")

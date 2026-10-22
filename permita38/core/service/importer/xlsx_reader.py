@@ -18,8 +18,9 @@ NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 RNS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 PKG_RNS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 MAX_ENTRIES = 500
-MAX_UNPACKED = 200 * 1024 * 1024
+MAX_UNPACKED = 100 * 1024 * 1024
 MAX_RATIO = 100
+MAX_COLUMNS = 16384  # XFD, the last column Excel allows
 
 
 class XlsxError(ValueError):
@@ -64,6 +65,8 @@ def _col_index(ref: str) -> int:
     n = 0
     for ch in letters.group(0):
         n = n * 26 + (ord(ch) - 64)
+    if n > MAX_COLUMNS:
+        raise XlsxError("bad cell reference")
     return n - 1
 
 
