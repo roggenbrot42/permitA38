@@ -376,3 +376,66 @@ def test_random_garbage_never_escapes_as_an_unexpected_error(lines):
         assert len(result.occurrences) <= ics.MAX_OCCURRENCES
         for o in result.occurrences:
             assert len(o.summary) <= ics.MAX_TITLE_CHARS
+
+
+def test_google_style_export_golden():
+    raw = (FIXTURES / "google_style.ics").read_bytes()
+    result = parse_ics(raw, default_tz=BERLIN, window=(utc(2026, 3, 1), utc(2026, 4, 30)))
+    # Los Angeles: PST (UTC-8) until 8 Mar, then PDT (UTC-7). COUNT=3 includes the EXDATE'd 9 Mar,
+    # so the series is 2 Mar and 16 Mar only. The TRANSPARENT offsite entry is not busy.
+    assert [(o.start, o.end, o.summary) for o in result.occurrences] == [
+        ("2026-03-02T18:00:00Z", "2026-03-02T19:00:00Z", "Weekly sync (fake)"),
+        ("2026-03-16T17:00:00Z", "2026-03-16T18:00:00Z", "Weekly sync (fake)"),
+        ("2026-03-20T16:00:00Z", "2026-03-20T17:00:00Z", "Customer call (fake)"),
+    ]
+    assert result.warnings == ()
+
+
+def test_outlook_style_export_with_windows_zone_names_golden():
+    raw = (FIXTURES / "outlook_style.ics").read_bytes()
+    result = parse_ics(raw, default_tz=BERLIN, window=(utc(2026, 3, 1), utc(2026, 4, 30)))
+    # "W. Europe Standard Time" is not an IANA name: the VTIMEZONE offset (+01:00, standard time) is used and the
+    # result is flagged as approximate. 24 Mar is still standard time: 09:30 local = 08:30 UTC.
+    assert [(o.start, o.end, o.all_day, o.summary, o.ooo) for o in result.occurrences] == [
+        ("2026-03-24T08:30:00Z", "2026-03-24T09:15:00Z", False, "Design review (fake)", False),
+        ("2026-03-30", "2026-03-31", True, "Holiday (fake, out of office)", True),
+    ]
+    assert "approximate_timezone" in result.warnings
+
+
+@settings(max_examples=100, deadline=None)
+@given(
+    freq=st.sampled_from(["DAILY", "WEEKLY", "MONTHLY", "YEARLY"]),
+    interval=st.integers(min_value=1, max_value=13),
+    byday=st.lists(
+        st.sampled_from(["MO", "TU", "WE", "TH", "FR", "SA", "SU", "-1FR", "2MO", "+3TU"]), max_size=4, unique=True
+    ),
+    bymonthday=st.lists(st.sampled_from([1, 15, 28, -1, -2]), max_size=3, unique=True),
+    bysetpos=st.one_of(st.none(), st.sampled_from([1, -1, 2])),
+    start=st.dates(min_value=date(2020, 1, 1), max_value=date(2030, 12, 31)),
+)
+def test_expanded_dates_are_strictly_ascending_and_start_no_earlier_than_dtstart(
+    freq, interval, byday, bymonthday, bysetpos, start
+):
+    parts = [f"FREQ={freq}", f"INTERVAL={interval}"]
+    if byday:
+        parts.append("BYDAY=" + ",".join(byday))
+    if bymonthday:
+        parts.append("BYMONTHDAY=" + ",".join(str(x) for x in bymonthday))
+    if bysetpos is not None:
+        parts.append(f"BYSETPOS={bysetpos}")
+    try:
+        rule = parse_rule(";".join(parts))
+    except recurrence.RruleError:
+        return  # some combinations are rejected by design (for example an ordinal in a weekly rule)
+    seen: list[date] = []
+    ticks = iter(range(10**9))  # a small time budget: rules that match rarely must not scan forever
+    try:
+        for day in iter_dates(rule, start, lambda: float(next(ticks)), 3.0):
+            seen.append(day)
+            if len(seen) == 60:
+                break
+    except recurrence.ExpansionLimit:
+        pass
+    assert all(d >= start for d in seen)
+    assert all(a < b for a, b in zip(seen, seen[1:], strict=False))

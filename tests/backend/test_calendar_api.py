@@ -305,6 +305,15 @@ def soon_on(day: date, start_hour: int, end_hour: int) -> tuple[datetime, dateti
 
 def test_upload_defaults_count_toward_capacity_when_flags_are_absent(boss_client):
     data = ics(timed("df@example.test", "Default flags", *soon()))
-    r = boss_client.post("/api/calendars/upload", data={"name": "Defaults"}, files={"file": ("d.ics", data, "text/calendar")})
+    r = boss_client.post(
+        "/api/calendars/upload", data={"name": "Defaults"}, files={"file": ("d.ics", data, "text/calendar")}
+    )
     assert r.status_code == 200, r.text
     assert r.json()["busy_default"] is True and r.json()["all_day_blocks"] is False
+
+
+def test_openapi_contract_never_contains_the_secret(app, boss_client):
+    import json
+
+    connect(boss_client)
+    assert SECRET_TOKEN not in json.dumps(app.openapi())
