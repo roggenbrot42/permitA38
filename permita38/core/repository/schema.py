@@ -162,6 +162,6 @@ TABLES: dict[str, Table] = {
 }
 
 # internal per-user collections that are not exposed through the CRUD API
-INTERNAL_COLLECTIONS = ["timers"]
+INTERNAL_COLLECTIONS = ["timers", "plan_scenarios"]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]

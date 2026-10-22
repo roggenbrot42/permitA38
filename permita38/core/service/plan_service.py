@@ -147,14 +147,13 @@ class PlanningService:
 
     @staticmethod
     def _public_week(r: dict) -> dict:
+        """Precise week values; the keys of the earlier forecast contract are kept as aliases."""
         legacy = eng.week_summary_free(r)
         return {
-            **r,
             **legacy,
-            "revenue": r["revenue"],
-            "tentative_revenue": r["tentative_revenue"],
-            "free": legacy["free"],
-            "free_incl_tentative": legacy["free_incl_tentative"],
+            **r,
+            "free": r["free_after_confirmed"],
+            "free_incl_tentative": r["free_worst_case"],
         }
 
     def simulate(
