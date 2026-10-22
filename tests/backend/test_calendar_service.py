@@ -221,3 +221,13 @@ def test_mask_url_hides_the_secret_path():
     assert mask_url(SECRET_URL) == "https://calendar.example.test/…/****"
     assert SECRET_TOKEN not in mask_url(SECRET_URL)
     assert mask_url(None) is None
+
+
+def test_refresh_all_reports_status_without_urls(repo):
+    fetcher = FakeFetcher(ics(timed("r1@example.test", "Round", datetime(2026, 11, 3, 10), datetime(2026, 11, 3, 11))))
+    service = CalendarService(repo, fetcher, clock=lambda: FIXED_NOW)
+    source(repo, "srcall001", name="Work", kind="ics_url", url=SECRET_URL)
+    source(repo, "srcfile01", name="File", kind="ics_file")
+    report = service.refresh_all()
+    assert report == [("Work", "ok")]
+    assert SECRET_TOKEN not in repr(report)

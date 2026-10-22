@@ -297,6 +297,22 @@ class CalendarService:
             threads.append(thread)
         return threads
 
+    def refresh_all(self) -> list[tuple[str, str | None]]:
+        """Refresh every subscription now (used by ``permita38 calendar refresh``). Returns (name, status) pairs."""
+        out = []
+        for src in self.store.list("calendar_sources"):
+            if src.get("kind") != "ics_url":
+                continue
+            if self._begin(src["id"]):
+                try:
+                    self._refresh_source(src)
+                finally:
+                    self._end(src["id"])
+            out.append(
+                (src.get("name") or "", (self.store.get("calendar_sources", src["id"]) or {}).get("last_status"))
+            )
+        return out
+
     def _background(self, source_id: str) -> None:
         try:
             src = self.store.get("calendar_sources", source_id)
