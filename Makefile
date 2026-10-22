@@ -35,3 +35,21 @@ generate-openapi:
 .PHONY: check-openapi
 check-openapi:
 	$(PYTHON) -m permita38 show-openapi | diff -u $(OPENAPI) - && echo "openapi.json is up to date"
+
+DOCKER_IMAGE ?= permita38:local
+
+.PHONY: docker-build
+docker-build:
+	docker build -t $(DOCKER_IMAGE) .
+
+.PHONY: docker-run
+docker-run: docker-build
+	docker run --rm -it -p 127.0.0.1:8765:8765 -v permita38-data:/data --env-file .env $(DOCKER_IMAGE)
+
+.PHONY: docker-up
+docker-up:
+	docker compose up -d --build
+
+.PHONY: docker-lock
+docker-lock:
+	uv pip compile pyproject.toml --universal --python-version 3.12 --no-header -o docker/constraints.txt

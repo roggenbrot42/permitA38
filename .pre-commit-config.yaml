@@ -3,6 +3,7 @@ repos:
     rev: v5.0.0
     hooks:
       - id: check-yaml
+        exclude: ^docker-compose\.proxy\.yml$ # uses Compose's !reset tag (validated by `docker compose config`)
       - id: end-of-file-fixer
         exclude: ^(api/openapi\.json|LICENSE)$
       - id: trailing-whitespace

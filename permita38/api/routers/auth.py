@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel
 
 from permita38 import __version__
 from permita38.api.deps import COOKIE_NAME, CurrentUser, ServicesDep
+from permita38.core.config import Config
 from permita38.core.models import UserOut
 from permita38.core.service.auth import public_user
 
@@ -44,8 +45,19 @@ class TokenResult(BaseModel):
     token: str
 
 
-def _set_cookie(response: Response, token: str, max_age: int):
-    response.set_cookie(COOKIE_NAME, token, max_age=max_age, httponly=True, samesite="strict", path="/")
+def cookie_secure(request: Request, config: Config) -> bool:
+    """Secure flag for the auth cookie: explicit setting, else https (directly or via a trusted proxy)."""
+    if config.cookie_secure is not None:
+        return config.cookie_secure
+    if request.url.scheme == "https":
+        return True
+    if config.trust_proxy:
+        return request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower() == "https"
+    return False
+
+
+def _set_cookie(response: Response, token: str, max_age: int, secure: bool = False):
+    response.set_cookie(COOKIE_NAME, token, max_age=max_age, httponly=True, samesite="strict", path="/", secure=secure)
 
 
 @router.get("/status", response_model=AuthStatus, summary="public: is the first-run setup still needed?")
@@ -63,21 +75,23 @@ def setup(payload: SetupPayload, services: ServicesDep):
 
 
 @router.post("/login", response_model=LoginResult, summary="sign in with username and password")
-def login(payload: LoginPayload, response: Response, services: ServicesDep):
+def login(payload: LoginPayload, request: Request, response: Response, services: ServicesDep):
     token, user = services.auth.login(payload.username, payload.password)
-    _set_cookie(response, token, services.auth.ttl)
+    _set_cookie(response, token, services.auth.ttl, cookie_secure(request, services.config))
     return {"token": token, "user": user}
 
 
 @router.post("/logout", status_code=204, summary="sign out (clears the cookie)")
-def logout(response: Response):
-    response.delete_cookie(COOKIE_NAME, path="/")
+def logout(request: Request, response: Response, services: ServicesDep):
+    response.delete_cookie(COOKIE_NAME, path="/", secure=cookie_secure(request, services.config))
 
 
 @router.post("/change-password", response_model=TokenResult, summary="change own password")
-def change_password(payload: ChangePasswordPayload, user: CurrentUser, response: Response, services: ServicesDep):
+def change_password(
+    payload: ChangePasswordPayload, request: Request, user: CurrentUser, response: Response, services: ServicesDep
+):
     token = services.auth.change_password(user, payload.old_password, payload.new_password)
-    _set_cookie(response, token, services.auth.ttl)
+    _set_cookie(response, token, services.auth.ttl, cookie_secure(request, services.config))
     return {"token": token}
 
 

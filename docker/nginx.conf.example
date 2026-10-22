@@ -1,0 +1,31 @@
+# nginx in front of permitA38 (example). Run permitA38 with
+#   PERMITA38_TRUST_PROXY=true  PERMITA38_COOKIE_SECURE=true
+# and publish its port on localhost only ("127.0.0.1:8765:8765").
+# Replace permita.example.com and the certificate paths (e.g. from certbot).
+
+server {
+    listen 80;
+    server_name permita.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name permita.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/permita.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/permita.example.com/privkey.pem;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    client_max_body_size 25m;
+
+    location / {
+        proxy_pass         http://127.0.0.1:8765;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 60s;
+    }
+}

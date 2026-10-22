@@ -1,0 +1,54 @@
+# permitA38 – docker compose
+#   cp .env.example .env && $EDITOR .env
+#   docker compose up -d --build
+# then open http://localhost:8765 and sign in with your PERMITA38_BOOTSTRAP_* account.
+# Full guide: docs/docker.md
+services:
+  permita38:
+    image: ghcr.io/roggenbrot42/permita38:latest
+    build: .
+    init: true # reaps zombies, forwards SIGTERM -> graceful shutdown
+    restart: unless-stopped
+    # Bound to localhost only. To expose it on your LAN use "8765:8765" – but only behind TLS, see
+    # docs/docker.md (docker-compose.proxy.yml adds an HTTPS reverse proxy and publishes no app port).
+    ports:
+      - "127.0.0.1:8765:8765"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PERMITA38_LOG_LEVEL: ${PERMITA38_LOG_LEVEL:-info}
+    volumes:
+      - permita38-data:/data
+    # --- hardening ---
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request as u; u.urlopen('http://127.0.0.1:8765/api/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    # Docker secrets instead of plain env vars (optional):
+    #   environment:
+    #     PERMITA38_BOOTSTRAP_PASSWORD_FILE: /run/secrets/permita38_password
+    #     PERMITA38_SECRET_KEY_FILE: /run/secrets/permita38_secret
+    #   secrets: [permita38_password, permita38_secret]
+
+volumes:
+  permita38-data:
+
+# secrets:
+#   permita38_password:
+#     file: ./secrets/password.txt
+#   permita38_secret:
+#     file: ./secrets/secret_key.txt

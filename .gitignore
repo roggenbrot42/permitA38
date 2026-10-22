@@ -22,3 +22,7 @@ backups/
 .stfolder
 .stversions
 .DS_Store
+
+# docker
+.env
+secrets/

@@ -3,13 +3,33 @@
 import argparse
 import getpass
 import json
+import logging
+import logging.config
 import sys
 import threading
 import webbrowser
 from pathlib import Path
 
+from permita38.core.bootstrap import bootstrap_from_env, create_user, read_password_file
 from permita38.core.config import load_config
 from permita38.core.errors import ServiceError
+
+
+def build_log_config(level: str = "info") -> dict:
+    """Logging to stdout (what `docker logs` shows) for the app and for uvicorn."""
+    level = level.upper()
+    return {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"}},
+        "handlers": {"stdout": {"class": "logging.StreamHandler", "formatter": "plain", "stream": "ext://sys.stdout"}},
+        "loggers": {
+            "uvicorn": {"handlers": ["stdout"], "level": level, "propagate": False},
+            "uvicorn.error": {"level": level},
+            "uvicorn.access": {"handlers": ["stdout"], "level": level, "propagate": False},
+            "permita38": {"handlers": ["stdout"], "level": level, "propagate": False},
+        },
+    }
 
 
 def main(argv: list[str] | None = None):
@@ -36,6 +56,11 @@ def main(argv: list[str] | None = None):
     cp.add_argument("name")
     dp = sub.add_parser("dump-ddl", help="print the schema DDL generated for a SQL dialect")
     dp.add_argument("--dialect", default="sqlite", choices=["sqlite", "postgresql", "mariadb"])
+    cu = sub.add_parser("create-user", help="create a user (e.g. via `docker compose run --rm permita38 create-user`)")
+    cu.add_argument("--username", required=True)
+    cu.add_argument("--name", required=True)
+    cu.add_argument("--role", choices=("boss", "member"), default="member")
+    cu.add_argument("--password-file", type=Path, help="read the password from this file (default: prompt)")
     args = ap.parse_args(argv)
 
     command = args.command or "serve"
@@ -103,6 +128,22 @@ def main(argv: list[str] | None = None):
     except DatabaseRevisionError as e:
         sys.exit(f"permitA38 cannot use this database:\n{e}")
 
+    if command == "create-user":
+        try:
+            user_pw: str | None = read_password_file(args.password_file) if args.password_file else None
+        except OSError as e:
+            sys.exit(f"Cannot read {args.password_file}: {e.strerror}")
+        if user_pw is None:
+            user_pw = getpass.getpass("Password: ")
+            if user_pw != getpass.getpass("Repeat: "):
+                sys.exit("Passwords do not match")
+        try:
+            user = create_user(app.state.services.auth, args.username, args.name, args.role, user_pw)
+        except ServiceError as e:
+            sys.exit(e.message)
+        print(f"Created {user['role']} {user['username']!r}.")
+        return
+
     import uvicorn
 
     from permita38.core.repository.importer import is_legacy_layout
@@ -112,11 +153,30 @@ def main(argv: list[str] | None = None):
             "Note: the data folder still contains data in the old JSON layout. "
             "Import it once with: permita38 import-json " + str(cfg.data_dir)
         )
+    log_level = (cfg.log_level or ("info" if cfg.in_container else "warning")).lower()
+    logging.config.dictConfig(build_log_config(log_level))
+    try:
+        bootstrap_from_env(app.state.services.auth)
+    except RuntimeError as e:
+        sys.exit(str(e))
+    if cfg.in_container and app.state.services.auth.needs_setup():
+        logging.getLogger("permita38").warning(
+            "No users yet: the first-run setup page is open to anyone who can reach this server. "
+            "Set PERMITA38_BOOTSTRAP_USERNAME / PERMITA38_BOOTSTRAP_PASSWORD(_FILE) to create the boss account at startup."
+        )
+
     url = f"http://{'localhost' if cfg.host in ('127.0.0.1', '0.0.0.0') else cfg.host}:{cfg.port}/"
     print(f"permitA38 is running at {url}\nData folder: {cfg.data_dir}\nPress Ctrl+C to stop.")
     if not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host=cfg.host, port=cfg.port, log_level="warning")
+    uvicorn.run(
+        app,
+        host=cfg.host,
+        port=cfg.port,
+        log_config=build_log_config(log_level),
+        proxy_headers=cfg.trust_proxy,
+        forwarded_allow_ips=cfg.forwarded_allow_ips if cfg.trust_proxy else None,
+    )
 
 
 if __name__ == "__main__":

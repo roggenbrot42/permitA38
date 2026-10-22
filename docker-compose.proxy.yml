@@ -1,0 +1,36 @@
+# Adds an HTTPS reverse proxy (Caddy, automatic Let's Encrypt certificates) in front of permitA38.
+#   docker compose -f docker-compose.yml -f docker-compose.proxy.yml up -d --build
+# Set PERMITA38_DOMAIN in .env (a DNS name pointing at this host, ports 80/443 reachable).
+services:
+  permita38:
+    ports: !reset [] # not published: only Caddy can reach the app
+    environment:
+      PERMITA38_TRUST_PROXY: "true" # trust X-Forwarded-* from Caddy (the app is not reachable otherwise)
+      PERMITA38_COOKIE_SECURE: "true"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      permita38:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      PERMITA38_DOMAIN: ${PERMITA38_DOMAIN:?set PERMITA38_DOMAIN in .env}
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  caddy-data:
+  caddy-config:

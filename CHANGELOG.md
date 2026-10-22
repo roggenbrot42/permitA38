@@ -5,6 +5,21 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- Docker support: multi-stage `Dockerfile` (non-root, health check, pinned dependencies), `docker-compose.yml`
+  (hardened), HTTPS reverse-proxy examples (Caddy, nginx) and `docs/docker.md`.
+- Environment-variable configuration for server hosting (`PERMITA38_*`: host, port, secret key / key file, CORS,
+  token lifetime, proxy trust, cookie `Secure` flag, log level) and container mode that keeps the generated secret in
+  the data volume instead of a per-device YAML file.
+- First-run bootstrap of the boss account from `PERMITA38_BOOTSTRAP_*` (closes the public setup page) and the
+  `permita38 create-user` command.
+- The auth cookie gets the `Secure` flag on https / behind a trusted proxy; logging goes to stdout.
+- GitHub Actions workflow building the image on pull requests and publishing multi-arch images to ghcr.io on tags.
+
+### Changed
+- Precedence of `PERMITA38_DATA` is now command line > environment > YAML (it used to be below the YAML file), and
+  environment values are no longer written into the YAML file.
+
 ## [0.3.0]
 
 ### Changed
