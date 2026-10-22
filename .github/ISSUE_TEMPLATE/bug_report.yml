@@ -1,0 +1,25 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes: {value: "Never paste real customer or business data. Security problems: use the private report link instead."}
+  - type: input
+    id: version
+    attributes: {label: "permitA38 version", description: "The release you downloaded, or `pip show permita38`", placeholder: "0.4.0-alpha.1"}
+    validations: {required: true}
+  - type: dropdown
+    id: install
+    attributes: {label: "How do you run it", options: [Windows bundle, Linux bundle, Docker, pip / from source]}
+    validations: {required: true}
+  - type: textarea
+    id: what
+    attributes: {label: "What happened and what did you expect?"}
+    validations: {required: true}
+  - type: textarea
+    id: steps
+    attributes: {label: "Steps to reproduce"}
+    validations: {required: true}
+  - type: textarea
+    id: logs
+    attributes: {label: "Relevant log output", render: text}

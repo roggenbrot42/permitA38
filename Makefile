@@ -19,6 +19,16 @@ test-web:
 
 test-all: test-backend test-random test-web
 
+.PHONY: test-release
+test-release:
+	$(PYTHON) -m pytest tests/release -q
+
+# cut a release tag:  make release VERSION=0.4.0-alpha.1  [RELEASE_FLAGS="--dry-run --skip-checks"]  (see RELEASING.md)
+.PHONY: release
+release:
+	@test -n "$(VERSION)" || { echo "usage: make release VERSION=0.4.0-alpha.1 [RELEASE_FLAGS=--dry-run]"; exit 2; }
+	$(PYTHON) scripts/release.py tag $(VERSION) $(RELEASE_FLAGS)
+
 .PHONY: lint
 lint: ruff mypy
 

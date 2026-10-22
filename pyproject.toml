@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "permita38"
-version = "0.3.0"
+dynamic = ["version"]  # single source: permita38/__init__.py (PEP 440); see RELEASING.md
 description = "Time tracking, planning, offers, invoices and tax reserves for freelancers and small businesses in Germany."
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
@@ -34,12 +34,17 @@ dev = [
     "mypy",
     "types-PyYAML",
 ]
+# tools used by the release workflow and scripts/ (not needed to run or develop the app)
+release = ["build", "twine", "pyinstaller", "cyclonedx-bom", "pytest-cov", "packaging"]
 
 [project.scripts]
 permita38 = "permita38.cli.main:main"
 
 [project.urls]
 Source = "https://github.com/roggenbrot42/permitA38"
+
+[tool.setuptools.dynamic]
+version = {attr = "permita38.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["permita38*"]
@@ -51,7 +56,7 @@ include = ["permita38*"]
 [tool.ruff]
 line-length = 120
 target-version = "py310"
-exclude = [".git", ".venv*", "web"]
+exclude = [".git", ".venv*", "web", "build", "dist"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]
@@ -66,7 +71,7 @@ plugins = ["pydantic.mypy"]
 minversion = "8.0"
 # `pytest` runs the fast backend suite. The randomized and browser suites are selected explicitly
 # (make test-random / test-web, or pass their path).
-testpaths = ["tests/backend"]
+testpaths = ["tests/backend", "tests/release"]
 markers = [
     "randomized: model-based and fuzz tests driven by random input (tests/backend/randomized)",
     "e2e_random: seeded random user simulations over HTTP and in the browser (tests/web/e2e_random)",
