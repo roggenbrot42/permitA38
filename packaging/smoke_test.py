@@ -87,10 +87,11 @@ def main(argv: list[str]) -> int:
             expect(st["setup_needed"] is True and st["app"] == "permitA38", "GET /api/auth/status (fresh install)")
             expect("data_dir" not in st, "public status does not leak the data folder")
 
-            status, ctype, raw = call(base, "GET", "/")
-            expect(status == 200 and "text/html" in ctype and b"permitA38" in raw, "bundled web frontend is served")
-            status, _, raw = call(base, "GET", "/api.js")
-            expect(status == 200 and len(raw) > 100, "frontend scripts are bundled")
+            if os.environ.get("SMOKE_EXPECT_WEB", "1") == "1":  # a pip-installed wheel ships no web/ folder
+                status, ctype, raw = call(base, "GET", "/")
+                expect(status == 200 and "text/html" in ctype and b"permitA38" in raw, "bundled web frontend is served")
+                status, _, raw = call(base, "GET", "/api.js")
+                expect(status == 200 and len(raw) > 100, "frontend scripts are bundled")
 
             pw = "smoke-test-password-1"
             call(base, "POST", "/api/auth/setup", {"username": "smoke", "name": "Smoke Test", "password": pw})
