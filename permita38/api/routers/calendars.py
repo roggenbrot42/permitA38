@@ -15,6 +15,16 @@ MAX_UPLOAD = 5 * 1024 * 1024
 MAX_SPAN_DAYS = 400
 
 
+def _flag(value: str, default: bool) -> bool:
+    """Form flags are strings: an absent field must mean the default, not 'false' as with HTML checkboxes."""
+    text = (value or "").strip().lower()
+    if text in ("true", "1", "on", "yes"):
+        return True
+    if text in ("false", "0", "off", "no"):
+        return False
+    return default
+
+
 def require_calendar_right(user: CurrentUser) -> dict:
     if not may_manage_own(user):
         raise HTTPException(403, "Forbidden")
@@ -44,8 +54,8 @@ def upload_calendar(
     name: Annotated[str, Form(max_length=200)],
     title_policy: Annotated[str, Form()] = "none",
     refresh_minutes: Annotated[int, Form()] = 360,
-    all_day_blocks: Annotated[bool, Form()] = False,
-    busy_default: Annotated[bool, Form()] = True,
+    all_day_blocks: Annotated[str, Form(max_length=5)] = "false",  # "true" / "false" (absent = default)
+    busy_default: Annotated[str, Form(max_length=5)] = "true",
     include_keywords: Annotated[str, Form(max_length=2000)] = "",
     exclude_keywords: Annotated[str, Form(max_length=2000)] = "",
 ):
@@ -53,8 +63,8 @@ def upload_calendar(
         name=name,
         title_policy=title_policy,  # type: ignore[arg-type]
         refresh_minutes=refresh_minutes,
-        all_day_blocks=all_day_blocks,
-        busy_default=busy_default,
+        all_day_blocks=_flag(all_day_blocks, False),
+        busy_default=_flag(busy_default, True),
         include_keywords=[k for k in include_keywords.split(",") if k.strip()][:20],
         exclude_keywords=[k for k in exclude_keywords.split(",") if k.strip()][:20],
     ).model_dump(exclude={"url"})

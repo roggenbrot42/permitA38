@@ -301,3 +301,10 @@ def test_daily_target_caps_the_busy_hours(boss_client, fake):
 def soon_on(day: date, start_hour: int, end_hour: int) -> tuple[datetime, datetime]:
     start = datetime.combine(day, datetime.min.time())
     return start.replace(hour=start_hour), start.replace(hour=end_hour)
+
+
+def test_upload_defaults_count_toward_capacity_when_flags_are_absent(boss_client):
+    data = ics(timed("df@example.test", "Default flags", *soon()))
+    r = boss_client.post("/api/calendars/upload", data={"name": "Defaults"}, files={"file": ("d.ics", data, "text/calendar")})
+    assert r.status_code == 200, r.text
+    assert r.json()["busy_default"] is True and r.json()["all_day_blocks"] is False
