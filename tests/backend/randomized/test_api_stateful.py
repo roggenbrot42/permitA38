@@ -83,6 +83,8 @@ def subset_eq(exp, act, path="") -> None:
     if isinstance(exp, dict):
         assert isinstance(act, dict), f"{path}: expected object, got {act!r}"
         for k, v in exp.items():
+            if k == "planning_warnings":
+                continue  # response-only hint on write responses, never stored
             assert k in act, f"{path}.{k} missing in {act}"
             subset_eq(v, act[k], f"{path}.{k}")
     elif isinstance(exp, list):
@@ -867,12 +869,16 @@ class ApiMachine(RuleBasedStateMachine):
         assert out["offer"]["status"] == "accepted"
         cust = self.m["customers"].get(offer.get("customer_id"))
         proj = out["project"]
-        assert proj["name"] == (offer.get("title") or "Project for " + (cust or {}).get("name", ""))
-        assert (
-            proj["status"] == "active"
-            and proj["offer_id"] == rid
-            and proj.get("customer_id") == offer.get("customer_id")
-        )
+        existing = self.m["projects"].get(offer.get("project_id"))
+        if existing:  # the offer belongs to a project: it is widened, not replaced
+            assert proj["id"] == offer["project_id"] and proj["name"] == existing["name"]
+        else:
+            assert proj["name"] == (offer.get("title") or "Project for " + (cust or {}).get("name", ""))
+            assert (
+                proj["status"] == "active"
+                and proj["offer_id"] == rid
+                and proj.get("customer_id") == offer.get("customer_id")
+            )
         offer["status"] = "accepted"
         self.bodies[rid] = {**self.bodies[rid], "status": "accepted"}
         self.m["projects"][proj["id"]] = DEFAULTS["projects"] | {
