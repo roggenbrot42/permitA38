@@ -46,5 +46,5 @@ def test_dependabot_covers_ecosystems():
 def test_roadmap_has_maintainer_todo_and_alpha1_facts():
     text = (ROOT / "docs/roadmap.md").read_text(encoding="utf-8")
     assert "MAINTAINER TODO: Review and finalise the release assignment of each roadmap item" in text
-    assert text.count("(confirm intended meaning") >= 2  # GoBD and GDPR items
+    assert "GoBD compliance" in text and "GDPR / DSGVO compliance" in text  # both confirmed by the maintainer
     assert "TOTP" in text.split("## v0.4.0-alpha.2")[0]  # TOTP is done in alpha.1, not planned later

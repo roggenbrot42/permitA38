@@ -307,6 +307,10 @@ make check-openapi     # fail if the contract is stale (also runs in CI)
 
 See [AGENTS.md](AGENTS.md) for repository conventions and [CHANGELOG.md](CHANGELOG.md) for what changed.
 
+## Compliance and regulation
+
+What GoBD, GDPR, e-invoicing, retention periods and VAT obligations mean for you – in plain language, with the status of each in permitA38: [docs/compliance.md](docs/compliance.md). The release assignment of every item is in [docs/roadmap.md](docs/roadmap.md).
+
 ## Contributing
 
 Contributions are welcome – see [CONTRIBUTING.md](CONTRIBUTING.md) (includes the sign-off / Developer Certificate of Origin all commits need) and [SECURITY.md](SECURITY.md) for vulnerability reports.
