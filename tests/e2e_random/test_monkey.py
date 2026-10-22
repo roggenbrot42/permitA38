@@ -217,8 +217,6 @@ class Monkey:
         watch.accept_confirm = 0.3
         if member_secrets is not None:  # boss-only pages answer 403; the app logs it and shows an error card
             watch.ignore.append(re.compile(r"Error: Forbidden"))
-        # known bug, pinned by test_regressions.py::test_unknown_document_shows_not_found
-        watch.ignore.append(re.compile(r"Cannot read properties of undefined \(reading 'map'\)\s+at PAGES\.doc"))
 
     def say(self, msg: str):
         self.log.append(f"{len(self.log) + 1:03d} {msg}")
@@ -413,9 +411,6 @@ class Monkey:
         assert p.query_selector("#app .side"), "session lost: the login screen appeared during navigation"
         assert p.evaluate("() => !!localStorage.getItem('permita38.token')")
         text = norm(p.inner_text("main")) if p.query_selector("main") else ""
-        text = text.replace(
-            "Something went wrong: Cannot read properties of undefined (reading 'map')", ""
-        )  # known bug
         if self.secrets is None:
             assert "Something went wrong" not in text, f"error page shown to the boss: {text[:200]}"
         for bad in ("[object Object]", "undefined"):

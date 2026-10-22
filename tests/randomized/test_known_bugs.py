@@ -66,6 +66,14 @@ def test_one_invalid_absence_must_not_break_everybody_elses_dashboard(api):
     assert api.get("/api/forecast").status_code == 200
 
 
+@pytest.mark.xfail(strict=True, reason="POST /absences without user_id (optional for a boss) is stored without an owner; "
+                   "then /dashboard and /forecast return 500 for everyone (core/calc.py Capacity: a['user_id'])")
+def test_absence_without_user_id_must_not_break_the_dashboard(api):
+    _boss(api)
+    r = api.post("/api/absences", json={"start": "2026-10-19", "end": "2026-10-22"})
+    assert r.status_code in (400, 422) or api.get("/api/dashboard").status_code == 200
+
+
 @pytest.mark.xfail(strict=True, reason="Expense date '2026-13-45' is stored; afterwards GET /finance returns 500 "
                    "(core/calc.py finance -> d(x['date']))")
 def test_invalid_expense_date_must_not_break_finance(api):

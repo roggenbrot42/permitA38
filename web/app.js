@@ -122,6 +122,8 @@ function entryForm(e = {}, after) {
 const NAV_BOSS = [['today', '⏱', 'Today'], ['time', '🗓', 'Timesheet'], ['plan', '📈', 'Planning'], ['customers', '👥', 'Customers'], ['projects', '📁', 'Projects'], ['sales', '🧾', 'Offers & Invoices'], ['expenses', '💳', 'Expenses'], ['money', '💶', 'Money & Taxes'], ['team', '🧑‍🤝‍🧑', 'Team'], ['settings', '⚙️', 'Settings']];
 const NAV_MEMBER = [['today', '⏱', 'Today'], ['time', '🗓', 'Timesheet'], ['timeoff', '🏖', 'Time off']];
 function route() { const [p, ...a] = (location.hash.replace(/^#\/?/, '') || 'today').split('/'); return [p, a]; }
+const MEMBER_PAGES = ['today', 'time', 'timeoff'];
+function denyMember() { toast('Not available for your role'); location.hash = '#/today'; }
 async function render() {
   const app = $('#app');
   clearInterval(render.tick);
@@ -130,8 +132,14 @@ async function render() {
   if (p !== 'doc' && typeof DOC !== 'undefined') DOC = null;
   const nav = isBoss() ? NAV_BOSS : NAV_MEMBER;
   const active = { customer: 'customers', project: 'projects', doc: 'sales' }[p] || p;
+  if (!isBoss() && !MEMBER_PAGES.includes(p)) return denyMember();
   let html;
-  try { html = await (PAGES[p] || PAGES.today)(...args); } catch (e) { if (!S.me) return; html = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; console.error(e); }
+  try { html = await (PAGES[p] || PAGES.today)(...args); } catch (e) {
+    if (!S.me) return;
+    if (e.status === 403 && !isBoss()) return denyMember();
+    if (e.status) { toast(e.message, true); html = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; }  // API error: shown, not a crash
+    else { html = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; console.error(e); }
+  }
   if (!S.me) return;
   app.innerHTML = `<div class="shell"><nav class="side"><div class="brand"><i></i>permitA38</div>
     ${nav.map(([k, ic, l]) => `<a class="nav ${k === active ? 'on' : ''}" href="#/${k}"><span>${ic}</span>${l}</a>`).join('')}
@@ -140,6 +148,7 @@ async function render() {
   if (render.after) { const f = render.after; render.after = null; f(); }
 }
 window.addEventListener('hashchange', guard(render));
+window.addEventListener('unhandledrejection', e => { e.preventDefault(); toast((e.reason && e.reason.message) || 'Something went wrong', true); });
 
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-a]'); if (!el) return;

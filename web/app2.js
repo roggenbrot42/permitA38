@@ -121,11 +121,17 @@ let DOC = null;
 PAGES.doc = async (coll, id) => {
   await loadAll(['customers', 'projects', 'users', 'offers', 'invoices']);
   const s = S.settings, isInv = coll === 'invoices';
+  const route = coll + '/' + id;
   if (id.startsWith('new')) {
-    DOC = { coll, customer_id: id.slice(4) || '', date: todayISO(), status: 'draft', lines: [{ description: '', qty: 1, unit: isInv ? 'h' : 'h', price: s.default_rate || 0 }], template_id: s.default_template, vat_rate: s.vat_rate };
-    const cu = S.d.customers.find(c => c.id === DOC.customer_id); if (cu?.rate) DOC.lines[0].price = cu.rate;
-  } else if (!DOC || DOC.id !== id) DOC = { coll, ...S.d[coll].find(d => d.id === id) };
-  if (!DOC) return '<div class="card">Not found.</div>';
+    if (!DOC || DOC.__route !== route) {   // keep the in-progress draft across re-renders (add/delete line)
+      DOC = { __route: route, coll, customer_id: id.slice(4) || '', date: todayISO(), status: 'draft', lines: [{ description: '', qty: 1, unit: 'h', price: s.default_rate || 0 }], template_id: s.default_template, vat_rate: s.vat_rate };
+      const cu = S.d.customers.find(c => c.id === DOC.customer_id); if (cu?.rate) DOC.lines[0].price = cu.rate;
+    }
+  } else if (!DOC || DOC.id !== id || DOC.coll !== coll) {
+    const rec = (S.d[coll] || []).find(x => x.id === id);
+    if (!rec) { DOC = null; return `<div class="card"><h2>Not found</h2><p class="muted">This ${isInv ? 'invoice' : 'offer'} does not exist (any more).</p><a href="#/sales/${isInv ? 'invoices' : 'offers'}">← Back to ${isInv ? 'invoices' : 'offers'}</a></div>`; }
+    DOC = { coll, ...rec, lines: rec.lines || [] };
+  }
   const d = DOC, locked = d.number && d.status !== 'draft', isNew = !d.id;
   const opt = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
   const klein = s.kleinunternehmer;
@@ -176,13 +182,18 @@ A.delLine = el => { syncDoc(); DOC.lines.splice(+el.dataset.i, 1); render(); };
 async function persistDoc() {
   syncDoc(); const d = DOC;
   if (!d.customer_id) throw new Error('Choose a customer first');
-  const { coll, ...body } = d; const r = await api.upsert(coll, body); DOC = { coll, ...r };
+  const { coll, __route, ...body } = d; const r = await api.upsert(coll, body); DOC = { coll, ...r };
   await loadAll([coll]); return r;
 }
 A.docSave = async () => { const wasNew = !DOC.id; const r = await persistDoc(); toast('Saved'); if (wasNew) location.hash = `#/doc/${DOC.coll}/${r.id}`; else render(); };
 A.docFinalize = async () => { await persistDoc(); const r = await api('POST', `${DOC.coll}/${DOC.id}/finalize`); DOC = { coll: DOC.coll, ...r }; toast('Finalized as ' + r.number); await loadAll([DOC.coll]); location.hash = `#/doc/${DOC.coll}/${r.id}`; render(); };
 A.docPdf = async () => { await persistDoc(); window.open(api.url(`${DOC.coll}/${DOC.id}/pdf`), '_blank'); };
-A.docStatus = async el => { if (!el.value) return; await persistDoc(); DOC.status = el.value; if (el.value === 'paid' && !DOC.paid_date) DOC.paid_date = todayISO(); await persistDoc(); toast('Status: ' + el.value); render(); };
+A.docStatus = async el => {
+  if (!el.value) return;
+  syncDoc(); DOC.status = el.value;
+  if (el.value === 'paid' && !DOC.paid_date) { DOC.paid_date = todayISO(); const pd = $('#d_paid'); if (pd) pd.value = DOC.paid_date; }  // before persistDoc() re-reads the form
+  await persistDoc(); toast('Status: ' + el.value); render();
+};
 A.docAccept = async () => { await persistDoc(); const r = await api('POST', `offers/${DOC.id}/accept`); await loadAll(['offers', 'projects', 'contracts']); DOC = null; toast('Accepted – project' + (r.contract ? ' and contract' : '') + ' created'); location.hash = '#/project/' + r.project.id; };
 A.docToInvoice = async () => { await persistDoc(); const r = await api('POST', `offers/${DOC.id}/to-invoice`); DOC = null; await loadAll(['invoices']); location.hash = '#/doc/invoices/' + r.id; };
 A.billTimeInto = () => A.billTime({ dataset: { cust: DOC.customer_id } });
@@ -223,16 +234,16 @@ PAGES.money = async (year) => {
   const f = await api('GET', 'finance?year=' + year), s = S.settings, m = new Date().getMonth(), cur = year === new Date().getFullYear() ? f.months[m] : null;
   const T = f.totals, ta = f.tax_actual, tp = f.tax_projected;
   const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const mx = Math.max(100, ...f.months.map(x => Math.max(x.revenue, x.expenses))), H = 170, bw = 900 / 12;
+  const mx = Math.max(100, ...f.months.map(x => Math.max(x.revenue, x.expenses, 0))), H = 170, bw = 900 / 12;
   const chart = `<svg class="chart" viewBox="0 0 940 ${H + 28}"><g transform="translate(36,6)">${[0, .5, 1].map(k => `<line x1="0" x2="900" y1="${H - H * k}" y2="${H - H * k}" stroke="var(--line)"/><text x="-6" y="${H - H * k + 4}" text-anchor="end">${num(mx * k, 0)}</text>`).join('')}
-    ${f.months.map((x, i) => `<g><title>${MN[i]}: revenue ${eur(x.revenue)}, expenses ${eur(x.expenses)}, profit ${eur(x.profit)}</title><rect x="${i * bw + 8}" y="${H - x.revenue / mx * H}" width="${bw / 2 - 9}" height="${x.revenue / mx * H}" fill="var(--accent)" rx="2"/><rect x="${i * bw + bw / 2}" y="${H - x.expenses / mx * H}" width="${bw / 2 - 9}" height="${x.expenses / mx * H}" fill="var(--warn)" rx="2"/><text x="${i * bw + bw / 2}" y="${H + 16}" text-anchor="middle">${MN[i]}</text></g>`).join('')}</g></svg>`;
+    ${f.months.map((x, i) => `<g><title>${MN[i]}: revenue ${eur(x.revenue)}, expenses ${eur(x.expenses)}, profit ${eur(x.profit)}</title><rect x="${i * bw + 8}" y="${H - Math.max(0, x.revenue) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, x.revenue) / mx * H}" fill="var(--accent)" rx="2"/><rect x="${i * bw + bw / 2}" y="${H - Math.max(0, x.expenses) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, x.expenses) / mx * H}" fill="var(--warn)" rx="2"/><text x="${i * bw + bw / 2}" y="${H + 16}" text-anchor="middle">${MN[i]}</text></g>`).join('')}</g></svg>`;
   const typeName = { freiberufler: 'Freiberufler (EÜR, no trade tax)', gewerbe: 'Gewerbetreibender / Einzelunternehmen', gmbh: 'UG / GmbH' }[f.company_type];
   return `<div class="head"><div><h1>Money & Taxes</h1><div class="muted">${esc(typeName)}${f.kleinunternehmer ? ' · Kleinunternehmer' : ''} · ${s.accounting === 'accrual' ? 'by invoice date' : 'by payment date (EÜR)'}</div></div>
     <div class="row tight" style="flex:none;align-items:center"><button data-a="goto" data-to="money/${year - 1}">←</button><b>${year}</b><button data-a="goto" data-to="money/${year + 1}">→</button></div></div>
   ${f.warnings.map(w => `<div class="banner">⚠ ${esc(w)}</div>`).join('')}
   ${cur ? `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">Tax reserve (${num(f.effective_rate * 100, 1)} %)</div><div style="font-size:22px;font-weight:700">${eur(cur.tax_set_aside)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div><div><div class="muted small">Social insurance</div><div style="font-size:22px;font-weight:700">${eur(cur.social)}</div></div></div>
     <div style="margin-top:10px">→ You can take home about <b class="${cur.take_home >= 0 ? 'free-good' : 'free-bad'}" style="font-size:20px">${eur(cur.take_home)}</b> this month.</div></div>` : ''}
-  <div class="grid g4"><div class="card kpi"><div class="l">Revenue (net)</div><div class="v">${eur(T.revenue)}</div></div><div class="card kpi"><div class="l">Expenses (net)</div><div class="v">${eur(T.expenses)}</div></div><div class="card kpi good"><div class="l">Profit</div><div class="v">${eur(T.profit)}</div></div><div class="card kpi ${f.open_receivables ? 'warn' : ''}"><div class="l">Open receivables</div><div class="v">${eur(f.open_receivables)}</div></div></div>
+  <div class="grid g4"><div class="card kpi"><div class="l">Revenue (net)</div><div class="v">${eur(T.revenue)}</div></div><div class="card kpi"><div class="l">Expenses (net)</div><div class="v">${eur(T.expenses)}</div></div><div class="card kpi ${T.profit < 0 ? 'bad' : 'good'}"><div class="l">Profit</div><div class="v">${eur(T.profit)}</div></div><div class="card kpi ${f.open_receivables ? 'warn' : ''}"><div class="l">Open receivables</div><div class="v">${eur(f.open_receivables)}</div></div></div>
   <div class="grid g2"><div class="card"><h2>Tax burden ${year}</h2><table>
     ${f.company_type === 'gmbh' ? `<tr><td>Körperschaftsteuer (15 %)</td><td class="num">${eur(ta.kst)}</td></tr><tr><td>Solidaritätszuschlag</td><td class="num">${eur(ta.soli)}</td></tr>` : `<tr><td>Einkommensteuer</td><td class="num">${eur(ta.est)}</td></tr><tr><td>Solidaritätszuschlag</td><td class="num">${eur(ta.soli)}</td></tr>${ta.church ? `<tr><td>Kirchensteuer</td><td class="num">${eur(ta.church)}</td></tr>` : ''}`}
     ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)${ta.gewst_credit ? `<div class="small muted">incl. ${eur(ta.gewst_credit)} credited against income tax (§35 EStG)</div>` : ''}</td><td class="num">${eur(ta.gewst)}</td></tr>` : ''}
@@ -241,7 +252,7 @@ PAGES.money = async (year) => {
     <p class="small muted">Based on profit to date. Projected full-year profit: ${eur(f.projected_profit)} → tax rate ${num(f.effective_rate * 100, 1)} % used for the monthly reserve. Estimate only – not tax advice.</p></div>
   <div class="card"><h2>Expenses by category</h2>${Object.keys(f.categories).length ? `<table>${Object.entries(f.categories).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${eur(v)}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses this year.</div>'}</div></div>
   <div class="card"><h2>Month by month</h2>${chart}<div class="small muted"><span class="dot" style="background:var(--accent)"></span>revenue <span class="dot" style="background:var(--warn);margin-left:10px"></span>expenses</div>
-  <table style="margin-top:12px"><tr><th>Month</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">VAT due</th><th class="num">Tax reserve</th><th class="num">Take-home</th></tr>${f.months.map((x, i) => `<tr><td>${MN[i]}</td><td class="num">${eur(x.revenue)}</td><td class="num">${eur(x.expenses)}</td><td class="num">${eur(x.profit)}</td><td class="num">${eur(x.vat_due)}</td><td class="num">${eur(x.tax_set_aside)}</td><td class="num"><b>${eur(x.take_home)}</b></td></tr>`).join('')}</table></div>`;
+  <table style="margin-top:12px"><tr><th>Month</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">VAT due</th><th class="num">Tax reserve</th><th class="num">Take-home</th></tr>${f.months.map((x, i) => `<tr><td>${MN[i]}</td><td class="num">${eur(x.revenue)}</td><td class="num">${eur(x.expenses)}</td><td class="num ${x.profit < 0 ? 'free-bad' : ''}">${eur(x.profit)}</td><td class="num">${eur(x.vat_due)}</td><td class="num">${eur(x.tax_set_aside)}</td><td class="num"><b>${eur(x.take_home)}</b></td></tr>`).join('')}</table></div>`;
 };
 
 /* ================= TEAM ================= */

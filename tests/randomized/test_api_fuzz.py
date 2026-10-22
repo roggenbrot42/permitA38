@@ -14,6 +14,7 @@ generator avoids exactly those triggers; set PERMITA38_FUZZ_KNOWN_BUGS=1 to let 
 
 import json
 import os
+import random
 import shutil
 import tempfile
 import uuid
@@ -136,6 +137,8 @@ class Gen:
         schema = self.resolve(schema)
         if depth > 5:
             return None
+        if AVOID_KNOWN_BUGS and name == "user_id":  # known bug: an absence without owner breaks every dashboard
+            return self.r.choice([self.w.boss["id"], self.w.member["id"], DEAD_ID])
         if self.r.random() < 0.08:
             if not (AVOID_KNOWN_BUGS and name in DATE_FIELDS):
                 return self.junk()
@@ -149,9 +152,9 @@ class Gen:
         if t == "object" or "properties" in schema:
             props = schema.get("properties", {})
             out = {k: self.schema_value(v, k, depth + 1) for k, v in props.items()
-                   if k in schema.get("required", []) or self.r.random() < 0.6}  # fmt: skip
+                   if k in schema.get("required", []) or self.r.random() < 0.6 or (AVOID_KNOWN_BUGS and k == "user_id")}  # fmt: skip
             if self.r.random() < 0.1:
-                out[self.r.choice(["__class__", "id", "created", "pw_changed", "password_hash", "x" * 50])] = self.junk()
+                out[self.r.choice(["__class__", "id", "created", "$where", "../x", "x" * 50])] = self.junk()
             return out
         if t == "array":
             return [self.schema_value(schema.get("items", {}), name, depth + 1) for _ in range(self.r.randint(0, 3))]
@@ -256,11 +259,11 @@ def check_response(r, method, url, who, has_traversal, world, sent=""):
         assert secret not in body or secret in sent, f"{secret} leaked by {method} {url}"
 
 
-def run_session(data, steps: int):
+def run_session(seed: int, steps: int):
     world = World()
     try:
         spec = world.app.openapi()
-        gen = Gen(data.draw(st.randoms(use_true_random=False)), world, spec)
+        gen = Gen(random.Random(seed), world, spec)
         for _ in range(steps):
             method, url, query, kw, trav = gen.request()
             who = gen.r.choice(["boss", "boss", "member", "member", "anon", "forged", "cookie"])
@@ -287,7 +290,8 @@ def run_session(data, steps: int):
             if who == "member":
                 after = world.snapshot()
                 changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
-                bad = {k for k in changed if k.split("/")[0] not in MEMBER_WRITE_DIRS}
+                own = {f"users/{world.member['id']}.json"} if url.endswith("/auth/change-password") else set()
+                bad = {k for k in changed if k.split("/")[0] not in MEMBER_WRITE_DIRS and k not in own}
                 assert not bad, f"{who} {method} {url} wrote to {sorted(bad)}"
         verify_consistency(world)
     finally:
@@ -318,9 +322,11 @@ def verify_consistency(world: World):
 
 @pytest.mark.randomized
 @settings(settings.default, max_examples=max(8, settings.default.max_examples * 2 // 3))
-@given(data=st.data())
-def test_random_requests_never_break_the_api(data):
-    run_session(data, steps=40)
+@given(seed=st.integers(0, 2**32 - 1))
+def test_random_requests_never_break_the_api(seed):
+    """`seed` drives a real PRNG (hypothesis' own random source is biased towards 'simplest' values, which
+    would make every body junk). A failure prints the seed: replay with run_session(seed, steps=40)."""
+    run_session(seed, steps=40)
 
 
 @pytest.mark.randomized
@@ -360,3 +366,21 @@ def test_attachment_paths_cannot_escape_the_data_folder(name):
                 pass  # rejecting the id outright is fine too
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+@pytest.mark.randomized
+@pytest.mark.parametrize("extra", [{"password_hash": "pbkdf2_sha256$1$00$00", "pw_changed": 0}, {"role": "boss", "id": "x"}])
+def test_user_records_cannot_be_mass_assigned(extra):
+    """Extra fields on /users are ignored: they can neither replace a password hash nor smuggle a role."""
+    world = World()
+    try:
+        h = {"Authorization": "Bearer " + world.token("boss")}
+        body = {"username": "mia", "name": "Mia", "role": "member", "weekly_hours": 40, **extra}
+        r = world.http.put(f"/api/users/{world.member['id']}", json=body, headers=h)
+        assert r.status_code == 200, r.text
+        stored = world.svc.store.get("users", world.member["id"])
+        assert stored["role"] == "member" and stored["password_hash"].count("$") == 3 and stored["password_hash"] != extra.get("password_hash")
+        login = world.http.post("/api/auth/login", json={"username": "mia", "password": "member-pass-1"})
+        assert login.status_code == 200
+    finally:
+        world.close()

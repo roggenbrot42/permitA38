@@ -1,16 +1,11 @@
-"""Minimal regressions for genuine bugs found by the random tests (strict xfail: they flip to a failure
-as soon as the bug is fixed, so the marker gets removed)."""
+"""Regressions for genuine bugs found by the random tests. Tests still marked strict xfail pin known backend
+bugs: they flip to a failure as soon as the bug is fixed, so the marker gets removed then."""
 
 import pytest
 
 pytestmark = pytest.mark.e2e_random
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="web/app2.js PAGES.doc: a *new* document is re-initialised on every render, "
-    "so '+ Add line' (and 'delete line') on an unsaved offer/invoice discards the draft",
-)
 def test_add_line_on_new_document(make_page, live_server, api):
     api.setup_boss()
     page, _ = make_page(token=api.http.headers["Authorization"].split()[1])
@@ -23,12 +18,6 @@ def test_add_line_on_new_document(make_page, live_server, api):
     assert page.locator('[data-l="0"][data-k="description"]').input_value() == "first line"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="web/app2.js A.docStatus: persistDoc() -> syncDoc() overwrites the paid_date it "
-    "just set with the empty 'Paid on' input, so a 'paid' invoice has no paid_date and is not counted "
-    "as revenue (finance uses paid_date)",
-)
 def test_mark_paid_sets_paid_date(make_page, live_server, api):
     from datetime import date
 
@@ -64,11 +53,6 @@ def test_vat_rounding_is_half_up(api):
     assert api.get("/finance", year=date.today().year)["totals"]["vat_out"] == 118.09
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="web/app2.js PAGES.doc: for an unknown id `DOC = {coll, ...undefined}` is truthy, "
-    "so the 'Not found' branch is dead and render() crashes on `d.lines.map` (console.error)",
-)
 def test_unknown_document_shows_not_found(make_page, live_server, api):
     api.setup_boss()
     page, watch = make_page(token=api.http.headers["Authorization"].split()[1])
@@ -103,3 +87,42 @@ def test_invalid_values_do_not_break_dashboards(api, coll, body, breaks):
         return
     # accepted -> the aggregate endpoints must still answer
     assert api.http.get(breaks).status_code < 500
+
+
+def test_negative_expense_does_not_break_money_page(make_page, live_server, api):
+    from datetime import date
+
+    api.setup_boss()
+    api.post("/expenses", {"date": date.today().isoformat(), "net": -5000.0, "vat": 0, "vendor": "Gutschrift"})
+    page, watch = make_page(token=api.http.headers["Authorization"].split()[1])
+    page.goto(live_server.url + "/#/money")
+    page.wait_for_selector("main .kpi")
+    page.wait_for_timeout(300)
+    watch.check()
+
+
+def test_member_opening_boss_route_is_redirected(make_page, live_server, api):
+    api.setup_boss()
+    api.post("/users", {"username": "mia", "name": "Mia Member", "role": "member", "password": "member-pass-123"})
+    member = api.http.post("/auth/login", json={"username": "mia", "password": "member-pass-123"}).json()["token"]
+    page, watch = make_page(token=member)
+    for route in ("money", "customers", "doc/invoices/new", "settings"):
+        page.goto(live_server.url + "/#/" + route)
+        page.wait_for_selector("main")
+        page.wait_for_timeout(300)
+        assert page.evaluate("location.hash") == "#/today", route
+        assert "Forbidden" not in page.inner_text("main")
+    watch.check()
+
+
+def test_new_document_draft_survives_delete_line_and_status_menu_is_robust(make_page, live_server, api):
+    api.setup_boss()
+    page, watch = make_page(token=api.http.headers["Authorization"].split()[1])
+    page.goto(live_server.url + "/#/doc/invoices/new")
+    page.wait_for_selector("#d_totals")
+    page.click("[data-a=addLine]")
+    page.click("[data-a=addLine]")
+    assert page.locator("input[data-k=description]").count() == 3
+    page.click("[data-a=delLine][data-i='1']")
+    assert page.locator("input[data-k=description]").count() == 2
+    watch.check()

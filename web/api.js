@@ -25,9 +25,15 @@
     if (r.status === 401 && !opts.noAuthRedirect) {
       store.set(null);
       if (typeof api.onUnauthorized === 'function') api.onUnauthorized();
-      throw new Error(detailText(data.detail, 'Please sign in'));
+      const err = new Error(detailText(data.detail, 'Please sign in'));
+      err.status = 401;
+      throw err;
     }
-    if (!r.ok) throw new Error(detailText(data.detail, r.statusText || 'Request failed'));
+    if (!r.ok) {
+      const err = new Error(detailText(data.detail, r.statusText || 'Request failed'));
+      err.status = r.status;
+      throw err;
+    }
     return data;
   }
   // legacy-compatible signature: api(method, path, body)
