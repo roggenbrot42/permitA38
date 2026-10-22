@@ -1,9 +1,11 @@
 """Responses for data that was read back from the database."""
 
+import copy
 import json
 from typing import Any
 
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 
 class StoredJSON(JSONResponse):
@@ -18,3 +20,24 @@ class StoredJSON(JSONResponse):
 
     def render(self, content: Any) -> bytes:
         return json.dumps(content, ensure_ascii=True, allow_nan=False, separators=(",", ":"), default=str).encode()
+
+
+def with_defaults(model: type[BaseModel], data: Any) -> Any:
+    """Fill the model's non-null default values into records that lack them (e.g. ``personal: false``), the way a
+    validated response model would, but without validating anything else."""
+    defaults = {
+        name: f.get_default(call_default_factory=True)
+        for name, f in model.model_fields.items()
+        if not f.is_required() and f.get_default(call_default_factory=True) is not None
+    }
+
+    def fill(rec: Any) -> Any:
+        if not isinstance(rec, dict):
+            return rec
+        return {**{k: copy.deepcopy(v) for k, v in defaults.items() if k not in rec}, **rec}
+
+    return [fill(r) for r in data] if isinstance(data, list) else fill(data)
+
+
+def stored(model: type[BaseModel], data: Any) -> StoredJSON:
+    return StoredJSON(with_defaults(model, data))

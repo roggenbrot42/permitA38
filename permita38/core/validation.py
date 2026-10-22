@@ -76,8 +76,16 @@ IdList = Annotated[list[Id], Field(max_length=200)]
 Attachment = Annotated[str, StringConstraints(pattern=ATTACHMENT_PATTERN)]
 OptAttachment = Annotated[Attachment | None, BeforeValidator(blank_to_none)]
 
-Name = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)]
-Short = Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)]
+
+def _not_blank(value: str) -> str:
+    if not value.strip():
+        raise ValueError("must not be empty")
+    return value
+
+
+# values are stored exactly as typed (no silent trimming); a name just must not be blank
+Name = Annotated[str, StringConstraints(min_length=1, max_length=200), AfterValidator(_not_blank)]
+Short = Annotated[str, StringConstraints(max_length=200)]
 Desc = Annotated[str, StringConstraints(max_length=2000)]
 Note = Annotated[str, StringConstraints(max_length=5000)]
 

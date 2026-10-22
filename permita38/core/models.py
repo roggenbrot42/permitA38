@@ -244,14 +244,14 @@ class CustomerIn(v.StrictRecord):
     name: v.Name
     customer_no: v.Short | None = None
     street: v.Short | None = None
-    zip: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)] | None = None
+    zip: Annotated[str, StringConstraints(max_length=20)] | None = None
     city: v.Short | None = None
     country: v.Short | None = None
-    tax_number: Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)] | None = None
-    vat_id: Annotated[str, StringConstraints(strip_whitespace=True, max_length=30)] | None = None
+    tax_number: Annotated[str, StringConstraints(max_length=50)] | None = None
+    vat_id: Annotated[str, StringConstraints(max_length=30)] | None = None
     contact: v.Short | None = None
-    email: Annotated[str, StringConstraints(strip_whitespace=True, max_length=254)] | None = None
-    phone: Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)] | None = None
+    email: Annotated[str, StringConstraints(max_length=254)] | None = None
+    phone: Annotated[str, StringConstraints(max_length=50)] | None = None
     notes: v.Note | None = None
     rate: v.Rate | None = None
 
@@ -409,16 +409,16 @@ class SettingsIn(v.StrictRecord):
     company_name: v.Short = ""
     owner_name: v.Short = ""
     street: v.Short = ""
-    zip: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)] = ""
+    zip: Annotated[str, StringConstraints(max_length=20)] = ""
     city: v.Short = ""
-    email: Annotated[str, StringConstraints(strip_whitespace=True, max_length=254)] = ""
-    phone: Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)] = ""
-    website: Annotated[str, StringConstraints(strip_whitespace=True, max_length=300)] = ""
-    tax_number: Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)] = ""
-    vat_id: Annotated[str, StringConstraints(strip_whitespace=True, max_length=30)] = ""
+    email: Annotated[str, StringConstraints(max_length=254)] = ""
+    phone: Annotated[str, StringConstraints(max_length=50)] = ""
+    website: Annotated[str, StringConstraints(max_length=300)] = ""
+    tax_number: Annotated[str, StringConstraints(max_length=50)] = ""
+    vat_id: Annotated[str, StringConstraints(max_length=30)] = ""
     bank_name: v.Short = ""
-    iban: Annotated[str, StringConstraints(strip_whitespace=True, max_length=40)] = ""
-    bic: Annotated[str, StringConstraints(strip_whitespace=True, max_length=20)] = ""
+    iban: Annotated[str, StringConstraints(max_length=40)] = ""
+    bic: Annotated[str, StringConstraints(max_length=20)] = ""
     logo: v.OptAttachment = None
     company_type: Literal["freiberufler", "gewerbe", "gmbh"] = "freiberufler"
     accounting: Literal["eur", "accrual"] = "eur"

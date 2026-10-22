@@ -1,8 +1,10 @@
 """Regression tests for real bugs found by the randomized tests.
 
-Each test states the *correct* behaviour and is marked `xfail(strict=True)`: it documents the bug today and
-turns red (XPASS) the moment the bug is fixed, which is the signal to delete the marker and the matching
-workaround in test_api_fuzz.py / test_api_stateful.py.
+Each test states the *correct* behaviour. Fixed bugs are plain tests; a bug that is still open is marked
+`xfail(strict=True)`: it documents the bug today and turns red (XPASS) the moment it is fixed, which is the
+signal to delete the marker.
+
+Fixed in 0.4.0: input validation (dates, numbers, ranges, lone surrogates) and VAT rounding.
 """
 
 import pytest
