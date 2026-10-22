@@ -65,6 +65,13 @@ def _timezone(value: str) -> str:
     return value
 
 
+def _keyword(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError("must not be empty")
+    return value
+
+
 def _color(value: str) -> str:
     if not _COLOR_RE.match(value):
         raise ValueError("must be a colour like #2563eb")
@@ -100,6 +107,7 @@ Name = Annotated[str, StringConstraints(min_length=1, max_length=200), AfterVali
 Short = Annotated[str, StringConstraints(max_length=200)]
 Desc = Annotated[str, StringConstraints(max_length=2000)]
 Note = Annotated[str, StringConstraints(max_length=5000)]
+Keyword = Annotated[str, StringConstraints(max_length=100), AfterValidator(_keyword)]
 
 Amount = Annotated[float, Field(ge=-MAX_MONEY, le=MAX_MONEY, allow_inf_nan=False)]
 NonNegAmount = Annotated[float, Field(ge=0, le=MAX_MONEY, allow_inf_nan=False)]

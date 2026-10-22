@@ -11,9 +11,24 @@ from fastapi.staticfiles import StaticFiles
 from permita38 import __version__
 from permita38.core.config import Config
 from permita38.core.errors import ServiceError
+from permita38.core.service.calendar.service import ResourceFetcher
 
 from .deps import Services, startup_services
-from .routers import auth, files, finance, health, impressum, planning, records, sales, settings, time, totp, users
+from .routers import (
+    auth,
+    calendars,
+    files,
+    finance,
+    health,
+    impressum,
+    planning,
+    records,
+    sales,
+    settings,
+    time,
+    totp,
+    users,
+)
 
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
 
@@ -23,8 +38,9 @@ def _clean_msg(msg: str) -> str:
     return msg[:300]
 
 
-def get_app(config: Config) -> FastAPI:
-    services = Services.create(config)
+def get_app(config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> FastAPI:
+    """Build the app. ``calendar_fetcher`` is a test-only seam (never set by the CLI)."""
+    services = Services.create(config, calendar_fetcher=calendar_fetcher)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -80,7 +96,21 @@ def get_app(config: Config) -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    for module in (health, auth, totp, users, time, planning, finance, settings, files, sales, impressum, records):
+    for module in (
+        health,
+        auth,
+        totp,
+        users,
+        time,
+        planning,
+        finance,
+        settings,
+        files,
+        sales,
+        impressum,
+        records,
+        calendars,
+    ):
         for router in module.routers:
             app.include_router(router, prefix="/api")
 

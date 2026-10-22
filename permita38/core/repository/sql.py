@@ -7,6 +7,7 @@ Everything here is generic: records are encoded/decoded from the declarative sch
 
 from __future__ import annotations
 
+import builtins
 import math
 import os
 import re
@@ -239,11 +240,11 @@ class SQLRepository(Repository):
             rows = self._rows(self.dialect.select_all(table, f"{q('created')}, {q('id')}"))
         return [self._decode(table, r) for r in rows]
 
-    def _where(self, table: Table, equals: dict[str, Any]) -> tuple[str, list[Any]]:
+    def _where(self, table: Table, equals: dict[str, Any]) -> tuple[str, builtins.list[Any]]:
         """``WHERE`` clause for equality on plain columns (JSON columns and unknown names are rejected)."""
         q = self.dialect.quote
         parts: list[str] = []
-        params: list[Any] = []
+        params: builtins.list[Any] = []
         for name, value in equals.items():
             col = table.column(name)
             if col is None or col.type == JSON:

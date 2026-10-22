@@ -458,3 +458,59 @@ class SettingsIn(v.StrictRecord):
         if not _PATTERN_OK.match(value) or "{n" not in value:
             raise ValueError("may only use {year} and {n} / {n:04d} and must contain {n}")
         return value
+
+
+CalendarTitlePolicy = Literal["none", "redacted", "full"]
+
+
+class CalendarIn(BaseModel):
+    """Connect a calendar: an https ICS link (``url``) or a file uploaded alongside these fields."""
+
+    model_config = ConfigDict(extra="ignore")
+    name: v.Name
+    url: str | None = Field(default=None, max_length=2048)
+    refresh_minutes: int = Field(default=360, ge=15, le=10080)
+    title_policy: CalendarTitlePolicy = "none"
+    all_day_blocks: bool = False
+    include_keywords: list[v.Keyword] = Field(default=[], max_length=20)
+    exclude_keywords: list[v.Keyword] = Field(default=[], max_length=20)
+    busy_default: bool = True
+
+
+class CalendarPatchIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: v.Name | None = None
+    refresh_minutes: int | None = Field(default=None, ge=15, le=10080)
+    title_policy: CalendarTitlePolicy | None = None
+    all_day_blocks: bool | None = None
+    include_keywords: list[v.Keyword] | None = Field(default=None, max_length=20)
+    exclude_keywords: list[v.Keyword] | None = Field(default=None, max_length=20)
+    busy_default: bool | None = None
+
+
+class CalendarOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    name: str | None = None
+    kind: str | None = None
+    url_masked: str | None = None  # the subscription address is a secret: only a masked form is returned
+    refresh_minutes: int | None = None
+    title_policy: str | None = None
+    all_day_blocks: bool = False
+    include_keywords: list[str] = []
+    exclude_keywords: list[str] = []
+    busy_default: bool = True
+    last_fetched: int | None = None
+    last_status: str | None = None
+    last_error: str | None = None
+    event_count: int = 0
+
+
+class CalendarEventOut(BaseModel):
+    start: str
+    end: str
+    all_day: bool = False
+    title: str | None = None  # only when the source's title policy allows it
+    ooo: bool = False
+    source_id: str | None = None
+    source_name: str | None = None

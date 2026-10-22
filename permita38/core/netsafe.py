@@ -29,6 +29,7 @@ MAX_REDIRECTS = 3
 ALLOWED_PORTS = (80, 443)
 ALLOWED_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
 _REDIRECT_STATUS = (301, 302, 303, 307, 308)
+_HTML_ACCEPT = "text/html,application/xhtml+xml;q=0.9"
 _BLOCKED_SUFFIXES = (".localhost", ".local", ".internal", ".intranet", ".lan", ".home", ".corp", ".home.arpa")
 
 # Not covered (or only partly) by ``is_global``: tunnelling prefixes that embed an arbitrary IPv4 address.
@@ -70,6 +71,18 @@ class FetchError(Exception):
 class BlockedAddress(FetchError):
     def __init__(self, message: str = "This address is not allowed (private, internal or reserved network)."):
         super().__init__("blocked_address", message)
+
+
+@dataclass
+class FetchedResource:
+    """A non-HTML download (for example an iCalendar file). ``status`` is 200, or 304 when the server says unchanged."""
+
+    url: str  # final URL after redirects
+    status: int
+    content_type: str
+    body: bytes
+    etag: str | None = None
+    last_modified: str | None = None
 
 
 @dataclass
@@ -243,42 +256,102 @@ class SafeFetcher:
 
     # -- public ---------------------------------------------------------------------------------
     def fetch(self, url: str, budget: RequestBudget | None = None) -> FetchedPage:
+        current, status, headers, body, visited = self._walk(url, budget, _HTML_ACCEPT, ALLOWED_CONTENT_TYPES, None)
+        if status != 200:
+            raise FetchError("http_error", f"The website answered with HTTP status {status}.")
+        raw_type = headers.get("content-type", "")
+        ctype = raw_type.split(";")[0].strip().lower()
+        if ctype not in ALLOWED_CONTENT_TYPES:
+            raise FetchError("bad_content_type", "The address does not point to a web page (HTML).")
+        charset = None
+        for param in raw_type.split(";")[1:]:
+            name, _, value = param.partition("=")
+            if name.strip().lower() == "charset":
+                charset = value.strip().strip("\"'") or None
+        return FetchedPage(
+            url=current, status=status, content_type=ctype, body=body, redirects=visited, charset=charset
+        )
+
+    def fetch_resource(
+        self,
+        url: str,
+        *,
+        accept: str,
+        allowed_types: tuple[str, ...],
+        max_bytes: int,
+        https_only: bool = False,
+        conditional: dict[str, str] | None = None,
+        budget: RequestBudget | None = None,
+    ) -> FetchedResource:
+        """Download a file with the same SSRF rules. ``conditional`` may hold ETag/Last-Modified validators.
+
+        Returns status 304 (empty body) when the validators say the file is unchanged. Raises :class:`FetchError`.
+        """
+        headers_in = {"If-None-Match": conditional["etag"]} if conditional and conditional.get("etag") else {}
+        if conditional and conditional.get("last_modified"):
+            headers_in["If-Modified-Since"] = conditional["last_modified"]
+        current, status, headers, body, _ = self._walk(
+            url, budget, accept, allowed_types, (max_bytes, https_only, headers_in)
+        )
+        if status == 304:
+            return FetchedResource(url=current, status=304, content_type="", body=b"")
+        if status != 200:
+            raise FetchError("http_error", f"The server answered with HTTP status {status}.")
+        ctype = headers.get("content-type", "").split(";")[0].strip().lower()
+        if ctype not in allowed_types:
+            raise FetchError("bad_content_type", "The address does not point to a calendar file.")
+        return FetchedResource(
+            url=current,
+            status=200,
+            content_type=ctype,
+            body=body,
+            etag=headers.get("etag"),
+            last_modified=headers.get("last-modified"),
+        )
+
+    # -- internals ------------------------------------------------------------------------------
+    def _walk(
+        self,
+        url: str,
+        budget: RequestBudget | None,
+        accept: str,
+        allowed_types: tuple[str, ...],
+        extra: tuple[int, bool, dict[str, str]] | None,
+    ) -> tuple[str, int, dict[str, str], bytes, list[str]]:
+        """Follow redirects; returns (final url, status, headers, body, URLs visited before it)."""
         budget = budget or RequestBudget()
         started = time.monotonic()
+        max_bytes, https_only, extra_headers = extra if extra else (self.max_bytes, False, {})
         current = url
         visited: list[str] = []
         for _ in range(self.max_redirects + 1):
             parsed = parse_url(current, self.allowed_ports)
+            if https_only and parsed.scheme != "https":
+                raise FetchError("insecure_url", "Only https:// addresses are accepted here.")
             key = f"{parsed.scheme}://{parsed.host}:{parsed.port}{parsed.target}"
             if key in visited:
                 raise FetchError("redirect_loop", "The website redirects in a loop.")
             visited.append(key)
             ip = self._resolve_and_check(parsed)
             budget.spend()
-            status, headers, body = self._request(parsed, ip, started)
+            status, headers, body = self._request(
+                parsed,
+                ip,
+                started,
+                accept=accept,
+                allowed_types=allowed_types,
+                max_bytes=max_bytes,
+                extra=extra_headers,
+            )
             if status in _REDIRECT_STATUS:
                 location = headers.get("location")
                 if not location:
                     raise FetchError("http_error", "The website sent an invalid redirect.")
                 current = urljoin(current, location.strip())
                 continue
-            if status != 200:
-                raise FetchError("http_error", f"The website answered with HTTP status {status}.")
-            raw_type = headers.get("content-type", "")
-            ctype = raw_type.split(";")[0].strip().lower()
-            if ctype not in ALLOWED_CONTENT_TYPES:
-                raise FetchError("bad_content_type", "The address does not point to a web page (HTML).")
-            charset = None
-            for param in raw_type.split(";")[1:]:
-                name, _, value = param.partition("=")
-                if name.strip().lower() == "charset":
-                    charset = value.strip().strip("\"'") or None
-            return FetchedPage(
-                url=current, status=status, content_type=ctype, body=body, redirects=visited[:-1], charset=charset
-            )
+            return current, status, headers, body, visited[:-1]
         raise FetchError("too_many_redirects", "The website redirects too often.")
 
-    # -- internals ------------------------------------------------------------------------------
     def _resolve_and_check(self, parsed: ParsedUrl) -> str:
         addresses = self.resolver(parsed.host, parsed.port)
         if not addresses:
@@ -299,28 +372,37 @@ class SafeFetcher:
             return _PinnedHTTPSConnection(parsed.host, ip, parsed.port, self.timeout, ctx)
         return _PinnedHTTPConnection(parsed.host, ip, parsed.port, self.timeout)
 
-    def _request(self, parsed: ParsedUrl, ip: str, started: float) -> tuple[int, dict[str, str], bytes]:
+    def _request(
+        self,
+        parsed: ParsedUrl,
+        ip: str,
+        started: float,
+        *,
+        accept: str = _HTML_ACCEPT,
+        allowed_types: tuple[str, ...] = ALLOWED_CONTENT_TYPES,
+        max_bytes: int | None = None,
+        extra: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, str], bytes]:
         conn = self._connection(parsed, ip)
         try:
-            conn.request(
-                "GET",
-                parsed.target,
-                headers={
-                    "User-Agent": self.user_agent,
-                    "Accept": "text/html,application/xhtml+xml;q=0.9",
-                    "Accept-Encoding": "gzip",
-                    "Accept-Language": "de,en;q=0.8",
-                    "Connection": "close",
-                },
-            )
+            headers = {
+                "User-Agent": self.user_agent,
+                "Accept": accept,
+                "Accept-Encoding": "gzip",
+                "Accept-Language": "de,en;q=0.8",
+                "Connection": "close",
+            }
+            headers.update(extra or {})
+            conn.request("GET", parsed.target, headers=headers)
             resp = conn.getresponse()
             headers = {k.lower(): v for k, v in resp.getheaders()}
             if resp.status in _REDIRECT_STATUS or resp.status != 200:
                 return resp.status, headers, b""
             ctype = headers.get("content-type", "").split(";")[0].strip().lower()
-            if ctype not in ALLOWED_CONTENT_TYPES:
+            if ctype not in allowed_types:
                 return resp.status, headers, b""
-            return resp.status, headers, self._read_body(conn, resp, headers, started)
+            limit = self.max_bytes if max_bytes is None else max_bytes
+            return resp.status, headers, self._read_body(conn, resp, headers, started, limit)
         except FetchError:
             raise
         except (TimeoutError, socket.timeout):
@@ -335,7 +417,12 @@ class SafeFetcher:
             conn.close()
 
     def _read_body(
-        self, conn: http.client.HTTPConnection, resp: http.client.HTTPResponse, headers: dict[str, str], started: float
+        self,
+        conn: http.client.HTTPConnection,
+        resp: http.client.HTTPResponse,
+        headers: dict[str, str],
+        started: float,
+        limit: int,
     ) -> bytes:
         encoding = headers.get("content-encoding", "identity").strip().lower()
         if encoding not in ("", "identity", "gzip", "x-gzip"):
@@ -353,10 +440,10 @@ class SafeFetcher:
                 break
             if decomp is not None:
                 try:
-                    chunk = decomp.decompress(chunk, self.max_bytes + 1 - len(out))
+                    chunk = decomp.decompress(chunk, limit + 1 - len(out))
                 except zlib.error:
                     raise FetchError("network_error", "The website sent damaged data.") from None
             out += chunk
-            if len(out) > self.max_bytes:
+            if len(out) > limit:
                 raise FetchError("too_large", "The web page is too large.")
         return bytes(out)
