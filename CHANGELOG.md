@@ -18,6 +18,10 @@ All notable changes to this project are documented here. The format is based on
   ←/→ (move), PageUp/PageDown (a week), Shift+←/→ (end), Ctrl+←/→ (start).
 
 ### Added
+- **Itemised expenses in the dialog**: tick *Itemise this bill* to book a bill with several lines (own amount, VAT rate
+  and deductible share per line), with totals per VAT rate while you type. See `docs/getting-started.md`, section 8.
+- **Bill preview** in the expense dialog: the chosen or stored bill is shown beside the lines; images zoom and pan
+  (buttons, mouse wheel, keys, drag), PDFs use the browser's viewer.
 - **Itemised expenses (API)** (`docs/specs/itemised-expenses.md`): an expense can carry up to 50 `lines`, each with its
   own gross amount, VAT rate and deductible share (and optional business-meal VAT share or category). VAT is computed
   per rate group as on a printed bill; the server derives net and VAT per line and the totals for the tax figures use

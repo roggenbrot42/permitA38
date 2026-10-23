@@ -75,6 +75,9 @@ Open **Planning**:
 ## 8. Expenses and your tax picture
 
 - **Expenses → + Add bill.** Enter the amount on the bill (gross) and the VAT rate – permitA38 works out net and VAT. Attach the PDF or a photo. Choose a project or leave it as a general expense.
+- **A bill with several lines** (a hotel invoice with a 7 % room, a 19 % breakfast and 0 % city tax): tick **Itemise this bill**. Type each line as it is printed: description, amount on the bill (gross), VAT % (19, 7 or 0) and the deductible share of that line. The totals under the table show gross, net and VAT per rate, so you can check them against the total on the paper. Remove a line with ✕; itemising can be switched off again once one line is left. Example: room 160,00 € at 7 %, breakfast 30,00 € at 19 %, city tax 6,00 € at 0 % gives gross 196,00 €, net 180,74 €, VAT 15,26 €.
+- **Deductible, per line:** the share of a line that you can deduct as a business cost. Use 100 for almost everything. A business meal with business partners is 70 % deductible: choose the category *Business meals* and the share is set to 70. Its input VAT is still reclaimed in full. Each line has its own share, so on one bill the room can be 100 % and a business lunch 70 %.
+- **Bill preview:** the attached bill is shown beside the lines, so you can compare them while you type. Images: zoom with + and −, *Fit* or *100 %*, the mouse wheel, or drag to move the picture (keys: + − 0 and the arrow keys once the preview is focused). PDFs use your browser's own viewer; if it cannot show the PDF, use *Open in a new tab*. Bills with several lines show "n items" in the expense list.
 - **Money & Taxes** shows, for any year: revenue, expenses, profit, VAT, estimated income tax / trade tax and – the important number – **what to set aside this month** and **what you can take home**.
 
 > These numbers are planning estimates, not tax advice. Check them with your Steuerberater.
