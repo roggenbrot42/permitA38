@@ -7,7 +7,7 @@ import tempfile
 import typing
 from pathlib import Path
 
-from fastapi import UploadFile, params
+from fastapi import params
 from fastapi.routing import APIRoute
 from pydantic import BaseModel
 
