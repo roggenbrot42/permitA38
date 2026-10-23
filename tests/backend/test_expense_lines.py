@@ -16,7 +16,7 @@ Decisions where the spec is silent (the implementation must follow them):
   the top-level fields stay exactly as the client sent them.
 """
 
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -44,12 +44,17 @@ def derive(lines):
     for r, idx in groups.items():
         total = sum((D(str(lines[i][0])) for i in idx), D(0))
         group_vat = q2(total * r / (100 + r))
-        used = D(0)
-        for n, i in enumerate(idx):
-            g = D(str(lines[i][0]))
-            vat = group_vat - used if n == len(idx) - 1 else q2(g * r / (100 + r))
-            used += vat
-            out[i] = (g - vat, vat)
+        # largest-remainder method (spec rule 2): floor every exact share to cents, hand the leftover cents to the
+        # largest fractional parts, ties to the later line
+        exact = {i: D(str(lines[i][0])) * r / (100 + r) for i in idx}
+        floor = {i: exact[i].quantize(D("0.01"), rounding=ROUND_DOWN) for i in idx}
+        rest = int((group_vat - sum(floor.values(), D(0))) / D("0.01"))
+        order = sorted(idx, key=lambda i: (exact[i] - floor[i], i), reverse=True)
+        vats = dict(floor)
+        for i in order[:rest]:
+            vats[i] += D("0.01")
+        for i in idx:
+            out[i] = (D(str(lines[i][0])) - vats[i], vats[i])
         summary[r] = (group_vat, total - group_vat)
     return out, summary
 
