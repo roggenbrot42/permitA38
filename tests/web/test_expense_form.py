@@ -4,7 +4,14 @@ import pytest
 
 pytest.importorskip("playwright.sync_api")
 
-from tests.web.test_planner_ui import srv  # noqa: E402,F401  (shared harness)
+from tests.web.test_impressum_prefill import Server  # noqa: E402,F401  (shared harness)
+
+
+@pytest.fixture
+def srv(tmp_path):
+    s = Server(tmp_path)
+    yield s
+    s.stop()
 
 
 def test_business_meals_category_is_selectable_and_proposes_70_percent(browser, srv):
@@ -35,5 +42,5 @@ def test_business_meals_category_is_selectable_and_proposes_70_percent(browser, 
     import httpx
 
     got = httpx.get(srv.base + "/api/expenses", headers={"Authorization": "Bearer " + srv.token}).json()
-    assert [(x["category"], x["deductible"]) for x in got] == [("Business meals", 70)]
+    assert [(x["category"], x["deductible"], x["vat_deductible"]) for x in got] == [("Business meals", 70, 100)]
     ctx.close()

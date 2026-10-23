@@ -6754,6 +6754,17 @@
             "title": "Deductible",
             "default": 100
           },
+          "vat_deductible": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Deductible"
+          },
           "attachment": {
             "anyOf": [
               {
@@ -6860,6 +6871,19 @@
             "minimum": 0.0,
             "title": "Deductible",
             "default": 100
+          },
+          "vat_deductible": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Deductible"
           },
           "attachment": {
             "anyOf": [
