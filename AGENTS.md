@@ -5,7 +5,7 @@
   `config.py`, `database.py` (schema revision + migration files) and `service/` (business services).
 - `permita38/core/repository/` – the storage layer. `base.py` is the `Repository` interface; `schema.py` describes the
   tables once (dialect-neutral); `dialect.py` generates SQL per dialect; `sql.py` is the generic SQL implementation;
-  `sqlite.py` is the default backend. `permita38/core/schema/migrations/<dialect>/` holds the numbered migrations.
+  `sqlite.py` is the default backend. `permita38/core/schema/migrations/<dialect>/` holds the migrations (id/requires chain, `NNNN-slug.sql`).
 - `permita38/api/` – FastAPI app (`server.py`), dependency injection (`deps.py`) and one router per domain in `routers/`.
 - `permita38/cli/` – command line entry point (`serve`, `show-openapi`, `set-password`).
 - `web/` – vanilla-JS single-page frontend, no build step. It only talks to the HTTP API.
@@ -24,6 +24,13 @@
   `PERMITA38_CHROMIUM` or run `python -m playwright install chromium`). `make test-all` – everything. `make lint` – ruff + mypy. `make format` / `make check-format` – ruff formatter.
 - `make run` – start the server without opening a browser. `make check-openapi` – verify the contract is current.
 
+## Running tests economically
+- While iterating run only the affected files (`pytest tests/backend/test_x.py -q`). Run the browser and randomized
+  suites **once, at the end**, with `make test-summary` (one line per suite, full logs in `test-artifacts/`, a lock
+  makes concurrent runs wait). Read `test-artifacts/<suite>.log` only for a failing suite.
+- Randomized failures print the replay command and the last 12 steps; the whole step log is in
+  `test-artifacts/e2e-<kind>-seed<N>.log`. Replay with `PERMITA38_E2E_SEED=<N>`; seeds are fixed by default.
+
 ## Conventions
 - Routers stay thin; logic belongs in `core/service/`. Services raise `ServiceError`, never HTTP exceptions.
 - Request bodies are validated by the strict `*In` models (`core/models.py`, primitives in `core/validation.py`);
@@ -36,12 +43,20 @@
   (the repository keeps them in the row's `extra` JSON column).
 
 ## Database migrations
-- The schema lives in `core/repository/schema.py`. To change it: run `permita38 create-migration <name>` (creates the next
-  numbered file in **every** dialect folder under `core/schema/migrations/`), write the SQL for each dialect, update
-  `schema.py` and the pydantic model, and **bump `CURRENT_REVISION` in `core/database.py`**. Tests fail if the dialect
-  folders drift apart, if `CURRENT_REVISION` is not the highest number, or if a migrated SQLite database differs from
-  `schema.py`. Migration SQL must not contain `BEGIN`/`COMMIT` (the runner wraps each file in a transaction and
-  records the revision). Never edit a migration that has been released – add a new one.
+- The schema lives in `core/repository/schema.py`. To change it: run `permita38 create-migration <name>`. It creates
+  `NNNN-<slug>.sql` in **every** dialect folder under `core/schema/migrations/` with the header
+  `-- migration: <random 8-hex id>` / `-- requires: <id of the current head>`; write the SQL for each dialect and update
+  `schema.py` and the pydantic model. There is no revision constant to bump. The identity of a migration is its id, the
+  order is the `requires` chain (linear, exactly one head); `NNNN` is only a human-readable ordinal (head + 1, must not
+  decrease along the chain, ties are fine). Tests fail if a chain rule is violated, if the dialect folders drift
+  apart, or if a migrated SQLite database differs from `schema.py`. The runner records applied ids in
+  `schema_migrations` and keeps `PRAGMA user_version` = number of applied migrations (so old binaries refuse the
+  database). Migration SQL must not contain `BEGIN`/`COMMIT` (the runner wraps each file in a transaction and records
+  the id). Never edit a migration that has been released – add a new one. The first three migrations keep the fixed
+  ids `00000001`..`00000003` (the old integer revisions).
+- **Merge conflict on `requires`:** when two branches both added a migration, validation reports a fork. The second to
+  merge rebases its **first** new migration's `requires` onto the new head (in all three dialect folders) and changes
+  nothing else; renaming the `NNNN` prefix is optional. `permita38 migrate --status` lists the chain.
 - Commit messages use Conventional Commit prefixes (`feat:`, `fix:`, `chore:`, `docs:`), imperative summaries.
 - Licensed GPL-3.0-or-later; keep new files compatible.
 
@@ -55,12 +70,21 @@
 - **Review** (code, tests, logic) is done by the stronger model, see "Merge gate".
 
 ## Merge gate (before anything lands on `main`)
-- Implementation work may be done with smaller/cheaper models, but **every branch is reviewed with Sonnet 5.5 before it is
-  merged into `main`**, in three passes: (1) **code review** of the diff (correctness, security, edge cases),
-  (2) **test review** (do the tests prove the intent, are assertions meaningful, are cases missing, would they fail if
-  the code were wrong), (3) **logic review** of the domain rules (recompute key numbers by hand or with an independent
-  oracle: capacity, VAT/rounding, numbering, calendar hours, permissions). Findings go back to the branch and are fixed
-  first. Only then: merge, regenerate `api/openapi.json`, run `make test lint`, push.
+- Implementation may be done with smaller/cheaper models. The review effort scales with the risk of the branch:
+  - **Light** (cosmetic UI, docs, tooling, small bug fixes that touch no money, rights, storage or outside input):
+    one Haiku pass over the diff plus the targeted tests.
+  - **Standard** (schema/migrations, advisory checks, other non-security logic): one Sonnet 5.5 pass covering code and
+    tests together; a smaller model may check the test list against the specification.
+  - **Full** (money/VAT/numbering, rights, uploads and served files, parsing of outside input, network access): three
+    Sonnet 5.5 passes. (1) **code review** of the diff (correctness, security, edge cases), (2) **test review** (do the
+    tests prove the intent, are assertions meaningful, are cases missing, would they fail if the code were wrong),
+    (3) **logic review** of the domain rules (recompute key numbers by hand or with an independent oracle: capacity,
+    VAT/rounding, numbering, calendar hours, permissions). The logic pass is never done by a smaller model.
+  - The maintainer or architect assigns the tier in the task specification; when in doubt take the higher one.
+  - Findings go back to the branch and are fixed first. Only then: merge, regenerate `api/openapi.json`, run
+    `make test lint`, push.
+- **Before every release** run the whole suite once on `main` (`make test-summary` with backend, browser, randomized and
+  release suites) and click through the main path by hand. Branches only run their affected tests.
 - Releases are always tagged (annotated) from `main`, see `RELEASING.md`.
 
 ## Security

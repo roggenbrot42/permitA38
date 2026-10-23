@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- Planner: after the first keyboard move the bar lost keyboard focus (the page redrew), so it could not be moved or
+  resized again. Focus now survives redraws, Ctrl+←/→ resizes the start, and each draft change has its own Discard
+  button (and Esc on a focused bar).
+- Planner: bars could not be dragged at all (the pointer sat on the bar, so no day was found under it); a clicked bar
+  was neither focused nor visibly selected (Firefox hides `:focus-visible` after a click); Alt+←/→ was taken by the
+  browser's Back/Forward. Dragging now measures the distance, clicking selects and outlines the bar, and the keys are
+  ←/→ (move), PageUp/PageDown (a week), Shift+←/→ (end), Ctrl+←/→ (start).
+
 ### Added
 - **Calendars: meetings reduce your capacity.** Connect a personal calendar by its ICS link (Proton Calendar
   "Share via link", Nextcloud, Google, Outlook, Apple, Fastmail: `https://` or `webcal://`) or by uploading an `.ics`
@@ -22,11 +31,30 @@ All notable changes to this project are documented here. The format is based on
   and offer-based extensions; revenue basis (contracted, open offers, assumed); vacation entitlement; and the
   **Plan & vacation** page with drag-to-vacation, moving and resizing bars, keyboard editing, draft and apply,
   scenarios and comparison, and suggestions (vacation windows, earliest start, what must move).
-  Migration 0003 (renumbered to 0009 at merge time, see the migration header).
+  Migration `0003-planning`.
+- **Migration identifiers instead of contiguous numbers** (`docs/specs/migration-ids.md`): migrations are
+  `NNNN-slug.sql` files with a `-- migration: <id>` / `-- requires: <id>` header, ordered by the `requires` chain, so
+  parallel branches no longer collide on "the next number". Applied ids are recorded in a new `schema_migrations`
+  table; databases written by alpha.1 (integer `PRAGMA user_version` 1 to 3) are adopted automatically, and
+  `user_version` keeps counting applied migrations so old binaries refuse upgraded databases. `permita38 migrate`
+  prints ids and `migrate --status` lists the chain.
 
 ### Changed
+- `/api/health`: `revision` and `current_revision` are migration ids (`revision` is `null` for an empty database);
+  new field `applied`. `CURRENT_REVISION` is gone. Pre-migration backups are named
+  `pre-migration-<timestamp>-before-<head id>.sqlite3`.
 - Forecast revenue is based first on contracted hours, then open offers, and only then on assumed hours; every week
   states its basis. Contract hours are spread over the workdays of the assignee.
+
+### Fixed
+- Expenses: there was no "Business meals" category to choose. It exists now and proposes 70 % deductible (your own value is
+  never overwritten); a category entered elsewhere stays selectable when editing.
+- Expenses: the deductible share was also applied to the input VAT, so business meals (70 % deductible) under-claimed 30 % of
+  the VAT. Input VAT of bills in the category *Business meals* is now reclaimed in full (§ 15 Abs. 1a UStG, to be
+  confirmed by your tax adviser); other categories are unchanged. Bills you entered earlier keep their old figures: open
+  and save them again after choosing the category.
+- Money & Taxes: a year outside 2000–2100 in the address (typed or stale) showed a validation error page; it is clamped
+  now and the arrows stop at the ends (found by the nightly randomized browser run).
 
 ## [0.4.0-alpha.1] - 2026-10-22
 

@@ -26,6 +26,7 @@ from .helpers import (
     norm,
     parse_duration,
     pick_weighted,
+    report_failure,
     seeds_from_env,
     week_start,
     week_target_minutes,
@@ -479,7 +480,7 @@ class Journey:
         self.wait_render()
         doc.id = self.hash_id()
         self.m.docs.append(doc)
-        assert "(draft)" in norm(self.page.inner_text("main h1"))
+        assert "draft" in norm(self.page.inner_text("main h1")).lower()
 
     def _open_doc(self, doc: MDoc):
         self.nav(f"#/sales/{doc.kind}")
@@ -789,15 +790,12 @@ def test_random_user_journey(seed, make_page, live_server, api):
         unexpected = [x for x in watch.http_4xx if not x.startswith("401 ")]
         assert not unexpected, unexpected
     except Exception as exc:
-        log = "\n".join(j.log)
-        print(f"\n=== journey seed={seed} failed; replay with PERMITA38_E2E_SEED={seed} ===\n{log}")
-        shot = f"/tmp/e2e_random_seed{seed}.png"
+        detail = report_failure("journey", seed, j.log)
         try:
-            page.screenshot(path=shot)
-            print("screenshot:", shot, "| page text:", norm(page.inner_text("body"))[:500])
+            page.screenshot(path=f"/tmp/e2e_random_seed{seed}.png")
         except Exception:
             pass
         raise AssertionError(
-            f"seed {seed} failed after {len(j.log)} actions: {exc}\n{log}\n{traceback.format_exc(limit=6)}"
+            f"seed {seed} failed after {len(j.log)} actions: {exc}\n{detail}\n{traceback.format_exc(limit=3)}"
         ) from exc
     print(f"seed {seed}: {len(j.log)} actions OK\n" + "\n".join(j.log))

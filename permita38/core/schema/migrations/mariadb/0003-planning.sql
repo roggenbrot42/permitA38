@@ -1,6 +1,6 @@
+-- migration: 00000003
+-- requires: 00000002
 -- permitA38 migration 0003: planning (mariadb)
--- RENUMBERING NOTE: this branch numbers it 0003 because it is the next free number here; the parent renumbers it
--- to 0009 when the planner branch is merged after the other branches (update CURRENT_REVISION accordingly).
 -- projects.start / end: project period; backfilled from the earliest/latest contract and time entry where known.
 -- projects.extensions: JSON list of period extensions (manual or by offer). plan_scenarios: named what-if scenarios.
 

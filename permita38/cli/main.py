@@ -49,12 +49,15 @@ def main(argv: list[str] | None = None):
     sp.add_argument("username")
     rp = sub.add_parser("reset-totp", help="turn off two-factor authentication of a user (lock-out recovery)")
     rp.add_argument("username")
-    sub.add_parser("migrate", help="apply pending database migrations (a backup is taken first)")
+    mp = sub.add_parser("migrate", help="apply pending database migrations (a backup is taken first)")
+    mp.add_argument("--status", action="store_true", help="list the migration chain with an applied marker and exit")
     bp = sub.add_parser("backup", help="write a consistent copy of the database")
     bp.add_argument("--dest", type=Path, help="target file (default: <data>/backups/permita38-<timestamp>.sqlite3)")
     ip = sub.add_parser("import-json", help="import data from the old JSON-file layout")
     ip.add_argument("old_data_dir", type=Path)
-    cp = sub.add_parser("create-migration", help="create the next numbered migration file (all dialects)")
+    cp = sub.add_parser(
+        "create-migration", help="create a new migration file (random id, requires = current head) in all dialects"
+    )
     cp.add_argument("name")
     dp = sub.add_parser("dump-ddl", help="print the schema DDL generated for a SQL dialect")
     dp.add_argument("--dialect", default="sqlite", choices=["sqlite", "postgresql", "mariadb"])
@@ -74,7 +77,7 @@ def main(argv: list[str] | None = None):
 
         for p in create_migration(args.name):
             print("created", p)
-        print("Now write the SQL for every dialect and bump CURRENT_REVISION in permita38/core/database.py.")
+        print("'requires' is set for you; there is no revision constant to bump. Now write the SQL for every dialect.")
         return
     if command == "dump-ddl":
         from permita38.core.repository.dialect import DIALECTS
@@ -95,8 +98,19 @@ def main(argv: list[str] | None = None):
         return
     try:
         if command == "migrate":
-            old, new = services.store.migrate()
-            print(f"Database is at revision {new}." if old == new else f"Migrated revision {old} -> {new}.")
+            if args.status:
+                from permita38.core.database import list_migrations
+
+                applied = set(services.store.applied_ids())
+                for m in list_migrations(services.store.backend):
+                    print(f"[{'x' if m.id in applied else ' '}] {m.id}  {m.file_name}")
+                return
+            old, new, n = services.store.migrate()
+            print(
+                f"Database is at revision {new}."
+                if n == 0
+                else f"Migrated {old or 'none'} -> {new} ({n} migrations applied)."
+            )
             return
         if command == "backup":
             services.store.startup()

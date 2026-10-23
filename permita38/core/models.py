@@ -101,6 +101,7 @@ class Expense(Record):
     category: str | None = None
     project_id: str | None = None
     deductible: float = 100
+    vat_deductible: float | None = None  # share of the input VAT that is reclaimed; None = same as `deductible`
     attachment: str | None = None
 
 
@@ -353,6 +354,7 @@ class ExpenseIn(v.StrictRecord):
     category: v.Short | None = None
     project_id: v.OptId = None
     deductible: v.Percent = 100
+    vat_deductible: v.Percent | None = None
     attachment: v.OptAttachment = None
 
 

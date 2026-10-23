@@ -215,12 +215,13 @@ def test_attachments(repo):
 
 # ------------------------------------------------------------------ operations
 def test_health_and_revision(repo):
-    from permita38.core.database import CURRENT_REVISION
+    from permita38.core.database import head_id
 
     h = repo.health()
-    assert h["ok"] is True and h["revision"] == CURRENT_REVISION == h["current_revision"]
-    assert repo.get_revision() == CURRENT_REVISION
-    assert repo.migrate() == (CURRENT_REVISION, CURRENT_REVISION)  # nothing pending
+    assert h["ok"] is True and h["revision"] == head_id() == h["current_revision"]
+    assert repo.get_revision() == head_id()
+    assert h["applied"] == len(repo.applied_ids())
+    assert repo.migrate() == (head_id(), head_id(), 0)  # nothing pending
 
 
 def test_conflicts_is_a_list(repo):

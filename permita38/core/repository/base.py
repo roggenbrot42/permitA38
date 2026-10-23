@@ -61,15 +61,20 @@ class Repository(ABC):
 
     @abstractmethod
     def health(self) -> Record:
-        """{"backend", "revision", "current_revision", "ok", ...}"""
+        """{"backend", "revision", "current_revision", "applied", "ok", ...}"""
 
     # ---- schema revision / migrations ----
     @abstractmethod
-    def get_revision(self) -> int: ...
+    def applied_ids(self) -> list[str]:
+        """Ids of the applied migrations in chain order."""
 
     @abstractmethod
-    def migrate(self) -> tuple[int, int]:
-        """Apply pending migrations; returns (old_revision, new_revision)."""
+    def get_revision(self) -> str | None:
+        """Id of the last applied migration, None for an empty database."""
+
+    @abstractmethod
+    def migrate(self) -> tuple[str | None, str | None, int]:
+        """Apply pending migrations; returns (old id, new id, number of migrations applied)."""
 
     # ---- records ----
     @abstractmethod

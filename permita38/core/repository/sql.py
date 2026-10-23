@@ -15,14 +15,22 @@ import threading
 import time
 from abc import abstractmethod
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from permita38.core.database import CURRENT_REVISION, list_migrations
+from permita38.core.database import LEGACY_IDS, Migration, list_migrations
 
 from .base import ID_RE, DatabaseRevisionError, Record, RecordList, Repository, StrList, check_collection, new_id
 from .dialect import Dialect
 from .schema import BOOL, FLOAT, ID, INT, JSON, STR, TABLES, TEXT, Column, Table
+
+MIGRATIONS_TABLE = "schema_migrations"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 
 _INT_MIN, _INT_MAX = -(2**63), 2**63 - 1
 _CONFLICT_MARKERS = (".sync-conflict-", "conflicted copy")
@@ -64,11 +72,60 @@ class SQLRepository(Repository):
     def _rollback(self) -> None: ...
 
     @abstractmethod
-    def _read_revision(self) -> int: ...
+    def _run_migration(self, migration: Migration, applied_count: int) -> None:
+        """Apply one migration atomically: its SQL and the `schema_migrations` row in ONE transaction
+        (SQLite also sets `PRAGMA user_version = applied_count` so that old binaries refuse the database)."""
 
-    @abstractmethod
-    def _run_migration(self, version: int, name: str, sql: str) -> None:
-        """Apply one migration atomically and record the new revision."""
+    def _read_legacy_revision(self) -> int:
+        """Integer revision of a database written before `schema_migrations` existed (0 = none).
+
+        Server backends were never released with an integer revision, so the default is 0; SQLite overrides this
+        with `PRAGMA user_version`."""
+        return 0
+
+    # ------------------------------------------------------------------ migration state
+    def _migrations_table_exists(self) -> bool:
+        return bool(self._rows(self.dialect.table_exists_sql(), (MIGRATIONS_TABLE,)))
+
+    def _migration_state(self, chain: list[Migration]) -> tuple[list[str], list[str], bool]:
+        """(applied ids in chain order, unknown ids, applied ids come from the legacy revision).
+
+        Read-only: a missing `schema_migrations` table means nothing is recorded yet (legacy or empty database).
+        Only `migrate()` creates the table."""
+        ids: set[str] = set()
+        if self._migrations_table_exists():
+            rows = self._rows(f"SELECT {self.dialect.quote('id')} FROM {self.dialect.quote(MIGRATIONS_TABLE)}")
+            ids = {str(r[0]) for r in rows}
+        legacy = False
+        if not ids:
+            rev = self._read_legacy_revision()
+            if rev > len(LEGACY_IDS):
+                return [], [f"revision {rev}"], False
+            if rev > 0:
+                ids, legacy = set(LEGACY_IDS[:rev]), True
+        known = {m.id for m in chain}
+        unknown = sorted(ids - known)
+        applied = [m.id for m in chain if m.id in ids]
+        return applied, unknown, legacy
+
+    def _check_state(self, chain: list[Migration]) -> tuple[list[str], bool]:
+        """Applied ids (chain order) and whether they come from the legacy revision. Refuses newer/holey databases."""
+        applied, unknown, legacy = self._migration_state(chain)
+        if unknown:
+            self.close()
+            raise DatabaseRevisionError(
+                f"The database contains migrations this version of permitA38 does not know ({', '.join(unknown)}). "
+                "It was probably written by a newer version (e.g. on another device). "
+                "Update permitA38 on this device; refusing to start to protect your data."
+            )
+        if applied != [m.id for m in chain[: len(applied)]]:
+            missing = [m.id for m in chain[: len(applied)] if m.id not in applied]
+            self.close()
+            raise DatabaseRevisionError(
+                f"The applied migrations are not a prefix of the migration chain (missing: {', '.join(missing)}). "
+                "A migration was skipped; refusing to continue. Restore a backup or ask for help."
+            )
+        return applied, legacy
 
     # ------------------------------------------------------------------ lifecycle
     def startup(self) -> None:
@@ -76,21 +133,18 @@ class SQLRepository(Repository):
             if self._ready:
                 return
             self._open()
-            rev = self._read_revision()
-            if rev > CURRENT_REVISION:
-                self.close()
-                raise DatabaseRevisionError(
-                    f"The database is at revision {rev}, but this version of permitA38 only supports revision "
-                    f"{CURRENT_REVISION}. It was probably written by a newer version (e.g. on another device). "
-                    "Update permitA38 on this device; refusing to start to protect your data."
-                )
-            if rev < CURRENT_REVISION:
+            chain = list_migrations(self.dialect.name)
+            applied, legacy = self._check_state(chain)
+            pending = len(applied) < len(chain)
+            if pending:
                 if not self.auto_migrate:
                     self.close()
                     raise DatabaseRevisionError(
-                        f"The database is at revision {rev}, expected {CURRENT_REVISION}. Run `permita38 migrate`."
+                        f"The database is at revision {applied[-1] if applied else 'none'}, "
+                        f"expected {chain[-1].id}. Run `permita38 migrate`."
                     )
-                self.migrate()
+            if (pending or legacy) and self.auto_migrate:
+                self.migrate()  # also records a legacy revision in schema_migrations when nothing is pending
             self._ready = True
 
     def _ensure(self) -> None:
@@ -102,40 +156,67 @@ class SQLRepository(Repository):
             self._close()
             self._ready = False
 
-    def get_revision(self) -> int:
+    def applied_ids(self) -> list[str]:
+        """Ids of the applied migrations in chain order (legacy revisions included)."""
         with self.lock:
             self._open()
-            return self._read_revision()
+            return self._migration_state(list_migrations(self.dialect.name))[0]
 
-    def migrate(self) -> tuple[int, int]:
+    def get_revision(self) -> str | None:
+        """Id of the last applied migration (None for an empty database)."""
+        applied = self.applied_ids()
+        return applied[-1] if applied else None
+
+    def migrate(self) -> tuple[str | None, str | None, int]:
+        """Apply pending migrations; returns (old id, new id, number applied)."""
         with self.lock:
             self._open()
-            old = self._read_revision()
-            if old > CURRENT_REVISION:
-                raise DatabaseRevisionError(
-                    f"The database is at revision {old}, newer than the supported {CURRENT_REVISION}."
-                )
-            pending = [m for m in list_migrations(self.dialect.name) if old < m.version <= CURRENT_REVISION]
-            if not pending:
-                return old, old
-            if old > 0:
-                self._pre_migration_backup(old, pending[-1].version)
-            for m in pending:
-                self._run_migration(m.version, m.name, m.sql())
-            return old, pending[-1].version
+            chain = list_migrations(self.dialect.name)
+            applied, legacy = self._check_state(chain)
+            old = applied[-1] if applied else None
+            pending = chain[len(applied) :]
+            if pending and applied:
+                self._pre_migration_backup(chain[-1].id)
+            self._exec(self.dialect.create_migrations_table())
+            if legacy:
+                self._record_applied([m for m in chain if m.id in applied])
+            for i, m in enumerate(pending, start=len(applied) + 1):
+                self._run_migration(m, i)
+            return old, chain[-1].id if chain else None, len(pending)
 
-    def _pre_migration_backup(self, old: int, new: int) -> None:
+    def _record_applied(self, migrations: list[Migration]) -> None:
+        """Insert bookkeeping rows for already-applied (legacy) migrations in one transaction."""
+        q = self.dialect.quote
+        ph = self.dialect.placeholder
+        stmt = (
+            f"INSERT INTO {q('schema_migrations')} ({q('id')}, {q('name')}, {q('applied_at')}) "
+            f"VALUES ({ph}, {ph}, {ph})"
+        )
+        self._begin()
+        try:
+            for m in migrations:
+                self._exec(stmt, (m.id, m.name, _now()))
+        except BaseException:
+            self._rollback()
+            raise
+        self._commit()
+
+    def _pre_migration_backup(self, head: str) -> None:
         if self.backup_dir is not None:
             stamp = time.strftime("%Y%m%d-%H%M%S")
-            self.backup(self.backup_dir / f"pre-migration-r{old}-to-r{new}-{stamp}.sqlite3")
+            self.backup(self.backup_dir / f"pre-migration-{stamp}-before-{head}.sqlite3")
 
     def health(self) -> Record:
-        self._ensure()
+        # Read-only: reports the state without migrating (startup() / migrate() do that).
+        self._open()
+        chain = list_migrations(self.dialect.name)
+        applied = self.applied_ids()
         return {
             "backend": self.backend,
             "ok": True,
-            "revision": self.get_revision(),
-            "current_revision": CURRENT_REVISION,
+            "revision": applied[-1] if applied else None,
+            "current_revision": chain[-1].id if chain else None,
+            "applied": len(applied),
         }
 
     # ------------------------------------------------------------------ transactions

@@ -5,6 +5,7 @@ import os
 import random
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
 
 from permita38.core.holidays import holidays
 
@@ -17,6 +18,21 @@ def seeds_from_env(default: list[int] | None = None) -> list[int]:
     if raw:
         return [int(x) for x in raw.replace(",", " ").split()]
     return list(default or DEFAULT_SEEDS)
+
+
+ARTIFACTS = Path(__file__).resolve().parents[3] / "test-artifacts"
+
+
+def report_failure(kind: str, seed: int, log: list[str], tail: int = 12) -> str:
+    """Keep failure output short: the full step log goes to test-artifacts/, the message carries the replay command
+    and only the last few steps (a long dump costs a reader a lot and rarely helps more than the tail)."""
+    ARTIFACTS.mkdir(exist_ok=True)
+    path = ARTIFACTS / f"e2e-{kind}-seed{seed}.log"
+    path.write_text("\n".join(log) + "\n", encoding="utf-8")
+    return (
+        f"replay: PERMITA38_E2E_SEED={seed} pytest tests/web/e2e_random -k {kind}\n"
+        f"full log ({len(log)} steps): {path.relative_to(path.parents[1])}\nlast steps:\n" + "\n".join(log[-tail:])
+    )
 
 
 def env_int(name: str, default: int) -> int:

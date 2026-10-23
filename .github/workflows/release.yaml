@@ -134,7 +134,7 @@ jobs:
           /tmp/venv/bin/pip install "dist/permita38-${PEP440}-py3-none-any.whl"
           /tmp/venv/bin/python -c "import permita38, sys; assert permita38.__version__ == sys.argv[1], permita38.__version__" "$PEP440"
           /tmp/venv/bin/permita38 --help > /dev/null
-          /tmp/venv/bin/python -c "from importlib.resources import files; assert files('permita38.core.schema').joinpath('migrations/sqlite/0001_initial.sql').is_file()"
+          /tmp/venv/bin/python -c "from importlib.resources import files; assert files('permita38.core.schema').joinpath('migrations/sqlite/0001-initial.sql').is_file()"
           SMOKE_EXPECT_WEB=0 /tmp/venv/bin/python packaging/smoke_test.py /tmp/venv/bin/permita38
       - name: CycloneDX SBOM of the installed application
         run: python -m cyclonedx_py environment /tmp/venv --of JSON -o dist/permita38-sbom.cdx.json

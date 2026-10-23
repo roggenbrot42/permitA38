@@ -114,11 +114,11 @@ PAGES.customer = async id => {
 };
 function docTable(rows) {
   if (!rows.length) return '<div class="empty">Nothing here yet.</div>';
-  return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${esc(d.number || 'Draft')}</b><div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${eur(docTotal(d))}</td><td>${statusPill(coll, d)}</td></tr>`).join('')}</table>`;
+  return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${d.number ? esc(d.number) : '<span class="muted">No number yet</span>'}</b><div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${eur(docTotal(d))}</td><td>${statusPill(coll, d)}</td></tr>`).join('')}</table>`;
 }
 function statusPill(coll, d) {
   const late = coll === 'invoices' && d.status === 'sent' && d.due_date && d.due_date < todayISO();
-  const cls = late ? 'bad' : { paid: 'good', accepted: 'good', sent: 'blue', rejected: 'bad', cancelled: 'bad' }[d.status] || '';
+  const cls = late ? 'bad' : { paid: 'good', accepted: 'good', sent: 'blue', rejected: 'bad', cancelled: 'bad', draft: 'warn' }[d.status] || '';
   return `<span class="pill ${cls}">${late ? 'overdue' : esc(d.status)}</span>`;
 }
 
@@ -199,7 +199,7 @@ PAGES.doc = async (coll, id) => {
   if (id.startsWith('new')) {
     if (!DOC || DOC.__route !== route) {   // keep the in-progress draft across re-renders (add/delete line)
       DOC = { __route: route, coll, customer_id: id.slice(4) || '', date: todayISO(), status: 'draft', lines: [{ description: '', qty: 1, unit: 'h', price: s.default_rate || 0 }], template_id: s.default_template, vat_rate: s.vat_rate };
-      const cu = S.d.customers.find(c => c.id === DOC.customer_id); if (cu?.rate) DOC.lines[0].price = cu.rate;
+      SUGGESTED_RATE = suggestedRate(DOC.customer_id, null); DOC.lines[0].price = SUGGESTED_RATE; AUTO_PRICED.add(DOC.lines[0]);
     }
   } else if (!DOC || DOC.id !== id || DOC.coll !== coll) {
     const rec = (S.d[coll] || []).find(x => x.id === id);
@@ -211,10 +211,11 @@ PAGES.doc = async (coll, id) => {
   const klein = s.kleinunternehmer;
   const statuses = isInv ? [['sent', 'Sent'], ['paid', 'Paid'], ['cancelled', 'Cancelled']] : [['sent', 'Sent'], ['accepted', 'Accepted'], ['rejected', 'Rejected']];
   const plan = d.plan || {};
-  return `<div class="head"><div><a href="#/sales/${coll}" class="small">← ${isInv ? 'Invoices' : 'Offers'}</a><h1>${isInv ? 'Invoice' : 'Offer'} ${esc(d.number || '(draft)')} ${d.id ? statusPill(coll, d) : ''}</h1></div>
-    <div class="row tight" style="flex:none">${d.id ? `<button data-a="docPdf">Preview PDF</button>` : ''}<button class="${d.number ? '' : 'primary'}" data-a="docSave">Save</button>
+  return `<div class="head"><div><a href="#/sales/${coll}" class="small">← ${isInv ? 'Invoices' : 'Offers'}</a><h1>${isInv ? 'Invoice' : 'Offer'} ${esc(d.number || '')} ${d.id ? statusPill(coll, d) : '<span class="pill warn">draft – not saved yet</span>'}</h1></div>
+    <div class="row tight" style="flex:none">${d.id ? `<button data-a="docPdf">Preview PDF</button>` : ''}<button class="${d.number ? '' : 'primary'}" data-a="docSave">${d.status === 'draft' ? 'Save draft' : 'Save'}</button>
     ${d.id && !d.number ? `<button class="primary" data-a="docFinalize">Finalize & number</button>` : ''}${d.id && d.number ? `<select style="width:auto" data-change="docStatus"><option value="">Set status…</option>${opt(statuses, '')}</select>` : ''}
     ${d.id && !isInv && d.number && d.status !== 'accepted' ? `<button data-a="docAccept">✓ Accepted → create project</button>` : ''}${d.id && !isInv ? `<button data-a="docToInvoice">→ Invoice</button>` : ''}</div></div>
+  ${d.status === 'draft' && !d.number ? `<div class="banner info">This is a <b>draft</b>: it has no number yet, is not counted in revenue or planning, and the PDF is marked as a draft. It gets its ${isInv ? 'invoice' : 'offer'} number when you press <b>Finalize &amp; number</b>.</div>` : ''}
   ${locked ? '<div class="banner">This document has a number and was probably sent. Changing it now changes the PDF – only edit for corrections.</div>' : ''}
   <div class="card"><div class="grid g3"><div class="field"><label>Customer</label><select id="d_cust">${opt([['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])], d.customer_id)}</select></div>
     <div class="field"><label>Project</label><select id="d_proj">${opt(projectOptions(), d.project_id || '')}</select></div><div class="field"><label>Title / subject</label><input id="d_title" value="${esc(d.title || '')}"></div>
@@ -233,8 +234,28 @@ PAGES.doc = async (coll, id) => {
     <div class="field"><label>Internal notes (not printed)</label><textarea id="d_notes" rows="2">${esc(d.notes || '')}</textarea></div></div>
   ${isInv ? '' : `<div class="card"><h2>Planning (optional)</h2><div class="muted small" style="margin-bottom:8px">When should this work happen? While the offer is open, the Planning forecast shows it as tentative; once accepted it becomes a contract.</div><div class="row"><div><label>Start</label><input type="date" id="p_s" value="${esc(plan.start || '')}"></div><div><label>End</label><input type="date" id="p_e" value="${esc(plan.end || '')}"></div><div><label>Hours per week</label><input type="number" id="p_hpw" value="${esc(plan.hours_per_week ?? '')}"></div><div><label>or total hours</label><input type="number" id="p_tot" value="${esc(plan.total_hours ?? '')}"></div></div></div>`}`;
 };
+// Hourly rate for a new document: project > customer > your default (the same order the time entries use).
+const AUTO_PRICED = new WeakSet();   // lines whose price was set by us, not typed by hand
+let SUGGESTED_RATE = null;   // set only while editing a new, unsaved document; saved documents are never repriced
+function suggestedRate(customerId, projectId) {
+  const pick = x => (x === null || x === undefined || x === '' ? null : +x);
+  return pick(S.d.projects.find(p => p.id === projectId)?.rate) ?? pick(S.d.customers.find(c => c.id === customerId)?.rate)
+    ?? pick(S.me?.rate) ?? pick(S.me?.default_rate) ?? pick(S.settings.default_rate) ?? 0;
+}
+function repriceNewDoc() {
+  if (!DOC || DOC.id || SUGGESTED_RATE === null) return;
+  syncDoc();
+  const rate = suggestedRate(DOC.customer_id, DOC.project_id);
+  let changed = false;   // only lines we priced ourselves are touched, never a price typed by hand
+  DOC.lines.forEach(l => { if (AUTO_PRICED.has(l) && rate !== SUGGESTED_RATE) { l.price = rate; changed = true; } });
+  SUGGESTED_RATE = rate; if (changed) render();
+}
 const _origDoc = PAGES.doc;
-PAGES.doc = async (...a) => { const h = await _origDoc(...a); render.after = recalcDoc; return h; };
+PAGES.doc = async (...a) => {
+  const h = await _origDoc(...a);
+  render.after = () => { recalcDoc(); for (const id of ['d_cust', 'd_proj']) $('#' + id)?.addEventListener('change', repriceNewDoc); };
+  return h;
+};
 function syncDoc() {
   if (!DOC || !$('#d_cust')) return;
   const g = i => $('#' + i)?.value, d = DOC;
@@ -250,8 +271,17 @@ function recalcDoc() {
   const vat = Object.entries(t.vat).filter(([r]) => +r);
   $('#d_totals').innerHTML = `Net <b>${eur(Money.toNumber(t.net))}</b>${vat.map(([r, c]) => ` · VAT ${r}% ${eur(Money.toNumber(c))}`).join('')} · <span style="font-size:20px">Total <b>${eur(Money.toNumber(t.gross))}</b></span>${klein ? '<div class="small muted">Kleinunternehmer (§19 UStG): no VAT charged.</div>' : ''}`;
 }
-document.addEventListener('input', e => { if (e.target.closest('[data-l],#d_vat')) recalcDoc(); });
-A.addLine = () => { syncDoc(); DOC.lines.push({ description: '', qty: 1, unit: 'h', price: S.settings.default_rate || 0 }); render(); };
+document.addEventListener('input', e => {
+  if (!e.target.closest('[data-l],#d_vat')) return;
+  if (e.target.dataset?.k === 'price' && DOC?.lines) AUTO_PRICED.delete(DOC.lines[+e.target.dataset.l]);   // typed by hand
+  recalcDoc();
+});
+A.addLine = () => {
+  syncDoc();
+  const line = { description: '', qty: 1, unit: 'h', price: DOC.id ? S.settings.default_rate || 0 : suggestedRate(DOC.customer_id, DOC.project_id) };
+  if (!DOC.id) AUTO_PRICED.add(line);
+  DOC.lines.push(line); render();
+};
 A.delLine = el => { syncDoc(); DOC.lines.splice(+el.dataset.i, 1); render(); };
 async function persistDoc() {
   syncDoc(); const d = DOC;
@@ -273,34 +303,42 @@ A.docToInvoice = async () => { await persistDoc(); const r = await api('POST', `
 A.billTimeInto = () => A.billTime({ dataset: { cust: DOC.customer_id } });
 
 /* ================= EXPENSES ================= */
-const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & coworking', 'Travel', 'Marketing', 'Insurance', 'Phone & internet', 'Training', 'Subcontractors', 'Fees & bank', 'Other'];
+const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & coworking', 'Travel', 'Business meals', 'Marketing', 'Insurance', 'Phone & internet', 'Training', 'Subcontractors', 'Fees & bank', 'Other'];
 PAGES.expenses = async () => {
   await loadAll(['expenses', 'projects']);
   const y = new Date().getFullYear(), list = S.d.expenses.sort((a, b) => a.date < b.date ? 1 : -1), yr = list.filter(e => (e.date || '').startsWith(y));
   return `<div class="head"><div><h1>Expenses</h1><div class="muted">Bills you pay – general or tied to a project.</div></div><button class="primary" data-a="editExpense">+ Add bill</button></div>
-  <div class="grid g3"><div class="card kpi"><div class="l">${y} net expenses</div><div class="v">${eur(yr.reduce((a, e) => a + (e.net || 0) * (e.deductible ?? 100) / 100, 0))}</div></div><div class="card kpi"><div class="l">Input VAT ${y}</div><div class="v">${S.settings.kleinunternehmer ? '–' : eur(yr.reduce((a, e) => a + (e.vat || 0) * (e.deductible ?? 100) / 100, 0))}</div></div></div>
+  <div class="grid g3"><div class="card kpi"><div class="l">${y} net expenses</div><div class="v">${eur(yr.reduce((a, e) => a + (e.net || 0) * (e.deductible ?? 100) / 100, 0))}</div></div><div class="card kpi"><div class="l">Input VAT ${y}</div><div class="v">${S.settings.kleinunternehmer ? '–' : eur(yr.reduce((a, e) => a + (e.vat || 0) * (e.vat_deductible ?? e.deductible ?? 100) / 100, 0))}</div></div></div>
   <div class="card">${list.length ? `<table><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Project</th><th class="num">Net</th><th class="num">VAT</th><th></th></tr>${list.map(e => `<tr class="click" data-a="editExpense" data-id="${e.id}"><td class="nowrap">${fmtDate(e.date)}</td><td><b>${esc(e.vendor || '')}</b><div class="small muted">${esc(e.description || '')}</div></td><td>${esc(e.category || '')}</td><td>${esc(nameOf('projects', e.project_id) || 'General')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td><td>${e.attachment ? `<a href="${api.url('attachments/' + e.attachment)}" target="_blank" data-stop>📎</a>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses yet.</div>'}</div>`;
 };
 A.editExpense = el => {
   const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: EXP_CATS[0] };
+  const cats = e.category && !EXP_CATS.includes(e.category) ? [...EXP_CATS, e.category] : EXP_CATS;   // keep a category entered elsewhere
   const v0 = { ...e, gross: e.net != null ? Math.round((e.net + (e.vat || 0)) * 100) / 100 : '', vat_rate: e.vat_rate ?? 19 };
   openForm({
     title: e.id ? 'Edit bill' : 'Add bill', vals: v0,
     fields: [{ k: 'date', l: 'Paid on', t: 'date', row: 1 }, { k: 'vendor', l: 'Vendor', row: 1 }, { k: 'description', l: 'Description' },
       { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: [19, 7, 0], row: 2 },
-      { k: 'category', l: 'Category', t: 'select', o: EXP_CATS, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
-      { k: 'deductible', l: 'Deductible %', t: 'number', h: '100 normally; 70 for business meals' }],
+      { k: 'category', l: 'Category', t: 'select', o: cats, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
+      { k: 'deductible', l: 'Deductible %', t: 'number', h: '100 normally; 70 for business meals with business partners (set automatically with that category). Input VAT of business meals is reclaimed in full.' }],
     extra: `<div class="field"><label>Attach the bill (PDF / photo)</label><input type="file" id="e_file">${e.attachment ? `<div class="small"><a href="${api.url('attachments/' + e.attachment)}" target="_blank">Current attachment</a></div>` : ''}</div>`,
     save: async v => {
       if (!v.gross) throw new Error('Enter the amount'); const r = +v.vat_rate || 0;
       if (v.gross < 0) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
       if (!v.date) throw new Error('Pick the date you paid');
       Object.assign(v, Money.splitGross(v.gross, r)); v.vat_rate = r; delete v.gross; v.project_id = v.project_id || null;
+      v.vat_deductible = v.category === 'Business meals' ? 100 : null;   // the 30 % that is not deductible does not touch the input VAT
       const f = $('#e_file').files[0];
       if (f) v.attachment = (await api.upload(f)).name;
       await save('expenses', v); render();
     },
     del: e.id ? async () => { await api('DELETE', 'expenses/' + e.id); await loadAll(['expenses']); render(); } : null
+  });
+  // Business meals are 70 % deductible: choosing the category proposes that, leaving it restores 100 (a hand-typed value stays)
+  $('#f_category')?.addEventListener('change', ev => {
+    const ded = $('#f_deductible'); if (!ded) return;
+    if (ev.target.value === 'Business meals' && +ded.value === 100) ded.value = 70;
+    else if (ev.target.value !== 'Business meals' && +ded.value === 70) ded.value = 100;
   });
 };
 

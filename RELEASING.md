@@ -26,6 +26,10 @@ edit only `permita38/__init__.py`; `pyproject.toml` reads it.
      and fixes the compare links at the bottom,
    - regenerates `THIRD_PARTY_NOTICES.md` (`python scripts/generate_notices.py`) if dependencies changed,
    - passes `make lint test test-release`.
+   - Database migrations (`permita38/core/schema/migrations/`): a released migration is frozen (never edit it, never
+     change its id). Check `permita38 migrate --status` lists a single linear chain whose head is the newest
+     migration, and that `make test` (chain and dialect-drift tests, legacy upgrade tests) passes. There is no revision
+     constant to bump any more; `/api/health` reports the head id as `current_revision`.
 4. Update your local `main` (`git switch main && git pull --ff-only`).
 5. Your signing key is configured (below) and `git config user.name/user.email` match your verified GitHub identity.
 
