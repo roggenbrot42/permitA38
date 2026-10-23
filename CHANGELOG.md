@@ -5,18 +5,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-### Fixed
-- Itemised expenses: line amounts must be whole cents
-- Attachments: a file uploaded with a `.html` or `.svg` name was served from the app's own origin and could run as a
-  page. Only PDF and image types are now served inline; all other files are downloads. Uploads whose content does not
-  match a PDF or image extension are refused (415).
-- Planner: after the first keyboard move the bar lost keyboard focus (the page redrew), so it could not be moved or
-  resized again. Focus now survives redraws, Ctrl+←/→ resizes the start, and each draft change has its own Discard
-  button (and Esc on a focused bar).
-- Planner: bars could not be dragged at all (the pointer sat on the bar, so no day was found under it); a clicked bar
-  was neither focused nor visibly selected (Firefox hides `:focus-visible` after a click); Alt+←/→ was taken by the
-  browser's Back/Forward. Dragging now measures the distance, clicking selects and outlines the bar, and the keys are
-  ←/→ (move), PageUp/PageDown (a week), Shift+←/→ (end), Ctrl+←/→ (start).
+## [0.4.0-alpha.2] - 2026-10-23
+
+Second alpha. Adds roles, sanity warnings, calendars, document numbering and import, itemised expenses with a bill
+preview, the planner, and migration identifiers. Back up your data folder before upgrading (the app also does it
+automatically); an alpha.1 database is upgraded in place and can no longer be opened by alpha.1. Not for production
+bookkeeping yet; the tax rules marked *(verify)* in `docs/compliance.md` still need your tax adviser.
 
 ### Added
 - **Document numbering with sequences**: per-type counters for invoices and offers, patterns with `{year}`, `{yy}`,
@@ -28,7 +22,6 @@ All notable changes to this project are documented here. The format is based on
   PDFs attached by number, dry run, all-or-nothing runs and undo (`permita38 import-documents`,
   `/api/import/*`). See `docs/import.md`.
 - **Adoption guide** `docs/adopting.md`: what to change when you start using permitA38.
-
 - **Roles and rights** (`docs/roles.md`): the roles `boss`, `employee` (formerly `member`, behaviour unchanged) and
   `accountant` (read access to customers, projects, time, contracts, offers, invoices, finance and settings; can
   enter expenses and upload bills). A per-area permission matrix (`permita38/core/rights.py`) is enforced on every
@@ -45,7 +38,7 @@ All notable changes to this project are documented here. The format is based on
   RECURRENCE-ID) inside a bounded window. Busy time counts only inside each person's working hours and time zone,
   overlaps are merged, and a daily target caps it. No meeting titles are stored by default; the subscription link is
   a secret, is never shown again and never logged. Out-of-office entries are offered as suggestions, never created.
-  Settings → Calendars includes a guided Proton Calendar card. Database migration 0007 adds the calendar tables and the per-user working time fields; the boss account
+  Settings → Calendars includes a guided Proton Calendar card. Database migration `0007-calendars` adds the calendar tables and the per-user working time fields; the boss account
   manages its own calendars. Command: `permita38 calendar refresh`. See [docs/calendar.md](docs/calendar.md).
 - `SafeFetcher.fetch_resource`: the SSRF-safe download for files (https only, conditional requests with ETag and
   Last-Modified, size and content-type limits).
@@ -82,6 +75,17 @@ All notable changes to this project are documented here. The format is based on
   states its basis. Contract hours are spread over the workdays of the assignee.
 
 ### Fixed
+- Itemised expenses: line amounts must be whole cents
+- Attachments: a file uploaded with a `.html` or `.svg` name was served from the app's own origin and could run as a
+  page. Only PDF and image types are now served inline; all other files are downloads. Uploads whose content does not
+  match a PDF or image extension are refused (415).
+- Planner: after the first keyboard move the bar lost keyboard focus (the page redrew), so it could not be moved or
+  resized again. Focus now survives redraws, Ctrl+←/→ resizes the start, and each draft change has its own Discard
+  button (and Esc on a focused bar).
+- Planner: bars could not be dragged at all (the pointer sat on the bar, so no day was found under it); a clicked bar
+  was neither focused nor visibly selected (Firefox hides `:focus-visible` after a click); Alt+←/→ was taken by the
+  browser's Back/Forward. Dragging now measures the distance, clicking selects and outlines the bar, and the keys are
+  ←/→ (move), PageUp/PageDown (a week), Shift+←/→ (end), Ctrl+←/→ (start).
 - Expenses: there was no "Business meals" category to choose. It exists now and proposes 70 % deductible (your own value is
   never overwritten); a category entered elsewhere stays selectable when editing.
 - Expenses: the deductible share was also applied to the input VAT, so business meals (70 % deductible) under-claimed 30 % of
@@ -207,5 +211,7 @@ limitations and what is planned for the next alphas. Not for production bookkeep
 ## [0.1.0]
 - Initial version as *Timely*: time tracking, weekly goal, forecast, offers, invoices, expenses, tax estimates.
 
-[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.2...HEAD
+[0.4.0-alpha.2]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.1...v0.4.0-alpha.2
+[0.4.0-alpha.1]: https://github.com/roggenbrot42/permitA38/releases/tag/v0.4.0-alpha.1
 [0.2.0]: https://github.com/roggenbrot42/permitA38/releases/tag/v0.2.0
