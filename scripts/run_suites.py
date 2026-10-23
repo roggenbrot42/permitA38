@@ -12,7 +12,6 @@ wait instead of loading the machine twice.
 """
 
 import argparse
-import fcntl
 import re
 import subprocess
 import sys
@@ -71,10 +70,15 @@ def main() -> int:
     OUT.mkdir(exist_ok=True)
     with open(OUT / ".lock", "w") as lock:
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            print("another test run is active - waiting for it to finish ...", flush=True)
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            import fcntl  # POSIX only; on Windows runs are simply not serialised
+        except ImportError:
+            fcntl = None
+        if fcntl:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print("another test run is active - waiting for it to finish ...", flush=True)
+                fcntl.flock(lock, fcntl.LOCK_EX)
         worst = 0
         for name in names:
             t0 = time.time()
@@ -94,7 +98,7 @@ def main() -> int:
                 + ("" if code == 0 else f"\n      log: test-artifacts/{name}.log"),
                 flush=True,
             )
-            worst = max(worst, code)
+            worst = worst or int(code != 0)  # a signal gives a negative code, still a failure
         return 1 if worst else 0
 
 
