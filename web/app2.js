@@ -389,6 +389,8 @@ function pvSet(kind, name, src, own, href = src, note = '') {
   const link = kind === 'other'
     ? `<a id="e_preview_open" href="${esc(href)}" download="${esc(name)}">Download ${esc(name)}</a>`
     : `<a id="e_preview_open" href="${esc(href)}" target="_blank" rel="noopener">Open in a new tab</a>`;
+  // a visible line under every PDF or image: the browser may download a PDF or show it blank, and the page cannot tell
+  const help = kind === 'other' ? '' : `<p id="e_preview_help" class="small">Not showing? <a id="e_preview_help_open" href="${esc(href)}" target="_blank" rel="noopener">Open</a> or <a id="e_preview_download" href="${esc(href)}" download="${esc(name)}">download</a> the bill.</p>`;
   if (kind === 'image') {
     box.innerHTML = `<div class="exp-zoombar" role="group" aria-label="Zoom">
         <button type="button" data-a="zoomOut" aria-label="Zoom out">−</button>
@@ -396,11 +398,13 @@ function pvSet(kind, name, src, own, href = src, note = '') {
         <button type="button" data-a="zoomFit" aria-label="Fit the bill into the pane">Fit</button>
         <button type="button" data-a="zoom100" aria-label="Zoom to 100 %">100 %</button>
         <span id="e_zoom_label" class="small muted" aria-live="polite"></span>${link}</div>
+      ${help}
       <div id="e_stage" class="exp-stage"><img id="e_img" alt="${esc(name)}" src="${esc(src)}" draggable="false"></div>`;
     const img = $('#e_img');
     img.addEventListener('load', () => { if (!PV || PV.src !== src) return; PV.nw = img.naturalWidth; PV.nh = img.naturalHeight; if (PV.fit) pvZoomTo(fitZoom(), null, true); else pvApply(); });
   } else if (kind === 'pdf') {
     box.innerHTML = `<div class="exp-zoombar">${link}</div>
+      ${help}
       <iframe id="e_pdf" class="exp-pdf" src="${esc(src)}" title="Bill preview: ${esc(name)}"></iframe>
       <p id="e_preview_fallback" class="small muted">If the preview stays blank, this browser cannot show PDFs here. Use “Open in a new tab”.</p>`;
   } else {
