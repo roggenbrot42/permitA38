@@ -83,8 +83,8 @@ def subset_eq(exp, act, path="") -> None:
     if isinstance(exp, dict):
         assert isinstance(act, dict), f"{path}: expected object, got {act!r}"
         for k, v in exp.items():
-            if k == "planning_warnings":
-                continue  # response-only hint on write responses, never stored
+            if k in ("planning_warnings", "sanity_warnings"):
+                continue  # response-only hints on write responses, never stored
             assert k in act, f"{path}.{k} missing in {act}"
             subset_eq(v, act[k], f"{path}.{k}")
     elif isinstance(exp, list):
@@ -190,8 +190,9 @@ class ApiMachine(RuleBasedStateMachine):
         r = self.http.request(method, "/api" + path, headers=headers, **kw)
         self.http.cookies.clear()
         assert r.status_code < 500, f"{method} {path} -> {r.status_code}: {r.text[:300]}"
+        sent = repr(kw)  # a value the client itself sent (e.g. a note that reads "password_hash") may be echoed back
         for word in SECRET_WORDS:
-            assert word not in r.text, f"secret field {word!r} leaked by {method} {path}"
+            assert word in sent or word not in r.text, f"secret field {word!r} leaked by {method} {path}"
         if r.status_code >= 400:
             assert r.headers["content-type"].startswith("application/json"), (path, r.status_code, r.text[:100])
             assert "detail" in r.json(), (path, r.status_code, r.text[:100])

@@ -30,8 +30,8 @@ def test_draft_is_marked_everywhere_until_finalized(browser, srv):
     pg.fill('[data-l="0"][data-k="description"]', "Work")
     pg.click("[data-a=docSave]")
     pg.wait_for_function("() => !location.hash.includes('/new')")
-    pg.wait_for_selector("h1 .pill.warn")
-    assert pg.inner_text("h1 .pill.warn").strip() == "draft"
+    # the header is re-rendered after the save: wait for the saved state, not for the old "not saved yet" pill
+    pg.wait_for_function("() => document.querySelector('h1 .pill.warn')?.textContent.trim() === 'draft'")
     # the list shows it as a draft without a number
     pg.goto(srv.base + "/#/sales/invoices")
     pg.wait_for_selector("tr.click .pill.warn")

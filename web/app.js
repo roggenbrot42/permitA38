@@ -136,7 +136,7 @@ const navFor = () => NAV.filter(n => navAllowed(n) && !(n[0] === 'timeoff' && ca
 function pageArea(p, args) {
   if (p === 'doc') return args[0] === 'offers' ? 'offers' : 'invoices';
   if (p === 'sales') return can('invoices') ? 'invoices' : 'offers';
-  return { customer: 'customers', project: 'projects' }[p] || NAV.find(n => n[0] === p)?.[3] || null;
+  return { customer: 'customers', project: 'projects', numbering: 'settings', import: 'settings' }[p] || NAV.find(n => n[0] === p)?.[3] || null;
 }
 const ROLE_LABEL = { boss: 'Boss', employee: 'Employee', accountant: 'Accountant' };
 function route() { const [p, ...a] = (location.hash.replace(/^#\/?/, '') || 'today').split('/'); return [p, a]; }
@@ -158,7 +158,8 @@ async function render() {
   const nav = navFor();
   const active = { customer: 'customers', project: 'projects', doc: 'sales' }[p] || p;
   const area = pageArea(p, args), item = NAV.find(n => n[0] === p);
-  const ok = item ? navAllowed(item) : ['customer', 'project', 'doc'].includes(p) && !!area && scopeOf(area) === 'all';
+  const ok = item ? navAllowed(item) : ['customer', 'project', 'doc'].includes(p) ? !!area && scopeOf(area) === 'all'
+    : ['numbering', 'import'].includes(p) && can('settings', 'write') && scopeOf('settings') === 'all';   // boss-only management pages without a menu entry
   if (!PAGES[p] || !ok) {
     const first = nav[0];
     if (first && (!PAGES[p] || p === 'today')) { location.hash = '#/' + first[0]; return; }  // unknown page or default landing
