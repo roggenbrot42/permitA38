@@ -6,6 +6,7 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- Itemised expenses: line amounts must be whole cents
 - Attachments: a file uploaded with a `.html` or `.svg` name was served from the app's own origin and could run as a
   page. Only PDF and image types are now served inline; all other files are downloads. Uploads whose content does not
   match a PDF or image extension are refused (415).

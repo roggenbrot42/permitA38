@@ -21,7 +21,7 @@ Line (strict `ExpenseLineIn`, lenient `ExpenseLine`, every field with a hard bou
 | field | type | notes |
 |---|---|---|
 | `description` | `v.Desc` | e.g. "Room 2 nights" |
-| `gross` | `v.NonNegAmount` | amount **as printed on the bill**, incl. VAT (input) |
+| `gross` | `v.NonNegAmount`, whole cents only | amount **as printed on the bill**, incl. VAT (input). Must be a multiple of 0.01: a sub-cent value (`0.0099`, `10.005`) is rejected with 422 and `loc` `["body", "lines", <i>, "gross"]` |
 | `vat_rate` | `v.Percent` | the UI offers 19, 7, 0 |
 | `deductible` | `v.Percent`, default 100 | share of **this line** that is deductible |
 | `vat_deductible` | `v.Percent \| None` | share of this line's input VAT that is reclaimed; `None` = same as `deductible` (private use). The *Business meals* category sets it to 100: only the cost is 70 % deductible, the input VAT is reclaimed in full (§ 15 Abs. 1a UStG, *verify*). Same field and rule as on single-amount expenses (`fix/meal-input-vat`). |
@@ -104,8 +104,9 @@ The user wants to see the uploaded bill (PDF or image) next to the lines and zoo
   screens). It shows the file chosen in the file input immediately (before saving) and the stored attachment when
   editing. Vanilla JS, no new libraries, no build step.
 * **Images** (png, jpg, webp, gif): an `<img>` in a pan/zoom container: buttons "+", "-", "Fit", "100 %", mouse
-  wheel zoom (Ctrl+wheel or plain wheel inside the pane, centred on the pointer), drag to pan, pinch zoom on touch
-  (`touch-action: none`, pointer events), keyboard: `+`/`-`/`0` when the pane is focused, arrow keys pan. Zoom range
+  wheel zoom (Ctrl+wheel or plain wheel inside the pane, centred on the pointer), drag to pan (pointer events),
+  keyboard: `+`/`-`/`0` when the pane is focused, arrow keys pan. Zoom is by wheel, buttons and keys only: no pinch
+  zoom (decided by the maintainer). Zoom range
   25 %..800 %. Alt text = the file name through `esc()`.
 * **PDF**: use the browser's built-in viewer in an `<iframe>` (it brings its own zoom, search and page navigation);
   no PDF.js. If the browser cannot render it inline (no viewer, mobile Safari), show a clear fallback text with
