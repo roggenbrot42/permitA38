@@ -1,6 +1,6 @@
 """ICS parser: golden occurrences (hand-computed), recurrence rules, DST, overrides and hostile input."""
 
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -8,6 +8,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+from permita38.core.compat import UTC
 from permita38.core.service.calendar import ics, recurrence
 from permita38.core.service.calendar.ics import IcsError, parse_ics
 from permita38.core.service.calendar.recurrence import iter_dates, parse_rule

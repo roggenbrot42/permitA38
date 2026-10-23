@@ -15,11 +15,12 @@ import logging
 import threading
 import time as _time
 from collections.abc import Callable
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Protocol
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+from permita38.core.compat import UTC
 from permita38.core.errors import ServiceError
 from permita38.core.netsafe import FetchedResource, FetchError, RequestBudget, parse_url
 from permita38.core.repository import Repository

@@ -3,11 +3,12 @@
 
 import gzip
 import threading
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from permita38.core.compat import UTC
 from permita38.core.errors import ServiceError
 from permita38.core.netsafe import FetchError, SafeFetcher
 from permita38.core.service.calendar.ics import parse_ics

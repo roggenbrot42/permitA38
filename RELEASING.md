@@ -25,6 +25,8 @@ edit only `permita38/__init__.py`; `pyproject.toml` reads it.
    - turns `## [Unreleased]` entries into `## [0.4.0-alpha.1] - YYYY-MM-DD` (keep an empty `## [Unreleased]` above it)
      and fixes the compare links at the bottom,
    - regenerates `THIRD_PARTY_NOTICES.md` (`python scripts/generate_notices.py`) if dependencies changed,
+   - regenerates `api/openapi.json` (`make generate-openapi`): it contains the package version, so every version bump
+     makes `make check-openapi` and the freshness test fail until it is regenerated,
    - passes `make lint test test-release`.
    - Database migrations (`permita38/core/schema/migrations/`): a released migration is frozen (never edit it, never
      change its id). Check `permita38 migrate --status` lists a single linear chain whose head is the newest

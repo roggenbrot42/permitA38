@@ -12,8 +12,9 @@ documentation (`docs/roles.md`, checked by a test) all derive from `MATRIX`. Rol
 (``member``) are read as ``employee``.
 """
 
-from enum import StrEnum
 from typing import Literal
+
+from permita38.core.compat import StrEnum
 
 Op = Literal["read", "write"]
 

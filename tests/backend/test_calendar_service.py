@@ -1,10 +1,11 @@
 """Calendar service and busy-hours rules, against the real SQLite repository (fake network, invented data)."""
 
 import threading
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 
 import pytest
 
+from permita38.core.compat import UTC
 from permita38.core.errors import ServiceError
 from permita38.core.repository.sqlite import SQLiteRepository
 from permita38.core.service.busy import BusyTimeProvider, NullBusyProvider
