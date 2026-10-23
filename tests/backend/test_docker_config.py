@@ -257,10 +257,10 @@ def test_cli_create_user_boss_then_member(tmp_path, capsys):
     )
     run_cli(tmp_path, "create-user", "--username", "mia", "--name", "Mia", "--password-file", str(pw))
     out = capsys.readouterr().out
-    assert "Created boss 'boss'" in out and "Created member 'mia'" in out
+    assert "Created boss 'boss'" in out and "Created employee 'mia'" in out
     app = get_app(load_config(cfg_path(tmp_path), data_dir=tmp_path / "data"))
     assert login(app, "boss", PASSWORD).json()["user"]["role"] == "boss"
-    assert login(app, "mia", PASSWORD).json()["user"]["role"] == "member"
+    assert login(app, "mia", PASSWORD).json()["user"]["role"] == "employee"
     store = app.state.services.store
     assert store.settings()["owner_name"] == "The Boss"  # first boss initialised the settings
 

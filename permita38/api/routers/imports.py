@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
-from permita38.api.deps import BossUser, ServicesDep
+from permita38.api.deps import Needs, ServicesDep
 from permita38.core.errors import ServiceError
 from permita38.core.service.importer.tables import MAX_BYTES
 
@@ -26,7 +26,7 @@ def _read(upload: UploadFile | None) -> bytes | None:
 
 @router.post("/import/preview", summary="dry run: validate a file and report what an import would do")
 def preview(
-    _: BossUser,
+    _: Annotated[dict, Needs("settings", "write", full=True)],
     services: ServicesDep,
     file: Annotated[UploadFile, File()],
     type: Annotated[ImportType, Form()],
@@ -53,7 +53,7 @@ def preview(
 
 @router.post("/import/run", summary="import; all-or-nothing: any error row (HTTP 422) writes nothing")
 def run(
-    _: BossUser,
+    _: Annotated[dict, Needs("settings", "write", full=True)],
     services: ServicesDep,
     file: Annotated[UploadFile, File()],
     type: Annotated[ImportType, Form()],
@@ -82,10 +82,10 @@ def run(
 
 
 @router.get("/import/batches", summary="import runs, newest first")
-def batches(_: BossUser, services: ServicesDep) -> list[dict]:
+def batches(_: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep) -> list[dict]:
     return sorted(services.imports.batches(), key=lambda b: b.get("created") or 0, reverse=True)
 
 
 @router.post("/import/batches/{rid}/undo", summary="remove the records of an import run (only if unchanged since)")
-def undo(rid: str, _: BossUser, services: ServicesDep) -> dict:
+def undo(rid: str, _: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep) -> dict:
     return services.imports.undo(rid)

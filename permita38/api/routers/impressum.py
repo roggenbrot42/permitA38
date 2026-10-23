@@ -1,7 +1,9 @@
+from typing import Annotated
+
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from permita38.api.deps import BossUser, ServicesDep
+from permita38.api.deps import Needs, ServicesDep
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 routers = [router]
@@ -32,5 +34,5 @@ class ImpressumLookup(BaseModel):
     response_model=ImpressumLookup,
     summary="read business data from a website's Impressum (nothing is saved)",
 )
-def lookup_impressum(body: LookupRequest, user: BossUser, services: ServicesDep):
+def lookup_impressum(body: LookupRequest, user: Annotated[dict, Needs("customers", "write")], services: ServicesDep):
     return services.impressum.lookup(user["id"], body.url)

@@ -1,18 +1,20 @@
-"""Generic CRUD with role-based permissions."""
+"""Generic CRUD with role-based permissions (the scopes come from `core/rights.py`)."""
 
 from decimal import Decimal
 
-from permita38.core import calc
+from permita38.core import calc, rights
 from permita38.core.errors import ServiceError
 from permita38.core.money import dec
 from permita38.core.repository import COLLECTIONS, ID_RE, Repository
+from permita38.core.rights import Scope
 from permita38.core.settings import effective_settings
 from permita38.core.validation import ALLOWED_VAT_RATES, MAX_MONEY
 
 from .auth import public_user
 
-MEMBER_READ = {"projects", "tasks", "entries", "absences", "users"}
-MEMBER_WRITE_OWN = {"entries", "absences"}
+# collections where a LIMITED scope means "own records only" (write) / "own records or assigned projects" (read)
+OWN_COLLECTIONS = {"entries", "absences"}
+VIEW_COLLECTIONS = {"projects", "tasks"}
 
 
 _IMPORT_FIELDS = (
@@ -37,12 +39,13 @@ class RecordService:
 
     def list_records(self, me: dict, coll: str) -> list[dict]:
         self._check(coll)
+        sc = _scope(me, coll, "read")
         rows = self.store.list(coll)
-        if me["role"] == "boss":
+        if sc == Scope.ALL:
             return rows
-        if coll not in MEMBER_READ:
+        if sc == Scope.NONE or coll not in OWN_COLLECTIONS | VIEW_COLLECTIONS:
             raise ServiceError(403, "Forbidden")
-        if coll in ("entries", "absences"):
+        if coll in OWN_COLLECTIONS:
             rows = [r for r in rows if r.get("user_id") == me["id"]]
         elif coll == "projects":
             rows = [_member_project_view(p) for p in rows if _project_visible(p, me)]
@@ -56,10 +59,11 @@ class RecordService:
         rec = self.store.get(coll, rid) if _valid_id(rid) else None
         if not rec:
             raise ServiceError(404, "Not found")
-        if me["role"] != "boss":
-            if coll not in MEMBER_READ:
+        sc = _scope(me, coll, "read")
+        if sc != Scope.ALL:
+            if sc == Scope.NONE or coll not in OWN_COLLECTIONS | VIEW_COLLECTIONS:
                 raise ServiceError(403, "Forbidden")
-            if coll in ("entries", "absences") and rec.get("user_id") != me["id"]:
+            if coll in OWN_COLLECTIONS and rec.get("user_id") != me["id"]:
                 raise ServiceError(403, "Forbidden")
             if coll == "projects":
                 if not _project_visible(rec, me):
@@ -86,14 +90,17 @@ class RecordService:
         return self._write(me, coll, {**data, "id": rid, "created": old.get("created")}, old)
 
     def _write(self, me: dict, coll: str, data: dict, old: dict | None) -> dict:
-        boss = me["role"] == "boss"
-        if not boss:
-            if coll not in MEMBER_WRITE_OWN:
+        sc = _scope(me, coll, "write")
+        full = sc == Scope.ALL
+        if not full:
+            if sc == Scope.NONE or coll not in OWN_COLLECTIONS:
                 raise ServiceError(403, "Forbidden")
             if old and old.get("user_id") != me["id"]:
                 raise ServiceError(403, "Forbidden")
             data["user_id"] = me["id"]
-            if coll == "entries":  # billing fields are boss/system-only: a member must not set rates or hide hours
+            if (
+                coll == "entries"
+            ):  # billing fields are for full access/system only: a limited user must not set rates or hide hours
                 for k in _ENTRY_BILLING_FIELDS:
                     data.pop(k, None)
                     if old and k in old:
@@ -113,7 +120,7 @@ class RecordService:
             data.setdefault("billable", True)
             self._check_day_total(data, old)
             if old and old.get("invoice_id"):
-                if not boss:
+                if not full:
                     raise ServiceError(403, "Entry already invoiced")
                 data.setdefault("invoice_id", old["invoice_id"])
         if data.get("created") is None:
@@ -178,8 +185,14 @@ class RecordService:
             raise ServiceError(
                 409, "A numbered invoice cannot be deleted; cancel it instead (keeps the numbers gapless)"
             )
-        if me["role"] != "boss":
-            own = coll in MEMBER_WRITE_OWN and old.get("user_id") == me["id"] and not old.get("invoice_id")
+        sc = _scope(me, coll, "write")
+        if sc != Scope.ALL:
+            own = (
+                sc == Scope.LIMITED
+                and coll in OWN_COLLECTIONS
+                and old.get("user_id") == me["id"]
+                and not old.get("invoice_id")
+            )
             if not own:
                 raise ServiceError(403, "Forbidden")
         with self.store.transaction():
@@ -192,13 +205,17 @@ class RecordService:
 
     def list_users(self, me: dict) -> list[dict]:
         users = self.store.list("users")
-        if me["role"] == "boss":
+        if rights.scope(me.get("role"), "team") == Scope.ALL:
             return [public_user(u) for u in users]
-        return [{"id": u["id"], "name": u.get("name"), "role": u.get("role")} for u in users]
+        return [{"id": u["id"], "name": u.get("name"), "role": rights.normalize_role(u.get("role"))} for u in users]
 
 
 _ENTRY_BILLING_FIELDS = ("rate", "invoice_id")
 _MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
+
+
+def _scope(me: dict, coll: str, op: rights.Op) -> Scope:
+    return rights.scope(me.get("role"), rights.COLLECTION_AREA[coll], op)
 
 
 def _project_visible(project: dict, me: dict) -> bool:

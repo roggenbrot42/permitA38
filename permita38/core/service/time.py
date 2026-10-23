@@ -2,7 +2,7 @@
 
 import time as _time
 
-from permita38.core import calc
+from permita38.core import calc, rights
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 
@@ -58,7 +58,7 @@ class TimeService:
     def dashboard(self, me: dict, user_id: str | None) -> dict:
         target = me
         if user_id and user_id != me["id"]:
-            if me["role"] != "boss":
+            if rights.scope(me.get("role"), "time") != rights.Scope.ALL:
                 raise ServiceError(403, "Forbidden")
             found = self.store.get("users", user_id)
             if not found:

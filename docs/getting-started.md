@@ -81,7 +81,7 @@ Open **Planning**:
 
 ## 9. Working with a team
 
-Under **Team → + Add person** create members. Give each person a username and an initial password; they sign in on the login screen, can change the password from the account menu, track their own time, and book their own time off. You see everyone's week at a glance and can plan with their capacity in the forecast. Set a **cost rate** per person to see real project margins.
+Under **Team → + Add person** create employees (or an accountant: read access to the money side, can enter expenses; see [roles](roles.md)). Give each person a username and an initial password; they sign in on the login screen, can change the password from the account menu, track their own time, and book their own time off. You see everyone's week at a glance and can plan with their capacity in the forecast. Set a **cost rate** per person to see real project margins.
 
 ### Turn on two-factor authentication
 

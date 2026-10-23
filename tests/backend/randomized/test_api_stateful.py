@@ -176,7 +176,7 @@ class ApiMachine(RuleBasedStateMachine):
 
     def refresh_sessions(self):
         """Long time jumps expire every token; make sure a boss (and a member) can still act afterwards."""
-        for role in ("boss", "member"):
+        for role in ("boss", "employee"):
             users = [u for u in self.m["users"].values() if u["role"] == role and u["active"]]
             if users and not any(self.valid(s) and self.role_of(s) == role for s in self.sessions):
                 if self.do_login(users[0]["username"], users[0]["password"]) is None:  # throttled: mint one
@@ -246,7 +246,7 @@ class ApiMachine(RuleBasedStateMachine):
     # ------------------------------------------------------------------ strategies bound to the model
     def actor(self):
         boss = [s for s in self.sessions if self.valid(s) and self.role_of(s) == "boss"]
-        member = [s for s in self.sessions if self.valid(s) and self.role_of(s) == "member"]
+        member = [s for s in self.sessions if self.valid(s) and self.role_of(s) == "employee"]
         stale = [s for s in self.sessions if not self.valid(s)]
         junk = [None, Session("not.a.token", None, 0), Session("a.b", None, 0)]
         opts = []  # most likely (and, for hypothesis' simplest examples, first) choices are valid sessions
@@ -404,7 +404,7 @@ class ApiMachine(RuleBasedStateMachine):
         """Start from a populated workspace so every rule is reachable from step one."""
         boss = self.sessions[0]
         for i in range(2):
-            self.op_create_user(boss, f"member{i}", "member-pass-1", "member", 40.0, [0, 1, 2, 3, 4], None)
+            self.op_create_user(boss, f"member{i}", "member-pass-1", "employee", 40.0, [0, 1, 2, 3, 4], None)
         self.refresh_sessions()
         for coll, n in (("customers", 2), ("projects", 3), ("tasks", 2), ("entries", 5), ("absences", 1), ("expenses", 2),
                         ("contracts", 1), ("templates", 1)):  # fmt: skip
@@ -492,7 +492,7 @@ class ApiMachine(RuleBasedStateMachine):
     def member_probes(self, data):
         """Members never see boss-only data."""
         self.tick()
-        members = [s for s in self.sessions if self.valid(s) and self.role_of(s) == "member"]
+        members = [s for s in self.sessions if self.valid(s) and self.role_of(s) == "employee"]
         if not members:
             return
         s = data.draw(st.sampled_from(members))
@@ -517,7 +517,7 @@ class ApiMachine(RuleBasedStateMachine):
     def member_tampering(self, data):
         """A member books time and plans absences for somebody else, or edits/deletes other people's records."""
         self.tick()
-        members = [x for x in self.sessions if self.valid(x) and self.role_of(x) == "member"]
+        members = [x for x in self.sessions if self.valid(x) and self.role_of(x) == "employee"]
         if not members:
             return
         s = data.draw(st.sampled_from(members))
@@ -619,6 +619,9 @@ class ApiMachine(RuleBasedStateMachine):
             return
         old = self.m[coll].get(rid)
         me = self.m["users"][s.user_id]
+        if me["role"] != "boss" and coll not in MEMBER_OWN:
+            assert r.status_code == 403  # the area check comes before the lookup: nothing is revealed
+            return
         if old is None:
             assert r.status_code == 404
             return
@@ -649,6 +652,9 @@ class ApiMachine(RuleBasedStateMachine):
             assert r.status_code == 409  # numbered invoices are cancelled, never deleted (gapless numbering)
             return
         me = self.m["users"][s.user_id]
+        if me["role"] != "boss" and coll not in MEMBER_OWN:
+            assert r.status_code == 403
+            return
         if old is not None and me["role"] != "boss":
             own = coll in MEMBER_OWN and old.get("user_id") == me["id"] and not old.get("invoice_id")
             if not own:
@@ -677,7 +683,9 @@ class ApiMachine(RuleBasedStateMachine):
             assert r.status_code == g
             return
         old, me = self.m[coll].get(rid), self.m["users"][s.user_id]
-        if old is None:
+        if me["role"] != "boss" and coll not in ("projects", "tasks", "entries", "absences"):
+            assert r.status_code == 403  # the area check comes before the lookup
+        elif old is None:
             assert r.status_code == 404
         elif me["role"] != "boss" and coll in ("projects", "tasks"):
             pid = rid if coll == "projects" else old.get("project_id")
@@ -950,7 +958,7 @@ class ApiMachine(RuleBasedStateMachine):
         data=st.data(),
         username=USERNAMES,
         password=PASSWORDS,
-        role=st.sampled_from(["member", "member", "boss", "root"]),
+        role=st.sampled_from(["employee", "employee", "boss", "root"]),
         hours=st.sampled_from([20.0, 32.5, 40.0]),
         workdays=st.sampled_from([[0, 1, 2, 3, 4], [0, 1, 2], [1, 3, 5]]),
         rate=maybe_none(RATE),
@@ -969,7 +977,7 @@ class ApiMachine(RuleBasedStateMachine):
             return
         norm = oracle.normalize_username(username)
         taken = any(u["username"] == norm for u in self.m["users"].values())
-        if role not in ("boss", "member"):
+        if role not in ("boss", "employee"):
             assert r.status_code == 422, (body, r.text)  # rejected by the request model before any service rule
             return
         if not norm or taken or len(password) < 8:
@@ -990,7 +998,7 @@ class ApiMachine(RuleBasedStateMachine):
         data=st.data(),
         username=USERNAMES,
         password=maybe_none(PASSWORDS),
-        role=st.sampled_from(["member", "boss"]),
+        role=st.sampled_from(["employee", "boss"]),
         active=st.booleans(),
         hours=st.sampled_from([20.0, 40.0]),
     )
@@ -1096,7 +1104,7 @@ class ApiMachine(RuleBasedStateMachine):
             for uid, u in self.m["users"].items():
                 subset_eq({k: u[k] for k in ("username", "name", "role", "active", "weekly_hours")}, rows[uid])
         # a member only ever sees their own entries/absences and stripped projects
-        members = [u["id"] for u in self.m["users"].values() if u["role"] == "member" and u["active"]]
+        members = [u["id"] for u in self.m["users"].values() if u["role"] == "employee" and u["active"]]
         if members and self.dirty & {"entries", "absences", "projects", "users", "tasks"}:
             uid = members[self.steps % len(members)]
             ms = self.mint(uid)

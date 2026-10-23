@@ -1,12 +1,13 @@
 """Dependency injection: services container and authentication."""
 
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from permita38 import __version__
+from permita38.core import rights
 from permita38.core.config import Config
 from permita38.core.netsafe import SafeFetcher
 from permita38.core.repository import Repository, auto_backup, create_repository
@@ -95,10 +96,36 @@ def get_current_user(
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 
 
-def require_boss(user: CurrentUser) -> dict:
-    if user["role"] != "boss":
-        raise HTTPException(403, "Forbidden")
-    return user
+def Needs(area: str, op: rights.Op = "read", *, full: bool = False) -> Any:
+    """Route dependency: the signed-in user's role must have some access (any scope) to `area` for `op`, else 403.
+
+    The requirement is stored on the dependency (``.rbac``) so tests can enumerate it for every route. Routes whose
+    scope matters (own records only, restricted views) get the user and ask `rights.scope` in the service.
+    `full=True` additionally demands the ``all`` scope (for endpoints that have no restricted view).
+    """
+    if area not in rights.AREAS:
+        raise ValueError(f"unknown area {area!r}")
+
+    def check(user: CurrentUser) -> dict:
+        got = rights.scope(user.get("role"), area, op)
+        if got == rights.Scope.NONE or (full and got != rights.Scope.ALL):
+            raise HTTPException(403, "Forbidden")
+        return user
+
+    check.rbac = (area, op, full)  # type: ignore[attr-defined]
+    return Depends(check)
 
 
-BossUser = Annotated[dict, Depends(require_boss)]
+def declared(route: Any) -> list[tuple[str, str, bool]]:
+    """The (area, op, full) requirements found in a route's dependency tree."""
+    found: list[tuple[str, str, bool]] = []
+
+    def walk(dep: Any) -> None:
+        spec = getattr(dep.call, "rbac", None)
+        if spec:
+            found.append(spec)
+        for sub in dep.dependencies:
+            walk(sub)
+
+    walk(route.dependant)
+    return found

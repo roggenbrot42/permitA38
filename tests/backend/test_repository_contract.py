@@ -238,3 +238,10 @@ def test_backup_if_supported(repo, tmp_path):
 
 def test_database_revision_error_is_a_runtime_error():
     assert issubclass(DatabaseRevisionError, RuntimeError)
+
+
+def test_user_roles_round_trip_unchanged(repo):
+    """The storage layer keeps whatever role string it is given (the meaning lives in core/rights.py)."""
+    for role in ("boss", "employee", "accountant", "member"):
+        saved = repo.save("users", {"username": f"u-{role}", "name": role, "role": role})
+        assert repo.get("users", saved["id"])["role"] == role

@@ -1,9 +1,11 @@
 """Two-factor authentication (TOTP, RFC 6238): enrolment, second login step, recovery and administrative reset."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 
-from permita38.api.deps import BossUser, CurrentUser, ServicesDep
+from permita38.api.deps import CurrentUser, Needs, ServicesDep
 from permita38.api.routers.auth import LoginResult, TokenResult, _set_cookie, cookie_secure
 from permita38.core.models import UserOut
 
@@ -111,5 +113,7 @@ def totp_regenerate(payload: RegeneratePayload, user: CurrentUser, services: Ser
     response_model=UserOut,
     summary="boss: remove a user's two-factor authentication (lock-out recovery)",
 )
-def totp_reset(user_id: str, payload: ResetPayload, boss: BossUser, services: ServicesDep):
+def totp_reset(
+    user_id: str, payload: ResetPayload, boss: Annotated[dict, Needs("team", "write")], services: ServicesDep
+):
     return services.totp.reset_for(boss, user_id, payload.password)

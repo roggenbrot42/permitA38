@@ -1,4 +1,4 @@
-from permita38.core import documents
+from permita38.core import documents, rights
 from permita38.core.errors import ServiceError
 from permita38.core.holidays import STATES
 from permita38.core.repository import Repository
@@ -35,13 +35,15 @@ class SettingsService:
 
     def bootstrap(self, me: dict, timer: dict) -> dict:
         st = self.get()
-        if me["role"] != "boss":
+        if rights.scope(me.get("role"), "settings") != rights.Scope.ALL:
             st = {k: st.get(k) for k in ("company_name", "state")}
+        role = me.get("role")
+        sees_conflicts = rights.allowed(role, "settings", "write") or rights.allowed(role, "team", "write")
         return dict(
             me=public_user(me),
             settings=st,
             states=STATES,
-            templates=self.templates(),
+            templates=self.templates() if rights.allowed(role, "templates") else [],
             timer=timer,
-            conflicts=self.store.conflicts(),
+            conflicts=self.store.conflicts() if sees_conflicts else [],
         )

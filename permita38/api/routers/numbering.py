@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
-from permita38.api.deps import BossUser, ServicesDep
+from permita38.api.deps import Needs, ServicesDep
 from permita38.core.numbering import MAX_NUMBER
 
 router = APIRouter(tags=["numbering"])
@@ -35,17 +35,23 @@ class NumberingCheck(BaseModel):
 
 
 @router.get("/numbering/preview", summary="the next numbers for a document type")
-def preview(_: BossUser, services: ServicesDep, type: DocType = "invoice") -> dict:
+def preview(
+    _: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep, type: DocType = "invoice"
+) -> dict:
     return {"type": type, "next": services.sales.numbering.preview(type, 5)}
 
 
 @router.get("/numbering/status", summary="pattern, reset scope, next number and warnings for a document type")
-def status(_: BossUser, services: ServicesDep, type: DocType = "invoice") -> dict:
+def status(
+    _: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep, type: DocType = "invoice"
+) -> dict:
     return services.sales.numbering.status(type)
 
 
 @router.post("/numbering/check", summary="dry run of a change: warnings and preview, nothing is written")
-def check(body: NumberingCheck, _: BossUser, services: ServicesDep) -> dict:
+def check(
+    body: NumberingCheck, _: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep
+) -> dict:
     return services.sales.numbering.check(body.type, pattern=body.pattern, reset=body.reset, next_number=body.next)
 
 
@@ -53,7 +59,7 @@ def check(body: NumberingCheck, _: BossUser, services: ServicesDep) -> dict:
     "/numbering",
     summary="change pattern, reset scope or next number; risky changes need confirm=true (409 otherwise)",
 )
-def update(body: NumberingChange, _: BossUser, services: ServicesDep):
+def update(body: NumberingChange, _: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep):
     result = services.sales.numbering.update(
         body.type,
         pattern=body.pattern,
@@ -68,5 +74,7 @@ def update(body: NumberingChange, _: BossUser, services: ServicesDep):
 
 
 @router.get("/numbering/log", summary="audit trail of numbering changes")
-def log(_: BossUser, services: ServicesDep, type: DocType | None = None) -> list[dict]:
+def log(
+    _: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep, type: DocType | None = None
+) -> list[dict]:
     return services.sales.numbering.log(type)

@@ -28,7 +28,7 @@ def worlds(draw):
             name=f"U{i}",
             weekly_hours=draw(st.sampled_from([0, 10, 20, 24, 40])),
             workdays=draw(st.sampled_from([[0, 1, 2, 3, 4], [0, 2, 4], [0, 1, 2]])),
-            role="boss" if i == 0 else "member",
+            role="boss" if i == 0 else "employee",
         )
         for i in range(n_users)
     ]

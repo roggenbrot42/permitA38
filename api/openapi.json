@@ -535,7 +535,7 @@
           "users"
         ],
         "summary": "List Users",
-        "description": "Boss: full records. Members: id, name and role only.",
+        "description": "Full records with team access; everyone else: id, name and role only.",
         "operationId": "list_users_api_users_get",
         "responses": {
           "200": {
@@ -9970,10 +9970,13 @@
             "type": "string",
             "enum": [
               "boss",
+              "employee",
+              "accountant",
               "member"
             ],
             "title": "Role",
-            "default": "member"
+            "description": "\"member\" is the old name of \"employee\" and is still accepted",
+            "default": "employee"
           },
           "password": {
             "anyOf": [
@@ -10266,6 +10269,29 @@
               }
             ],
             "title": "Totp Enabled"
+          },
+          "permissions": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "additionalProperties": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "limited",
+                      "all"
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Permissions",
+            "description": "read/write scope per area, derived from the role (never stored)"
           }
         },
         "additionalProperties": true,
