@@ -47,7 +47,7 @@ Strict model in `SettingsIn`:
 |---|---|---|---|---|
 | `off` | route answers 403 | | | |
 | `away` | `null` | `null` | listed as away (`kind: null`) | `[]` |
-| `time-off` | `"vacation"` / `"holiday"` / `"other"` | the entry's `note` (vacation and holiday entries only, else `null`) | listed as away, `kind: null`, `label: null` | `[]` |
+| `time-off` | `"vacation"` / `"holiday"` / `"other"` (an allow-list: any other stored kind, legacy or unknown, is `null`) | the entry's `note` (vacation and holiday entries only, else `null`) | listed as away, `kind: null`, `label: null` | `[]` |
 | `full` | all kinds incl. `"sick"` | the entry's `note` (every kind) | `kind: "sick"` | all contracts of the person |
 
 **The viewer's own entries are always returned as at `full`** for absences (the `absences` limited scope), at any
@@ -67,6 +67,10 @@ Query parameters (strict model; unknown parameters 422):
 Errors: 401; 403 (`"Forbidden"`: role has no access, or level `off`); 422 (missing, malformed or out-of-range
 date, `end < start`, window larger than 366 days: for the last two `{"detail": "..."}` strings, for the others the
 list form; never 500).
+
+Order of the checks: authentication (401), then the role and the level (403, also for a viewer whose level is `off`),
+then the window (422 for `end < start` and a span above 365 days). Query-shape errors (malformed, out of range, unknown
+parameter) are answered before the role check, as the list form, and never echo the input.
 
 Example, request `GET /api/team/timeline?start=2026-11-02&end=2026-12-27`, level `full` (boss):
 
@@ -119,7 +123,7 @@ Same request at level `away` (employee): `"level": "away"`, every absence has `"
 | `people[].color` | `#rrggbb` or `null` | the stored, validated user colour; omitted/`null` if none (the UI picks a neutral) |
 | `people[].weekly_hours` | number 0-168 | the user's weekly hours; `null` if unset, and `null` below `full` except on the viewer's own row |
 | `people[].absences[]` | `{start, end, kind, label}` | dates `YYYY-MM-DD`, `end` always set (`end = start` for one-day entries), clipped to nothing: entries are returned whole if they overlap the window; sorted by `start`; entries of the same person are not merged |
-| `people[].contracts[]` | `{id, title, customer, start, end, hours_per_week}` | only `full`; contracts that overlap the window and list this person in `user_ids`; `customer` is the customer's name or `null`; `end` may be `null` for open-ended; `hours_per_week` number or `null` |
+| `people[].contracts[]` | `{id, title, customer, start, end, hours_per_week}` | only `full`; contracts that overlap the window and list this person in `user_ids`, of every status (`confirmed` and `done`); `customer` is the customer's name or `null`; `end` may be `null` for open-ended; `hours_per_week` number or `null` |
 
 `kind` values: `"vacation"`, `"holiday"`, `"sick"`, `"other"` (the `Absence.kind` values), or `null` when hidden.
 
@@ -136,6 +140,9 @@ clash(day)  = day is a weekday (Mon-Fri), is not a key of `holidays`, and away(d
 "More than N" is strict: with `N = 2`, three people away is a clash. At level `away` the count includes sick days
 and every kind (they are all listed). The marker is a header stripe plus a text count; the browser tests compute it
 with an independent oracle from the fixture.
+
+The backend does not compute clashes and has no clash tests of its own: `tests/backend/test_team_timeline.py` only
+checks the fixture's hand-computed clash days against a local oracle, as data for the UI tests.
 
 ## Contract decisions (where the spec left a choice)
 
