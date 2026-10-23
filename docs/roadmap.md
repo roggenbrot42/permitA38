@@ -92,6 +92,7 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | **SSO / OIDC** login | for team and server installations |
 | **ELSTER transmission** | research: certificate handling, ERiC library licensing, or an export for the official software |
 | **Public customer demo** | per-visitor sandboxes with fake data, risky features off; see [`specs/demo-deployment.md`](specs/demo-deployment.md) |
+| **Team timeline** (who is away, who works on what) | read-only people-per-row chart in the planner, visibility set per role by the boss; see [`specs/team-timeline.md`](specs/team-timeline.md) |
 | Recurring invoices, credit notes, reminders (Mahnungen) | |
 | macOS and Linux arm64 bundles | needs signing and notarisation |
 
