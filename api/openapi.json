@@ -8577,17 +8577,6 @@
               }
             ],
             "title": "Lines"
-          },
-          "trip_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trip Id"
           }
         },
         "additionalProperties": true,
@@ -8731,18 +8720,6 @@
               }
             ],
             "title": "Lines"
-          },
-          "trip_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^[0-9a-z]{6,32}$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trip Id"
           }
         },
         "additionalProperties": true,
@@ -13661,17 +13638,6 @@
               }
             ],
             "title": "Lines"
-          },
-          "trip_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trip Id"
           },
           "planning_warnings": {
             "anyOf": [
