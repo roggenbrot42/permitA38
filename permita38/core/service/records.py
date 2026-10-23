@@ -63,7 +63,20 @@ class RecordService:
 
     def create(self, me: dict, coll: str, data: dict) -> dict:
         self._check(coll)
+        client_id = data.get("id") if coll == "entries" else None
         data = {k: v for k, v in data.items() if k not in ("id", "created", "updated")}
+        if client_id is not None:
+            # Time entries may carry a client-generated id so that a retry (offline queue, lost response) is
+            # exactly-once: creating an id that already exists for the same person returns the stored record.
+            if not isinstance(client_id, str) or not _valid_id(client_id):
+                raise ServiceError(422, "id: 6-32 characters of 0-9a-z")
+            existing = self.store.get("entries", client_id)
+            owner = (data.get("user_id") or me["id"]) if me["role"] == "boss" else me["id"]
+            if existing:
+                if existing.get("user_id") != owner:
+                    raise ServiceError(409, "This id is already in use")
+                return existing
+            data["id"] = client_id
         return self._write(me, coll, data, None)
 
     def update(self, me: dict, coll: str, rid: str, data: dict) -> dict:

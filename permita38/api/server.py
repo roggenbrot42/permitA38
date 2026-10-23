@@ -13,6 +13,7 @@ from permita38.core.config import Config
 from permita38.core.errors import ServiceError
 
 from .deps import Services, startup_services
+from .pwa import mount_pwa
 from .routers import auth, files, finance, health, impressum, planning, records, sales, settings, time, totp, users
 
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
@@ -84,6 +85,7 @@ def get_app(config: Config) -> FastAPI:
         for router in module.routers:
             app.include_router(router, prefix="/api")
 
+    mount_pwa(app, config)  # /sw.js (version injected) must be registered before the static mount
     if config.serve_web and config.web_dir and config.web_dir.is_dir():
         app.mount("/", StaticFiles(directory=config.web_dir, html=True), name="web")
     return app
