@@ -21,7 +21,7 @@ All notable changes to this project are documented here. The format is based on
 - **Itemised expenses (API)** (`docs/specs/itemised-expenses.md`): an expense can carry up to 50 `lines`, each with its
   own gross amount, VAT rate and deductible share (and optional business-meal VAT share or category). VAT is computed
   per rate group as on a printed bill; the server derives net and VAT per line and the totals for the tax figures use
-  the lines. Bills without lines work as before. Migration `0005-expense_lines`.
+  the lines (largest-remainder split, so no negative VAT on tiny amounts). Bills without lines work as before. Migration `0005-expense_lines`.
 - **Planning and vacation planner** (`docs/planning.md`): per-day capacity (weekly hours, holidays, absences, busy
   time from `services.busy`) against confirmed contracts and open offers in the worst case; offer feasibility with
   exact weeks, causes and options; numbers that do not add up on offers and invoices; project periods with manual

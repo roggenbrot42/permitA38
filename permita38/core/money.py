@@ -15,7 +15,7 @@ All of it is done with :class:`decimal.Decimal` on the *decimal representation* 
 import logging
 import math
 from collections.abc import Sequence
-from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 log = logging.getLogger(__name__)
@@ -80,12 +80,19 @@ def hours_from_minutes(minutes: Any) -> Decimal:
     return q2(dec(minutes) / 60)
 
 
+def _floor_cent(value: Decimal) -> Decimal:
+    return (value / CENT).to_integral_value(rounding=ROUND_FLOOR) * CENT
+
+
 def split_gross(lines: Sequence[tuple[Decimal, Decimal]]) -> list[tuple[Decimal, Decimal]]:
     """(gross, rate %) per bill line -> (net, vat) per line, as a printed bill does it.
 
-    VAT is computed per rate group: the group VAT is ``q2(sum(gross) * r / (100 + r))``; each line of the group gets
-    ``q2(gross * r / (100 + r))`` except the last line, which takes the rest of the group VAT so the lines add up to
-    the group exactly. ``net = gross - vat``. Docs: ``docs/specs/itemised-expenses.md``, money rules 1 and 2.
+    VAT is computed per rate group: the group VAT is ``q2(sum(gross) * r / (100 + r))``. The group VAT is then shared
+    out with the largest-remainder method: each line starts at its exact share ``e_i = gross_i * r / (100 + r)``
+    rounded **down** to cents; the missing cents (an integer, ``0 <= rest <= number of lines with a fraction``) go one
+    each to the lines with the largest fractional remainder; ties go to the later line. So every line VAT is either
+    ``floor(e_i)`` or ``floor(e_i) + 0.01`` (``|vat_i - e_i| < 0.01``), the lines add up to the group VAT exactly, and
+    no VAT or net can be negative. ``net = gross - vat``. Docs: ``docs/specs/itemised-expenses.md``, money rules 1, 2.
     """
     groups: dict[Decimal, list[int]] = {}
     for i, (_, rate) in enumerate(lines):
@@ -94,10 +101,15 @@ def split_gross(lines: Sequence[tuple[Decimal, Decimal]]) -> list[tuple[Decimal,
     for rate, idx in groups.items():
         total = sum((lines[i][0] for i in idx), ZERO)
         group_vat = q2(total * rate / (100 + rate))
-        used = ZERO
-        for n, i in enumerate(idx):
-            gross = lines[i][0]
-            vat = group_vat - used if n == len(idx) - 1 else q2(gross * rate / (100 + rate))
-            used += vat
-            out[i] = (gross - vat, vat)
+        exact = {i: lines[i][0] * rate / (100 + rate) for i in idx}
+        floors = {i: _floor_cent(exact[i]) for i in idx}
+        rest = int((group_vat - sum(floors.values(), ZERO)) / CENT)
+        if not 0 <= rest <= len(idx):  # cannot happen: rest is round(sum of fractions) in cents
+            raise ValueError(f"largest-remainder split failed for rate {rate}")
+        # largest fractional remainder first; equal remainders: the later line first
+        order = sorted(idx, key=lambda i: (exact[i] - floors[i], i), reverse=True)
+        extra = set(order[:rest])
+        for i in idx:
+            vat = floors[i] + (CENT if i in extra else ZERO)
+            out[i] = (lines[i][0] - vat, vat)
     return out
