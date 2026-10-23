@@ -9,13 +9,17 @@ Migrations are `0001_name.sql`, numbered contiguously, and `CURRENT_REVISION` is
 branch that needs a migration takes "the next free number", so parallel branches collide (`feat/calendar` and
 `feat/numbering-import` both took 0004) and whoever merges second must rename files in three dialect folders, edit
 `CURRENT_REVISION` and fix tests that hard-code it. The model is taken over from stustapay (`-- migration: <id>` and
-`-- requires: <id>` headers): the identity of a migration is a random id, the order is the chain of `requires`.
+`-- requires: <id>` headers, `NNNN-slug.sql` file names): the identity of a migration is a random id, the order is
+the chain of `requires`; the file-name number is only a label.
 
 ## Format
 
-* File: `permita38/core/schema/migrations/<dialect>/<id>-<slug>.sql`, e.g. `7ecb5a30-planning.sql`.
-  `<id>` = 8 lowercase hex characters (random), `<slug>` = `[a-z0-9_]+`. The same file name exists in **every**
-  dialect folder. Files carry no ordinal number: the order is defined by the chain, not by the name.
+* File: `permita38/core/schema/migrations/<dialect>/<NNNN>-<slug>.sql`, e.g. `0004-calendars.sql` (stustapay style:
+  four digits, hyphen, slug; slug = `[a-z0-9_]+`). The same file name exists in **every** dialect folder.
+  `NNNN` is a human-readable ordinal only. **The identity of a migration is the random 8-hex-character id in its
+  header, and the order is the `requires` chain.** `create-migration` uses head ordinal + 1. The ordinals must be
+  non-decreasing along the chain (ties are allowed and are not an error), so two branches that both picked 0004 do
+  not break anything; renaming the prefix later is cosmetic.
 * First lines of every file (before any SQL), exactly:
 
   ```
@@ -23,8 +27,9 @@ branch that needs a migration takes "the next free number", so parallel branches
   -- requires: 3f9a1c02
   ```
 
-  `requires: none` for the first migration. The header id must equal the id in the file name.
-* Rules (all enforced by tests, see below): ids are unique; each `requires` names an existing migration; exactly one
+  `requires: none` for the first migration. The id is random (`secrets.token_hex(4)`), except for the three legacy
+  migrations below.
+* Rules (all enforced by tests, see below): ids are unique; ordinals are non-decreasing along the chain; each `requires` names an existing migration; exactly one
   migration has `requires: none`; every migration is required by at most one other (**linear chain, no forks**);
   hence exactly one head. The three dialect folders contain identical ids, slugs and `requires` values.
 * The SQL rules stay as they are (no `BEGIN`/`COMMIT`, never edit a released migration).
@@ -32,13 +37,14 @@ branch that needs a migration takes "the next free number", so parallel branches
 ## Legacy revisions
 
 Released databases (alpha.1) carry the integer revision 1 or 2 in SQLite `PRAGMA user_version`; `main` has 3.
-The existing three migrations become the root of the chain with **fixed ids** (rename the files, add the headers):
+The existing three migrations become the root of the chain with **fixed ids** (rename `0001_initial.sql` to
+`0001-initial.sql` etc., add the headers):
 
-| old file | id |
-|---|---|
-| `0001_initial.sql` | `00000001` |
-| `0002_totp.sql` | `00000002` |
-| `0003_planning.sql` | `00000003` |
+| old file | new file | id |
+|---|---|---|
+| `0001_initial.sql` | `0001-initial.sql` | `00000001` |
+| `0002_totp.sql` | `0002-totp.sql` | `00000002` |
+| `0003_planning.sql` | `0003-planning.sql` | `00000003` |
 
 Keeping the old number as the id for these three keeps the upgrade path trivial and recognisable. New migrations use
 random ids. (If maintainers prefer random ids here too, the mapping table above is the only thing to change.)
@@ -90,7 +96,7 @@ random ids. (If maintainers prefer random ids here too, the mapping table above 
 ## Tests (must exist)
 
 1. Chain validation unit tests with synthetic migration folders: duplicate id, missing `requires` target, two roots,
-   fork (two migrations requiring the same one), cycle, header id != file name, bad header, dialect drift.
+   fork (two migrations requiring the same one), cycle, decreasing ordinal, bad header or file name, dialect drift.
 2. The real folders form a valid chain and are identical across dialects.
 3. **Legacy upgrade:** build a SQLite database at revision 1, 2 and 3 from the old files (fixtures from the git
    history are fine, or apply the three files by hand and set `user_version`), open it with the new runner: all
