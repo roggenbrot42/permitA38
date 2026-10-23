@@ -129,7 +129,7 @@ def test_vat_is_rounded_per_rate_group_not_per_line(boss_client):
     assert got["vat_rate"] == 7  # all lines share one rate -> the common rate
 
 
-def test_last_line_of_a_group_takes_the_remainder_even_when_groups_are_interleaved(boss_client):
+def test_largest_remainder_gives_extra_cents_to_largest_fractions_across_interleaved_groups(boss_client):
     lines = [L(0.50, 7, "a"), L(10.00, 19, "b"), L(0.50, 7, "c"), L(0.50, 7, "d")]
     got = book(boss_client, lines)
     derived, summary = derive([(ln["gross"], ln["vat_rate"]) for ln in lines])
@@ -362,6 +362,21 @@ def test_invalid_line_values_are_rejected_and_the_message_names_the_line(boss_cl
     lines_422(r, 1, field)
 
 
+@pytest.mark.parametrize("gross", [0.0099, 0.001, 10.005])
+def test_sub_cent_line_amounts_are_rejected_with_the_cents_rule(boss_client, gross):
+    r = boss_client.post("/api/expenses", json={"date": "2026-03-10", "net": 0, "lines": [L(5, 19), L(gross, 19)]})
+    lines_422(r, 1, "gross")
+    msg = next(e["msg"] for e in r.json()["detail"] if e["loc"][-1] == "gross")
+    assert "cent" in msg
+    assert boss_client.get("/api/expenses").json() == []
+
+
+@pytest.mark.parametrize("gross", [0.01, 2.52, 1234.56])
+def test_whole_cent_line_amounts_are_accepted(boss_client, gross):
+    got = book(boss_client, [L(gross, 19), L(1, 7)])
+    assert dd(got["lines"][0]["net"]) + dd(got["lines"][0]["vat"]) == dd(gross)
+
+
 def test_a_line_must_state_gross_and_vat_rate(boss_client):
     lines_422(
         boss_client.post("/api/expenses", json={"date": "2026-03-10", "net": 0, "lines": [{"vat_rate": 19}]}),
@@ -403,3 +418,21 @@ def test_property_lines_add_up_exactly_and_group_vat_adds_up(boss_client, lines)
         assert sum((dd(x["net"]) for x in members), D(0)) == group_net
     assert dd(got["vat"]) == sum((v for v, _ in summary.values()), D(0))
     assert all(dd(x["net"]) >= 0 and dd(x["vat"]) >= 0 for x in out)
+
+
+# ------------------------------------------------------------------ 7. importer and classic expenses
+def test_an_imported_expense_has_no_lines_and_stays_classic_after_a_put_without_lines(boss_client):
+    csv_text = "Datum;Lieferant;Beschreibung;Netto;USt;Kategorie\n01.03.2026;Büro AG;Papier;100,00;19,00;Büro\n"
+    r = boss_client.post(
+        "/api/import/run", data={"type": "expenses"}, files={"file": ("e.csv", csv_text.encode(), "text/csv")}
+    )
+    assert r.status_code == 200, r.text
+    exp = next(x for x in boss_client.get("/api/expenses").json() if x["vendor"] == "Büro AG")
+    assert "lines" not in exp
+    r = boss_client.put(
+        f"/api/expenses/{exp['id']}", json={"date": "2026-03-01", "net": 120.0, "vat": 22.8, "vendor": "Büro AG"}
+    )
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert "lines" not in got and dd(got["net"]) == D("120.00") and dd(got["vat"]) == D("22.80")
+    assert "lines" not in boss_client.get(f"/api/expenses/{exp['id']}").json()

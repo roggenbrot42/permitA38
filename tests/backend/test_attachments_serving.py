@@ -226,3 +226,39 @@ def test_page_csp_allows_blob_images_and_frames_and_nothing_else_changed(tmp_pat
         "frame-src": {"'self'", "blob:"},
     }
     assert "script-src" not in r.headers["content-security-policy"]  # scripts stay on default-src 'self'
+
+
+# ------------------------------------------------------------------ anchored names, upper-case extensions
+def test_a_stored_name_with_a_trailing_newline_is_404(boss_client, config):
+    name = stored(boss_client, "a.pdf", PDF, "application/pdf")
+    assert boss_client.get(f"/api/attachments/{name}").status_code == 200
+    assert boss_client.get(f"/api/attachments/{name}%0A").status_code == 404
+    assert boss_client.get(f"/api/attachments/{name}%0D%0A").status_code == 404
+
+
+def test_upper_case_extension_with_html_bytes_is_415_and_nothing_is_stored(boss_client, config):
+    r = upload(boss_client, "x.PDF", HTML, "application/pdf")
+    assert r.status_code == 415
+    folder = config.data_dir / "attachments"
+    assert not folder.exists() or [p for p in folder.iterdir() if p.suffix != ".tmp"] == []
+
+
+@pytest.mark.parametrize(
+    "filename,blob,mime",
+    [("x.Png", PNG, "image/png"), ("x.JPG", JPEG, "image/jpeg"), ("x.PDF", PDF, "application/pdf")],
+)
+def test_upper_case_extensions_with_correct_magic_numbers_are_accepted_and_served_inline(
+    boss_client, filename, blob, mime
+):
+    name = stored(boss_client, filename, blob, mime)
+    assert name.endswith(name.rsplit(".", 1)[1].lower()) and name == name.lower()
+    r = boss_client.get(f"/api/attachments/{name}")
+    assert r.status_code == 200 and r.content == blob
+    assert r.headers["content-type"].split(";")[0] == mime
+
+
+def test_download_filename_is_a_quoted_string(boss_client):
+    name = stored(boss_client, "x.html", HTML, "text/html")
+    assert (
+        boss_client.get(f"/api/attachments/{name}").headers["content-disposition"] == f'attachment; filename="{name}"'
+    )

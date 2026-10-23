@@ -244,3 +244,11 @@ def test_split_properties_hold_for_any_lines(lines):
     for r in {r for _, r in gl}:
         group = sum((g for g, rr in gl if rr == r), D(0))
         assert sum((v for (_, v), (_, rr) in zip(out, gl, strict=True) if rr == r), D(0)) == q2(_exact(group, r))
+
+
+def test_sub_cent_input_is_clamped_so_no_line_has_a_negative_net():
+    # the API rejects sub-cent gross; split_gross must still never produce a negative net or a VAT above the gross
+    out = split_gross([(D("0.0099"), D(19))] * 4)
+    for (g, _), (n, v) in zip([(D("0.0099"), 19)] * 4, out, strict=True):
+        assert D(0) <= v <= g
+        assert n == g - v and n >= 0

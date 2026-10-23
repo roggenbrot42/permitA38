@@ -95,7 +95,7 @@ def split_gross(lines: Sequence[tuple[Decimal, Decimal]]) -> list[tuple[Decimal,
     rounded **down** to cents; the missing cents (an integer, ``0 <= rest <= number of lines with a fraction``) go one
     each to the lines with the largest fractional remainder; ties go to the later line. So every line VAT is either
     ``floor(e_i)`` or ``floor(e_i) + 0.01`` (``|vat_i - e_i| < 0.01``), the lines add up to the group VAT exactly, and
-    no VAT or net can be negative. ``net = gross - vat``. Docs: ``docs/specs/itemised-expenses.md``, money rules 1, 2.
+    no VAT or net can be negative (a sub-cent input is clamped, see the code). ``net = gross - vat``. Docs: ``docs/specs/itemised-expenses.md``, money rules 1, 2.
 
     All shares are exact rationals (``Fraction``): a remainder that is mathematically equal to another is a tie even
     when the decimal representation would differ in the 28th digit.
@@ -118,5 +118,8 @@ def split_gross(lines: Sequence[tuple[Decimal, Decimal]]) -> list[tuple[Decimal,
         extra = set(order[:rest])
         for i in idx:
             vat = Decimal(floors[i] + (1 if i in extra else 0)).scaleb(-2)
+            # belt and braces: only reachable with sub-cent gross (rejected by the API); never a negative net
+            gross = max(lines[i][0], ZERO)
+            vat = min(max(vat, ZERO), gross)
             out[i] = (lines[i][0] - vat, vat)
     return out

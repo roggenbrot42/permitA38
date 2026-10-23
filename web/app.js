@@ -42,8 +42,10 @@ async function bootstrap() {
 function closeModal() { runCloseHook(); $('#modal-root').innerHTML = ''; }
 /** A dialog can register cleanup (e.g. revoking object URLs) that runs once when it closes. */
 function runCloseHook() { const h = closeModal.onClose; closeModal.onClose = null; if (h) h(); }
+let MODAL_SEQ = 0;  // bumped every time a dialog opens: a save that finishes after its dialog was cancelled must not close another one
 function modal(html, wide) {
   runCloseHook();
+  MODAL_SEQ++;
   $('#modal-root').innerHTML = `<div class="modal-bg"><div class="modal ${wide ? 'wide' : ''}">${html}</div></div>`;
   const first = $('#modal-root input:not([type=hidden]), #modal-root select'); if (first) first.focus();
 }
@@ -79,11 +81,17 @@ function readForm(fields, base) {
 }
 function openForm({ title, fields, vals = {}, save, del, wide, extra = '', saveLabel = 'Save', note = '' }) {
   modal(`<h2>${esc(title)}</h2>${note}${formHTML(fields, vals)}${extra}<div class="actions">${del ? '<button class="danger" id="m-del" style="margin-right:auto">Delete</button>' : ''}<button id="m-cancel">Cancel</button><button class="primary" id="m-save">${esc(saveLabel)}</button></div>`, wide);
+  const token = MODAL_SEQ, mine = () => token === MODAL_SEQ;
+  let busy = false;   // a second Enter or click while a save runs is ignored (no double bill)
   $('#m-cancel').onclick = closeModal;
-  const doSave = guard(async () => { await save(readForm(fields, vals)); closeModal(); });
+  const doSave = guard(async () => {
+    if (busy) return;
+    busy = true;
+    try { await save(readForm(fields, vals)); if (mine()) closeModal(); } finally { busy = false; }
+  });
   $('#m-save').onclick = doSave;
   $('#modal-root').onkeydown = e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') doSave(); if (e.key === 'Escape') closeModal(); };
-  if (del) $('#m-del').onclick = guard(async () => { if (confirm('Delete this? This cannot be undone.')) { await del(vals); closeModal(); } });
+  if (del) $('#m-del').onclick = guard(async () => { if (busy) return; if (confirm('Delete this? This cannot be undone.')) { busy = true; try { await del(vals); if (mine()) closeModal(); } finally { busy = false; } } });
 }
 const save = guard(async (coll, obj, msg = 'Saved') => { const r = await api.upsert(coll, obj); toast(msg); await loadAll([coll]); return r; });
 

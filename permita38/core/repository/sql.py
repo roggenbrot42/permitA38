@@ -354,24 +354,24 @@ class SQLRepository(Repository):
 
     def find(self, coll: str, **equals: Any) -> RecordList:
         check_collection(coll)
-        table = TABLES[coll]
         q = self.dialect.quote
-        where, params = self._where(table, equals)
-        sql = self.dialect.select_all(table, f"{q('created')}, {q('id')}")
-        marker = " ORDER BY"
-        head, sep, tail = sql.partition(marker)
         with self.lock:
             self._ensure()
+            table = self._table(coll)
+            where, params = self._where(table, equals)
+            sql = self.dialect.select_all(table, f"{q('created')}, {q('id')}")
+            marker = " ORDER BY"
+            head, sep, tail = sql.partition(marker)
             rows = self._rows(head + where + sep + tail, params)
         return [self._decode(table, r) for r in rows]
 
     def delete_where(self, coll: str, **equals: Any) -> int:
         check_collection(coll)
-        table = TABLES[coll]
-        where, params = self._where(table, equals)
-        if not where:
-            raise ValueError("delete_where needs at least one condition")
         with self.transaction():
+            table = self._table(coll)
+            where, params = self._where(table, equals)
+            if not where:
+                raise ValueError("delete_where needs at least one condition")
             return self._exec(f"DELETE FROM {self.dialect.quote(table.name)}{where}", params)
 
     def get(self, coll: str, rid: str) -> Record | None:
@@ -435,7 +435,7 @@ class SQLRepository(Repository):
     # ------------------------------------------------------------------ attachments (files)
     def save_attachment(self, filename: str, blob: bytes) -> str:
         ext = os.path.splitext(filename)[1].lower()
-        if not re.match(r"^\.[a-z0-9]{1,5}$", ext):
+        if not re.fullmatch(r"\.[a-z0-9]{1,5}", ext):
             ext = ".bin"
         name = new_id() + ext
         folder = self.data_dir / "attachments"
@@ -446,7 +446,7 @@ class SQLRepository(Repository):
         return name
 
     def attachment_path(self, name: str) -> str | None:
-        if not re.match(r"^[0-9a-z]{6,32}\.[a-z0-9]{1,5}$", name):
+        if not re.fullmatch(r"[0-9a-z]{6,32}\.[a-z0-9]{1,5}", name):
             return None
         p = self.data_dir / "attachments" / name
         return str(p) if p.is_file() else None
