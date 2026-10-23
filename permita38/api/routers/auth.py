@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from permita38 import __version__
 from permita38.api.deps import COOKIE_NAME, CurrentUser, ServicesDep
+from permita38.core import validation as v
 from permita38.core.config import Config
 from permita38.core.models import UserOut
 from permita38.core.service.auth import public_user
@@ -17,17 +18,17 @@ class AuthStatus(BaseModel):
     version: str
 
 
-class SetupPayload(BaseModel):
-    username: str
-    name: str
-    password: str
-    company_name: str = ""
-    weekly_hours: float = 40
+class SetupPayload(v.CheckedBody):
+    username: str = Field(max_length=64)
+    name: v.Name
+    password: str = Field(max_length=1000)
+    company_name: v.Short = ""
+    weekly_hours: v.Hours = 40
 
 
-class LoginPayload(BaseModel):
-    username: str
-    password: str
+class LoginPayload(v.CheckedBody):
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=1000)
 
 
 class LoginResult(BaseModel):
@@ -41,9 +42,9 @@ class LoginResult(BaseModel):
     recovery_codes_left: int | None = None
 
 
-class ChangePasswordPayload(BaseModel):
-    old_password: str
-    new_password: str
+class ChangePasswordPayload(v.CheckedBody):
+    old_password: str = Field(max_length=1000)
+    new_password: str = Field(max_length=1000)
 
 
 class TokenResult(BaseModel):

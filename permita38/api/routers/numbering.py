@@ -4,9 +4,10 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import ConfigDict, Field, StringConstraints
 
 from permita38.api.deps import Needs, ServicesDep
+from permita38.core import validation as v
 from permita38.core.numbering import MAX_NUMBER
 
 router = APIRouter(tags=["numbering"])
@@ -16,7 +17,7 @@ DocType = Literal["invoice", "offer"]
 Pattern = Annotated[str, StringConstraints(max_length=100)]
 
 
-class NumberingChange(BaseModel):
+class NumberingChange(v.CheckedBody):
     model_config = ConfigDict(extra="forbid")
     type: DocType
     pattern: Pattern | None = None
@@ -26,7 +27,7 @@ class NumberingChange(BaseModel):
     confirm: bool = False
 
 
-class NumberingCheck(BaseModel):
+class NumberingCheck(v.CheckedBody):
     model_config = ConfigDict(extra="forbid")
     type: DocType
     pattern: Pattern | None = None

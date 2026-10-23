@@ -2,7 +2,7 @@ import re
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Response
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from permita38.api.deps import Needs, ServicesDep
 from permita38.core import validation as v
@@ -27,7 +27,7 @@ def _doc(services, coll: str, doc: dict, finalize: bool = False) -> dict:
     }
 
 
-class FromTime(BaseModel):
+class FromTime(v.CheckedBody):
     customer_id: v.OptId = None
     project_id: v.OptId = None
     date_from: v.OptDate = Field(None, alias="from")

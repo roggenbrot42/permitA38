@@ -158,16 +158,29 @@ def _check_value(value: Any, depth: int = 0) -> None:
             _check_value(v, depth + 1)
 
 
-class StrictRecord(BaseModel):
-    """Base for request models: unknown fields are kept (forward compatibility) but every value is checked."""
-
-    model_config = ConfigDict(extra="allow")
+class CheckedBody(BaseModel):
+    """Base for every request body: each value in the raw body (also unknown fields) is checked for NUL characters,
+    lone surrogates, length and nesting before the declared fields are validated. Keeps the model's own ``extra``
+    setting."""
 
     @model_validator(mode="before")
     @classmethod
     def _sane_values(cls, data: Any) -> Any:
         _check_value(data)
         return data
+
+
+class StrictRecord(CheckedBody):
+    """Base for request models: unknown fields are kept (forward compatibility) but every value is checked."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+def check_form_values(*values: Any) -> None:
+    """For values read from multipart form fields, which have no model: same checks as a JSON body.
+    Raises ValueError with a readable message."""
+    for value in values:
+        _check_value(value)
 
 
 def check_period(start: str | None, end: str | None, what: str = "end") -> None:

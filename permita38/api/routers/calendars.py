@@ -7,6 +7,7 @@ from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, Up
 from pydantic import ValidationError
 
 from permita38.api.deps import Needs, ServicesDep
+from permita38.core import validation as v
 from permita38.core.models import CalendarEventOut, CalendarIn, CalendarOut, CalendarPatchIn, CalendarTitlePolicy
 
 router = APIRouter(prefix="/calendars", tags=["calendars"])
@@ -55,6 +56,10 @@ def upload_calendar(
     include_keywords: Annotated[str, Form(max_length=2000)] = "",
     exclude_keywords: Annotated[str, Form(max_length=2000)] = "",
 ):
+    try:
+        v.check_form_values(name, all_day_blocks, busy_default, include_keywords, exclude_keywords)
+    except ValueError as err:
+        raise HTTPException(422, f"form fields: {err}") from None
     declared = request.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > MAX_UPLOAD + 65536:  # refuse before the body is spooled to disk
         raise HTTPException(413, "The calendar file is too large (max 5 MB).")

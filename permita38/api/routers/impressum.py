@@ -4,12 +4,13 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from permita38.api.deps import Needs, ServicesDep
+from permita38.core import validation as v
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 routers = [router]
 
 
-class LookupRequest(BaseModel):
+class LookupRequest(v.CheckedBody):
     url: str = Field(max_length=2048, description="Address of the company website or its Impressum page")
 
 
