@@ -261,10 +261,10 @@ def test_upgrade_applies_pending_migrations_and_backs_up_first(tmp_path, monkeyp
     root = real_chain_copy(tmp_path)
     new_id = "7ecb5a30"
     write_migration(
-        root, "0004-add_fax.sql", new_id, HEAD, 'ALTER TABLE "customers" ADD COLUMN "fax" TEXT;\n', dialects=("sqlite",)
+        root, "0900-add_fax.sql", new_id, HEAD, 'ALTER TABLE "customers" ADD COLUMN "fax" TEXT;\n', dialects=("sqlite",)
     )
     for d in ("postgresql", "mariadb"):
-        write_migration(root, "0004-add_fax.sql", new_id, HEAD, "", dialects=(d,))
+        write_migration(root, "0900-add_fax.sql", new_id, HEAD, "", dialects=(d,))
     use_chain(monkeypatch, root)
 
     new = SQLiteRepository(data)
@@ -356,7 +356,7 @@ def test_failed_migration_is_rolled_back_and_reported_with_id_and_name(tmp_path,
     for d in DIALECT_NAMES:
         write_migration(
             root,
-            "0004-bad.sql",
+            "0900-bad.sql",
             "badbad01",
             HEAD,
             "CREATE TABLE half_done (x TEXT);\nTHIS IS NOT SQL;\n",
@@ -364,7 +364,7 @@ def test_failed_migration_is_rolled_back_and_reported_with_id_and_name(tmp_path,
         )
     use_chain(monkeypatch, root)
     repo = SQLiteRepository(data)
-    with pytest.raises(RuntimeError, match=r"badbad01 \(0004-bad.sql\).*rolled back"):
+    with pytest.raises(RuntimeError, match=r"badbad01 \(0900-bad.sql\).*rolled back"):
         repo.startup()
     assert repo.get_revision() == HEAD
     assert [r[0] for r in repo.conn.execute("SELECT name FROM sqlite_master WHERE name='half_done'")] == []
@@ -382,7 +382,7 @@ def test_user_version_equals_the_number_of_applied_migrations_after_every_run(tm
     assert user_version(data) == len(CHAIN)
     root = real_chain_copy(tmp_path)
     prev = HEAD
-    for n, mid in enumerate(("11111111", "22222222"), start=4):
+    for n, mid in enumerate(("11111111", "22222222"), start=900):
         for d in DIALECT_NAMES:
             write_migration(root, f"{n:04d}-step{n}.sql", mid, prev, f"CREATE TABLE step{n} (x TEXT);\n", dialects=(d,))
         prev = mid
@@ -409,13 +409,13 @@ def test_old_binary_would_refuse_an_upgraded_database(tmp_path):
 def test_two_branches_adding_a_migration_on_the_same_head_is_reported_as_a_fork(tmp_path):
     root = real_chain_copy(tmp_path)
     for d in DIALECT_NAMES:
-        write_migration(root, "0004-calendars.sql", "aaaa0001", HEAD, dialects=(d,))
-        write_migration(root, "0004-numbering.sql", "bbbb0002", HEAD, dialects=(d,))
+        write_migration(root, "0900-calendars.sql", "aaaa0001", HEAD, dialects=(d,))
+        write_migration(root, "0900-numbering.sql", "bbbb0002", HEAD, dialects=(d,))
     with pytest.raises(ValueError, match="fork"):
         validate_dialects(root)
     # the fix named in the message: the second branch re-points its first migration onto the new head
     for d in DIALECT_NAMES:
-        write_migration(root, "0004-numbering.sql", "bbbb0002", "aaaa0001", dialects=(d,))
+        write_migration(root, "0900-numbering.sql", "bbbb0002", "aaaa0001", dialects=(d,))
     chain = validate_dialects(root)["sqlite"]
     assert [m.id for m in chain][-2:] == ["aaaa0001", "bbbb0002"]
 

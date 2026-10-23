@@ -167,7 +167,7 @@ def test_effective_top_level_deductible_share(boss_client):
     n1, n2 = D("84.03"), D("100.00")
     # group 19 %: gross 219,00 -> VAT q2(219*19/119)=34.97 ; line 1 VAT 15.97, last line takes 19.00
     assert [dd(x["vat"]) for x in got["lines"]] == [D("15.97"), D("19.00")]
-    expected = q2(100 * (n1 * 70 + n2 * 100) / (n1 + n2))
+    expected = q2((n1 * 70 + n2 * 100) / (n1 + n2))
     assert dd(got["deductible"]) == expected == D("86.30")
 
 
