@@ -91,6 +91,20 @@ class Absence(Record):
     note: str | None = None
 
 
+class ExpenseLine(BaseModel):
+    """One line of an itemised bill (docs/specs/itemised-expenses.md). net/vat are derived by the server."""
+
+    model_config = ConfigDict(extra="allow")
+    description: str = ""
+    gross: float | None = None
+    vat_rate: float | None = None
+    net: float | None = None
+    vat: float | None = None
+    deductible: float = 100
+    vat_deductible: float | None = None
+    category: str | None = None
+
+
 class Expense(Record):
     date: str
     net: float
@@ -103,6 +117,7 @@ class Expense(Record):
     deductible: float = 100
     vat_deductible: float | None = None  # share of the input VAT that is reclaimed; None = same as `deductible`
     attachment: str | None = None
+    lines: list[ExpenseLine] | None = None  # itemised bill; absent for a classic single-amount expense
 
 
 class Line(BaseModel):
@@ -338,9 +353,20 @@ class AbsenceIn(v.StrictRecord):
         return self
 
 
+class ExpenseLineIn(v.StrictRecord):
+    """One line of an itemised bill. ``net`` and ``vat`` sent by a client are ignored (derived by the server)."""
+
+    description: v.Desc = ""
+    gross: v.NonNegAmount  # as printed on the bill, incl. VAT
+    vat_rate: v.Percent
+    deductible: v.Percent = 100
+    vat_deductible: v.Percent | None = None
+    category: v.Short | None = None
+
+
 class ExpenseIn(v.StrictRecord):
     date: v.ISODate
-    net: v.NonNegAmount
+    net: v.NonNegAmount | None = None  # required without lines; with lines it is derived by the server
     vat: v.NonNegAmount = 0
     vat_rate: v.Percent | None = None
     vendor: v.Short | None = None
@@ -350,6 +376,13 @@ class ExpenseIn(v.StrictRecord):
     deductible: v.Percent = 100
     vat_deductible: v.Percent | None = None
     attachment: v.OptAttachment = None
+    lines: Annotated[list[ExpenseLineIn], Field(max_length=v.MAX_EXPENSE_LINES)] | None = None
+
+    @model_validator(mode="after")
+    def _net_or_lines(self):
+        if not self.lines and self.net is None:
+            raise ValueError("net is required for a bill without lines")
+        return self
 
 
 class LineIn(BaseModel):

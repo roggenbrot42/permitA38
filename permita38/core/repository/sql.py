@@ -42,9 +42,13 @@ class SQLRepository(Repository):
         self.lock = threading.RLock()
         self._depth = 0
         self._ready = False
-        self._upserts: dict[str, str] = {}
+        self._upserts: dict[tuple[str, tuple[str, ...]], str] = {}
 
     # ------------------------------------------------------------------ driver hooks
+    def _live_columns(self, table: str) -> set[str] | None:
+        """Column names the database really has for ``table`` (None = assume the schema as described)."""
+        return None
+
     @abstractmethod
     def _open(self) -> None:
         """Open the connection (idempotent)."""
@@ -266,7 +270,7 @@ class SQLRepository(Repository):
         for k, v in obj.items():
             if v is None:
                 continue
-            col = table.column(k)
+            col = table.column(k)  # a column this database lacks (older revision) is kept in `extra`
             if col is None:
                 extra[k] = v
                 continue
@@ -304,17 +308,28 @@ class SQLRepository(Repository):
         return out
 
     # ------------------------------------------------------------------ records
+    def _table(self, coll: str) -> Table:
+        """The table as this database has it. A database still at an older revision lacks the columns of newer
+        schema versions: they are left out of every statement (their values stay in the `extra` JSON column)."""
+        table = TABLES[coll]
+        live = self._live_columns(table.name)
+        if live is None:
+            return table
+        cols = tuple(c for c in table.columns if c.name in live)
+        return Table(table.name, cols, table.indexes, table.pk, table.extra_column)
+
     def _upsert_sql(self, table: Table) -> str:
-        if table.name not in self._upserts:
-            self._upserts[table.name] = self.dialect.upsert(table, self.dialect.all_columns(table))
-        return self._upserts[table.name]
+        key = (table.name, tuple(self.dialect.all_columns(table)))
+        if key not in self._upserts:
+            self._upserts[key] = self.dialect.upsert(table, self.dialect.all_columns(table))
+        return self._upserts[key]
 
     def list(self, coll: str) -> RecordList:
         check_collection(coll)
-        table = TABLES[coll]
         q = self.dialect.quote
         with self.lock:
             self._ensure()
+            table = self._table(coll)
             rows = self._rows(self.dialect.select_all(table, f"{q('created')}, {q('id')}"))
         return [self._decode(table, r) for r in rows]
 
@@ -322,21 +337,21 @@ class SQLRepository(Repository):
         check_collection(coll)
         if not isinstance(rid, str) or not ID_RE.match(rid):
             return None
-        table = TABLES[coll]
         with self.lock:
             self._ensure()
+            table = self._table(coll)
             rows = self._rows(self.dialect.select_one(table), [rid])
         return self._decode(table, rows[0]) if rows else None
 
     def save(self, coll: str, obj: Record, touch: bool = True) -> Record:
         check_collection(coll)
-        table = TABLES[coll]
         obj = dict(obj)
         rid = obj.get("id") or new_id()
         if not isinstance(rid, str) or not ID_RE.match(rid):
             raise ValueError("bad id")
         now = int(time.time())
         with self.transaction():
+            table = self._table(coll)
             if not obj.get("created"):
                 old = self._rows(
                     f"SELECT {self.dialect.quote('created')} FROM {self.dialect.quote(table.name)} "

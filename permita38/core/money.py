@@ -14,6 +14,7 @@ All of it is done with :class:`decimal.Decimal` on the *decimal representation* 
 
 import logging
 import math
+from collections.abc import Sequence
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
@@ -77,3 +78,26 @@ def vat_amount(net_of_rate_group: Decimal, rate: Any) -> Decimal:
 def hours_from_minutes(minutes: Any) -> Decimal:
     """Minutes -> hours rounded half-up to 2 decimals (used for invoice quantities)."""
     return q2(dec(minutes) / 60)
+
+
+def split_gross(lines: Sequence[tuple[Decimal, Decimal]]) -> list[tuple[Decimal, Decimal]]:
+    """(gross, rate %) per bill line -> (net, vat) per line, as a printed bill does it.
+
+    VAT is computed per rate group: the group VAT is ``q2(sum(gross) * r / (100 + r))``; each line of the group gets
+    ``q2(gross * r / (100 + r))`` except the last line, which takes the rest of the group VAT so the lines add up to
+    the group exactly. ``net = gross - vat``. Docs: ``docs/specs/itemised-expenses.md``, money rules 1 and 2.
+    """
+    groups: dict[Decimal, list[int]] = {}
+    for i, (_, rate) in enumerate(lines):
+        groups.setdefault(rate, []).append(i)
+    out: list[tuple[Decimal, Decimal]] = [(ZERO, ZERO)] * len(lines)
+    for rate, idx in groups.items():
+        total = sum((lines[i][0] for i in idx), ZERO)
+        group_vat = q2(total * rate / (100 + rate))
+        used = ZERO
+        for n, i in enumerate(idx):
+            gross = lines[i][0]
+            vat = group_vat - used if n == len(idx) - 1 else q2(gross * rate / (100 + rate))
+            used += vat
+            out[i] = (gross - vat, vat)
+    return out

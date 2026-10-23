@@ -15,7 +15,7 @@ from typing import Any
 
 from . import tax
 from .holidays import holidays as de_holidays
-from .money import ZERO, dec, line_amount, q2, to_float, vat_amount
+from .money import ZERO, dec, line_amount, q2, split_gross, to_float, vat_amount
 
 log = logging.getLogger(__name__)
 
@@ -245,6 +245,67 @@ def invoice_amounts(inv, settings):
 _MONEY_KEYS = ("revenue", "vat_out", "expenses", "vat_in")
 
 
+def _line_view(net, vat, deductible, vat_deductible) -> dict[str, Decimal | None]:
+    """One effective expense line with exact values; percentages are Decimal percents (70 means 70 %)."""
+    pct = dec(deductible if deductible is not None else 0)
+    return {
+        "net": dec(net),
+        "vat": dec(vat),
+        "pct": pct,
+        "vat_pct": pct if vat_deductible is None else dec(vat_deductible),
+    }
+
+
+def expense_lines(x: dict) -> list[dict[str, Any]]:
+    """The effective lines of an expense: its stored ``lines``, or one implicit line built from the top-level fields
+    for a classic single-amount record. Each line has ``net``, ``vat``, ``pct`` (deductible share), ``vat_pct`` (share
+    of the input VAT that is reclaimed; same as ``pct`` unless set) and ``category`` (line or expense category)."""
+    raw = x.get("lines")
+    if isinstance(raw, list) and raw:
+        out = []
+        for ln in raw:
+            if not isinstance(ln, dict):
+                continue
+            view = _line_view(ln.get("net"), ln.get("vat"), ln.get("deductible", 100), ln.get("vat_deductible"))
+            view["category"] = ln.get("category") or x.get("category")
+            out.append(view)
+        return out
+    view = _line_view(x.get("net"), x.get("vat"), x.get("deductible", 100), x.get("vat_deductible"))
+    view["category"] = x.get("category")
+    return [view]
+
+
+def itemise_expense(rec: dict) -> dict:
+    """Server-side derivation for an expense with ``lines`` (docs/specs/itemised-expenses.md, API section).
+
+    Each line gets its ``net``/``vat`` (per rate group, see ``money.split_gross``); the top-level ``net``, ``vat``,
+    ``vat_rate`` (common rate or None when mixed) and ``deductible`` (net-weighted share, 100 when the net sum is 0)
+    are overwritten. A record without lines (absent or empty) is returned as a classic expense.
+    """
+    lines = rec.get("lines")
+    if not lines:
+        rec.pop("lines", None)
+        return rec
+    gross_rates = [(dec(ln.get("gross")), dec(ln.get("vat_rate"))) for ln in lines]
+    split = split_gross(gross_rates)
+    out_lines = []
+    for ln, (net, vat) in zip(lines, split, strict=True):
+        out_lines.append({**ln, "net": to_float(net), "vat": to_float(vat)})
+    net_sum = sum((n for n, _ in split), ZERO)
+    vat_sum = sum((v for _, v in split), ZERO)
+    rates = {r for _, r in gross_rates}
+    weighted = sum((n * dec(ln.get("deductible", 100)) for (n, _), ln in zip(split, lines, strict=True)), ZERO)
+    deductible = 100.0 if net_sum == 0 else to_float(q2(weighted / net_sum))
+    return {
+        **rec,
+        "lines": out_lines,
+        "net": to_float(net_sum),
+        "vat": to_float(vat_sum),
+        "vat_rate": float(rates.pop()) if len(rates) == 1 else None,
+        "deductible": deductible,
+    }
+
+
 def finance(store, year, today=None):
     today = today or date.today()
     s = store.settings()
@@ -271,20 +332,19 @@ def finance(store, year, today=None):
         when = d(x.get("date"))
         if not when or when.year != year:
             continue
-        raw_pct = x.get("deductible", 100)
-        pct = dec(raw_pct if raw_pct is not None else 0) / 100
-        # Input VAT normally follows the deductible share (private use), but business meals with partners are only 70 %
-        # deductible as an expense while the input VAT is reclaimed in full (§ 15 Abs. 1a UStG): then it is set apart.
-        raw_vat_pct = x.get("vat_deductible")
-        vat_pct = pct if raw_vat_pct is None else dec(raw_vat_pct) / 100
-        net, vat_raw = dec(x.get("net")), dec(x.get("vat"))
         m = months[when.month - 1]
-        # Kleinunternehmer cannot reclaim input VAT, so the gross amount is the cost
-        cost = q2((net + vat_raw) * pct) if klein else q2(net * pct)
-        m["expenses"] += cost
-        if not klein:
-            m["vat_in"] += q2(vat_raw * vat_pct)
-        cats[x.get("category") or "Other"] += cost
+        for ln in expense_lines(x):
+            # per line: a business meal is 70 % deductible as an expense while its input VAT is reclaimed in full
+            # (§ 15 Abs. 1a UStG), so the VAT share is set apart from the cost share
+            pct = ln["pct"] / 100
+            vat_pct = ln["vat_pct"] / 100
+            net, vat_raw = ln["net"], ln["vat"]
+            # Kleinunternehmer cannot reclaim input VAT, so the gross amount is the cost
+            cost = q2((net + vat_raw) * pct) if klein else q2(net * pct)
+            m["expenses"] += cost
+            if not klein:
+                m["vat_in"] += q2(vat_raw * vat_pct)
+            cats[ln["category"] or "Other"] += cost
     for m in months:
         m["profit"] = m["revenue"] - m["expenses"]
         m["vat_due"] = ZERO if klein else m["vat_out"] - m["vat_in"]

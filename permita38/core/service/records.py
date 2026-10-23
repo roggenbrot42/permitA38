@@ -26,6 +26,8 @@ class RecordService:
     def list_records(self, me: dict, coll: str) -> list[dict]:
         self._check(coll)
         rows = self.store.list(coll)
+        if coll == "expenses":
+            rows = [_expense_view(r) for r in rows]
         if me["role"] == "boss":
             return rows
         if coll not in MEMBER_READ:
@@ -44,6 +46,8 @@ class RecordService:
         rec = self.store.get(coll, rid) if _valid_id(rid) else None
         if not rec:
             raise ServiceError(404, "Not found")
+        if coll == "expenses":
+            rec = _expense_view(rec)
         if me["role"] != "boss":
             if coll not in MEMBER_READ:
                 raise ServiceError(403, "Forbidden")
@@ -91,7 +95,12 @@ class RecordService:
             data = self.prepare_document(data, old)
             self._check_document_amounts(data)
         elif coll == "expenses":
-            self._check_vat_rates(data.get("vat_rate"))
+            if data.get("lines"):
+                self._check_vat_rates(*(ln.get("vat_rate") for ln in data["lines"]))
+                data = calc.itemise_expense(data)  # server derives net/vat per line and overwrites the top level
+            else:
+                data.pop("lines", None)
+                self._check_vat_rates(data.get("vat_rate"))
         elif coll == "projects":  # the extension history is server-managed: never taken from the request
             data.pop("extensions", None)
             if old and old.get("extensions") is not None:
@@ -106,7 +115,8 @@ class RecordService:
                 data.setdefault("invoice_id", old["invoice_id"])
         if data.get("created") is None:
             data.pop("created", None)
-        return self.store.save(coll, data)
+        saved = self.store.save(coll, data)
+        return _expense_view(saved) if coll == "expenses" else saved
 
     # -- sanity checks that need stored data or settings ---------------------------------------------
     def _check_vat_rates(self, *rates) -> None:
@@ -177,6 +187,14 @@ class RecordService:
 
 _ENTRY_BILLING_FIELDS = ("rate", "invoice_id")
 _MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
+
+
+def _expense_view(expense: dict) -> dict:
+    """An itemised bill with mixed VAT rates has ``vat_rate`` null. Storage drops NULLs, so the key is restored here
+    (the API always states the field for itemised bills)."""
+    if expense.get("lines") and "vat_rate" not in expense:
+        return {**expense, "vat_rate": None}
+    return expense
 
 
 def _project_visible(project: dict, me: dict) -> bool:
