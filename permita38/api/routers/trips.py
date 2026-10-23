@@ -11,8 +11,6 @@ from permita38.core import models
 router = APIRouter(prefix="/trips", tags=["trips"])
 routers = [router]
 
-_PDF = {200: {"content": {"application/pdf": {}}}}
-
 
 def _body(body: models.TripIn) -> dict:
     return body.model_dump(by_alias=True, exclude_none=True)
@@ -20,7 +18,7 @@ def _body(body: models.TripIn) -> dict:
 
 @router.get("", response_model=list[models.Trip], response_model_exclude_none=True, name="list_trips")
 def list_trips(user: Annotated[dict, Needs("trips", "read")], services: ServicesDep):
-    return stored(models.Trip, services.trips.list(user))
+    return stored(models.Trip, services.trips.list_trips(user))
 
 
 @router.post("", response_model=models.Trip, response_model_exclude_none=True, name="create_trip")
@@ -67,7 +65,12 @@ def reopen_trip(rid: str, user: Annotated[dict, Needs("trips", "write", full=Tru
     return stored(models.Trip, services.trips.reopen(user, rid))
 
 
-@router.get("/{rid}/statement.pdf", response_class=Response, responses=_PDF, name="trip_statement_pdf")
+@router.get(
+    "/{rid}/statement.pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+    name="trip_statement_pdf",
+)
 def trip_statement(rid: str, user: Annotated[dict, Needs("trips", "read")], services: ServicesDep):
     data, name = services.trips.statement(user, rid)
     return Response(data, media_type="application/pdf", headers={"Content-Disposition": f'inline; filename="{name}"'})

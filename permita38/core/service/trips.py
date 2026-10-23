@@ -114,7 +114,7 @@ class TripService:
         return {**trip, "bills": bills_summary(bills), "checklist": checklist(trip, bills)}
 
     # -- reads ----------------------------------------------------------------------------------------------------
-    def list(self, me: dict) -> list[dict]:
+    def list_trips(self, me: dict) -> list[dict]:
         if self._scope(me, "read") == Scope.NONE:
             raise ServiceError(403, "Forbidden")
         index: dict[str, list[dict]] = {}
@@ -152,7 +152,11 @@ class TripService:
         """Figures for a trip body; nothing is saved (the same computation a save uses)."""
         if self._scope(me, "write") == Scope.NONE:  # the contract: preview needs write access
             raise ServiceError(403, "Forbidden")
-        body = {k: v for k, v in body.items() if k not in ("id", "created", "updated", "status", *_COMPUTED, *_RESPONSE_ONLY)}
+        body = {
+            k: v
+            for k, v in body.items()
+            if k not in ("id", "created", "updated", "status", *_COMPUTED, *_RESPONSE_ONLY)
+        }
         self._check_refs(body)
         figures = self._figures(body)
         return figures

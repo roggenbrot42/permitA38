@@ -80,19 +80,37 @@ def render(
     w.y += 8
 
     w.line("Meal allowance per day", size=11, bold=True, gap=16)
-    w.row([(0, "Date"), (62, "Place"), (200, "Hours"), (250, "Base"), (300, "Reduct."), (355, "Amount"), (400, "Note")],
-          bold=True)
+    w.row(
+        [(0, "Date"), (62, "Place"), (200, "Hours"), (250, "Base"), (300, "Reduct."), (355, "Amount"), (400, "Note")],
+        bold=True,
+    )
     for d in figures.get("days") or []:
-        w.row([(0, _date(d["date"])), (62, str(d.get("city") or d["country"])), (200, _de(d["absence_hours"])), (250, _de(d["base"])),
-               (300, _de(sum(x["amount"] for x in d.get("reductions") or []))), (355, _de(d["amount"])), (400, str(d.get("note") or ""))])
+        w.row(
+            [
+                (0, _date(d["date"])),
+                (62, str(d.get("city") or d["country"])),
+                (200, _de(d["absence_hours"])),
+                (250, _de(d["base"])),
+                (300, _de(sum(x["amount"] for x in d.get("reductions") or []))),
+                (355, _de(d["amount"])),
+                (400, str(d.get("note") or "")),
+            ]
+        )
     w.row([(250, "Total allowance"), (355, _de(figures.get("allowance_total") or 0))], bold=True)
     w.y += 10
 
     w.line("Mileage (private car, 0.30 EUR per km)", size=11, bold=True, gap=16)
     w.row([(0, "Date"), (62, "From"), (160, "To"), (260, "Purpose"), (400, "km")], bold=True)
     for m in trip.get("mileage") or []:
-        w.row([(0, _date(m.get("date"))), (62, str(m.get("from") or "")), (160, str(m.get("to") or "")),
-               (260, str(m.get("purpose") or "")), (400, _de(m.get("km") or 0))])
+        w.row(
+            [
+                (0, _date(m.get("date"))),
+                (62, str(m.get("from") or "")),
+                (160, str(m.get("to") or "")),
+                (260, str(m.get("purpose") or "")),
+                (400, _de(m.get("km") or 0)),
+            ]
+        )
     km = figures.get("mileage_km") or 0
     w.row([(260, "Total km / mileage"), (400, _de(km))], bold=True)
     w.row([(260, "Mileage amount"), (400, _de(figures.get("mileage_total") or 0))], bold=True)
@@ -105,8 +123,15 @@ def render(
         net, vat = float(b.get("net") or 0), float(b.get("vat") or 0)
         net_sum += net
         vat_sum += vat
-        w.row([(0, _date(b.get("date"))), (62, str(b.get("vendor") or b.get("description") or "")),
-               (240, str(b.get("category") or "")), (340, _de(net)), (400, _de(vat))])
+        w.row(
+            [
+                (0, _date(b.get("date"))),
+                (62, str(b.get("vendor") or b.get("description") or "")),
+                (240, str(b.get("category") or "")),
+                (340, _de(net)),
+                (400, _de(vat)),
+            ]
+        )
     w.row([(240, "Bills total"), (340, _de(net_sum)), (400, _de(vat_sum))], bold=True)
     w.y += 10
 
@@ -116,10 +141,17 @@ def render(
     w.row([(0, "Bills (net)"), (340, _de(net_sum))])
     w.y += 10
 
-    w.line(f"Rules version: {figures.get('rules_version') or '-'} (BMF letter; country table placeholder where marked)",
-           size=8, gap=11)
-    w.line("Records: date, destination, purpose, start and end time, mileage with route and purpose. No receipts are "
-           "needed for the meal allowance.", size=8, gap=11)
+    w.line(
+        f"Rules version: {figures.get('rules_version') or '-'} (BMF letter; country table placeholder where marked)",
+        size=8,
+        gap=11,
+    )
+    w.line(
+        "Records: date, destination, purpose, start and end time, mileage with route and purpose. No receipts are "
+        "needed for the meal allowance.",
+        size=8,
+        gap=11,
+    )
     w.y += 24
     w.ensure(40)
     pdf.line(M, w.y, M + 260, w.y)

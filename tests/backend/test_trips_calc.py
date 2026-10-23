@@ -111,7 +111,13 @@ def test_nine_hours_with_lunch_only_leaves_two_euro_eighty():
 
 
 def test_mileage_237_5_km_is_71_25_euro():
-    r = calc(trip("2026-11-09T08:00", "2026-11-09T18:00", mileage=[{"date": "2026-11-09", "from": "A", "to": "B", "km": 237.5}]))
+    r = calc(
+        trip(
+            "2026-11-09T08:00",
+            "2026-11-09T18:00",
+            mileage=[{"date": "2026-11-09", "from": "A", "to": "B", "km": 237.5}],
+        )
+    )
     assert r["mileage_km"] == 237.5
     assert r["mileage_total"] == 71.25
 

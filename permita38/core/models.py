@@ -830,13 +830,12 @@ class TripIn(v.StrictRecord):
         days = (end.date() - start.date()).days + 1
         if days > TRIP_MAX_DAYS:
             raise ValueError(f"a trip may cover at most {TRIP_MAX_DAYS} calendar days (this one covers {days})")
-        for m in self.meals_provided:
-            if not start.date().isoformat() <= m.date <= end.date().isoformat():
-                raise ValueError(f"meal date {m.date} is outside the trip")
-        for m in self.mileage:
-            if not start.date().isoformat() <= m.date <= end.date().isoformat():
-                raise ValueError(f"mileage date {m.date} is outside the trip")
+        for meal in self.meals_provided:
+            if not start.date().isoformat() <= meal.date <= end.date().isoformat():
+                raise ValueError(f"meal date {meal.date} is outside the trip")
+        for row in self.mileage:
+            if not start.date().isoformat() <= row.date <= end.date().isoformat():
+                raise ValueError(f"mileage date {row.date} is outside the trip")
         if self.cost_centre == "project" and not (self.project_id or self.customer_id):
             raise ValueError("Choose a customer or project, or general")
         return self
-

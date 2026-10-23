@@ -124,8 +124,11 @@ def test_unknown_fields_round_trip_through_extra(boss_client):
 
 # ------------------------------------------------------------------ figures: preview and saved trip agree
 def test_saved_trip_has_the_hand_computed_figures(boss_client):
-    made = make_trip(boss_client, meals_provided=[{"date": "2026-11-10", "breakfast": True}],
-                     mileage=[{"date": "2026-11-09", "from": "Kiel", "to": "Hamburg", "km": 237.5}])
+    made = make_trip(
+        boss_client,
+        meals_provided=[{"date": "2026-11-10", "breakfast": True}],
+        mileage=[{"date": "2026-11-09", "from": "Kiel", "to": "Hamburg", "km": 237.5}],
+    )
     assert made["allowance_total"] == 50.40  # 14 + (28 - 5,60) + 14
     assert made["mileage_total"] == 71.25  # 237,5 x 0,30
     assert made["rules_version"] == "2025-12-05"
@@ -134,8 +137,10 @@ def test_saved_trip_has_the_hand_computed_figures(boss_client):
 
 
 def test_preview_equals_the_saved_figures_and_saves_nothing(boss_client):
-    body = trip_body(meals_provided=[{"date": "2026-11-10", "breakfast": True, "lunch": True}],
-                     mileage=[{"date": "2026-11-10", "from": "A", "to": "B", "km": 100.4}])
+    body = trip_body(
+        meals_provided=[{"date": "2026-11-10", "breakfast": True, "lunch": True}],
+        mileage=[{"date": "2026-11-10", "from": "A", "to": "B", "km": 100.4}],
+    )
     before = len(boss_client.get("/api/trips").json())
     pv = boss_client.post("/api/trips/preview", json=body)
     assert pv.status_code == 200, pv.text
@@ -351,20 +356,36 @@ def test_create_as_final_is_checked_the_same_way(boss_client):
 
 
 def test_checklist_states_and_bills_follow_the_linked_bills(boss_client):
-    trip = make_trip(boss_client, cost_centre="general", not_needed=["material"],
-                     mileage=[{"date": "2026-11-09", "from": "A", "to": "B", "km": 100}])
+    trip = make_trip(
+        boss_client,
+        cost_centre="general",
+        not_needed=["material"],
+        mileage=[{"date": "2026-11-09", "from": "A", "to": "B", "km": 100}],
+    )
     for net, cat in ((100.0, "Accommodation"), (50.0, "Accommodation")):
-        boss_client.post("/api/expenses", json={"date": "2026-11-09", "net": net, "vat": 0,
-                                                "category": cat, "trip_id": trip["id"]})
+        boss_client.post(
+            "/api/expenses", json={"date": "2026-11-09", "net": net, "vat": 0, "category": cat, "trip_id": trip["id"]}
+        )
     got = boss_client.get(f"/api/trips/{trip['id']}").json()
     assert got["bills"] == {"count": 2, "net": 150.0, "vat": 0.0}
     rows = {r["id"]: r for r in got["checklist"]}
     assert [r["id"] for r in got["checklist"]] == [
-        "allowance", "accommodation", "transportation", "food", "material", "cost_centre"]
+        "allowance",
+        "accommodation",
+        "transportation",
+        "food",
+        "material",
+        "cost_centre",
+    ]
     assert rows["allowance"]["state"] == "added" and rows["allowance"]["count"] == 3
     assert rows["allowance"]["sum"] == 56.0
     assert rows["accommodation"] == {**rows["accommodation"], "state": "added", "count": 2, "sum": 150.0}
-    assert rows["transportation"] == {**rows["transportation"], "state": "added", "count": 1, "sum": 30.0}  # 100 km x 0,30
+    assert rows["transportation"] == {
+        **rows["transportation"],
+        "state": "added",
+        "count": 1,
+        "sum": 30.0,
+    }  # 100 km x 0,30
     assert rows["material"]["state"] == "not_needed"
     assert rows["food"]["state"] == "added"
     assert rows["cost_centre"]["state"] == "added"
