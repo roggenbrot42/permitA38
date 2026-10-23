@@ -201,6 +201,14 @@ class PlanningService:
                 causes.append(f"time off ({_h(r['vacation_hours'])} h in week of {r['week']})")
             if r["holiday_hours"]:
                 causes.append(f"public holidays ({_h(r['holiday_hours'])} h in week of {r['week']})")
+            # (time off and holidays are no longer placed into the weeks they remove; name them wherever they cut the capacity)
+        lo = eng.week_start(item.start)
+        n_weeks = (eng.week_start(item.end) - lo).days // 7 + 1
+        for r in eng.weeks(base, lo, n_weeks, None):
+            if r["vacation_hours"]:
+                causes.append(f"time off ({_h(r['vacation_hours'])} h in week of {r['week']})")
+            if r["holiday_hours"]:
+                causes.append(f"public holidays ({_h(r['holiday_hours'])} h in week of {r['week']})")
         causes = list(dict.fromkeys(causes))[:6]
         over_pairs = [(r["week"], -r["free_worst_case"]) for r in over]
         options = self._options(world, item, hours)

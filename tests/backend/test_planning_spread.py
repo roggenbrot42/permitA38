@@ -89,7 +89,7 @@ def test_two_contracts_around_a_vacation(repo):
     # A: 220/37 = 5.9459 h a day, B: 45/37 = 1.2162 h a day, together 265/37 = 7.1622 h a day (< 8 h capacity).
     # A full week: 5 * 265/37 = 35.811 h of 40 h = 89.5 % -> below 90 % -> "ok" (the scenario fits).
     per_day_all = 265 / 37
-    out = forecast(repo, 10, date(2026, 10, 19))
+    out = forecast(repo, 11, date(2026, 10, 19))
 
     w = week(out, date(2026, 10, 19))  # first partial week: only Fri 23 Oct
     assert w["capacity"] == 40
