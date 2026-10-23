@@ -322,13 +322,20 @@ let PV = null; // bill preview of the open dialog: {kind, name, src, own, zoom, 
 let DRAG = null;
 let PV_GEN = 0;  // bumped when the dialog closes or the chosen file changes: a late load of a stored bill then does nothing
 const kindOf = name => { const ext = String(name).split('.').pop().toLowerCase(); return ext === 'pdf' ? 'pdf' : PREVIEW_IMAGE.includes(ext) ? 'image' : 'other'; };
+/** MIME type of a previewable file, from its extension (the same rule as kindOf); '' for other files. */
+const MIME_BY_EXT = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
+const mimeFor = name => MIME_BY_EXT[String(name).split('.').pop().toLowerCase()] || '';
 const toNum = x => { const t = String(x ?? '').trim().replace(',', '.'); return t === '' ? NaN : Number(t); };
-const lineHTML = (l, i) => `<tr data-line="${i}">
+const lineHTML = (l, i) => {
+  // a stored rate outside LINE_RATES (e.g. 5.5 or 16 from the API) is offered too, so the select shows what the totals use
+  const rates = LINE_RATES.map(String).includes(String(l.vat_rate)) ? LINE_RATES : [...LINE_RATES, l.vat_rate];
+  return `<tr data-line="${i}">
   <td><input data-f="description" value="${esc(l.description)}" maxlength="200" aria-label="Line ${i + 1}: description"></td>
   <td><input data-f="gross" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(l.gross)}" aria-label="Line ${i + 1}: amount on the bill, gross EUR"></td>
-  <td><select data-f="vat_rate" aria-label="Line ${i + 1}: VAT rate">${LINE_RATES.map(r => `<option value="${r}" ${String(r) === String(l.vat_rate) ? 'selected' : ''}>${r} %</option>`).join('')}</select></td>
+  <td><select data-f="vat_rate" aria-label="Line ${i + 1}: VAT rate">${rates.map(r => `<option value="${esc(r)}" ${String(r) === String(l.vat_rate) ? 'selected' : ''}>${esc(r)} %</option>`).join('')}</select></td>
   <td><input data-f="deductible" type="number" step="any" min="0" max="100" inputmode="decimal" value="${esc(l.deductible)}" aria-label="Line ${i + 1}: deductible %"></td>
   <td><button type="button" class="ghost sm" data-a="removeLine" data-i="${i}" aria-label="Remove line ${i + 1}" ${LN.length < 2 ? 'disabled' : ''}>✕</button></td></tr>`;
+};
 function renderLines() {
   $('#e_lines').innerHTML = LN.map(lineHTML).join('');
   $('#e_addline').disabled = LN.length >= MAX_LINES;
@@ -402,7 +409,7 @@ function pvSet(kind, name, src, own, href = src, note = '') {
 }
 /** The stored bill, fetched with the token (an img or iframe cannot send it) and shown from a blob: URL. */
 async function pvStored(name) {
-  const gen = PV_GEN, kind = kindOf(name), link = api.url('attachments/' + name);
+  const gen = PV_GEN, kind = kindOf(name), link = api.url('attachments/' + encodeURIComponent(name));
   if (kind === 'other') return pvSet('other', name, null, false, link);
   let src;
   try {
@@ -594,7 +601,11 @@ A.editExpense = el => {
   $('#e_file').addEventListener('change', ev => {
     PV_GEN++;
     const f = ev.target.files[0];
-    if (f) return pvSet(kindOf(f.name), f.name, URL.createObjectURL(f), true);
+    if (f) {
+      // the browser's guessed type is not trusted: a previewed file is typed by its extension (an HTML file named .pdf is not text/html)
+      const kind = kindOf(f.name);
+      return pvSet(kind, f.name, URL.createObjectURL(kind === 'other' ? f : new Blob([f], { type: mimeFor(f.name) })), true);
+    }
     if (e.attachment) pvStored(e.attachment); else pvSet(null);
   });
   if (stored.length) setItemised(true);
