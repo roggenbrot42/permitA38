@@ -6,6 +6,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
 from permita38.api.deps import Needs, ServicesDep
+from permita38.api.forms import check_form
 from permita38.core.errors import ServiceError
 from permita38.core.service.importer.tables import MAX_BYTES
 
@@ -24,6 +25,11 @@ def _read(upload: UploadFile | None) -> bytes | None:
     return data
 
 
+def _checked_form(mapping: str | None, sheet: str | None) -> None:
+    """Text form fields are not parsed by a model: they get the same NUL / surrogate / length checks as a JSON body."""
+    check_form({"mapping": mapping, "sheet": sheet})
+
+
 @router.post("/import/preview", summary="dry run: validate a file and report what an import would do")
 def preview(
     _: Annotated[dict, Needs("settings", "write", full=True)],
@@ -39,6 +45,7 @@ def preview(
     sheet: Annotated[str | None, Form(max_length=200)] = None,
     pdfs: Annotated[UploadFile | None, File()] = None,
 ) -> dict:
+    _checked_form(mapping, sheet)
     options = {
         "on_duplicate": on_duplicate,
         "accept_unverified": accept_unverified,
@@ -66,6 +73,7 @@ def run(
     sheet: Annotated[str | None, Form(max_length=200)] = None,
     pdfs: Annotated[UploadFile | None, File()] = None,
 ):
+    _checked_form(mapping, sheet)
     options = {
         "on_duplicate": on_duplicate,
         "accept_unverified": accept_unverified,

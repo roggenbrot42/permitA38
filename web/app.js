@@ -212,19 +212,20 @@ async function renderLogin(app) {
   const foot = `<p class="small muted auth-foot">Your data stays on your own server or computer – no cloud.${st.version ? ' · v' + esc(st.version) : ''}</p>`;
   if (st.setup_needed) {
     app.innerHTML = `<div class="auth-wrap"><form class="auth-card" id="setup-form" autocomplete="on" novalidate>${BRAND}<h1>Welcome 👋</h1><p class="muted">Create your boss account. You can add team members later.</p>
-      <div class="field"><label for="s_name">Your name</label><input id="s_name" autocomplete="name" autofocus></div>
-      <div class="row"><div class="field"><label for="s_user">Username</label><input id="s_user" autocomplete="username" autocapitalize="none" spellcheck="false"></div><div class="field"><label for="s_h">Weekly hours</label><input id="s_h" type="number" value="40" min="1" max="80"></div></div>
-      ${pwField('s_pw', 'Password (min. 8 characters)', 'new-password')}${pwField('s_pw2', 'Repeat password', 'new-password')}
+      <div class="field"><label for="s_name">Your name</label><input id="s_name" autocomplete="name" maxlength="200" required autofocus></div>
+      <div class="row"><div class="field"><label for="s_user">Username</label><input id="s_user" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="64" required></div><div class="field"><label for="s_h">Weekly hours</label><input id="s_h" type="number" value="40" min="0" max="168" step="any"></div></div>
+      ${pwField('s_pw', 'Password (min. 8 characters)', 'new-password', 'maxlength="1000" required')}${pwField('s_pw2', 'Repeat password', 'new-password')}
       <div class="field"><label for="s_co">Business name (optional)</label><input id="s_co" autocomplete="organization"></div>
       <div class="banner" id="auth-err" role="alert" hidden></div><button class="primary" id="s_go" type="submit" style="width:100%;justify-content:center">Create account</button>${foot}</form></div>`;
     $('#setup-form').onsubmit = async e => {
       e.preventDefault(); const pw = $('#s_pw').value; const btn = $('#s_go');
       if (!$('#s_name').value.trim() || !$('#s_user').value.trim()) return authError('Please enter your name and a username.');
       if (pw.length < 8) return authError('The password must be at least 8 characters long.');
+      if (pw.length > 1000) return authError('The password must be at most 1000 characters long.');
       if (pw !== $('#s_pw2').value) return authError('The passwords do not match.');
       authError(''); authBusy(btn, true);
       try {
-        await api.post('auth/setup', { name: $('#s_name').value.trim(), username: $('#s_user').value.trim(), password: pw, company_name: $('#s_co').value.trim(), weekly_hours: parseFloat($('#s_h').value) || 40 }, { noAuthRedirect: true });
+        await api.post('auth/setup', { name: $('#s_name').value.trim(), username: $('#s_user').value.trim(), password: pw, company_name: $('#s_co').value.trim(), weekly_hours: Number.isFinite(parseFloat($('#s_h').value)) ? parseFloat($('#s_h').value) : 40 }, { noAuthRedirect: true });
         const r = await api.post('auth/login', { username: $('#s_user').value.trim(), password: pw }, { noAuthRedirect: true });
         await enterApp(r.token);
       } catch (err) { authError(err.message); authBusy(btn, false, 'Create account'); }

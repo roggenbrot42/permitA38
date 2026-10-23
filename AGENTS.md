@@ -25,9 +25,17 @@
 - `make run` – start the server without opening a browser. `make check-openapi` – verify the contract is current.
 
 ## Running tests economically
-- While iterating run only the affected files (`pytest tests/backend/test_x.py -q`). Run the browser and randomized
-  suites **once, at the end**, with `make test-summary` (one line per suite, full logs in `test-artifacts/`, a lock
-  makes concurrent runs wait). Read `test-artifacts/<suite>.log` only for a failing suite.
+- While iterating run only the affected files (`pytest tests/backend/test_x.py -q`). **CI is the heavy runner**
+  (`.github/workflows/ci.yaml`: lint, OpenAPI contract, backend on Linux and Windows with Python 3.10-3.13, and the
+  browser suite, on every push to `main` and every pull request): push the branch and open a (draft) pull request instead
+  of running the whole browser suite locally. Local full runs are the exception, see below.
+- The stateful and fuzz **randomized suites** (`tests/backend/randomized`, `make test-random`) run in CI only in the
+  nightly workflow. Run them locally **once** (`make test-summary SUITES="random"`) before a branch is merged when it
+  touches records, rights, numbering, documents, import or the data model (they hold a model of the API, and that
+  model must be updated with the behaviour), and after merging several branches into `main`.
+- When CI is not available (offline, before the first push) run `make test-summary` once at the end: one line per
+  suite, full logs in `test-artifacts/`, a lock makes concurrent runs wait. Never run several full suites in parallel.
+  Read `test-artifacts/<suite>.log` only for a failing suite.
 - Randomized failures print the replay command and the last 12 steps; the whole step log is in
   `test-artifacts/e2e-<kind>-seed<N>.log`. Replay with `PERMITA38_E2E_SEED=<N>`; seeds are fixed by default.
 
@@ -82,9 +90,12 @@
     VAT/rounding, numbering, calendar hours, permissions). The logic pass is never done by a smaller model.
   - The maintainer or architect assigns the tier in the task specification; when in doubt take the higher one.
   - Findings go back to the branch and are fixed first. Only then: merge, regenerate `api/openapi.json`, run
-    `make test lint`, push.
-- **Before every release** run the whole suite once on `main` (`make test-summary` with backend, browser, randomized and
-  release suites) and click through the main path by hand. Branches only run their affected tests.
+    `make test lint` (affected files only if CI will run the rest), push; merge through a pull request when CI is
+    available and wait for it to be green.
+- **Before every release** CI on `main` must be green (`RELEASING.md`); run the randomized suites locally once if they
+  have not run since the last merge (the nightly counts), and click through the main path by hand, including the
+  features that depend on the browser (PDF preview in Firefox and Chromium, planner). Branches only run their affected
+  tests.
 - Releases are always tagged (annotated) from `main`, see `RELEASING.md`.
 
 ## Security

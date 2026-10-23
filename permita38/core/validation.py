@@ -8,6 +8,7 @@ values are left to a later soft-warning layer.
 
 import math
 import re
+from collections.abc import Mapping
 from datetime import date
 from typing import Annotated, Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -158,16 +159,34 @@ def _check_value(value: Any, depth: int = 0) -> None:
             _check_value(v, depth + 1)
 
 
-class StrictRecord(BaseModel):
-    """Base for request models: unknown fields are kept (forward compatibility) but every value is checked."""
-
-    model_config = ConfigDict(extra="allow")
+class CheckedBody(BaseModel):
+    """Base for every request body: each value in the raw body (also unknown fields) is checked for NUL characters,
+    lone surrogates, length and nesting before the declared fields are validated. Keeps the model's own ``extra``
+    setting."""
 
     @model_validator(mode="before")
     @classmethod
     def _sane_values(cls, data: Any) -> Any:
         _check_value(data)
         return data
+
+
+class StrictRecord(CheckedBody):
+    """Base for request models: unknown fields are kept (forward compatibility) but every value is checked."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+def form_value_errors(fields: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Multipart text fields have no model: they get the same checks as a JSON body. Returns pydantic-style errors
+    with ``loc == (field name,)``; the API layer turns them into the usual 422 shape."""
+    errors: list[dict[str, Any]] = []
+    for name, value in fields.items():
+        try:
+            _check_value(value)
+        except ValueError as err:
+            errors.append({"loc": (name,), "msg": f"Value error, {err}", "type": "value_error"})
+    return errors
 
 
 def check_period(start: str | None, end: str | None, what: str = "end") -> None:

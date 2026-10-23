@@ -2,7 +2,7 @@ from datetime import date
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep
 from permita38.core import validation as v
@@ -13,41 +13,41 @@ router = APIRouter(tags=["planning"])
 routers = [router]
 
 
-class SimulateIn(BaseModel):
+class SimulateIn(v.CheckedBody):
     changes: ScenarioChanges = ScenarioChanges()
     weeks: int = Field(26, ge=1, le=156)
     first: v.OptDate = None
     user_id: v.OptId = None
 
 
-class MoveCheckIn(BaseModel):
+class MoveCheckIn(v.CheckedBody):
     plan: PlanIn
 
 
-class SuggestVacationIn(BaseModel):
+class SuggestVacationIn(v.CheckedBody):
     user_id: v.Id
     days: int = Field(..., ge=1, le=60)
     window_from: v.ISODate
     window_to: v.ISODate
 
 
-class SuggestStartIn(BaseModel):
+class SuggestStartIn(v.CheckedBody):
     hours: v.TotalHours
     deadline: v.ISODate
     earliest: v.OptDate = None
     user_ids: v.IdList = []
 
 
-class ApplyIn(BaseModel):
+class ApplyIn(v.CheckedBody):
     changes: ScenarioChanges = ScenarioChanges()
     confirm: bool = False
 
 
-class ConfirmIn(BaseModel):
+class ConfirmIn(v.CheckedBody):
     confirm: bool = False
 
 
-class ExtendIn(BaseModel):
+class ExtendIn(v.CheckedBody):
     new_end: v.ISODate
     reason: v.Note | None = None
 

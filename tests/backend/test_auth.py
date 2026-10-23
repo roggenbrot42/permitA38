@@ -1,7 +1,14 @@
+import getpass
 import time
 
 import pytest
 from fastapi.testclient import TestClient
+
+from permita38.api.server import get_app
+from permita38.cli.main import main
+from permita38.core.config import Config
+from permita38.core.errors import ServiceError
+from permita38.core.service.auth import MAX_PASSWORD_LENGTH
 
 from .conftest import PASSWORD
 
@@ -189,3 +196,34 @@ def test_member_permissions(boss_client, member_client):
         ).status_code
         == 403
     )
+
+
+def test_password_maximum_is_enforced_by_the_service_and_the_cli(tmp_path, monkeypatch, capsys):
+    """A password the API could not log in with must not be settable by the recovery CLI either."""
+    assert MAX_PASSWORD_LENGTH == 1000
+    cfg_file = tmp_path / "cfg.yaml"
+    data = tmp_path / "d"
+    cfg = Config(data_dir=data, secret_key="s" * 16, web_dir=None)
+    app = get_app(cfg)
+    with TestClient(app) as c:
+        assert (
+            c.post("/api/auth/setup", json={"username": "boss", "name": "Boss", "password": PASSWORD}).status_code
+            == 200
+        )
+        with pytest.raises(ServiceError) as too_long:
+            app.state.services.auth.set_password("boss", "x" * 1001)
+        assert too_long.value.status == 400 and "at most 1000" in too_long.value.message
+
+    answers = iter(["x" * 1001, "x" * 1001])
+    monkeypatch.setattr(getpass, "getpass", lambda prompt="": next(answers))
+    with pytest.raises(SystemExit) as refused:
+        main(["-c", str(cfg_file), "--data", str(data), "set-password", "boss"])
+    assert "at most 1000" in str(refused.value)
+
+    long_ok = "y" * 1000
+    answers = iter([long_ok, long_ok])
+    monkeypatch.setattr(getpass, "getpass", lambda prompt="": next(answers))
+    main(["-c", str(cfg_file), "--data", str(data), "set-password", "boss"])
+    assert "Password changed." in capsys.readouterr().out
+    with TestClient(get_app(cfg)) as c:
+        assert c.post("/api/auth/login", json={"username": "boss", "password": long_ok}).status_code == 200

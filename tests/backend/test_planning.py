@@ -223,7 +223,9 @@ def test_offer_that_does_not_fit_gets_a_precise_warning(repo):
     repo.save("absences", dict(user_id=user["id"], kind="vacation", start="2026-02-16", end="2026-02-20"))
     add_offer(repo, user, date(2026, 2, 2), date(2026, 2, 6), hpw=20, valid=date(2026, 3, 30))  # 20 h in week 1
     draft = dict(
-        plan=dict(start="2026-01-12", end="2026-02-28", total_hours=120, user_ids=[user["id"]]),
+        plan=dict(
+            start="2026-01-12", end="2026-02-28", total_hours=260, user_ids=[user["id"]]
+        ),  # free: 240 - 20 = 220 h
         lines=[],
         status="draft",
     )
@@ -231,7 +233,7 @@ def test_offer_that_does_not_fit_gets_a_precise_warning(repo):
     cap = [w for w in warnings if w["code"] == "capacity.offer_over"]
     assert cap, warnings
     msg = cap[0]["message"]
-    assert "You offer 120 h between 12.01.2026 and 28.02.2026" in msg and "weeks of" in msg
+    assert "You offer 260 h between 12.01.2026 and 28.02.2026" in msg and "weeks of" in msg
     details = cap[0]["details"]
     assert details["over_weeks"] and details["free_hours"] > 0
     assert details["options"] and {o["type"] for o in details["options"]} <= {"shorten", "move_start", "reduce_scope"}
