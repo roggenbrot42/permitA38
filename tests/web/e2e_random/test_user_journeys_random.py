@@ -479,7 +479,7 @@ class Journey:
         self.wait_render()
         doc.id = self.hash_id()
         self.m.docs.append(doc)
-        assert "(draft)" in norm(self.page.inner_text("main h1"))
+        assert "draft" in norm(self.page.inner_text("main h1")).lower()
 
     def _open_doc(self, doc: MDoc):
         self.nav(f"#/sales/{doc.kind}")

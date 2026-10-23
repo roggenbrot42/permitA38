@@ -114,11 +114,11 @@ PAGES.customer = async id => {
 };
 function docTable(rows) {
   if (!rows.length) return '<div class="empty">Nothing here yet.</div>';
-  return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${esc(d.number || 'Draft')}</b><div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${eur(docTotal(d))}</td><td>${statusPill(coll, d)}</td></tr>`).join('')}</table>`;
+  return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${d.number ? esc(d.number) : '<span class="muted">No number yet</span>'}</b><div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${eur(docTotal(d))}</td><td>${statusPill(coll, d)}</td></tr>`).join('')}</table>`;
 }
 function statusPill(coll, d) {
   const late = coll === 'invoices' && d.status === 'sent' && d.due_date && d.due_date < todayISO();
-  const cls = late ? 'bad' : { paid: 'good', accepted: 'good', sent: 'blue', rejected: 'bad', cancelled: 'bad' }[d.status] || '';
+  const cls = late ? 'bad' : { paid: 'good', accepted: 'good', sent: 'blue', rejected: 'bad', cancelled: 'bad', draft: 'warn' }[d.status] || '';
   return `<span class="pill ${cls}">${late ? 'overdue' : esc(d.status)}</span>`;
 }
 
@@ -199,7 +199,7 @@ PAGES.doc = async (coll, id) => {
   if (id.startsWith('new')) {
     if (!DOC || DOC.__route !== route) {   // keep the in-progress draft across re-renders (add/delete line)
       DOC = { __route: route, coll, customer_id: id.slice(4) || '', date: todayISO(), status: 'draft', lines: [{ description: '', qty: 1, unit: 'h', price: s.default_rate || 0 }], template_id: s.default_template, vat_rate: s.vat_rate };
-      const cu = S.d.customers.find(c => c.id === DOC.customer_id); if (cu?.rate) DOC.lines[0].price = cu.rate;
+      SUGGESTED_RATE = suggestedRate(DOC.customer_id, null); DOC.lines[0].price = SUGGESTED_RATE;
     }
   } else if (!DOC || DOC.id !== id || DOC.coll !== coll) {
     const rec = (S.d[coll] || []).find(x => x.id === id);
@@ -211,10 +211,11 @@ PAGES.doc = async (coll, id) => {
   const klein = s.kleinunternehmer;
   const statuses = isInv ? [['sent', 'Sent'], ['paid', 'Paid'], ['cancelled', 'Cancelled']] : [['sent', 'Sent'], ['accepted', 'Accepted'], ['rejected', 'Rejected']];
   const plan = d.plan || {};
-  return `<div class="head"><div><a href="#/sales/${coll}" class="small">← ${isInv ? 'Invoices' : 'Offers'}</a><h1>${isInv ? 'Invoice' : 'Offer'} ${esc(d.number || '(draft)')} ${d.id ? statusPill(coll, d) : ''}</h1></div>
-    <div class="row tight" style="flex:none">${d.id ? `<button data-a="docPdf">Preview PDF</button>` : ''}<button class="${d.number ? '' : 'primary'}" data-a="docSave">Save</button>
+  return `<div class="head"><div><a href="#/sales/${coll}" class="small">← ${isInv ? 'Invoices' : 'Offers'}</a><h1>${isInv ? 'Invoice' : 'Offer'} ${esc(d.number || '')} ${d.id ? statusPill(coll, d) : '<span class="pill warn">draft – not saved yet</span>'}</h1></div>
+    <div class="row tight" style="flex:none">${d.id ? `<button data-a="docPdf">Preview PDF</button>` : ''}<button class="${d.number ? '' : 'primary'}" data-a="docSave">${d.status === 'draft' ? 'Save draft' : 'Save'}</button>
     ${d.id && !d.number ? `<button class="primary" data-a="docFinalize">Finalize & number</button>` : ''}${d.id && d.number ? `<select style="width:auto" data-change="docStatus"><option value="">Set status…</option>${opt(statuses, '')}</select>` : ''}
     ${d.id && !isInv && d.number && d.status !== 'accepted' ? `<button data-a="docAccept">✓ Accepted → create project</button>` : ''}${d.id && !isInv ? `<button data-a="docToInvoice">→ Invoice</button>` : ''}</div></div>
+  ${d.status === 'draft' && !d.number ? `<div class="banner info">This is a <b>draft</b>: it has no number yet, is not counted in revenue or planning, and the PDF is marked as a draft. It gets its ${isInv ? 'invoice' : 'offer'} number when you press <b>Finalize &amp; number</b>.</div>` : ''}
   ${locked ? '<div class="banner">This document has a number and was probably sent. Changing it now changes the PDF – only edit for corrections.</div>' : ''}
   <div class="card"><div class="grid g3"><div class="field"><label>Customer</label><select id="d_cust">${opt([['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])], d.customer_id)}</select></div>
     <div class="field"><label>Project</label><select id="d_proj">${opt(projectOptions(), d.project_id || '')}</select></div><div class="field"><label>Title / subject</label><input id="d_title" value="${esc(d.title || '')}"></div>
@@ -233,8 +234,27 @@ PAGES.doc = async (coll, id) => {
     <div class="field"><label>Internal notes (not printed)</label><textarea id="d_notes" rows="2">${esc(d.notes || '')}</textarea></div></div>
   ${isInv ? '' : `<div class="card"><h2>Planning (optional)</h2><div class="muted small" style="margin-bottom:8px">When should this work happen? While the offer is open, the Planning forecast shows it as tentative; once accepted it becomes a contract.</div><div class="row"><div><label>Start</label><input type="date" id="p_s" value="${esc(plan.start || '')}"></div><div><label>End</label><input type="date" id="p_e" value="${esc(plan.end || '')}"></div><div><label>Hours per week</label><input type="number" id="p_hpw" value="${esc(plan.hours_per_week ?? '')}"></div><div><label>or total hours</label><input type="number" id="p_tot" value="${esc(plan.total_hours ?? '')}"></div></div></div>`}`;
 };
+// Hourly rate for a new document: project > customer > your default (the same order the time entries use).
+let SUGGESTED_RATE = null;   // set only while editing a new, unsaved document; saved documents are never repriced
+function suggestedRate(customerId, projectId) {
+  const pick = x => (x?.rate === null || x?.rate === undefined || x?.rate === '' ? null : +x.rate);
+  return pick(S.d.projects.find(p => p.id === projectId)) ?? pick(S.d.customers.find(c => c.id === customerId))
+    ?? (S.me?.default_rate ? +S.me.default_rate : null) ?? S.settings.default_rate ?? 0;
+}
+function repriceNewDoc() {
+  if (!DOC || DOC.id || SUGGESTED_RATE === null) return;
+  syncDoc();
+  const rate = suggestedRate(DOC.customer_id, DOC.project_id);
+  let changed = false;   // only lines still carrying the old suggestion are touched, never a price typed by hand
+  DOC.lines.forEach(l => { if (+l.price === SUGGESTED_RATE && rate !== SUGGESTED_RATE) { l.price = rate; changed = true; } });
+  SUGGESTED_RATE = rate; if (changed) render();
+}
 const _origDoc = PAGES.doc;
-PAGES.doc = async (...a) => { const h = await _origDoc(...a); render.after = recalcDoc; return h; };
+PAGES.doc = async (...a) => {
+  const h = await _origDoc(...a);
+  render.after = () => { recalcDoc(); for (const id of ['d_cust', 'd_proj']) $('#' + id)?.addEventListener('change', repriceNewDoc); };
+  return h;
+};
 function syncDoc() {
   if (!DOC || !$('#d_cust')) return;
   const g = i => $('#' + i)?.value, d = DOC;
