@@ -310,8 +310,11 @@ def trip_amounts(trip: dict) -> list[dict[str, Any]]:
     """The finance lines of a business trip: its meal allowance per day and its mileage (dated at the trip start).
 
     The single place where trips feed the finance report (docs/specs/business-trips.md). Both are deductible at 100 %
-    and carry no VAT. The figures are the ones stored with the trip, so a final trip never changes here.
+    and carry no VAT. Only a FINAL trip counts: drafts are excluded until they are finalised. The figures are the ones
+    stored with the trip, so a final trip never changes here.
     """
+    if trip.get("status") != "final":
+        return []
     out: list[dict[str, Any]] = [
         {"date": x.get("date"), "category": "Meal allowance", "amount": x.get("amount")}
         for x in trip.get("days") or []

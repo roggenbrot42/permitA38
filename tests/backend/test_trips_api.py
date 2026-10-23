@@ -88,7 +88,7 @@ def test_checklist_has_the_six_items_in_order():
         {"start": "2026-02-30T08:00"},  # not a real date
         {"start": "2026-11-09 08:00"},  # wrong format
         {"purpose": "   "},  # blank purpose
-        {"start": "2026-01-01T00:00", "end": "2026-04-01T00:00"},  # 91 calendar days
+        {"start": "2026-01-01T00:00", "end": "2026-04-02T00:00"},  # 91 calendar days (31 Mar 24:00 is the end)
         {"places": [{"from_date": "2026-11-09", "country": "de"}]},  # country must be two capitals
         {"places": [{"from_date": "2026-11-09", "country": "DE"}] * 21},  # more than 20 places
         {"mileage": [{"date": "2026-11-09", "km": 0.05}]},  # below 0.1 km
@@ -108,6 +108,12 @@ def test_strict_bounds_give_422(boss_client, patch):
 def test_mileage_limit_is_100_rows(boss_client):
     rows = [{"date": "2026-11-09", "km": 1}] * 101
     assert boss_client.post("/api/trips", json=trip_body(mileage=rows)).status_code == 422
+
+
+def test_midnight_end_counts_the_day_before(boss_client):
+    # 1 Jan 00:00 to 1 Apr 00:00 covers 1 Jan .. 31 Mar: exactly 90 calendar days
+    ok = trip_body(start="2026-01-01T00:00", end="2026-04-01T00:00")
+    assert boss_client.post("/api/trips/preview", json=ok).status_code == 200
 
 
 def test_ninety_calendar_days_is_the_limit(boss_client):
@@ -312,11 +318,26 @@ def test_statement_escapes_user_text(boss_client):
 
 
 # ------------------------------------------------------------------ finance
-def test_a_trip_changes_the_november_totals_by_exactly_the_expected_cents(boss_client):
+def test_a_draft_trip_changes_no_finance_figure(boss_client):
+    before = boss_client.get("/api/finance", params={"year": 2026}).json()
+    make_trip(boss_client, mileage=[{"date": "2026-11-09", "from": "Kiel", "to": "Hamburg", "km": 237.5}])
+    after = boss_client.get("/api/finance", params={"year": 2026}).json()
+    assert after["months"] == before["months"]
+    assert "Mileage" not in after["categories"]
+
+
+def test_finalising_a_trip_adds_exactly_the_expected_cents(boss_client):
     before = boss_client.get("/api/finance", params={"year": 2026}).json()
     nov_before = before["months"][10]
     trip = make_trip(boss_client, mileage=[{"date": "2026-11-09", "from": "Kiel", "to": "Hamburg", "km": 237.5}])
     assert trip["allowance_total"] == 56.00 and trip["mileage_total"] == 71.25
+    fin = boss_client.put(
+        f"/api/trips/{trip['id']}",
+        json=trip_body(
+            **FINAL_OK, status="final", mileage=[{"date": "2026-11-09", "from": "Kiel", "to": "Hamburg", "km": 237.5}]
+        ),
+    )
+    assert fin.status_code == 200, fin.text
     after = boss_client.get("/api/finance", params={"year": 2026}).json()
     nov = after["months"][10]
     # allowance 56,00 + mileage 71,25: deductible cost, no input VAT
@@ -331,6 +352,10 @@ def test_a_trip_changes_the_november_totals_by_exactly_the_expected_cents(boss_c
 def test_a_december_trip_changes_only_december(boss_client):
     before = boss_client.get("/api/finance", params={"year": 2026}).json()
     made = make_trip(boss_client, start="2026-12-30T08:00", end="2026-12-30T18:00", places=[])
+    boss_client.put(
+        f"/api/trips/{made['id']}",
+        json=trip_body(**FINAL_OK, status="final", start="2026-12-30T08:00", end="2026-12-30T18:00", places=[]),
+    )
     assert made["allowance_total"] == 14.00  # one day of 10 hours, domestic: 14,00
     after = boss_client.get("/api/finance", params={"year": 2026}).json()
     assert round(after["months"][11]["expenses"] - before["months"][11]["expenses"], 2) == 14.00
@@ -408,3 +433,143 @@ def test_statement_says_draft_until_final(boss_client):
     trip = make_trip(boss_client)
     text = _pdf_text(boss_client.get(f"/api/trips/{trip['id']}/statement.pdf").content)
     assert "Status: Draft" in text
+
+
+# ------------------------------------------------------------------ review round 2: rights, lock, owner, preview
+def test_employee_gets_404_for_another_persons_statement(boss_client, member_client):
+    boss_trip = make_trip(boss_client)
+    assert member_client.get(f"/api/trips/{boss_trip['id']}/statement.pdf").status_code == 404
+
+
+def test_accountant_cannot_reopen_and_unknown_ids_are_404(boss_client, accountant):
+    final = boss_client.put(f"/api/trips/{make_trip(boss_client)['id']}", json=trip_body(**FINAL_OK, status="final"))
+    assert final.status_code == 200
+    assert accountant.post(f"/api/trips/{final.json()['id']}/reopen").status_code == 403
+    assert accountant.get("/api/trips/abc123def456").status_code == 404
+
+
+def test_employee_cannot_change_a_final_trip_and_force_does_not_skip_the_lock(boss_client, member_client):
+    mine = make_trip(member_client)
+    assert member_client.put(f"/api/trips/{mine['id']}", json=trip_body(**FINAL_OK, status="final")).status_code == 200
+    assert member_client.put(f"/api/trips/{mine['id']}", json=trip_body()).status_code == 409
+    assert member_client.delete(f"/api/trips/{mine['id']}").status_code == 409
+    forced = member_client.put(f"/api/trips/{mine['id']}?force=true", json=trip_body(**FINAL_OK, status="final"))
+    assert forced.status_code == 409  # force skips only the checklist check, never the final lock
+
+
+def test_boss_edit_keeps_the_owner_and_client_user_id_is_ignored(boss_client, member_client):
+    mine = make_trip(member_client, user_id="abc123def456")
+    assert mine["user_id"] == member_client.user_id
+    edited = boss_client.put(f"/api/trips/{mine['id']}", json=trip_body(title="edited by boss"))
+    assert edited.status_code == 200
+    assert edited.json()["user_id"] == member_client.user_id
+
+
+def test_preview_ignores_response_only_fields_in_the_body(boss_client):
+    plain = boss_client.post("/api/trips/preview", json=trip_body()).json()
+    noisy = boss_client.post(
+        "/api/trips/preview",
+        json=trip_body(
+            bills={"count": 9, "net": 9, "vat": 9},
+            checklist=[],
+            days=[],
+            allowance_total=999,
+            mileage_total=999,
+            rules_version="x",
+            status="final",
+        ),
+    ).json()
+    assert noisy["days"] == plain["days"]
+    assert noisy["allowance_total"] == plain["allowance_total"] == 56.00
+
+
+def test_year_without_table_is_422_with_the_contract_message(boss_client):
+    r = boss_client.post("/api/trips/preview", json=trip_body(start="2031-05-04T08:00", end="2031-05-04T18:00"))
+    assert r.status_code == 422
+    assert r.json()["detail"] == "No rate table for year 2031"
+
+
+def test_expense_trip_id_rights_follow_the_trips_area(boss_client, accountant, app, monkeypatch):
+    from permita38.core import rights
+    from permita38.core.rights import Scope
+
+    boss_trip = make_trip(boss_client)
+    body = {"date": "2026-11-09", "net": 10, "vat": 0, "trip_id": boss_trip["id"]}
+    assert accountant.post("/api/expenses", json=body).status_code == 200  # trips read: all
+    monkeypatch.setitem(rights.MATRIX["accountant"], "trips", (Scope.NONE, Scope.NONE))
+    assert accountant.post("/api/expenses", json=body).status_code == 422  # trips none -> unknown trip
+    monkeypatch.setitem(rights.MATRIX["accountant"], "trips", (Scope.LIMITED, Scope.NONE))
+    assert accountant.post("/api/expenses", json=body).status_code == 422  # limited: not their trip
+    monkeypatch.setitem(rights.MATRIX["accountant"], "trips", (Scope.ALL, Scope.NONE))
+    assert accountant.post("/api/expenses", json=body).status_code == 200
+
+
+def test_finance_across_a_year_boundary_books_allowance_per_day_and_mileage_at_start(boss_client, monkeypatch):
+    from permita38.core.trip_rates import load_rates
+
+    synthetic_2027 = {
+        "year": 2027,
+        "rules_version": "2027-SYNTH",
+        "mileage_per_km": Decimal("0.30"),
+        "fallback_country": "LU",
+        "domestic": {"from8h": Decimal("15.00"), "h24": Decimal("30.00")},
+        "countries": {
+            "DE": {"name": "Germany", "from8h": Decimal("15.00"), "h24": Decimal("30.00"), "placeholder": False}
+        },
+    }
+
+    def rates(year):
+        return load_rates(2026) if year == 2026 else synthetic_2027
+
+    monkeypatch.setattr("permita38.core.service.trips.load_rates", rates)  # no 2027 table exists in the repository
+    before26 = boss_client.get("/api/finance", params={"year": 2026}).json()
+    before27 = boss_client.get("/api/finance", params={"year": 2027}).json()
+    body = trip_body(
+        start="2026-12-30T08:00",
+        end="2027-01-02T18:00",
+        places=[],
+        mileage=[{"date": "2026-12-30", "from": "A", "to": "B", "km": 100}],
+        **FINAL_OK,
+        status="final",
+    )
+    made = boss_client.post("/api/trips", json=body)
+    assert made.status_code == 200, made.text
+    assert [d["amount"] for d in made.json()["days"]] == [14.00, 28.00, 30.00, 15.00]
+    after26 = boss_client.get("/api/finance", params={"year": 2026}).json()
+    after27 = boss_client.get("/api/finance", params={"year": 2027}).json()
+    # 2026: allowance 14 + 28 and mileage 100 km x 0,30 (start year) = 72,00
+    assert round(after26["totals"]["expenses"] - before26["totals"]["expenses"], 2) == 72.00
+    # 2027: allowance 30 + 15 = 45,00 and no mileage
+    assert round(after27["totals"]["expenses"] - before27["totals"]["expenses"], 2) == 45.00
+
+
+def test_statement_cells_are_cut_to_their_column_and_every_text_is_escaped(boss_client):
+    city = "Ort (Nord) \\ " + "y" * 90  # long and hostile
+    mile = {
+        "date": "2026-11-09",
+        "from": "Von (x) \\ " + "z" * 80,
+        "to": "Nach (y)",
+        "km": 10,
+        "purpose": "Zweck \\ (1)",
+    }
+    trip = make_trip(
+        boss_client,
+        title="Titel (A) \\ B",
+        places=[{"from_date": "2026-11-09", "country": "AT", "city": city}],
+        mileage=[mile],
+    )
+    data = boss_client.get(f"/api/trips/{trip['id']}/statement.pdf").content
+    texts = _pdf_text(data)
+    raw = b"".join(zlib.decompress(m.group(1)) for m in re.finditer(rb"stream\n(.*?)\nendstream", data, re.S))
+    assert any("Title: Titel (A) \\ B" in t for t in texts)  # the header is wrapped, never cut
+    assert any(t.startswith("Ort (Nord) \\ y") and t.endswith("...") for t in texts)  # city cell cut
+    assert any(t.startswith("Von (x) \\ z") and t.endswith("...") for t in texts)  # mileage 'from' cut
+    assert any(t == "Zweck \\ (1)" for t in texts)  # short text stays whole
+    assert any(t == "Nach (y)" for t in texts)
+    assert b"Ort \\(Nord\\) \\\\ y" in raw  # written with PDF escapes
+
+
+def test_statement_prints_the_placeholder_note_in_full(boss_client):
+    trip = make_trip(boss_client, places=[{"from_date": "2026-11-09", "country": "AT"}])
+    texts = _pdf_text(boss_client.get(f"/api/trips/{trip['id']}/statement.pdf").content)
+    assert any("Rate for AT is a placeholder: verify" in t for t in texts)
