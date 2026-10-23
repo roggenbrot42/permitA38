@@ -222,7 +222,9 @@ def test_legacy_revision_three_only_gets_bookkeeping_rows(tmp_path):
     legacy_db(data, 3).close()
     repo = SQLiteRepository(data)
     repo.startup()
-    assert table_ids(data) == list(LEGACY_IDS)
+    # the legacy migrations are adopted as bookkeeping rows (their SQL never runs again); newer ones are applied
+    assert table_ids(data)[: len(LEGACY_IDS)] == list(LEGACY_IDS)
+    assert table_ids(data)[-1] == HEAD
     assert repo.migrate() == (HEAD, HEAD, 0)
     repo.close()
 

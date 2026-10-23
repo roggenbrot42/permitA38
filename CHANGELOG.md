@@ -42,7 +42,7 @@ All notable changes to this project are documented here. The format is based on
 - Expenses: the deductible share was also applied to the input VAT, so business meals (70 % deductible) under-claimed 30 % of
   the VAT. Input VAT of bills in the category *Business meals* is now reclaimed in full (§ 15 Abs. 1a UStG, to be
   confirmed by your tax adviser); other categories are unchanged. Bills you entered earlier keep their old figures: open
-  and save them again after choosing the category.
+  and save them again after choosing the category. New column `expenses.vat_deductible` (migration `0004-expense_vat_deductible`).
 - Money & Taxes: a year outside 2000–2100 in the address (typed or stale) showed a validation error page; it is clamped
   now and the arrows stop at the ends (found by the nightly randomized browser run).
 
