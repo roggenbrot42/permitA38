@@ -109,8 +109,9 @@ holidays, time off, every contract and every open offer.
   - *What must move?*: for a selected offer, the smallest move of another open offer that makes it fit, or the
     largest amount that fits.
 
-**Keyboard**: focus a bar and press ←/→ to move it one day (Shift: one week); Alt+←/→ changes its end,
-Ctrl+←/→ its start. Esc discards the change of that one item, Delete or Backspace removes a time-off entry (a real entry is only
+**Keyboard**: click a bar (it is outlined and focused) or Tab to it, then ←/→ moves it one day and
+PageUp/PageDown one week; Shift+←/→ changes its end, Ctrl+←/→ its start (Alt is not used: browsers take Alt+←/→ for
+Back/Forward). Esc discards the change of that one item, Delete or Backspace removes a time-off entry (a real entry is only
 marked for deletion until you press Apply). Every draft change is also listed under the draft bar with its own
 **Discard** button. Forms for vacation and the suggestions work without the mouse. **Touch**: dragging works with a finger on the bars and the
 time-off row.

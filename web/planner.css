@@ -27,14 +27,16 @@
 .pln-weeks .util.tight { background: var(--warn-soft); color: var(--warn); }
 .pln-weeks .util.over { background: var(--bad-soft); color: var(--bad); }
 .pln-bar { position: absolute; top: 4px; height: 26px; border-radius: 7px; background: var(--accent); color: var(--accent-ink); cursor: grab; touch-action: none; user-select: none; overflow: visible; display: flex; align-items: center; min-width: 8px; }
-.pln-bar:focus-visible { outline: 3px solid var(--warn); outline-offset: 1px; }
+.pln-bar:focus { outline: 3px solid var(--warn); outline-offset: 1px; }   /* also after a mouse click (Firefox hides :focus-visible there) */
 .pln-bar-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 8px; font-size: 12px; pointer-events: none; }
 .pln-bar.offer { background: repeating-linear-gradient(45deg, var(--accent-soft) 0 6px, var(--accent) 6px 8px); color: var(--ink); }
 .pln-bar.contract { background: var(--accent); }
 .pln-bar.abs { background: var(--good); color: var(--accent-ink); }
 .pln-bar.abs.sick { background: var(--warn); }
 .pln-bar.draft { outline: 2px dashed var(--warn); outline-offset: 1px; }
-.pln-bar.sel { box-shadow: 0 0 0 2px var(--accent); }
+.pln-bar.sel { box-shadow: 0 0 0 2px var(--accent), 0 2px 8px rgba(0,0,0,.35); z-index: 2; }
+.pln-bar.sel .h { background: rgba(255,255,255,.55); }
+#plnWrap.dragging .pln-bar:not(.sel) { pointer-events: none; }
 .pln-bar .h { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
 .pln-bar .h.l { left: 0; } .pln-bar .h.r { right: 0; }
 .pln-drag { position: sticky; left: 200px; margin: 6px 0; font-size: 13px; background: var(--accent-soft); border-radius: 8px; padding: 6px 10px; width: max-content; }

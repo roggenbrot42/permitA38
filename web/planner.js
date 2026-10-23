@@ -188,6 +188,7 @@
     el.innerHTML = view();
     bindPlanner();
     if (wasDiscard) (el.querySelector('.pln-draftlist button') || el.querySelector('.pln-bar'))?.focus();   // the clicked button is gone
+    if (P.sel) document.querySelector(`#pln .pln-bar[data-key="${CSS.escape(P.sel)}"]`)?.classList.add('sel');
     if (focusKey) { const again = document.querySelector(`.pln-bar[data-key="${CSS.escape(focusKey)}"]`); if (again) again.focus(); }
   }
   // One line per draft change, each with its own "Discard", so single items can be dropped without losing the rest.
@@ -219,7 +220,7 @@
       <span class="right auto"><button type="button" class="ghost" data-a="plnDiscard" ${n ? '' : 'disabled'}>Discard</button> <button type="button" class="primary" data-a="plnApply" ${n ? '' : 'disabled'}>Apply</button></span>
     </div>
     ${draftList()}
-    <div class="pln-help small muted">Keyboard: focus a bar, then ←/→ moves it one day (Shift: one week); Alt+←/→ changes its end, Ctrl+←/→ its start; Esc discards this item's change; Delete or Backspace removes a time-off entry. Touch: drag bars and the time-off row.</div>
+    <div class="pln-help small muted">Keyboard: click or Tab to a bar, then ←/→ moves it one day (PageUp/PageDown: one week); Shift+←/→ changes its end, Ctrl+←/→ its start; Esc discards this item's change; Delete or Backspace removes a time-off entry. Touch: drag bars and the time-off row.</div>
     <div class="pln-wrap" id="plnWrap" aria-label="Timeline">
       <div class="pln-grid">
         ${headerRow()}
@@ -281,21 +282,27 @@
     }
     schedule();
   }
+  function selectBar(bar) {   // a clicked bar is selected and focused, so the keyboard works right after the click
+    P.sel = bar.dataset.key;
+    document.querySelectorAll('#pln .pln-bar.sel').forEach(b => b.classList.remove('sel'));
+    bar.classList.add('sel');
+    bar.focus({ preventScroll: true });
+  }
   function onDown(e) {
     const bar = e.target.closest('.pln-bar');
     const lane = e.target.closest('[data-lane="time"]');
     if (bar && e.button === 0) {
       const mode = (e.target.dataset && e.target.dataset.mode) || 'move';
-      drag = { kind: bar.dataset.kind, key: bar.dataset.key, id: bar.dataset.id, mode, x0: e.clientX, el: bar, startDay: null };
-      drag.startDay = dayFromPoint(e.clientX, e.clientY);
-      P.sel = bar.dataset.kind === 'com' ? bar.dataset.key : P.sel;
+      drag = { kind: bar.dataset.kind, key: bar.dataset.key, id: bar.dataset.id, mode, x0: e.clientX, el: bar, delta: 0 };
+      selectBar(bar);
       bar.setPointerCapture && bar.setPointerCapture(e.pointerId);
     } else if (lane && e.target.closest('[data-day]') && e.button === 0 && !bar) {
       const d = e.target.closest('[data-day]').dataset.day;
       drag = { kind: 'create', mode: 'create', startDay: d, curDay: d, el: null };
       showRange(d, d);
     } else { return; }
-    e.preventDefault();
+    e.preventDefault();   // no text selection / native drag; focus is set by selectBar()
+    document.getElementById('plnWrap')?.classList.add('dragging');
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp, { once: true });
   }
@@ -310,14 +317,15 @@
     if (!drag) return;
     const d = dayFromPoint(e.clientX, e.clientY);
     if (drag.mode === 'create') { if (d) { drag.curDay = d; showRange(drag.startDay, d); } return; }
-    if (drag.el && d && drag.startDay) {
-      const delta = dayIdx(d) - dayIdx(drag.startDay);
+    if (drag.el) {   // the bar itself is under the pointer, so measure distance instead of hit-testing a day cell
+      const delta = Math.round((e.clientX - drag.x0) / DW);
       drag.delta = delta;
-      drag.el.style.transform = `translateX(${delta * DW}px)`;
+      drag.el.style.transform = drag.mode === 'move' ? `translateX(${delta * DW}px)` : '';
     }
   }
   function onUp(e) {
     window.removeEventListener('pointermove', onMove);
+    document.getElementById('plnWrap')?.classList.remove('dragging');
     const cur = drag; drag = null;
     if (!cur) return;
     const box = document.getElementById('plnDrag'); if (box) box.hidden = true;
@@ -331,10 +339,7 @@
       return;
     }
     if (cur.el) cur.el.style.transform = '';
-    const d = dayFromPoint(e.clientX, e.clientY);
-    if (!d || !cur.startDay) return;
-    const delta = dayIdx(d) - dayIdx(cur.startDay);
-    applyBarDelta(cur.kind, cur.key, cur.id, cur.mode, delta);
+    applyBarDelta(cur.kind, cur.key, cur.id, cur.mode, Math.round((e.clientX - cur.x0) / DW));
   }
   function onKey(e) {
     const bar = e.target.closest && e.target.closest('.pln-bar');
@@ -355,10 +360,15 @@
       schedule();
       return;
     }
+    if (e.key === 'PageUp' || e.key === 'PageDown') {   // a week at a time (Shift: the end)
+      e.preventDefault();
+      applyBarDelta(bar.dataset.kind, bar.dataset.key, bar.dataset.id, e.shiftKey ? 'end' : e.ctrlKey || e.metaKey ? 'start' : 'move', e.key === 'PageDown' ? 7 : -7);
+      return;
+    }
     if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
     e.preventDefault();
-    const step = (e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 7 : 1);
-    applyBarDelta(bar.dataset.kind, bar.dataset.key, bar.dataset.id, e.altKey ? 'end' : e.ctrlKey || e.metaKey ? 'start' : 'move', step);
+    const step = e.key === 'ArrowRight' ? 1 : -1;
+    applyBarDelta(bar.dataset.kind, bar.dataset.key, bar.dataset.id, e.shiftKey ? 'end' : e.ctrlKey || e.metaKey ? 'start' : 'move', step);
   }
 
   function bindPlanner() {

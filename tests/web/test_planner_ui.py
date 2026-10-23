@@ -117,7 +117,7 @@ def test_apply_writes_the_draft_and_discard_drops_it(srv, ui, seeded):
 def test_keyboard_moves_a_contract_bar_and_the_draft_is_visible(srv, ui, seeded):
     bar = ui.locator('.pln-bar.contract[data-kind="com"]').first
     bar.focus()
-    ui.keyboard.press("Shift+ArrowRight")  # one week later
+    ui.keyboard.press("PageDown")  # one week later
     ui.wait_for_selector(".pln-bar.contract.draft")
     assert "1 draft change" in ui.inner_text(".pln-draftbar")
     ui.click("[data-a=plnDiscard]")
@@ -149,7 +149,7 @@ def test_keyboard_moves_and_resizes_a_time_off_draft(srv, ui, seeded):
     moved = abs_range(ui)
     assert moved != before
     assert ui.evaluate("() => document.activeElement.classList.contains('pln-bar')")  # focus survives the redraw
-    ui.keyboard.press("Alt+ArrowRight")  # extend the end by a day
+    ui.keyboard.press("Shift+ArrowRight")  # extend the end by a day (Alt+arrows are the browser's Back/Forward)
     ui.wait_for_function("(b) => document.querySelector('.pln-bar.abs').getAttribute('aria-label') !== b", arg=moved)
     assert "1 draft change" in ui.inner_text(".pln-draftbar")
 
@@ -220,3 +220,39 @@ def test_a_marked_for_deletion_time_off_can_be_restored_from_the_list(srv, ui, s
     ui.wait_for_selector(".pln-bar.abs")
     assert "No draft changes" in ui.inner_text(".pln-draftbar")
     assert len(srv.app.state.services.store.list("absences")) == 1
+
+
+def test_clicking_a_bar_selects_and_focuses_it_and_the_keyboard_works_right_away(srv, ui, seeded):
+    w2 = seeded["week2"]
+    drag_vacation(ui, w2.isoformat(), (w2 + timedelta(days=1)).isoformat())
+    before = abs_range(ui)
+    box = ui.locator(".pln-bar.abs.draft").first.bounding_box()
+    ui.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    assert ui.evaluate("() => document.activeElement.classList.contains('pln-bar')")
+    assert ui.locator(".pln-bar.sel").count() == 1  # a visible selection, also in browsers without :focus-visible on click
+    ui.keyboard.press("ArrowRight")
+    ui.wait_for_function("(b) => document.querySelector('.pln-bar.abs').getAttribute('aria-label') !== b", arg=before)
+
+
+def test_dragging_a_bar_moves_it_and_its_edge_resizes_it(srv, ui, seeded):
+    w2 = seeded["week2"]
+    drag_vacation(ui, w2.isoformat(), (w2 + timedelta(days=1)).isoformat())
+    before = abs_range(ui)
+    box = ui.locator(".pln-bar.abs.draft").first.bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    ui.mouse.move(x, y)
+    ui.mouse.down()
+    ui.mouse.move(x + 3 * 12, y, steps=6)  # three days to the right (12 px per day)
+    ui.mouse.up()
+    ui.wait_for_function("(b) => document.querySelector('.pln-bar.abs').getAttribute('aria-label') !== b", arg=before)
+    moved = abs_range(ui)
+    assert (w2 + timedelta(days=3)).strftime("%d.%m.") in moved
+    box = ui.locator(".pln-bar.abs.draft").first.bounding_box()
+    hx, y = box["x"] + box["width"] - 3, box["y"] + box["height"] / 2  # the right-hand edge handle
+    ui.mouse.move(hx, y)
+    ui.mouse.down()
+    ui.mouse.move(hx + 2 * 12, y, steps=4)
+    ui.mouse.up()
+    ui.wait_for_function("(b) => document.querySelector('.pln-bar.abs').getAttribute('aria-label') !== b", arg=moved)
+    assert (w2 + timedelta(days=6)).strftime("%d.%m.") in abs_range(ui)
+    assert "1 draft change" in ui.inner_text(".pln-draftbar")
