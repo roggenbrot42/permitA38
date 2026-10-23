@@ -6,7 +6,7 @@ import pytest
 pytest.importorskip("playwright.sync_api")
 from playwright.sync_api import expect  # noqa: E402
 
-from tests.web.test_impressum_prefill import PASSWORD, Server, chromium  # noqa: E402,F401  (shared harness)
+from tests.web.test_impressum_prefill import PASSWORD, Server  # noqa: E402  (shared harness)
 
 
 @pytest.fixture

@@ -250,7 +250,7 @@ class FakeTripApi:
 
 
 def _json(route, status, payload):
-    route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+    return route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
 
 
 def _static(route):
@@ -259,7 +259,7 @@ def _static(route):
     f = WEB / name
     if not f.is_file():
         return route.fulfill(status=404, body="not found")
-    route.fulfill(
+    return route.fulfill(
         status=200, content_type=mimetypes.guess_type(f.name)[0] or "application/octet-stream", body=f.read_bytes()
     )
 

@@ -107,18 +107,21 @@ def test_strict_bounds_give_422(boss_client, patch):
 
 def test_mileage_limit_is_100_rows(boss_client):
     rows = [{"date": "2026-11-09", "km": 1}] * 101
-    assert boss_client.post("/api/trips", json=trip_body(mileage=rows)).status_code == 422
+    resp = boss_client.post("/api/trips", json=trip_body(mileage=rows))
+    assert resp.status_code == 422
 
 
 def test_midnight_end_counts_the_day_before(boss_client):
     # 1 Jan 00:00 to 1 Apr 00:00 covers 1 Jan .. 31 Mar: exactly 90 calendar days
     ok = trip_body(start="2026-01-01T00:00", end="2026-04-01T00:00")
-    assert boss_client.post("/api/trips/preview", json=ok).status_code == 200
+    resp = boss_client.post("/api/trips/preview", json=ok)
+    assert resp.status_code == 200
 
 
 def test_ninety_calendar_days_is_the_limit(boss_client):
     ok = trip_body(start="2026-01-01T08:00", end="2026-03-31T18:00")  # exactly 90 calendar days
-    assert boss_client.post("/api/trips", json=ok).status_code == 200
+    resp = boss_client.post("/api/trips", json=ok)
+    assert resp.status_code == 200
 
 
 def test_unknown_fields_round_trip_through_extra(boss_client):
@@ -150,7 +153,8 @@ def test_preview_equals_the_saved_figures_and_saves_nothing(boss_client):
     before = len(boss_client.get("/api/trips").json())
     pv = boss_client.post("/api/trips/preview", json=body)
     assert pv.status_code == 200, pv.text
-    assert len(boss_client.get("/api/trips").json()) == before  # nothing saved
+    resp = boss_client.get("/api/trips")
+    assert len(resp.json()) == before  # nothing saved
     saved = boss_client.post("/api/trips", json=body).json()
     assert pv.json()["days"] == saved["days"]
     assert pv.json()["allowance_total"] == saved["allowance_total"]
@@ -160,14 +164,19 @@ def test_preview_equals_the_saved_figures_and_saves_nothing(boss_client):
 
 
 def test_preview_validates_like_save(boss_client):
-    assert boss_client.post("/api/trips/preview", json=trip_body(end="2026-11-09T08:00")).status_code == 422
+    resp = boss_client.post("/api/trips/preview", json=trip_body(end="2026-11-09T08:00"))
+    assert resp.status_code == 422
 
 
 def test_unknown_customer_project_or_checklist_item_is_422(boss_client):
-    assert boss_client.post("/api/trips", json=trip_body(customer_id="abc123def456")).status_code == 422
-    assert boss_client.post("/api/trips", json=trip_body(project_id="abc123def456")).status_code == 422
-    assert boss_client.post("/api/trips", json=trip_body(not_needed=["visa"])).status_code == 422
-    assert boss_client.post("/api/trips", json=trip_body(not_needed=["material"])).status_code == 200
+    resp = boss_client.post("/api/trips", json=trip_body(customer_id="abc123def456"))
+    assert resp.status_code == 422
+    resp = boss_client.post("/api/trips", json=trip_body(project_id="abc123def456"))
+    assert resp.status_code == 422
+    resp = boss_client.post("/api/trips", json=trip_body(not_needed=["visa"]))
+    assert resp.status_code == 422
+    resp = boss_client.post("/api/trips", json=trip_body(not_needed=["material"]))
+    assert resp.status_code == 200
 
 
 def test_missing_rate_table_for_the_year_is_422(boss_client):
@@ -208,7 +217,8 @@ def test_deleting_a_trip_keeps_its_bills_unlinked(boss_client):
     exp = boss_client.post(
         "/api/expenses", json={"date": "2026-11-09", "net": 40, "vat": 0, "trip_id": trip["id"]}
     ).json()
-    assert boss_client.delete(f"/api/trips/{trip['id']}").status_code == 204
+    resp = boss_client.delete(f"/api/trips/{trip['id']}")
+    assert resp.status_code == 204
     kept = boss_client.get(f"/api/expenses/{exp['id']}").json()
     assert kept["id"] == exp["id"] and kept["net"] == 40
     assert kept.get("trip_id") is None
@@ -216,16 +226,23 @@ def test_deleting_a_trip_keeps_its_bills_unlinked(boss_client):
 
 # ------------------------------------------------------------------ HTTP status codes
 def test_anonymous_gets_401(client):
-    assert client.get("/api/trips").status_code == 401
-    assert client.post("/api/trips", json=trip_body()).status_code == 401
-    assert client.post("/api/trips/preview", json=trip_body()).status_code == 401
+    resp = client.get("/api/trips")
+    assert resp.status_code == 401
+    resp = client.post("/api/trips", json=trip_body())
+    assert resp.status_code == 401
+    resp = client.post("/api/trips/preview", json=trip_body())
+    assert resp.status_code == 401
 
 
 def test_unknown_or_malformed_ids_are_404(boss_client):
-    assert boss_client.get("/api/trips/abc123def456").status_code == 404
-    assert boss_client.get("/api/trips/not-an-id!").status_code == 404
-    assert boss_client.put("/api/trips/abc123def456", json=trip_body()).status_code == 404
-    assert boss_client.delete("/api/trips/abc123def456").status_code == 404
+    resp = boss_client.get("/api/trips/abc123def456")
+    assert resp.status_code == 404
+    resp = boss_client.get("/api/trips/not-an-id!")
+    assert resp.status_code == 404
+    resp = boss_client.put("/api/trips/abc123def456", json=trip_body())
+    assert resp.status_code == 404
+    resp = boss_client.delete("/api/trips/abc123def456")
+    assert resp.status_code == 404
 
 
 # ------------------------------------------------------------------ rights
@@ -234,30 +251,46 @@ def test_employee_sees_and_changes_only_own_trips(boss_client, member_client):
     mine = make_trip(member_client, title="my trip")
     ids = {t["id"] for t in member_client.get("/api/trips").json()}
     assert ids == {mine["id"]}
-    assert member_client.get(f"/api/trips/{boss_trip['id']}").status_code == 404  # not revealed
-    assert member_client.put(f"/api/trips/{boss_trip['id']}", json=trip_body()).status_code == 404
-    assert member_client.delete(f"/api/trips/{boss_trip['id']}").status_code == 404
-    assert member_client.get(f"/api/trips/{mine['id']}").status_code == 200
-    assert member_client.get(f"/api/trips/{mine['id']}/statement.pdf").status_code == 200
-    assert boss_client.get("/api/trips").status_code == 200  # the boss sees both
+    resp = member_client.get(f"/api/trips/{boss_trip['id']}")
+    assert resp.status_code == 404  # not revealed
+    resp = member_client.put(f"/api/trips/{boss_trip['id']}", json=trip_body())
+    assert resp.status_code == 404
+    resp = member_client.delete(f"/api/trips/{boss_trip['id']}")
+    assert resp.status_code == 404
+    resp = member_client.get(f"/api/trips/{mine['id']}")
+    assert resp.status_code == 200
+    resp = member_client.get(f"/api/trips/{mine['id']}/statement.pdf")
+    assert resp.status_code == 200
+    resp = boss_client.get("/api/trips")
+    assert resp.status_code == 200  # the boss sees both
 
 
 def test_accountant_reads_every_trip_and_changes_none(boss_client, accountant, member_client):
     trip = make_trip(member_client)
-    assert accountant.get("/api/trips").status_code == 200
-    assert accountant.get(f"/api/trips/{trip['id']}").status_code == 200
-    assert accountant.get(f"/api/trips/{trip['id']}/statement.pdf").status_code == 200
-    assert accountant.post("/api/trips", json=trip_body()).status_code == 403
-    assert accountant.post("/api/trips/preview", json=trip_body()).status_code == 403  # preview needs write (contract)
-    assert accountant.put(f"/api/trips/{trip['id']}", json=trip_body()).status_code == 403
-    assert accountant.delete(f"/api/trips/{trip['id']}").status_code == 403
+    resp = accountant.get("/api/trips")
+    assert resp.status_code == 200
+    resp = accountant.get(f"/api/trips/{trip['id']}")
+    assert resp.status_code == 200
+    resp = accountant.get(f"/api/trips/{trip['id']}/statement.pdf")
+    assert resp.status_code == 200
+    resp = accountant.post("/api/trips", json=trip_body())
+    assert resp.status_code == 403
+    resp = accountant.post("/api/trips/preview", json=trip_body())
+    assert resp.status_code == 403  # preview needs write (contract)
+    resp = accountant.put(f"/api/trips/{trip['id']}", json=trip_body())
+    assert resp.status_code == 403
+    resp = accountant.delete(f"/api/trips/{trip['id']}")
+    assert resp.status_code == 403
 
 
 def test_employee_cannot_reopen_but_the_boss_can(boss_client, member_client):
     mine = make_trip(member_client)
-    assert member_client.put(f"/api/trips/{mine['id']}", json=trip_body(**FINAL_OK, status="final")).status_code == 200
-    assert member_client.post(f"/api/trips/{mine['id']}/reopen").status_code == 403
-    assert boss_client.post(f"/api/trips/{mine['id']}/reopen").status_code == 200
+    resp = member_client.put(f"/api/trips/{mine['id']}", json=trip_body(**FINAL_OK, status="final"))
+    assert resp.status_code == 200
+    resp = member_client.post(f"/api/trips/{mine['id']}/reopen")
+    assert resp.status_code == 403
+    resp = boss_client.post(f"/api/trips/{mine['id']}/reopen")
+    assert resp.status_code == 200
 
 
 # ------------------------------------------------------------------ final lock
@@ -266,11 +299,16 @@ def test_final_trip_is_locked_until_the_boss_reopens_it(boss_client):
     fin = boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(**FINAL_OK, status="final", title="done"))
     assert fin.status_code == 200, fin.text
     assert fin.json()["status"] == "final"
-    assert boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(title="again")).status_code == 409
-    assert boss_client.delete(f"/api/trips/{trip['id']}").status_code == 409
-    assert boss_client.post(f"/api/trips/{trip['id']}/reopen").json()["status"] == "draft"
-    assert boss_client.post(f"/api/trips/{trip['id']}/reopen").status_code == 409  # not final any more
-    assert boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(title="again")).status_code == 200
+    resp = boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(title="again"))
+    assert resp.status_code == 409
+    resp = boss_client.delete(f"/api/trips/{trip['id']}")
+    assert resp.status_code == 409
+    resp = boss_client.post(f"/api/trips/{trip['id']}/reopen")
+    assert resp.json()["status"] == "draft"
+    resp = boss_client.post(f"/api/trips/{trip['id']}/reopen")
+    assert resp.status_code == 409  # not final any more
+    resp = boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(title="again"))
+    assert resp.status_code == 200
 
 
 def test_final_trip_keeps_its_stored_figures(boss_client):
@@ -376,8 +414,10 @@ def test_final_is_refused_while_checklist_lines_are_open_unless_forced(boss_clie
 
 
 def test_create_as_final_is_checked_the_same_way(boss_client):
-    assert boss_client.post("/api/trips", json=trip_body(status="final")).status_code == 409
-    assert boss_client.post("/api/trips?force=true", json=trip_body(status="final")).status_code == 200
+    resp = boss_client.post("/api/trips", json=trip_body(status="final"))
+    assert resp.status_code == 409
+    resp = boss_client.post("/api/trips?force=true", json=trip_body(status="final"))
+    assert resp.status_code == 200
 
 
 def test_checklist_states_and_bills_follow_the_linked_bills(boss_client):
@@ -438,21 +478,27 @@ def test_statement_says_draft_until_final(boss_client):
 # ------------------------------------------------------------------ review round 2: rights, lock, owner, preview
 def test_employee_gets_404_for_another_persons_statement(boss_client, member_client):
     boss_trip = make_trip(boss_client)
-    assert member_client.get(f"/api/trips/{boss_trip['id']}/statement.pdf").status_code == 404
+    resp = member_client.get(f"/api/trips/{boss_trip['id']}/statement.pdf")
+    assert resp.status_code == 404
 
 
 def test_accountant_cannot_reopen_and_unknown_ids_are_404(boss_client, accountant):
     final = boss_client.put(f"/api/trips/{make_trip(boss_client)['id']}", json=trip_body(**FINAL_OK, status="final"))
     assert final.status_code == 200
-    assert accountant.post(f"/api/trips/{final.json()['id']}/reopen").status_code == 403
-    assert accountant.get("/api/trips/abc123def456").status_code == 404
+    resp = accountant.post(f"/api/trips/{final.json()['id']}/reopen")
+    assert resp.status_code == 403
+    resp = accountant.get("/api/trips/abc123def456")
+    assert resp.status_code == 404
 
 
 def test_employee_cannot_change_a_final_trip_and_force_does_not_skip_the_lock(boss_client, member_client):
     mine = make_trip(member_client)
-    assert member_client.put(f"/api/trips/{mine['id']}", json=trip_body(**FINAL_OK, status="final")).status_code == 200
-    assert member_client.put(f"/api/trips/{mine['id']}", json=trip_body()).status_code == 409
-    assert member_client.delete(f"/api/trips/{mine['id']}").status_code == 409
+    resp = member_client.put(f"/api/trips/{mine['id']}", json=trip_body(**FINAL_OK, status="final"))
+    assert resp.status_code == 200
+    resp = member_client.put(f"/api/trips/{mine['id']}", json=trip_body())
+    assert resp.status_code == 409
+    resp = member_client.delete(f"/api/trips/{mine['id']}")
+    assert resp.status_code == 409
     forced = member_client.put(f"/api/trips/{mine['id']}?force=true", json=trip_body(**FINAL_OK, status="final"))
     assert forced.status_code == 409  # force skips only the checklist check, never the final lock
 
@@ -495,13 +541,17 @@ def test_expense_trip_id_rights_follow_the_trips_area(boss_client, accountant, a
 
     boss_trip = make_trip(boss_client)
     body = {"date": "2026-11-09", "net": 10, "vat": 0, "trip_id": boss_trip["id"]}
-    assert accountant.post("/api/expenses", json=body).status_code == 200  # trips read: all
+    resp = accountant.post("/api/expenses", json=body)
+    assert resp.status_code == 200  # trips read: all
     monkeypatch.setitem(rights.MATRIX["accountant"], "trips", (Scope.NONE, Scope.NONE))
-    assert accountant.post("/api/expenses", json=body).status_code == 422  # trips none -> unknown trip
+    resp = accountant.post("/api/expenses", json=body)
+    assert resp.status_code == 422  # trips none -> unknown trip
     monkeypatch.setitem(rights.MATRIX["accountant"], "trips", (Scope.LIMITED, Scope.NONE))
-    assert accountant.post("/api/expenses", json=body).status_code == 422  # limited: not their trip
+    resp = accountant.post("/api/expenses", json=body)
+    assert resp.status_code == 422  # limited: not their trip
     monkeypatch.setitem(rights.MATRIX["accountant"], "trips", (Scope.ALL, Scope.NONE))
-    assert accountant.post("/api/expenses", json=body).status_code == 200
+    resp = accountant.post("/api/expenses", json=body)
+    assert resp.status_code == 200
 
 
 def test_finance_across_a_year_boundary_books_allowance_per_day_and_mileage_at_start(boss_client, monkeypatch):
