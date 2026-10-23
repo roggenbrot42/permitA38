@@ -5,8 +5,9 @@ RRULE, EXDATE, RDATE, RECURRENCE-ID overrides and the common "free" markers (TRA
 X-MICROSOFT-CDO-BUSYSTATUS:FREE, STATUS:CANCELLED). Output is expanded occurrences inside the window, in UTC.
 
 What it does not do: write calendars, read VTODO/VJOURNAL, honour alarms or attendee status, or reproduce
-VTIMEZONE rules exactly. Known zone names use :mod:`zoneinfo`; an unknown custom zone uses the offset of its
-VTIMEZONE (approximate across DST changes, reported as a warning). Floating times use the default zone given by
+VTIMEZONE rules for every exotic case. Known zone names use :mod:`zoneinfo`, Windows names are mapped to IANA names
+(``WINDOWS_ZONES``), any other zone is evaluated from the STANDARD/DAYLIGHT rules of its VTIMEZONE; a zone that cannot
+be resolved falls back to the default zone and is reported as a warning. Floating times use the default zone given by
 the caller.
 
 Untrusted input: every input is bounded (bytes, lines, nesting, components, occurrences, periods, wall-clock time).
@@ -23,7 +24,14 @@ from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
-from permita38.core.service.calendar.recurrence import ExpansionLimit, RruleError, Rule, iter_dates, parse_rule
+from permita38.core.service.calendar.recurrence import (
+    ExpansionLimit,
+    RruleError,
+    Rule,
+    iter_dates,
+    parse_rule,
+    period_dates,
+)
 
 MAX_INPUT_BYTES = 5 * 1024 * 1024
 MAX_LINES = 150_000
@@ -203,32 +211,162 @@ def _fixed_offset(text: str) -> timezone | None:
     return timezone(-delta if m.group(1) == "-" else delta)
 
 
+WINDOWS_ZONES = {
+    "UTC": "UTC",
+    "GMT Standard Time": "Europe/London",
+    "Greenwich Standard Time": "Atlantic/Reykjavik",
+    "W. Europe Standard Time": "Europe/Berlin",
+    "Central Europe Standard Time": "Europe/Budapest",
+    "Central European Standard Time": "Europe/Warsaw",
+    "Romance Standard Time": "Europe/Paris",
+    "E. Europe Standard Time": "Europe/Chisinau",
+    "FLE Standard Time": "Europe/Kiev",
+    "GTB Standard Time": "Europe/Bucharest",
+    "Turkey Standard Time": "Europe/Istanbul",
+    "Russian Standard Time": "Europe/Moscow",
+    "Israel Standard Time": "Asia/Jerusalem",
+    "Egypt Standard Time": "Africa/Cairo",
+    "South Africa Standard Time": "Africa/Johannesburg",
+    "Arab Standard Time": "Asia/Riyadh",
+    "Arabian Standard Time": "Asia/Dubai",
+    "India Standard Time": "Asia/Kolkata",
+    "China Standard Time": "Asia/Shanghai",
+    "Singapore Standard Time": "Asia/Singapore",
+    "Tokyo Standard Time": "Asia/Tokyo",
+    "Korea Standard Time": "Asia/Seoul",
+    "AUS Eastern Standard Time": "Australia/Sydney",
+    "E. Australia Standard Time": "Australia/Brisbane",
+    "New Zealand Standard Time": "Pacific/Auckland",
+    "Eastern Standard Time": "America/New_York",
+    "Central Standard Time": "America/Chicago",
+    "Mountain Standard Time": "America/Denver",
+    "US Mountain Standard Time": "America/Phoenix",
+    "Pacific Standard Time": "America/Los_Angeles",
+    "Alaskan Standard Time": "America/Anchorage",
+    "Hawaiian Standard Time": "Pacific/Honolulu",
+    "Atlantic Standard Time": "America/Halifax",
+    "Canada Central Standard Time": "America/Regina",
+    "E. South America Standard Time": "America/Sao_Paulo",
+    "Argentina Standard Time": "America/Argentina/Buenos_Aires",
+    "SA Pacific Standard Time": "America/Bogota",
+    "Mexico Standard Time": "America/Mexico_City",
+}
+
+
+@dataclass(frozen=True)
+class _Rule:
+    """One STANDARD/DAYLIGHT sub-component of a VTIMEZONE."""
+
+    offset_from: timedelta
+    offset_to: timedelta
+    start: datetime  # first transition, wall clock in ``offset_from``
+    rule: Rule | None
+    rdates: tuple[datetime, ...]
+
+
+class _VTimeZone(tzinfo):
+    """A zone evaluated from the VTIMEZONE rules of the file (for names that are not IANA names)."""
+
+    def __init__(self, rules: list[_Rule]):
+        self.rules = rules
+
+    def _transitions(self, year: int) -> list[tuple[datetime, timedelta]]:
+        out: list[tuple[datetime, timedelta]] = []
+        for r in self.rules:
+            times: list[datetime] = [r.start] if r.start.year == year else []
+            times += [d for d in r.rdates if d.year == year]
+            if r.rule is not None and r.start.year <= year:
+                try:
+                    for day in _vtz_dates(r.rule, r.start.date(), year):
+                        times.append(datetime.combine(day, r.start.time()))
+                except (ValueError, OverflowError):
+                    pass
+            out += [(t, r.offset_to) for t in times]
+        return sorted(out)
+
+    def utcoffset(self, dt: datetime | None) -> timedelta:
+        if dt is None:
+            return timedelta(0)
+        wall = dt.replace(tzinfo=None)
+        chosen: timedelta | None = None
+        for year in range(wall.year - 1, wall.year + 1):
+            for when, offset in self._transitions(year):
+                if when <= wall:
+                    chosen = offset
+        if chosen is None:  # before the first transition: the "from" offset of the earliest rule
+            chosen = min(self.rules, key=lambda r: r.start).offset_from
+        return chosen
+
+    def dst(self, dt: datetime | None) -> timedelta | None:
+        return None
+
+    def tzname(self, dt: datetime | None) -> str | None:
+        return None
+
+
+def _vtz_dates(rule: Rule, start: date, year: int) -> list[date]:
+    out = [d for d in period_dates(rule, start, year - start.year) if d.year == year]
+    return out
+
+
+def _vtz_stamp(text: str) -> datetime | None:
+    m = re.fullmatch(r"(\d{8})T(\d{6})Z?", text.strip().upper())
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+
+
+def _vtimezone(comp: _Comp) -> tzinfo | None:
+    rules: list[_Rule] = []
+    for child in comp.children:
+        if child.name not in ("STANDARD", "DAYLIGHT"):
+            continue
+        props = {p.name: p for p in child.props}
+        start = _vtz_stamp(props["DTSTART"].value) if "DTSTART" in props else None
+        off_to = _fixed_offset(props["TZOFFSETTO"].value) if "TZOFFSETTO" in props else None
+        off_from = _fixed_offset(props["TZOFFSETFROM"].value) if "TZOFFSETFROM" in props else None
+        if start is None or off_to is None or off_from is None:
+            continue
+        rule = None
+        if "RRULE" in props:
+            try:
+                rule = parse_rule(props["RRULE"].value)
+            except RruleError:
+                rule = None
+        rdates = tuple(
+            d
+            for p in child.props
+            if p.name == "RDATE"
+            for v in _split_values(p.value)[:100]
+            if (d := _vtz_stamp(v)) is not None
+        )
+        rules.append(_Rule(off_from.utcoffset(None), off_to.utcoffset(None), start, rule, rdates))
+    if not rules:
+        return None
+    if len(rules) == 1 and rules[0].rule is None and not rules[0].rdates:
+        return timezone(rules[0].offset_to)
+    return _VTimeZone(rules[:20])
+
+
 class _Zones:
-    """Resolves TZID names: IANA names via zoneinfo, otherwise the offset of the matching VTIMEZONE."""
+    """Resolves TZID names: IANA names via zoneinfo, Windows names via a table, otherwise the file's VTIMEZONE."""
 
     def __init__(self, default: tzinfo, warnings: list[str]):
         self.default = default
         self.warnings = warnings
         self.custom: dict[str, tzinfo] = {}
-        self.approximate: dict[str, bool] = {}
         self._cache: dict[str, tzinfo] = {}
 
     def add_vtimezone(self, comp: _Comp) -> None:
         tzid = next((p.value.strip().strip('"') for p in comp.props if p.name == "TZID"), "")
-        offsets = []
-        for child in comp.children:
-            if child.name not in ("STANDARD", "DAYLIGHT"):
-                continue
-            for prop in child.props:
-                if prop.name == "TZOFFSETTO":
-                    offsets.append((child.name, _fixed_offset(prop.value)))
-        if not tzid or not offsets:
+        if not tzid or tzid in self.custom:
             return
-        standard = [o for name, o in offsets if name == "STANDARD" and o is not None]
-        chosen = (standard or [o for _, o in offsets if o is not None])[-1:]
-        if chosen:
-            self.custom.setdefault(tzid, chosen[0])
-            self.approximate[tzid] = len(offsets) > 1
+        zone = _vtimezone(comp)
+        if zone is not None:
+            self.custom[tzid] = zone
 
     def resolve(self, tzid: str | None) -> tzinfo:
         if not tzid:
@@ -242,11 +380,10 @@ class _Zones:
                 zone = ZoneInfo(name)
             except (ValueError, KeyError, OSError):
                 zone = None
+        if zone is None and name in WINDOWS_ZONES:
+            zone = ZoneInfo(WINDOWS_ZONES[name])
         if zone is None:
-            key = name if name in self.custom else tzid.strip().strip('"')
-            zone = self.custom.get(key)
-            if zone is not None and self.approximate.get(key):
-                self.warnings.append("approximate_timezone")
+            zone = self.custom.get(name) or self.custom.get(tzid.strip().strip('"'))
         if zone is None:
             self.warnings.append("unknown_timezone")
             zone = self.default
@@ -471,7 +608,7 @@ def _expand(master: _Master, overrides: set[str], ctx: _Context) -> list[tuple[_
             if rule.count is not None and generated + 1 > rule.count:
                 break
             if generated > MAX_GENERATED:
-                raise IcsError("too_complex", "A recurring event has too many occurrences.")
+                raise ExpansionLimit()
             key = stamp.key()
             if key in seen:
                 continue
@@ -544,6 +681,35 @@ def parse_ics(
     deadline_seconds: float = DEFAULT_DEADLINE_SECONDS,
     clock: Callable[[], float] = time.monotonic,
 ) -> ParseResult:
+    """Busy occurrences of a calendar inside ``window``, expanded and in UTC. Raises only :class:`IcsError`."""
+    try:
+        return _parse_ics(
+            data,
+            default_tz=default_tz,
+            window=window,
+            include_keywords=include_keywords,
+            exclude_keywords=exclude_keywords,
+            deadline_seconds=deadline_seconds,
+            clock=clock,
+        )
+    except IcsError:
+        raise
+    except RecursionError:
+        raise IcsError("too_deep", "The calendar is nested too deeply.") from None
+    except Exception:  # whatever hostile input does, the caller sees one stable error and no details
+        raise IcsError("invalid_ics", "This is not an iCalendar (.ics) file.") from None
+
+
+def _parse_ics(
+    data: bytes,
+    *,
+    default_tz: tzinfo,
+    window: tuple[datetime, datetime],
+    include_keywords: Iterable[str] = (),
+    exclude_keywords: Iterable[str] = (),
+    deadline_seconds: float = DEFAULT_DEADLINE_SECONDS,
+    clock: Callable[[], float] = time.monotonic,
+) -> ParseResult:
     """Busy occurrences of a calendar that fall inside ``window`` (aware datetimes), expanded and in UTC.
 
     Keyword filters match SUMMARY and CATEGORIES case-insensitively (substring). Raises :class:`IcsError`.
@@ -603,7 +769,9 @@ def parse_ics(
             for stamp, _key in _expand(master, set(uid_overrides), ctx):
                 out.append(_occurrence(master, stamp, None))
         except ExpansionLimit:
-            raise IcsError("too_complex", "The calendar is too complex to process in time.") from None
+            ctx.check_time()  # the whole budget is gone: refuse the calendar; otherwise skip only this event
+            warnings.append("event_too_complex")
+            continue
         except (ValueError, OverflowError):
             warnings.append("out_of_range")
             continue
@@ -613,8 +781,11 @@ def parse_ics(
         for key, ov in by_key.items():
             if ov is None or ov.cancelled or ov.transparent or not ctx.keep(ov.summary, ov.categories):
                 continue
-            if ctx.in_window(ov.start, _end_of(ov.start, ov.duration)):
-                out.append(_occurrence(ov, ov.start, key))
+            try:
+                if ctx.in_window(ov.start, _end_of(ov.start, ov.duration)):
+                    out.append(_occurrence(ov, ov.start, key))
+            except (ValueError, OverflowError):  # a date past the calendar range
+                warnings.append("out_of_range")
     if len(out) > MAX_OCCURRENCES:
         raise IcsError("too_many_events", "The calendar has too many events in the period (max 20,000).")
     out.sort(key=lambda o: (o.start, o.uid, o.recurrence_id or ""))

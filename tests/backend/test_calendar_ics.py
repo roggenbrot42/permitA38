@@ -394,13 +394,12 @@ def test_google_style_export_golden():
 def test_outlook_style_export_with_windows_zone_names_golden():
     raw = (FIXTURES / "outlook_style.ics").read_bytes()
     result = parse_ics(raw, default_tz=BERLIN, window=(utc(2026, 3, 1), utc(2026, 4, 30)))
-    # "W. Europe Standard Time" is not an IANA name: the VTIMEZONE offset (+01:00, standard time) is used and the
-    # result is flagged as approximate. 24 Mar is still standard time: 09:30 local = 08:30 UTC.
+    # "W. Europe Standard Time" is a Windows name: it maps to Europe/Berlin. 24 Mar is still standard time.
     assert [(o.start, o.end, o.all_day, o.summary, o.ooo) for o in result.occurrences] == [
         ("2026-03-24T08:30:00Z", "2026-03-24T09:15:00Z", False, "Design review (fake)", False),
         ("2026-03-30", "2026-03-31", True, "Holiday (fake, out of office)", True),
     ]
-    assert "approximate_timezone" in result.warnings
+    assert result.warnings == ()
 
 
 @settings(max_examples=100, deadline=None)
@@ -464,3 +463,88 @@ def test_huge_count_is_bounded_by_the_window_not_rejected(count):
     window = (datetime(2026, 9, 1, tzinfo=UTC), datetime(2026, 9, 11, tzinfo=UTC))
     result = parse_ics(data, default_tz=ZoneInfo("UTC"), window=window)
     assert [o.start for o in result.occurrences] == [f"2026-09-{d:02d}T10:00:00Z" for d in range(1, 11)]
+
+
+def _vtz_ics(tzid: str, start_line: str = "DTSTART;TZID={tzid}:20250715T090000") -> bytes:
+    return (
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTIMEZONE\r\nTZID:" + tzid + "\r\n"
+        "BEGIN:STANDARD\r\nDTSTART:16010101T030000\r\nTZOFFSETFROM:+0200\r\nTZOFFSETTO:+0100\r\n"
+        "RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=10\r\nEND:STANDARD\r\n"
+        "BEGIN:DAYLIGHT\r\nDTSTART:16010101T020000\r\nTZOFFSETFROM:+0100\r\nTZOFFSETTO:+0200\r\n"
+        "RRULE:FREQ=YEARLY;INTERVAL=1;BYDAY=-1SU;BYMONTH=3\r\nEND:DAYLIGHT\r\nEND:VTIMEZONE\r\n"
+        "BEGIN:VEVENT\r\nUID:z\r\n" + start_line.format(tzid=tzid) + "\r\nDURATION:PT1H\r\nEND:VEVENT\r\n"
+        "END:VCALENDAR\r\n"
+    ).encode()
+
+
+@pytest.mark.parametrize("tzid", ["W. Europe Standard Time", "Custom Office Zone"])
+def test_windows_and_custom_zones_follow_daylight_saving_golden(tzid):
+    """09:00 in July is CEST (UTC+2) = 07:00Z; the old code took the last STANDARD offset and was an hour off."""
+    window = (utc(2025, 1, 1), utc(2026, 1, 1))
+    result = parse_ics(_vtz_ics(tzid), default_tz=UTC, window=window)
+    assert [o.start for o in result.occurrences] == ["2025-07-15T07:00:00Z"]
+    winter = _vtz_ics(tzid, "DTSTART;TZID={tzid}:20250115T090000")
+    assert [o.start for o in parse_ics(winter, default_tz=UTC, window=window).occurrences] == ["2025-01-15T08:00:00Z"]
+    # the changeover days: last Sunday of March 2025 is the 30th (02:00 -> 03:00), of October the 26th
+    for local, expected in (("20250330T040000", "02:00"), ("20250329T040000", "03:00"), ("20251026T040000", "03:00")):
+        got = parse_ics(_vtz_ics(tzid, "DTSTART;TZID={tzid}:" + local), default_tz=UTC, window=window)
+        assert got.occurrences[0].start[11:16] == expected
+
+
+def _cal(body: str) -> str:
+    return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" + body + "END:VCALENDAR\r\n"
+
+
+def test_overflowing_override_is_skipped_not_fatal():
+    raw = _cal(
+        "BEGIN:VEVENT\r\nUID:o\r\nDTSTART:20261105T100000Z\r\nDURATION:PT1H\r\nRRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nUID:o\r\nRECURRENCE-ID:20261106T100000Z\r\nDTSTART:99991231T230000Z\r\nDURATION:PT2H\r\nEND:VEVENT\r\n"
+    )
+    result = parse_ics(raw.encode(), default_tz=UTC, window=(utc(2026, 11, 1), utc(2026, 12, 1)))
+    assert [o.start for o in result.occurrences] == ["2026-11-05T10:00:00Z", "2026-11-07T10:00:00Z"]
+
+
+def test_pathological_event_is_skipped_with_a_warning_and_the_rest_survives():
+    raw = _cal(
+        "BEGIN:VEVENT\r\nUID:bad\r\nDTSTART:20261105T100000Z\r\nDURATION:PT1H\r\nRRULE:FREQ=MONTHLY;BYMONTH=2;BYMONTHDAY=31\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nUID:old\r\nDTSTART:00010101T100000Z\r\nDURATION:PT1H\r\nRRULE:FREQ=DAILY\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nUID:ok\r\nDTSTART:20261110T100000Z\r\nDURATION:PT1H\r\nEND:VEVENT\r\n"
+    )
+    result = parse_ics(raw.encode(), default_tz=UTC, window=(utc(2026, 11, 1), utc(2026, 12, 1)))
+    assert [o.uid for o in result.occurrences] == ["ok"]
+    assert "event_too_complex" in result.warnings
+
+
+def test_yearly_byday_without_bymonth_counts_within_the_year():
+    raw = _cal(
+        "BEGIN:VEVENT\r\nUID:y\r\nDTSTART:20260105T100000Z\r\nDURATION:PT1H\r\nRRULE:FREQ=YEARLY;BYDAY=1MO;COUNT=3\r\nEND:VEVENT\r\n"
+    )
+    result = parse_ics(raw.encode(), default_tz=UTC, window=(utc(2026, 1, 1), utc(2029, 1, 1)))
+    assert [o.start[:10] for o in result.occurrences] == ["2026-01-05", "2027-01-04", "2028-01-03"]
+
+
+def test_range_thisandfuture_is_not_supported_and_overrides_only_the_named_instance():
+    """Pinned limitation (documented): RANGE=THISANDFUTURE changes just the instance named by RECURRENCE-ID."""
+    raw = _cal(
+        "BEGIN:VEVENT\r\nUID:r\r\nDTSTART:20261105T100000Z\r\nDURATION:PT1H\r\nRRULE:FREQ=DAILY;COUNT=3\r\nEND:VEVENT\r\n"
+        "BEGIN:VEVENT\r\nUID:r\r\nRECURRENCE-ID;RANGE=THISANDFUTURE:20261106T100000Z\r\nDTSTART:20261106T150000Z\r\n"
+        "DURATION:PT1H\r\nEND:VEVENT\r\n"
+    )
+    result = parse_ics(raw.encode(), default_tz=UTC, window=(utc(2026, 11, 1), utc(2026, 12, 1)))
+    assert [o.start for o in result.occurrences] == [
+        "2026-11-05T10:00:00Z",
+        "2026-11-06T15:00:00Z",
+        "2026-11-07T10:00:00Z",
+    ]
+
+
+def test_garbage_that_slips_past_every_check_is_still_one_stable_error(monkeypatch):
+    import permita38.core.service.calendar.ics as mod
+
+    def boom(*a, **k):
+        raise KeyError("x")
+
+    monkeypatch.setattr(mod, "_tree", boom)
+    with pytest.raises(IcsError) as err:
+        parse_ics(b"BEGIN:VCALENDAR\r\nEND:VCALENDAR", default_tz=UTC, window=(utc(2026, 1, 1), utc(2027, 1, 1)))
+    assert err.value.code == "invalid_ics"

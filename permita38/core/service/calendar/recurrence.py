@@ -148,7 +148,21 @@ def _month_days(rule: Rule, year: int, month: int, start: date, explicit: bool) 
     return out
 
 
-def _period_dates(rule: Rule, start: date, index: int) -> list[date]:
+def _year_days(rule: Rule, year: int) -> list[date]:
+    """BYDAY in a YEARLY rule without BYMONTH/BYMONTHDAY: "1MO" is the first Monday of the year, "-1FR" the last."""
+    first, last = date(year, 1, 1), date(year, 12, 31)
+    total = (last - first).days + 1
+    out: set[date] = set()
+    for weekday, ordinal in rule.byday:
+        matching = [first + timedelta(days=i) for i in range(total) if (first + timedelta(days=i)).weekday() == weekday]
+        if ordinal is None:
+            out.update(matching)
+        elif 0 < abs(ordinal) <= len(matching):
+            out.add(matching[ordinal - 1] if ordinal > 0 else matching[ordinal])
+    return sorted(out)
+
+
+def period_dates(rule: Rule, start: date, index: int) -> list[date]:
     step = index * rule.interval
     if rule.freq == "DAILY":
         day = start + timedelta(days=step)
@@ -168,6 +182,8 @@ def _period_dates(rule: Rule, start: date, index: int) -> list[date]:
         return _month_days(rule, year, month + 1, start, explicit)
     # YEARLY
     year = start.year + step
+    if rule.byday and not rule.bymonth and not rule.bymonthday:
+        return _year_days(rule, year)  # RFC 5545: without BYMONTH an ordinal counts within the whole year
     explicit = bool(rule.bymonthday or rule.byday)
     months = rule.bymonth or (tuple(range(1, 13)) if explicit else (start.month,))
     out: list[date] = []
@@ -185,7 +201,7 @@ def iter_dates(rule: Rule, start: date, clock: Callable[[], float], deadline: fl
         if index % 256 == 255 and clock() > deadline:
             raise ExpansionLimit()
         try:
-            dates = _period_dates(rule, start, index)
+            dates = period_dates(rule, start, index)
         except (
             ValueError,
             OverflowError,
