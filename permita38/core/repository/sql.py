@@ -435,7 +435,7 @@ class SQLRepository(Repository):
     # ------------------------------------------------------------------ attachments (files)
     def save_attachment(self, filename: str, blob: bytes) -> str:
         ext = os.path.splitext(filename)[1].lower()
-        if not re.match(r"^\.[a-z0-9]{1,5}$", ext):
+        if not re.fullmatch(r"\.[a-z0-9]{1,5}", ext):
             ext = ".bin"
         name = new_id() + ext
         folder = self.data_dir / "attachments"
@@ -446,7 +446,7 @@ class SQLRepository(Repository):
         return name
 
     def attachment_path(self, name: str) -> str | None:
-        if not re.match(r"^[0-9a-z]{6,32}\.[a-z0-9]{1,5}$", name):
+        if not re.fullmatch(r"[0-9a-z]{6,32}\.[a-z0-9]{1,5}", name):
             return None
         p = self.data_dir / "attachments" / name
         return str(p) if p.is_file() else None

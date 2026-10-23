@@ -1,4 +1,5 @@
 import os
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, UploadFile
@@ -27,6 +28,11 @@ ATTACHMENT_CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
 
 class Uploaded(BaseModel):
     name: str
+
+
+def _quoted(name: str) -> str:
+    """A quoted-string filename for Content-Disposition: backslash, quote and CR/LF are removed, never passed on."""
+    return re.sub(r'[\\"\r\n]', "", name)
 
 
 def _magic_ok(ext: str, blob: bytes) -> bool:
@@ -65,5 +71,5 @@ def download(name: str, _: Annotated[dict, Needs("attachments")], services: Serv
     ext = os.path.splitext(name)[1]
     if ext in INLINE_TYPES:
         return FileResponse(path, media_type=INLINE_TYPES[ext], headers=headers)
-    headers["Content-Disposition"] = f'attachment; filename="{name}"'
+    headers["Content-Disposition"] = f'attachment; filename="{_quoted(name)}"'
     return FileResponse(path, media_type="application/octet-stream", headers=headers)
