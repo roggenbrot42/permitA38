@@ -328,6 +328,8 @@ class SafeFetcher:
             parsed = parse_url(current, self.allowed_ports)
             if https_only and parsed.scheme != "https":
                 raise FetchError("insecure_url", "Only https:// addresses are accepted here.")
+            if https_only and parsed.port != 443:
+                raise FetchError("invalid_url", "Only the standard https port is accepted here.")
             key = f"{parsed.scheme}://{parsed.host}:{parsed.port}{parsed.target}"
             if key in visited:
                 raise FetchError("redirect_loop", "The website redirects in a loop.")

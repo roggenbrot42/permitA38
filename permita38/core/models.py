@@ -533,6 +533,7 @@ class CalendarEventOut(BaseModel):
     source_id: str | None = None
     source_name: str | None = None
 
+
 # ---- planning: what-if changes and named scenarios -------------------------------------------------------------
 class AbsenceChange(BaseModel):
     """Changes one absence (``id`` given) or adds one (no ``id``). ``delete`` removes an existing one."""

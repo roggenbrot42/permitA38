@@ -334,3 +334,15 @@ def test_oversized_validators_from_the_server_are_not_stored(app, boss_client, f
     fake.etag = '"' + "x" * 400 + '"'
     sid = connect(boss_client).json()["id"]
     assert app.state.services.store.get("calendar_sources", sid).get("etag") is None
+
+
+def test_old_full_import_is_revalidated_without_conditional_headers(app, boss_client, fake):
+    """A 304 would keep a stored window that slides out of date: after a day the full file is fetched again."""
+    source = connect(boss_client).json()
+    store = app.state.services.store
+    row = store.get("calendar_sources", source["id"])
+    row["imported_at"] = int(row["imported_at"]) - 2 * 24 * 3600
+    store.save("calendar_sources", row)
+    r = boss_client.post(f"/api/calendars/{source['id']}/refresh")
+    assert r.json()["last_status"] == "ok"
+    assert fake.calls[-1]["conditional"] == {}

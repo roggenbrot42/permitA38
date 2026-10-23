@@ -96,3 +96,9 @@ def test_redirect_into_a_private_address_is_refused(site):
     with pytest.raises(FetchError) as err:
         download(make_fetcher(site), site.url("/go.ics"))
     assert err.value.code == "blocked_address"
+
+
+def test_https_on_port_80_is_refused_when_https_is_required(site):
+    with pytest.raises(FetchError) as err:
+        download(make_fetcher(site), "https://calendar.example.test:80/a.ics", https_only=True)
+    assert err.value.code == "invalid_url"

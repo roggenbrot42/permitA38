@@ -32,6 +32,7 @@ DEFAULT_REFRESH_MINUTES = 360
 MIN_REFRESH_MINUTES = 15
 MAX_REFRESH_MINUTES = 10080
 MAX_SOURCES = 20
+FULL_REFETCH_SECONDS = 24 * 3600  # conditional requests are used for at most a day after the last full import
 PAST_DAYS = 30  # the stored horizon: 30 days back ...
 FUTURE_DAYS = 548  # ... and about 18 months ahead
 REDACTED_TITLE = "Busy"
@@ -313,7 +314,11 @@ class CalendarService:
         """Refresh every subscription now (used by ``permita38 calendar refresh``). Returns (name, status) pairs."""
         out = []
         for src in self.store.list("calendar_sources"):
-            if src.get("kind") != "ics_url" or not src.get("user_id") or self.store.get("users", src["user_id"]) is None:
+            if (
+                src.get("kind") != "ics_url"
+                or not src.get("user_id")
+                or self.store.get("users", src["user_id"]) is None
+            ):
                 continue
             if self._begin(src["id"]):
                 try:
@@ -349,10 +354,11 @@ class CalendarService:
     def _refresh_source(self, src: dict) -> None:
         now = self._clock()
         owner = self.store.get("users", src["user_id"]) or {}
+        # a "not modified" answer would keep a stored window that slides out of date: revalidate the full file regularly
+        fresh = now - (src.get("imported_at") or 0) < FULL_REFETCH_SECONDS
+        conditional = {"etag": src.get("etag"), "last_modified": src.get("last_modified")} if fresh else None
         try:
-            events, etag, last_modified = self._download(
-                src["url"], owner, src, conditional={"etag": src.get("etag"), "last_modified": src.get("last_modified")}
-            )
+            events, etag, last_modified = self._download(src["url"], owner, src, conditional=conditional)
         except ServiceError as err:
             self._record_failure(src, err.message, now)
             return
@@ -428,7 +434,7 @@ class CalendarService:
                 for occ in occurrences
             ]
             self.store.save_many("calendar_events", rows)
-            src.update(event_count=len(rows), last_fetched=stamp)
+            src.update(event_count=len(rows), last_fetched=stamp, imported_at=stamp)
             return self.store.save("calendar_sources", src)
 
     # ----------------------------------------------------------------------------- read models
