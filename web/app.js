@@ -26,7 +26,7 @@ api.onUnauthorized = () => { if (S.me) S.expired = true; S.me = null; render(); 
 function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.className = 'on' + (err ? ' err' : ''); clearTimeout(toast.t); toast.t = setTimeout(() => t.className = '', err ? 4000 : 1800); }
 const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message, true); } };
 
-const COLL_AREA = { customers: 'customers', projects: 'projects', tasks: 'projects', entries: 'time', contracts: 'contracts', absences: 'absences', offers: 'offers', invoices: 'invoices', expenses: 'expenses', users: 'team' };
+const COLL_AREA = { customers: 'customers', projects: 'projects', tasks: 'projects', entries: 'time', contracts: 'contracts', absences: 'absences', offers: 'offers', invoices: 'invoices', expenses: 'expenses', trips: 'trips', users: 'team' };
 async function loadAll(only) {
   const colls = (only || Object.keys(COLL_AREA)).filter(c => can(COLL_AREA[c]));
   const res = await Promise.all(colls.map(c => api('GET', c)));
@@ -137,7 +137,7 @@ function entryForm(e = {}, after) {
 /* ---------- layout + router ---------- */
 /* nav: [route, icon, label, area needed to see it, 'write' if it needs write access (or 'all' when the read scope must be all, not a restricted view)] */
 const NAV = [['today', '⏱', 'Today', 'timer'], ['time', '🗓', 'Timesheet', 'time', 'write'], ['timeoff', '🏖', 'Time off', 'absences'], ['plan', '📈', 'Planning', 'planning'], ['customers', '👥', 'Customers', 'customers'], ['projects', '📁', 'Projects', 'projects', 'all'],
-  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['money', '💶', 'Money & Taxes', 'finance'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['settings', '⚙️', 'Settings', 'settings', 'all']];
+  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['trips', '🧳', 'Business trips', 'trips'], ['money', '💶', 'Money & Taxes', 'finance'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['settings', '⚙️', 'Settings', 'settings', 'all']];
 const navAllowed = ([, , , area, need]) => (need === 'write' ? can(area, 'write') : need === 'all' ? scopeOf(area) === 'all' : can(area));
 const navFor = () => NAV.filter(n => navAllowed(n) && !(n[0] === 'timeoff' && can('planning')));
 /* which area (and, for the read-only lock, which write area) a page belongs to */
@@ -150,7 +150,7 @@ const ROLE_LABEL = { boss: 'Boss', employee: 'Employee', accountant: 'Accountant
 function route() { const [p, ...a] = (location.hash.replace(/^#\/?/, '') || 'today').split('/'); return [p, a]; }
 function deny() { toast('Not available for your role'); const first = navFor()[0]; location.hash = '#/' + (first ? first[0] : 'today'); }
 /* a page whose area the role may read but not write: take the write controls away */
-const WRITE_ACTIONS = ['editCustomer', 'newDoc', 'billTime', 'billTimeInto', 'editProject', 'editTask', 'docSave', 'docFinalize', 'docAccept', 'docToInvoice', 'addLine', 'saveSettings', 'editTemplate', 'editUser', 'delLine', 'docPdfDelete'];
+const WRITE_ACTIONS = ['editCustomer', 'newDoc', 'billTime', 'billTimeInto', 'editProject', 'editTask', 'docSave', 'docFinalize', 'docAccept', 'docToInvoice', 'addLine', 'saveSettings', 'editTemplate', 'editUser', 'delLine', 'docPdfDelete', 'newTrip'];
 function lockPage(root, p) {
   root.querySelectorAll('[data-a]').forEach(el => { if (WRITE_ACTIONS.includes(el.dataset.a)) { if (el.tagName === 'TR') { delete el.dataset.a; el.classList.remove('click'); } else el.remove(); } });
   root.querySelectorAll('[data-change="docStatus"]').forEach(el => el.remove());
