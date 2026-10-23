@@ -9,7 +9,7 @@ Migrations are numbered SQL files, one folder per supported SQL dialect::
 Rules (enforced by tests):
 
 * every migration exists for every dialect folder, with the same number and name,
-* numbers are contiguous, starting at 1,
+* numbers are contiguous, starting at 1 (except revisions listed in ``RESERVED_REVISIONS``),
 * ``CURRENT_REVISION`` equals the highest migration number.
 
 Add a migration with ``permita38 create-migration <name>`` (creates the next file in every dialect
@@ -21,7 +21,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 #: Revision of the schema this version of the app expects. Bump together with a new migration file.
-CURRENT_REVISION = 2
+CURRENT_REVISION = 5
+
+#: Migration numbers reserved by other feature branches that are not merged into this one yet (roles = 3,
+#: accounting = 4). The gap check below tolerates them so this branch can ship migration 0005 on its own; the merge
+#: of those branches makes the set empty again (set it to ``frozenset()`` when resolving the merge).
+RESERVED_REVISIONS: frozenset[int] = frozenset({3, 4})
 
 MIGRATIONS_DIR = Path(__file__).parent / "schema" / "migrations"
 DIALECT_NAMES = ("sqlite", "postgresql", "mariadb")
@@ -46,9 +51,13 @@ def list_migrations(dialect: str, directory: Path | None = None) -> list[Migrati
         if not m:
             raise ValueError(f"bad migration file name: {p} (expected 0001_name.sql)")
         found.append(Migration(int(m.group(1)), m.group(2), p))
-    for i, mig in enumerate(found, start=1):
-        if mig.version != i:
+    expected = 1
+    for mig in found:
+        while expected in RESERVED_REVISIONS and mig.version > expected:
+            expected += 1
+        if mig.version != expected:
             raise ValueError(f"migrations in {folder} must be numbered 1..n without gaps (found {mig.path.name})")
+        expected += 1
     return found
 
 

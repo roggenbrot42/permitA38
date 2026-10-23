@@ -60,7 +60,7 @@ _EXTRA = ""  # the `extra` JSON column is added implicitly (Table.extra_column)
 _DOCUMENT = (
     "number:str customer_id:id project_id:id status:str date:str due_date:str valid_until:str paid_date:str "
     "service_from:str service_to:str title:str reference:str template_id:str language:str intro:text outro:text "
-    "notes:text vat_rate:float lines:json plan:json offer_id:id"
+    "notes:text vat_rate:float lines:json plan:json offer_id:id vat_treatment:str"
 )
 
 
@@ -128,7 +128,7 @@ TABLES: dict[str, Table] = {
             "expenses",
             _cols(
                 _BASE + "date:str net:float vat:float vat_rate:float vendor:str description:text category:str "
-                "project_id:id deductible:float attachment:str" + _EXTRA
+                "project_id:id deductible:float attachment:str vat_treatment:str supplier_country:str" + _EXTRA
             ),
             (Index("idx_expenses_date", ("date",)), Index("idx_expenses_project", ("project_id",))),
         ),
@@ -152,11 +152,19 @@ TABLES: dict[str, Table] = {
             "timers",
             _cols(_BASE + "running:bool started:int project_id:id task_id:id note:text" + _EXTRA),
         ),
+        Table(
+            "vat_returns",
+            _cols(
+                _BASE + "period:str year:int status:str submitted_on:str reference:str note:text total:float "
+                "data:json" + _EXTRA
+            ),
+            (Index("idx_vat_returns_period", ("period",)), Index("idx_vat_returns_year", ("year",))),
+        ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
 }
 
 # internal per-user collections that are not exposed through the CRUD API
-INTERNAL_COLLECTIONS = ["timers"]
+INTERNAL_COLLECTIONS = ["timers", "vat_returns"]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]

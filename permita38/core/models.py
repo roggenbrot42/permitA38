@@ -4,7 +4,7 @@ other devices survive a round-trip through this version."""
 import re
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from . import validation as v
 from .holidays import STATES
@@ -99,6 +99,8 @@ class Expense(Record):
     project_id: str | None = None
     deductible: float = 100
     attachment: str | None = None
+    vat_treatment: str | None = None
+    supplier_country: str | None = None
 
 
 class Line(BaseModel):
@@ -145,6 +147,7 @@ class Document(Record):
     lines: list[Line] = []
     plan: Plan | None = None
     offer_id: str | None = None
+    vat_treatment: str | None = None
 
 
 class Template(Record):
@@ -231,6 +234,10 @@ class Settings(BaseModel):
     splitting: bool = False
     other_income: float = 0
     other_deductions: float = 0
+    vat_period: str = "quarterly"
+    vat_taxation: str = ""
+    dauerfristverlaengerung: bool = False
+    vat_prepayment_special: float = 0
 
 
 # ======================================================================================================
@@ -238,6 +245,17 @@ class Settings(BaseModel):
 # (a record stored by an older version or another device must never turn a *response* into an error).
 # ======================================================================================================
 DOC_STATUS = Literal["draft", "sent", "accepted", "rejected", "paid", "cancelled"]
+#: how an invoice is treated in the VAT return (empty = derived from the customer's country and VAT id)
+DOC_VAT_TREATMENT = Literal[
+    "standard", "reverse_charge_domestic", "eu_b2b_service", "eu_supply", "export", "non_taxable_abroad",
+    "tax_free_no_deduction",
+]  # fmt: skip
+#: how a bill is treated in the VAT return (empty = domestic purchase, input VAT in `vat`)
+EXPENSE_VAT_TREATMENT = Literal[
+    "standard", "reverse_charge_eu_service", "reverse_charge_foreign_service", "reverse_charge_domestic",
+    "eu_acquisition", "import", "no_input_vat",
+]  # fmt: skip
+CountryCode = Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]
 _PATTERN_OK = re.compile(r"^(?:[^{}]|\{year\}|\{n(?::0?\d{1,2}d)?\})*$")
 
 
@@ -333,6 +351,8 @@ class ExpenseIn(v.StrictRecord):
     project_id: v.OptId = None
     deductible: v.Percent = 100
     attachment: v.OptAttachment = None
+    vat_treatment: EXPENSE_VAT_TREATMENT | None = None
+    supplier_country: Annotated[CountryCode | None, BeforeValidator(v.blank_to_none)] = None
 
 
 class LineIn(BaseModel):
@@ -384,6 +404,7 @@ class DocumentIn(v.StrictRecord):
     lines: list[LineIn] = Field(default=[], max_length=v.MAX_LINES)
     plan: PlanIn | None = None
     offer_id: v.OptId = None
+    vat_treatment: DOC_VAT_TREATMENT | None = None
 
     @model_validator(mode="after")
     def _period(self):
@@ -438,6 +459,10 @@ class SettingsIn(v.StrictRecord):
     splitting: bool = False
     other_income: v.NonNegAmount = 0
     other_deductions: v.NonNegAmount = 0
+    vat_period: Literal["monthly", "quarterly", "yearly"] = "quarterly"
+    vat_taxation: Literal["", "soll", "ist"] = ""
+    dauerfristverlaengerung: bool = False
+    vat_prepayment_special: v.NonNegAmount = 0
 
     @field_validator("state")
     @classmethod
