@@ -24,6 +24,13 @@
   `PERMITA38_CHROMIUM` or run `python -m playwright install chromium`). `make test-all` – everything. `make lint` – ruff + mypy. `make format` / `make check-format` – ruff formatter.
 - `make run` – start the server without opening a browser. `make check-openapi` – verify the contract is current.
 
+## Running tests economically
+- While iterating run only the affected files (`pytest tests/backend/test_x.py -q`). Run the browser and randomized
+  suites **once, at the end**, with `make test-summary` (one line per suite, full logs in `test-artifacts/`, a lock
+  makes concurrent runs wait). Read `test-artifacts/<suite>.log` only for a failing suite.
+- Randomized failures print the replay command and the last 12 steps; the whole step log is in
+  `test-artifacts/e2e-<kind>-seed<N>.log`. Replay with `PERMITA38_E2E_SEED=<N>`; seeds are fixed by default.
+
 ## Conventions
 - Routers stay thin; logic belongs in `core/service/`. Services raise `ServiceError`, never HTTP exceptions.
 - Request bodies are validated by the strict `*In` models (`core/models.py`, primitives in `core/validation.py`);

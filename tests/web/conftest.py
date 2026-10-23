@@ -6,6 +6,14 @@ import os
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def cheap_password_hashing(monkeypatch):
+    """The live server runs in this process: new password hashes at the production cost factor made every test slow."""
+    from permita38.core.service import auth
+
+    monkeypatch.setattr(auth, "PBKDF2_ITERATIONS", 1000)
+
+
 def pytest_collection_modifyitems(items):
     for item in items:
         if "/tests/web/" in str(item.fspath).replace("\\", "/"):
