@@ -22,7 +22,7 @@ dependencies = [
     "PyYAML>=6",
     "python-multipart>=0.0.9",
     "segno>=1.6",
-    "tzdata; sys_platform == 'win32'",   # zoneinfo has no system time zone database on Windows
+    "tzdata",   # zoneinfo needs a time zone database: Windows and slim containers have none
 ]
 
 [project.optional-dependencies]
