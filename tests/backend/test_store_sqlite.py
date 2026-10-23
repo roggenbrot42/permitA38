@@ -5,7 +5,7 @@ import sqlite3
 import pytest
 
 from permita38.core.config import Config
-from permita38.core.database import CURRENT_REVISION
+from permita38.core.database import head_id
 from permita38.core.repository import TABLES, create_repository
 from permita38.core.repository.dialect import SQLiteDialect
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
@@ -89,7 +89,7 @@ def test_tables_match_the_declarative_schema(tmp_path):
     idx = {r[1] for r in repo.conn.execute("SELECT * FROM sqlite_master WHERE type='index'").fetchall()}
     for table in TABLES.values():
         assert {i.name for i in table.indexes} <= idx
-    assert repo.get_revision() == CURRENT_REVISION
+    assert repo.get_revision() == head_id()
     repo.close()
 
 

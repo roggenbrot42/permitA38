@@ -21,9 +21,18 @@ All notable changes to this project are documented here. The format is based on
   and offer-based extensions; revenue basis (contracted, open offers, assumed); vacation entitlement; and the
   **Plan & vacation** page with drag-to-vacation, moving and resizing bars, keyboard editing, draft and apply,
   scenarios and comparison, and suggestions (vacation windows, earliest start, what must move).
-  Migration 0003 (renumbered to 0009 at merge time, see the migration header).
+  Migration `0003-planning`.
+- **Migration identifiers instead of contiguous numbers** (`docs/specs/migration-ids.md`): migrations are
+  `NNNN-slug.sql` files with a `-- migration: <id>` / `-- requires: <id>` header, ordered by the `requires` chain, so
+  parallel branches no longer collide on "the next number". Applied ids are recorded in a new `schema_migrations`
+  table; databases written by alpha.1 (integer `PRAGMA user_version` 1 to 3) are adopted automatically, and
+  `user_version` keeps counting applied migrations so old binaries refuse upgraded databases. `permita38 migrate`
+  prints ids and `migrate --status` lists the chain.
 
 ### Changed
+- `/api/health`: `revision` and `current_revision` are migration ids (`revision` is `null` for an empty database);
+  new field `applied`. `CURRENT_REVISION` is gone. Pre-migration backups are named
+  `pre-migration-<timestamp>-before-<head id>.sqlite3`.
 - Forecast revenue is based first on contracted hours, then open offers, and only then on assumed hours; every week
   states its basis. Contract hours are spread over the workdays of the assignee.
 

@@ -1,3 +1,5 @@
+-- migration: 00000001
+-- requires: none
 -- permitA38 migration 0001: initial schema (sqlite)
 -- generated from core/repository/schema.py
 

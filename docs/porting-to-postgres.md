@@ -30,11 +30,15 @@ web → API routers → services → Repository (interface) → SQLRepository (g
 2. **Implement the repository class** `permita38/core/repository/postgresql.py` (copy the shape of `sqlite.py`):
    subclass `SQLRepository`, set `backend = "postgresql"` and `dialect = PostgresDialect()`, and implement the hooks:
    `_open` / `_close` (connection or pool), `_exec` / `_rows` (execute with `%s` params; return rowcount / rows),
-   `_begin` / `_commit` / `_rollback`, `_read_revision`, `_run_migration`.
-   - Revision tracking: create a `schema_migrations(version BIGINT PRIMARY KEY, name TEXT, applied_at BIGINT)` table
-     (outside the numbered migrations, in `_open`) and read `MAX(version)`; `_run_migration` executes the SQL and inserts
-     the row in the same transaction (PostgreSQL has transactional DDL; **MariaDB does not** – DDL auto-commits, so
-     write MariaDB migrations to be re-runnable or split them into small steps).
+   `_begin` / `_commit` / `_rollback`, `_run_migration(migration, applied_count)` and, only if the server database could hold
+   a pre-`schema_migrations` integer revision, `_read_legacy_revision` (default `0`).
+   - Migration tracking: `SQLRepository` creates `schema_migrations(id, name, applied_at)` itself
+     (`Dialect.create_migrations_table`, `CREATE TABLE IF NOT EXISTS`, not a migration file) and decides what is
+     pending from the applied ids and the `requires` chain; there is no revision number. `_run_migration` must execute
+     the SQL and insert the `schema_migrations` row in the same transaction (PostgreSQL has transactional DDL;
+     **MariaDB does not** – DDL auto-commits, so write MariaDB migrations to be re-runnable or split them into small
+     steps). Server backends never shipped an integer revision, so `_read_legacy_revision` returns `0` there by default;
+     SQLite reads `PRAGMA user_version`. This path is **untested on PostgreSQL/MariaDB**.
    - **Concurrency:** the SQLite repository serialises everything through one connection and a lock. For a server
      backend use one connection per thread or a pool, and make `transaction()` real (`BEGIN`, isolation `READ COMMITTED`
      or better). The contract suite contains a read-modify-write test (`test_transactions_are_isolated_read_modify_write`)
@@ -46,10 +50,10 @@ web → API routers → services → Repository (interface) → SQLRepository (g
    - `conflicts()`: return `[]` – server backends have no sync conflicts.
 3. **Register it in the factory** (`core/repository/factory.py`): create the class for `config.database.backend`.
 4. **Check the migrations for your dialect.** `core/schema/migrations/postgresql/` and `…/mariadb/` already contain
-   `0001_initial.sql`, generated from the neutral schema (`permita38 dump-ddl --dialect postgresql`). Review them against a
-   real server. **Rule:** every migration must exist in every dialect folder with the same number and name; test
-   `test_every_migration_exists_for_every_dialect` enforces it. `permita38 create-migration <name>` creates the next file
-   for all dialects at once.
+   `0001-initial.sql`, generated from the neutral schema (`permita38 dump-ddl --dialect postgresql`). Review them against a
+   real server. **Rule:** every migration must exist in every dialect folder with the same file name, id and
+   `requires`; `test_real_folders_form_a_valid_chain_identical_across_dialects` enforces it. `permita38
+   create-migration <name>` creates the new file (random id, `requires` = current head) for all dialects at once.
 5. **Run the contract suite** against your server (empty scratch database!):
 
    ```bash

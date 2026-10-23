@@ -100,8 +100,8 @@ section and [AGENTS.md](AGENTS.md).
   CSP-friendly (no inline scripts, no CDNs).
 - **API changes:** update the models/routers, then regenerate the contract with `make generate-openapi` and commit
   `api/openapi.json`. CI fails if it is out of date.
-- **Database changes:** add a numbered migration for **every** SQL dialect (`make create-migration`), never edit an
-  existing migration, and bump `CURRENT_REVISION`. See `docs/porting-to-postgres.md`.
+- **Database changes:** add a migration for **every** SQL dialect (`permita38 create-migration <name>`, which sets the id and `requires` for
+  you), never edit an existing migration. See `docs/porting-to-postgres.md`.
 - **Tests:** every bug fix needs a regression test, every feature needs tests. Backend tests live in
   `tests/backend/` (`make test`), the randomized API tests in `tests/backend/randomized/` (`make test-random`),
   browser tests in `tests/web/` (`make test-web`) and the future Android app's in `tests/android/`. Randomised/monkey

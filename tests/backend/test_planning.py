@@ -15,7 +15,7 @@ from hypothesis import strategies as st
 
 from permita38.api.server import get_app
 from permita38.core.config import Config
-from permita38.core.database import CURRENT_REVISION, DIALECT_NAMES, MIGRATIONS_DIR
+from permita38.core.database import DIALECT_NAMES, MIGRATIONS_DIR, head_id
 from permita38.core.repository import TABLES
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service import planning as eng
@@ -531,8 +531,8 @@ def test_revision_two_database_is_upgraded_and_projects_get_their_period(tmp_pat
     data = tmp_path / "data"
     data.mkdir()
     raw = sqlite3.connect(data / DB_FILENAME)
-    raw.executescript((MIGRATIONS_DIR / "sqlite" / "0001_initial.sql").read_text())
-    raw.executescript((MIGRATIONS_DIR / "sqlite" / "0002_totp.sql").read_text())
+    raw.executescript((MIGRATIONS_DIR / "sqlite" / "0001-initial.sql").read_text())
+    raw.executescript((MIGRATIONS_DIR / "sqlite" / "0002-totp.sql").read_text())
     raw.execute("PRAGMA user_version = 2")
     raw.execute("INSERT INTO customers (id, name) VALUES ('cust00000001', 'ACME')")
     raw.execute(
@@ -557,20 +557,21 @@ def test_revision_two_database_is_upgraded_and_projects_get_their_period(tmp_pat
     raw.close()
     repo = SQLiteRepository(data)
     repo.startup()
-    assert repo.get_revision() == CURRENT_REVISION == 3
+    assert repo.get_revision() == head_id()
+    assert repo.applied_ids()[:3] == ["00000001", "00000002", "00000003"]
     p = repo.get("projects", "proj00000001")
     assert p["start"] == "2026-01-20" and p["end"] == "2026-03-15"  # entries widen the contract period
     late = repo.get("projects", "proj00000003")
     assert late["start"] == late["end"] == "2026-05-04"  # entries only
     assert repo.get("projects", "proj00000002").get("start") is None
-    assert list((data / "backups").glob("pre-migration-r2-to-r3-*.sqlite3"))
+    assert list((data / "backups").glob(f"pre-migration-*-before-{head_id()}.sqlite3"))
     repo.close()
 
 
 def test_migration_files_exist_for_every_dialect():
     for d in DIALECT_NAMES:
-        assert (MIGRATIONS_DIR / d / "0003_planning.sql").exists(), d
-        assert "plan_scenarios" in (MIGRATIONS_DIR / d / "0003_planning.sql").read_text()
+        assert (MIGRATIONS_DIR / d / "0003-planning.sql").exists(), d
+        assert "plan_scenarios" in (MIGRATIONS_DIR / d / "0003-planning.sql").read_text()
 
 
 # ------------------------------------------------------------------ fixtures for API tests

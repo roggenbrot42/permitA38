@@ -12,9 +12,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from permita38.core.database import Migration
+
 from .base import Record
 from .dialect import SQLiteDialect
-from .sql import SQLRepository
+from .sql import SQLRepository, _now
 
 DB_FILENAME = "permita38.sqlite3"
 
@@ -79,17 +81,26 @@ class SQLiteRepository(SQLRepository):
         if self.conn.in_transaction:
             self.conn.execute("ROLLBACK")
 
-    def _read_revision(self) -> int:
+    def _read_legacy_revision(self) -> int:
         return int(self.conn.execute("PRAGMA user_version").fetchone()[0])
 
-    def _run_migration(self, version: int, name: str, sql: str) -> None:
-        script = f"BEGIN IMMEDIATE;\n{sql}\nPRAGMA user_version = {int(version)};\nCOMMIT;"
+    def _run_migration(self, migration: Migration, applied_count: int) -> None:
+        # id, slug and timestamp contain only [0-9a-z_:TZ-], so literals are safe here (executescript takes no params).
+        # user_version is kept equal to the number of applied migrations: alpha.1 binaries (which know revisions
+        # 1..3 only) then see a revision above their own and refuse the database instead of corrupting it.
+        row = (
+            "INSERT INTO schema_migrations (id, name, applied_at) "
+            f"VALUES ('{migration.id}', '{migration.name}', '{_now()}');"
+        )
+        script = f"BEGIN IMMEDIATE;\n{migration.sql()}\n{row}\nPRAGMA user_version = {int(applied_count)};\nCOMMIT;"
         try:
             self.conn.executescript(script)
         except sqlite3.Error as e:
             if self.conn.in_transaction:
                 self.conn.execute("ROLLBACK")
-            raise RuntimeError(f"Migration {version:04d}_{name} failed and was rolled back: {e}") from e
+            raise RuntimeError(
+                f"Migration {migration.id} ({migration.file_name}) failed and was rolled back: {e}"
+            ) from e
 
     # ---- operations ----
     @property
