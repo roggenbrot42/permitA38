@@ -7,8 +7,9 @@ Rules (plain-language version in docs/planning.md):
   absence days) minus busy hours from ``services.busy``; never below zero.
 * Confirmed commitments = contracts with status != ``done``. ``hours_per_week`` is spread over the assignee's
   workdays of every ISO week (a partial week gets its share of the full week); ``total_hours`` is spread evenly over
-  the assignee's workdays of the contract period. Commitments are nominal: holidays and absences do NOT reduce them,
-  so a conflict shows up as over-capacity.
+  the assignee's AVAILABLE days of the contract period (workdays that are neither a public holiday nor an absence
+  day; with none available the nominal spread over all workdays is used). ``hours_per_week`` stays nominal: holidays
+  and absences do NOT reduce it, so a conflict shows up as over-capacity.
 * Binding offers = offers with status ``sent``, a plan, no contract yet and ``valid_until`` not passed (or unset).
   Worst case: all of them are accepted. The expected view weights each one by its win probability.
 * Assignees are the active users in ``user_ids`` (no user -> the boss). Hours are split equally among them.
@@ -316,11 +317,17 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
                     if n:
                         per_item[x] = per_item.get(x, 0.0) + it.hpw * share / n
             elif it.total:
-                k_all = sum(1 for y in _daterange(it.start, it.end) if y.weekday() in wdset)
-                if k_all:
+                # spread over the days the person can actually work: workdays that are neither a public holiday nor an
+                # absence day. With none left the nominal spread over all workdays stays, so the overload is visible.
+                off_days = cap.absences[uid]
+                period = [y for y in _daterange(it.start, it.end) if y.weekday() in wdset]
+                free = [y for y in period if not cap.holiday(y) and y not in off_days]
+                days_used = free or period
+                if days_used:
+                    chosen = set(days_used)
                     for x in span:
-                        if x.weekday() in wdset:
-                            per_item[x] = per_item.get(x, 0.0) + it.total * share / k_all
+                        if x in chosen:
+                            per_item[x] = per_item.get(x, 0.0) + it.total * share / len(days_used)
         if per_item:
             item_hours[_key(it.kind, it.id)] = per_item
             for x, h in per_item.items():

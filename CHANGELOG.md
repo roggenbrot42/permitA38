@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- Planner: a job with a total number of hours was spread over all workdays of its period, including vacation and
+  holidays, so the week before a vacation looked overloaded although the work fitted before it. The hours are now
+  spread over the available days (workdays that are neither a holiday nor time off); `docs/planning.md` has the rule.
+
 ## [0.4.0-alpha.2] - 2026-10-23
 
 Second alpha. Adds roles, sanity warnings, calendars, document numbering and import, itemised expenses with a bill

@@ -19,11 +19,15 @@ Capacity is never negative. Part-time workdays (for example Monday to Wednesday 
 
 - **Confirmed** = contracts (including contracts created by accepting an offer). A contract with `hours per week`
   books that many hours spread over the assignee's workdays. A contract with a `total` books that total evenly over
-  the workdays of its period. A partial week gets its share of the full week.
+  the assignee's **available days** in its period: workdays that are neither a public holiday nor a day off (vacation,
+  sick or other). Hours that would fall into a vacation therefore move to the days before and after it; nothing is
+  booked into the vacation. Calendar meetings do not change which days are available. If a person has no available
+  day in the period, the total is spread over all workdays instead, so the overload stays visible. A partial week
+  gets its share of the full week.
 - **Binding offers** = offers that were sent, are not accepted yet, and whose validity date (`valid until`) has not
   passed. Until that date the offer is treated as binding.
-- Holidays and absences do **not** reduce what a contract promises. If you promised 40 h in a week you take off,
-  the week shows as over capacity. That is the point of the planner.
+- Holidays and absences do **not** reduce what an `hours per week` contract promises. If you promised 40 h in a week
+  you take off, the week shows as over capacity. That is the point of the planner.
 
 ## Worst case and expected view
 
