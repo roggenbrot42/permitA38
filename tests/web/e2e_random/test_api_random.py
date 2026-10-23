@@ -19,7 +19,16 @@ import httpx
 import pytest
 
 from .conftest import PASSWORD, Api
-from .helpers import company, env_int, money, pick_weighted, seeds_from_env, week_start, week_target_minutes
+from .helpers import (
+    company,
+    env_int,
+    money,
+    pick_weighted,
+    report_failure,
+    seeds_from_env,
+    week_start,
+    week_target_minutes,
+)
 
 pytestmark = pytest.mark.e2e_random
 
@@ -142,7 +151,9 @@ class ApiSim:
 
     def free_minutes(self, day: str) -> int:
         used = sum(
-            e["minutes"] for e in self.model["entries"].values() if e.get("date") == day and e.get("user_id") == self.boss_id
+            e["minutes"]
+            for e in self.model["entries"].values()
+            if e.get("date") == day and e.get("user_id") == self.boss_id
         )
         return self.DAY_LIMIT - used
 
@@ -536,9 +547,7 @@ class ApiSim:
             resp = self.boss.http.get(junk_path)
             assert resp.status_code < 500, (junk_path, resp.status_code, resp.text[:200])
         removed = self.sanitize()
-        self.say(
-            f"fuzzed 12 payloads + path tricks without a 5xx (removed {removed} poisoned records)"
-        )
+        self.say(f"fuzzed 12 payloads + path tricks without a 5xx (removed {removed} poisoned records)")
         for coll in COLLS:  # fuzzing must not have damaged the stored data or the model
             self.fix_model_after_fuzz(coll)
 
@@ -666,9 +675,8 @@ def test_random_api_session(seed, live_server, api):
     try:
         sim.run(env_int("PERMITA38_E2E_API_STEPS", 80))
     except Exception as exc:
-        print(f"\n=== api seed={seed} failed; replay with PERMITA38_E2E_SEED={seed} ===\n" + "\n".join(sim.log[-50:]))
         raise AssertionError(
-            f"api seed {seed} failed after {len(sim.log)} ops: {exc}\n" + "\n".join(sim.log[-30:])
+            f"api seed {seed} failed after {len(sim.log)} ops: {exc}\n{report_failure('api', seed, sim.log)}"
         ) from exc
     member.close()
     print(f"api seed {seed}: {len(sim.log)} ops verified")

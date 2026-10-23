@@ -5,8 +5,18 @@ from fastapi.testclient import TestClient
 
 from permita38.api.server import get_app
 from permita38.core.config import Config
+from permita38.core.service import auth
 
 PASSWORD = "correct horse battery"
+#: the real cost factor; tests run with a cheap one (see `cheap_password_hashing`) and one test pins this value
+PRODUCTION_PBKDF2_ITERATIONS = auth.PBKDF2_ITERATIONS
+
+
+@pytest.fixture(autouse=True)
+def cheap_password_hashing(monkeypatch):
+    """Every new password hash costs ~0.1 s at the production cost factor, which dominated the suite. Stored hashes
+    carry their own iteration count, so verification is unaffected."""
+    monkeypatch.setattr(auth, "PBKDF2_ITERATIONS", 1000)
 
 
 def pytest_ignore_collect(collection_path, config):

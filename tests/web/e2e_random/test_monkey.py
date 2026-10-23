@@ -15,7 +15,7 @@ from datetime import date, timedelta
 import pytest
 
 from .conftest import PASSWORD, Api
-from .helpers import env_int, norm, seeds_from_env, week_start
+from .helpers import env_int, norm, report_failure, seeds_from_env, week_start
 
 pytestmark = pytest.mark.e2e_random
 
@@ -337,7 +337,17 @@ class Monkey:
         idx = self.page.evaluate(LIST_VISIBLE_JS.replace("arguments[1]", f"'{FORBIDDEN}'"), self.OPENERS)
         if not idx:
             top = self.rng.choice(
-                ["customers", "projects", "time", "expenses", "plan/contracts", "plan/timeoff", "plan/vacation", "team", "sales"]
+                [
+                    "customers",
+                    "projects",
+                    "time",
+                    "expenses",
+                    "plan/contracts",
+                    "plan/timeoff",
+                    "plan/vacation",
+                    "team",
+                    "sales",
+                ]
             )
             self.say(f"episode: no form opener here, going to #/{top}")
             self.page.evaluate("h => { location.hash = h; }", f"#/{top}")
@@ -506,15 +516,13 @@ def _run_monkey(seed, make_page, live_server, api, steps, member=False):
         api.get("/finance")
         api.get("/forecast")
     except Exception as exc:
-        print(f"\n=== monkey seed={seed} member={member} failed; replay: PERMITA38_E2E_SEED={seed} ===")
-        print("\n".join(monkey.log[-60:]))
+        detail = report_failure("monkey", seed, monkey.log)
         try:
             page.screenshot(path=f"/tmp/e2e_monkey_seed{seed}{'_member' if member else ''}.png")
         except Exception:
             pass
         raise AssertionError(
-            f"monkey seed {seed} (member={member}) failed after {len(monkey.log)} moves: {exc}\n"
-            + "\n".join(monkey.log[-40:])
+            f"monkey seed {seed} (member={member}) failed after {len(monkey.log)} moves: {exc}\n{detail}"
         ) from exc
 
 

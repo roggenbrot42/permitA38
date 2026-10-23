@@ -1,7 +1,7 @@
 PYTHON ?= python3
 OPENAPI = api/openapi.json
 
-.PHONY: test test-backend test-random test-web test-all
+.PHONY: test test-backend test-random test-web test-all test-summary
 # fast backend suite (unit, API, repository contract, migrations) - what CI runs on every OS/Python
 test: test-backend
 
@@ -18,6 +18,13 @@ test-web:
 	$(PYTHON) -m pytest tests/web -q
 
 test-all: test-backend test-random test-web
+
+# all suites one after the other, ONE line per suite (full output in test-artifacts/<suite>.log); waits if another
+# run is active. Prefer this to `test-all` for anything that is read by a person or a model:
+#   make test-summary                   # backend, random, web
+#   make test-summary SUITES="backend lint"
+test-summary:
+	$(PYTHON) scripts/run_suites.py $(SUITES)
 
 .PHONY: test-release
 test-release:
