@@ -27,6 +27,14 @@ All notable changes to this project are documented here. The format is based on
 - Forecast revenue is based first on contracted hours, then open offers, and only then on assumed hours; every week
   states its basis. Contract hours are spread over the workdays of the assignee.
 
+### Fixed
+- Expenses: there was no "Business meals" category to choose. It exists now and proposes 70 % deductible (your own value is
+  never overwritten); a category entered elsewhere stays selectable when editing.
+- Expenses: the deductible share was also applied to the input VAT, so business meals (70 % deductible) under-claimed 30 % of
+  the VAT. Input VAT of bills in the category *Business meals* is now reclaimed in full (§ 15 Abs. 1a UStG, to be
+  confirmed by your tax adviser); other categories are unchanged. Bills you entered earlier keep their old figures: open
+  and save them again after choosing the category.
+
 ## [0.4.0-alpha.1] - 2026-10-22
 
 First public alpha. Expect rough edges and read [docs/release-plan.md](docs/release-plan.md) for the scope, known

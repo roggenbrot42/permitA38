@@ -34,7 +34,7 @@ nesting depth).
 | Minutes (time entry) | integer 1 … 1440; a person's entries on one day must sum to ≤ 24 h |
 | Amounts, prices | finite, \|value\| ≤ 1 000 000 000 (credit-note lines may be negative) |
 | Quantities | finite, \|value\| ≤ 10 000 000 |
-| Expense net / VAT | 0 … 1 000 000 000 (refunds are credit-note invoices, not negative expenses); deductible 0–100 % |
+| Expense net / VAT | 0 … 1 000 000 000 (refunds are credit-note invoices, not negative expenses); deductible 0–100 %, optional `vat_deductible` 0–100 % (share of the input VAT; empty = same as deductible) |
 | Hourly rates | 0 … 10 000 |
 | Hours per week | 0 … 168; total hours / budget 0 … 100 000 |
 | VAT rates | 0 … 100, and on write one of 0, 5, 7, 16, 19 or the rate configured in the settings |

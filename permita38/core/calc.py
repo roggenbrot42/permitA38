@@ -273,13 +273,17 @@ def finance(store, year, today=None):
             continue
         raw_pct = x.get("deductible", 100)
         pct = dec(raw_pct if raw_pct is not None else 0) / 100
+        # Input VAT normally follows the deductible share (private use), but business meals with partners are only 70 %
+        # deductible as an expense while the input VAT is reclaimed in full (§ 15 Abs. 1a UStG): then it is set apart.
+        raw_vat_pct = x.get("vat_deductible")
+        vat_pct = pct if raw_vat_pct is None else dec(raw_vat_pct) / 100
         net, vat_raw = dec(x.get("net")), dec(x.get("vat"))
         m = months[when.month - 1]
         # Kleinunternehmer cannot reclaim input VAT, so the gross amount is the cost
         cost = q2((net + vat_raw) * pct) if klein else q2(net * pct)
         m["expenses"] += cost
         if not klein:
-            m["vat_in"] += q2(vat_raw * pct)
+            m["vat_in"] += q2(vat_raw * vat_pct)
         cats[x.get("category") or "Other"] += cost
     for m in months:
         m["profit"] = m["revenue"] - m["expenses"]
