@@ -13,7 +13,21 @@ from permita38.core.config import Config
 from permita38.core.errors import ServiceError
 
 from .deps import Services, startup_services
-from .routers import auth, files, finance, health, impressum, planning, records, sales, settings, time, totp, users
+from .routers import (
+    auth,
+    files,
+    finance,
+    health,
+    impressum,
+    planning,
+    records,
+    roles,
+    sales,
+    settings,
+    time,
+    totp,
+    users,
+)
 
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
 
@@ -80,7 +94,21 @@ def get_app(config: Config) -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    for module in (health, auth, totp, users, time, planning, finance, settings, files, sales, impressum, records):
+    for module in (
+        health,
+        auth,
+        totp,
+        users,
+        roles,
+        time,
+        planning,
+        finance,
+        settings,
+        files,
+        sales,
+        impressum,
+        records,
+    ):
         for router in module.routers:
             app.include_router(router, prefix="/api")
 

@@ -3,12 +3,14 @@ from permita38.core.holidays import STATES
 from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
-from .auth import public_user
+from .auth import AuthService
+from .roles import can
 
 
 class SettingsService:
-    def __init__(self, store: Repository):
+    def __init__(self, store: Repository, auth: AuthService):
         self.store = store
+        self.auth = auth
 
     def get(self) -> dict:
         return effective_settings(self.store.settings())
@@ -23,10 +25,10 @@ class SettingsService:
 
     def bootstrap(self, me: dict, timer: dict) -> dict:
         st = self.get()
-        if me["role"] != "boss":
+        if not can(me, "settings.manage"):
             st = {k: st.get(k) for k in ("company_name", "state")}
         return dict(
-            me=public_user(me),
+            me=self.auth.public(me),
             settings=st,
             states=STATES,
             templates=self.templates(),

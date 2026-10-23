@@ -5,7 +5,6 @@ from permita38 import __version__
 from permita38.api.deps import COOKIE_NAME, CurrentUser, ServicesDep
 from permita38.core.config import Config
 from permita38.core.models import UserOut
-from permita38.core.service.auth import public_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 routers = [router]
@@ -102,5 +101,5 @@ def change_password(
 
 
 @router.get("/me", response_model=UserOut)
-def me(user: CurrentUser):
-    return public_user(user)
+def me(user: CurrentUser, services: ServicesDep):
+    return services.auth.public(user)

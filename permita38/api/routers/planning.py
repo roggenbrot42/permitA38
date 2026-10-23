@@ -1,16 +1,17 @@
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
 
-from permita38.api.deps import BossUser, CurrentUser, ServicesDep
+from permita38.api.deps import CurrentUser, ServicesDep, needs
 
+PlanningUser = Annotated[dict, needs("planning.view")]
 router = APIRouter(tags=["planning"])
 routers = [router]
 
 
 @router.get("/forecast", summary="week-by-week capacity vs. contracts")
 def forecast(
-    _: BossUser,
+    _: PlanningUser,
     services: ServicesDep,
     weeks: int = Query(26, ge=1, le=156),
     user_id: str | None = None,

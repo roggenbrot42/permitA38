@@ -4,7 +4,7 @@ other devices survive a round-trip through this version."""
 import re
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from . import validation as v
 from .holidays import STATES
@@ -160,10 +160,29 @@ class Template(Record):
     closing: str | None = None
 
 
+class RoleRef(BaseModel):
+    id: str
+    name: str
+
+
+class Role(Record):
+    """A named set of rights. `system` roles (boss, member) are locked."""
+
+    name: str
+    description: str | None = None
+    rights: list[str] = []
+    system: bool = False
+
+
 class UserOut(Record):
     username: str | None = None
     name: str | None = None
-    role: str | None = None
+    role: str | None = Field(
+        default=None, description="compatibility: 'boss' with all rights, else the first role name"
+    )
+    role_ids: list[str] | None = None
+    roles: list[RoleRef] | None = Field(default=None, description="the user's roles (computed)")
+    rights: list[str] | None = Field(default=None, description="effective rights incl. implied ones (computed)")
     weekly_hours: float | None = None
     workdays: list[int] | None = None
     default_rate: float | None = None
@@ -180,7 +199,12 @@ class UserIn(BaseModel):
     id: str | None = None
     username: str = Field(max_length=64)
     name: v.Name
-    role: Literal["boss", "member"] = "member"
+    role_ids: Annotated[list[v.Id], Field(min_length=1, max_length=20)] | None = Field(
+        default=None, description="ids of the user's roles (see /api/roles); default: the Member role"
+    )
+    role: Literal["boss", "member"] | None = Field(
+        default=None, description="deprecated: maps to the built-in role when `role_ids` is not given"
+    )
     password: str | None = Field(default=None, max_length=1000)
     weekly_hours: v.Hours = 40
     workdays: list[int] = Field(default=[0, 1, 2, 3, 4], min_length=1, max_length=7)
@@ -402,6 +426,21 @@ class TemplateIn(v.StrictRecord):
     intro_invoice: v.Note | None = None
     outro_invoice: v.Note | None = None
     closing: v.Short | None = None
+
+
+class RoleIn(v.StrictRecord):
+    name: Annotated[str, StringConstraints(min_length=1, max_length=60), AfterValidator(v._not_blank)]
+    description: Annotated[str, StringConstraints(max_length=500)] | None = None
+    rights: Annotated[
+        list[Annotated[str, StringConstraints(pattern=r"^[a-z_]+\.[a-z_]+$", max_length=60)]], Field(max_length=100)
+    ] = []
+
+    @field_validator("rights")
+    @classmethod
+    def _unique_rights(cls, rights: list[str]) -> list[str]:
+        if len(set(rights)) != len(rights):
+            raise ValueError("must not contain duplicates")
+        return rights
 
 
 class SettingsIn(v.StrictRecord):

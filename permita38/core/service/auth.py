@@ -8,10 +8,12 @@ import re
 import secrets
 import time
 
+from permita38.core import rights as R
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 from permita38.core.settings import DEFAULT_SETTINGS
 
+from .roles import Principal, RoleService, can, rights_of_principal
 from .throttle import AttemptThrottle
 
 PBKDF2_ITERATIONS = 200_000
@@ -75,6 +77,16 @@ class AuthService:
         self.secret = secret_key.encode()
         self.ttl = token_ttl_hours * 3600
         self.throttle = AttemptThrottle()
+        self.roles = RoleService(store)
+
+    # ---------- users as seen by the API ----------
+    def public(self, user: dict) -> dict:
+        """The user record for responses: no secrets, plus the computed roles and rights."""
+        return self.roles.decorate(public_user(user), user)
+
+    def principal(self, user: dict) -> Principal:
+        """The authenticated user together with the rights they hold now (see `RoleService.principal`)."""
+        return self.roles.principal(user)
 
     # ---------- tokens ----------
     def _sign(self, signing_input: str) -> str:
@@ -135,7 +147,7 @@ class AuthService:
         user = self.check_credentials(username, password)
         if user.get("totp_enabled"):
             raise ServiceError(401, "Two-factor code required")
-        return self.create_token(user), public_user(user)
+        return self.create_token(user), self.public(user)
 
     def setup(self, username: str, name: str, password: str, company_name: str = "", weekly_hours: float = 40):
         if not self.needs_setup():
@@ -145,13 +157,14 @@ class AuthService:
         username = normalize_username(username)
         validate_password(password)
         self.store.save_settings(DEFAULT_SETTINGS | {"company_name": company_name, "owner_name": name.strip()})
-        return public_user(
+        return self.public(
             self.store.save(
                 "users",
                 dict(
                     username=username,
                     name=name.strip(),
                     role="boss",
+                    role_ids=[R.BOSS_ID],
                     weekly_hours=weekly_hours,
                     active=True,
                     workdays=[0, 1, 2, 3, 4],
@@ -164,37 +177,62 @@ class AuthService:
 
     # ---------- user management ----------
     def list_users(self) -> list[dict]:
-        return [public_user(u) for u in self.store.list("users")]
+        return [self.public(u) for u in self.store.list("users")]
 
-    def _boss_count(self, excluding: str | None = None) -> int:
-        return len(
-            [
-                u
-                for u in self.store.list("users")
-                if u["role"] == "boss" and u["id"] != excluding and u.get("active", True)
-            ]
-        )
+    def _target_role_ids(self, data: dict, old: dict | None) -> list[str]:
+        ids = data.pop("role_ids", None)
+        legacy = data.pop("role", None)
+        if ids is None:
+            if legacy is not None:
+                ids = [R.BOSS_ID if legacy == "boss" else R.MEMBER_ID]
+            elif old is not None:
+                ids = self.roles.role_ids_of(old)
+            else:
+                ids = [R.MEMBER_ID]
+        ids = list(dict.fromkeys(ids))
+        defs = self.roles.definitions()
+        unknown = [i for i in ids if i not in defs]
+        if unknown:
+            raise ServiceError(422, "Unknown role: " + ", ".join(unknown))
+        return ids
 
-    def save_user(self, data: dict) -> dict:
+    def _check_may_manage(self, actor: dict | None, target: dict, new_rights: frozenset[str] | None = None):
+        """Nobody can use user administration to rise above their own rights.
+
+        Unless the actor may define roles (administrator level: they could grant themselves anything anyway):
+        * a user who holds rights the actor does not hold cannot be edited, deleted or have their 2FA reset, and
+        * roles that would give the user (or anybody) rights the actor does not hold cannot be assigned.
+        """
+        if actor is None or can(actor, "roles.manage"):
+            return
+        mine = rights_of_principal(actor)
+        if not self.roles.rights_of(target) <= mine:
+            raise ServiceError(403, "You cannot manage a user who holds rights you do not have")
+        if new_rights is not None and not new_rights <= mine:
+            raise ServiceError(403, "You cannot grant rights you do not hold")
+
+    def save_user(self, data: dict, actor: dict | None = None) -> dict:
         old = self.store.get("users", data["id"]) if data.get("id") else None
         if data.get("id") and not old:
             raise ServiceError(404, "User not found")
         password = data.pop("password", None)
         data["username"] = normalize_username(data["username"])
-        if data.get("role") not in ("boss", "member"):
-            raise ServiceError(400, "Role must be boss or member")
+        role_ids = self._target_role_ids(data, old)
         if any(u.get("username") == data["username"] and u["id"] != data.get("id") for u in self.store.list("users")):
             raise ServiceError(400, "This username is already taken")
-        rec = {**(old or {}), **data}
+        defs = self.roles.definitions()
+        new_rights = self.roles.rights_of({"role_ids": role_ids}, defs)
+        self._check_may_manage(actor, old or {"role_ids": []}, new_rights)
+        rec = {**(old or {}), **data, "role_ids": role_ids, "role": "boss" if R.BOSS_ID in role_ids else "member"}
         if password:
             validate_password(password)
             rec["password_hash"], rec["pw_changed"] = hash_password(password), next_session_version(old)
         elif not old:
             raise ServiceError(400, "A password is required for new users")
-        if old and old["role"] == "boss" and (rec["role"] != "boss" or not rec.get("active", True)):
-            if self._boss_count(excluding=old["id"]) == 0:
-                raise ServiceError(400, "There must be at least one active boss")
-        return public_user(self.store.save("users", rec))
+        if old:  # changing roles or deactivating must not remove the last administrator
+            others = [u for u in self.store.list("users") if u["id"] != old["id"]]
+            self.roles.ensure_admin_remains([*others, rec], defs)
+        return self.public(self.store.save("users", rec))
 
     def delete_user(self, user_id: str, actor: dict):
         old = self.store.get("users", user_id)
@@ -202,8 +240,8 @@ class AuthService:
             return
         if user_id == actor["id"]:
             raise ServiceError(400, "You cannot delete yourself")
-        if old["role"] == "boss" and self._boss_count(excluding=user_id) == 0:
-            raise ServiceError(400, "Cannot delete the only boss")
+        self._check_may_manage(actor, old)
+        self.roles.ensure_admin_remains([u for u in self.store.list("users") if u["id"] != user_id])
         self.store.delete("users", user_id)
 
     def change_password(self, user: dict, old_password: str, new_password: str) -> str:

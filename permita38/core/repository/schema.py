@@ -137,7 +137,7 @@ TABLES: dict[str, Table] = {
             _cols(
                 _BASE + "username:str name:str role:str weekly_hours:float workdays:json default_rate:float "
                 "cost_rate:float color:str tracking_start:str active:bool password_hash:str pw_changed:int "
-                "totp_secret:str totp_enabled:bool totp_last_step:int totp_recovery:json" + _EXTRA
+                "totp_secret:str totp_enabled:bool totp_last_step:int totp_recovery:json role_ids:json" + _EXTRA
             ),
             (Index("idx_users_username", ("username",), unique=True),),
         ),
@@ -147,6 +147,11 @@ TABLES: dict[str, Table] = {
                 _BASE + "name:str layout:str accent:str language:str show_logo:bool intro_offer:text "
                 "outro_offer:text intro_invoice:text outro_invoice:text closing:text" + _EXTRA
             ),
+        ),
+        Table(
+            "roles",
+            _cols(_BASE + "name:str description:text rights:json system:bool" + _EXTRA),
+            (Index("idx_roles_name", ("name",), unique=True),),
         ),
         Table(
             "timers",

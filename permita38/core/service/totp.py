@@ -24,7 +24,7 @@ import segno
 
 from permita38.core.errors import ServiceError
 
-from .auth import AuthService, _b64, _unb64, next_session_version, public_user, verify_password
+from .auth import AuthService, _b64, _unb64, next_session_version, verify_password
 
 STEP_SECONDS = 30
 DIGITS = 6
@@ -264,12 +264,13 @@ class TotpService:
     def reset_for(self, actor: dict, target_id: str, actor_password: str) -> dict:
         self._require_password(actor, actor_password)
         target = self._user(target_id)
+        self.auth._check_may_manage(actor, target)  # not for users who hold rights the actor lacks
         with self._lock:
             saved = self._bump(
                 self._user(target["id"]), totp_secret=None, totp_enabled=False, totp_last_step=None, totp_recovery=[]
             )
         audit.warning("two-factor authentication of user %s reset by %s", target["username"], actor["username"])
-        return public_user(saved)
+        return self.auth.public(saved)
 
     def reset_by_username(self, username: str) -> None:
         """Lock-out recovery from the command line."""
@@ -298,7 +299,7 @@ class TotpService:
         user = self.auth.check_credentials(username, password)
         if user.get("totp_enabled"):
             return LoginStep(mfa_token=self._mfa_token(user))
-        return LoginStep(token=self.auth.create_token(user), user=public_user(user))
+        return LoginStep(token=self.auth.create_token(user), user=self.auth.public(user))
 
     def complete_login(
         self, mfa_token: str, code: str | None, recovery_code: str | None
@@ -320,7 +321,7 @@ class TotpService:
             self._used_mfa[claims["jti"]] = claims["exp"]
         fresh = self._user(user["id"])
         left = len(fresh.get("totp_recovery") or []) if how == "recovery" else None
-        return self.auth.create_token(fresh), public_user(fresh), left
+        return self.auth.create_token(fresh), self.auth.public(fresh), left
 
     def _read_mfa_token(self, token: str | None) -> dict:
         try:

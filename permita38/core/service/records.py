@@ -9,10 +9,36 @@ from permita38.core.repository import COLLECTIONS, ID_RE, Repository
 from permita38.core.settings import effective_settings
 from permita38.core.validation import ALLOWED_VAT_RATES, MAX_MONEY
 
-from .auth import public_user
+from .roles import can, can_any, require
 
-MEMBER_READ = {"projects", "tasks", "entries", "absences", "users"}
-MEMBER_WRITE_OWN = {"entries", "absences"}
+# Which rights open which collection (any one of them). The API routers use the same table for their dependencies,
+# the service checks again, so that a route that forgets its dependency still cannot leak data.
+READ_RIGHTS: dict[str, tuple[str, ...]] = {
+    "customers": ("customers.view",),
+    "projects": ("projects.view_assigned",),
+    "tasks": ("projects.view_assigned",),
+    "entries": ("time.track_own", "time.view_all"),
+    "contracts": ("planning.view",),
+    "absences": ("absences.manage_own", "absences.view_all"),
+    "offers": ("offers.view",),
+    "invoices": ("invoices.view",),
+    "expenses": ("expenses.view",),
+    "templates": ("templates.manage", "offers.view", "invoices.view"),
+}
+WRITE_RIGHTS: dict[str, tuple[str, ...]] = {
+    "customers": ("customers.manage",),
+    "projects": ("projects.manage",),
+    "tasks": ("tasks.manage",),
+    "entries": ("time.track_own",),
+    "contracts": ("planning.manage",),
+    "absences": ("absences.manage_own",),
+    "offers": ("offers.manage",),
+    "invoices": ("invoices.manage",),
+    "expenses": ("expenses.manage",),
+    "templates": ("templates.manage",),
+}
+# collections that are managed through their own endpoints, not the generic record CRUD
+SPECIAL = ("users", "roles")
 
 
 class RecordService:
@@ -20,45 +46,59 @@ class RecordService:
         self.store = store
 
     def _check(self, coll: str):
-        if coll not in COLLECTIONS or coll == "users":
+        if coll not in COLLECTIONS or coll in SPECIAL:
             raise ServiceError(404, "Unknown collection")
+
+    # -- what a user may see ----------------------------------------------------------------------------
+    @staticmethod
+    def _sees_all_of(me: dict, coll: str) -> bool:
+        return can(
+            me, {"entries": "time.view_all", "absences": "absences.view_all", "projects": "projects.view_all"}[coll]
+        )
+
+    def _visible_projects(self, me: dict) -> list[dict]:
+        projects = self.store.list("projects")
+        if can(me, "projects.view_all"):
+            return projects
+        return [p for p in projects if _project_assigned(p, me)]
+
+    def _project_view(self, me: dict, project: dict) -> dict:
+        return project if can(me, "projects.manage") else _limited_project(project)
+
+    def _task_view(self, me: dict, task: dict) -> dict:
+        return task if can_any(me, ("projects.manage", "tasks.manage")) else _limited_task(task)
 
     def list_records(self, me: dict, coll: str) -> list[dict]:
         self._check(coll)
+        require(me, *READ_RIGHTS[coll])
         rows = self.store.list(coll)
-        if me["role"] == "boss":
-            return rows
-        if coll not in MEMBER_READ:
-            raise ServiceError(403, "Forbidden")
-        if coll in ("entries", "absences"):
+        if coll in ("entries", "absences") and not self._sees_all_of(me, coll):
             rows = [r for r in rows if r.get("user_id") == me["id"]]
         elif coll == "projects":
-            rows = [_member_project_view(p) for p in rows if _project_visible(p, me)]
+            rows = [self._project_view(me, p) for p in self._visible_projects(me)]
         elif coll == "tasks":
-            visible = {p["id"] for p in self.store.list("projects") if _project_visible(p, me)}
-            rows = [_member_task_view(t) for t in rows if t.get("project_id") in visible]
+            visible = {p["id"] for p in self._visible_projects(me)}
+            rows = [self._task_view(me, t) for t in rows if t.get("project_id") in visible]
         return rows
 
     def get(self, me: dict, coll: str, rid: str) -> dict:
         self._check(coll)
+        require(me, *READ_RIGHTS[coll])
         rec = self.store.get(coll, rid) if _valid_id(rid) else None
         if not rec:
             raise ServiceError(404, "Not found")
-        if me["role"] != "boss":
-            if coll not in MEMBER_READ:
-                raise ServiceError(403, "Forbidden")
-            if coll in ("entries", "absences") and rec.get("user_id") != me["id"]:
-                raise ServiceError(403, "Forbidden")
-            if coll == "projects":
-                if not _project_visible(rec, me):
-                    raise ServiceError(404, "Not found")  # do not reveal that it exists
-                return _member_project_view(rec)
-            if coll == "tasks":
-                pid = rec.get("project_id")
-                project = self.store.get("projects", pid) if isinstance(pid, str) and _valid_id(pid) else None
-                if not project or not _project_visible(project, me):
-                    raise ServiceError(404, "Not found")
-                return _member_task_view(rec)
+        if coll in ("entries", "absences") and rec.get("user_id") != me["id"] and not self._sees_all_of(me, coll):
+            raise ServiceError(403, "Forbidden")
+        if coll == "projects":
+            if not (can(me, "projects.view_all") or _project_assigned(rec, me)):
+                raise ServiceError(404, "Not found")  # do not reveal that it exists
+            return self._project_view(me, rec)
+        if coll == "tasks":
+            pid = rec.get("project_id")
+            project = self.store.get("projects", pid) if isinstance(pid, str) and _valid_id(pid) else None
+            if not project or not (can(me, "projects.view_all") or _project_assigned(project, me)):
+                raise ServiceError(404, "Not found")
+            return self._task_view(me, rec)
         return rec
 
     def create(self, me: dict, coll: str, data: dict) -> dict:
@@ -68,20 +108,27 @@ class RecordService:
 
     def update(self, me: dict, coll: str, rid: str, data: dict) -> dict:
         self._check(coll)
+        require(me, *WRITE_RIGHTS[coll])
         old = self.store.get(coll, rid) if _valid_id(rid) else None
         if not old:
             raise ServiceError(404, "Not found")
         return self._write(me, coll, {**data, "id": rid, "created": old.get("created")}, old)
 
     def _write(self, me: dict, coll: str, data: dict, old: dict | None) -> dict:
-        boss = me["role"] == "boss"
-        if not boss:
-            if coll not in MEMBER_WRITE_OWN:
-                raise ServiceError(403, "Forbidden")
-            if old and old.get("user_id") != me["id"]:
-                raise ServiceError(403, "Forbidden")
-            data["user_id"] = me["id"]
-            if coll == "entries":  # billing fields are boss/system-only: a member must not set rates or hide hours
+        require(me, *WRITE_RIGHTS[coll])
+        everyone = (coll == "entries" and can(me, "time.edit_all")) or (
+            coll == "absences" and can(me, "absences.manage_all")
+        )
+        if coll in ("entries", "absences"):
+            if not everyone:
+                if old and old.get("user_id") != me["id"]:
+                    raise ServiceError(403, "Forbidden")
+                data["user_id"] = me["id"]
+            else:
+                data.setdefault("user_id", (old or {}).get("user_id") or me["id"])
+            if coll == "entries" and not everyone:
+                # billing fields are not for the person who did the work: a rate overrides every other rate when
+                # the time is billed and `invoice_id` hides hours from invoicing
                 for k in _ENTRY_BILLING_FIELDS:
                     data.pop(k, None)
                     if old and k in old:
@@ -97,7 +144,7 @@ class RecordService:
             data.setdefault("billable", True)
             self._check_day_total(data, old)
             if old and old.get("invoice_id"):
-                if not boss:
+                if not everyone:
                     raise ServiceError(403, "Entry already invoiced")
                 data.setdefault("invoice_id", old["invoice_id"])
         if data.get("created") is None:
@@ -149,12 +196,13 @@ class RecordService:
 
     def delete(self, me: dict, coll: str, rid: str):
         self._check(coll)
+        require(me, *WRITE_RIGHTS[coll])
         old = self.store.get(coll, rid) if _valid_id(rid) else None
         if not old:
             return
-        if me["role"] != "boss":
-            own = coll in MEMBER_WRITE_OWN and old.get("user_id") == me["id"] and not old.get("invoice_id")
-            if not own:
+        if coll in ("entries", "absences"):
+            everyone = can(me, "time.edit_all" if coll == "entries" else "absences.manage_all")
+            if not everyone and (old.get("user_id") != me["id"] or old.get("invoice_id")):
                 raise ServiceError(403, "Forbidden")
         with self.store.transaction():
             if coll == "invoices":  # release billed time entries
@@ -164,27 +212,29 @@ class RecordService:
                         self.store.save("entries", e)
             self.store.delete(coll, rid)
 
-    def list_users(self, me: dict) -> list[dict]:
+    def list_users(self, me: dict, public) -> list[dict]:
+        """People with their working hours and roles for those who may see the team; id and name for everybody else."""
         users = self.store.list("users")
-        if me["role"] == "boss":
-            return [public_user(u) for u in users]
-        return [{"id": u["id"], "name": u.get("name"), "role": u.get("role")} for u in users]
+        if can(me, "team.view"):
+            return [public(u) for u in users]
+        return [{"id": u["id"], "name": u.get("name")} for u in users]
 
 
 _ENTRY_BILLING_FIELDS = ("rate", "invoice_id")
-_MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
+_LIMITED_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
 
 
-def _project_visible(project: dict, me: dict) -> bool:
+def _project_assigned(project: dict, me: dict) -> bool:
+    """Open to everybody (no team set) or the user is on the team."""
     return not project.get("member_ids") or me["id"] in project["member_ids"]
 
 
-def _member_project_view(project: dict) -> dict:
-    """Members see which projects exist for them, never rates, budgets or internal notes."""
-    return {k: project[k] for k in _MEMBER_PROJECT_KEYS if k in project}
+def _limited_project(project: dict) -> dict:
+    """Without 'Manage projects' people see which projects exist for them, never rates, budgets or internal notes."""
+    return {k: project[k] for k in _LIMITED_PROJECT_KEYS if k in project}
 
 
-def _member_task_view(task: dict) -> dict:
+def _limited_task(task: dict) -> dict:
     return {k: v for k, v in task.items() if k != "rate"}
 
 

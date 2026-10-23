@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 #: Revision of the schema this version of the app expects. Bump together with a new migration file.
-CURRENT_REVISION = 2
+CURRENT_REVISION = 3
 
 MIGRATIONS_DIR = Path(__file__).parent / "schema" / "migrations"
 DIALECT_NAMES = ("sqlite", "postgresql", "mariadb")
