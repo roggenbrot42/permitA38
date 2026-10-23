@@ -62,7 +62,7 @@ class World:
         self.db_file = self.svc.store.db_path
         a = self.svc.auth
         self.boss = a.setup("boss", "Bea Boss", "boss-password-1", "Fuzz Co", 40)
-        self.member = a.save_user(dict(username="mia", name="Mia", role="member", password="member-pass-1"))
+        self.member = a.save_user(dict(username="mia", name="Mia", role="employee", password="member-pass-1"))
         s = self.svc.store
         self.ids: list[str] = [self.boss["id"], self.member["id"]]
         c = s.save("customers", dict(name="ACME", rate=100.0, street="Main 1", zip="10115", city="Berlin"))
@@ -179,7 +179,7 @@ class Gen:
         if name in ("password", "old_password", "new_password"):
             return self.r.choice(["boss-password-1", "member-pass-1", "short", "a-new-long-password"])
         if name == "role":
-            return self.r.choice(["boss", "member", "root"])
+            return self.r.choice(["boss", "employee", "root"])
         return self.r.choice(["text", "Ünïcödé ✓", "😀", "a" * 200, "", "line\nbreak", '"quotes"', "x"])
 
     def resolve(self, schema):
@@ -394,11 +394,11 @@ def test_user_records_cannot_be_mass_assigned(extra):
     world = World()
     try:
         h = {"Authorization": "Bearer " + world.token("boss")}
-        body = {"username": "mia", "name": "Mia", "role": "member", "weekly_hours": 40, **extra}
+        body = {"username": "mia", "name": "Mia", "role": "employee", "weekly_hours": 40, **extra}
         r = world.http.put(f"/api/users/{world.member['id']}", json=body, headers=h)
         assert r.status_code == 200, r.text
         stored = world.svc.store.get("users", world.member["id"])
-        assert stored["role"] == "member" and stored["id"] == world.member["id"] and "is_boss" not in stored
+        assert stored["role"] == "employee" and stored["id"] == world.member["id"] and "is_boss" not in stored
         assert stored["password_hash"].count("$") == 3 and stored["password_hash"] != extra.get("password_hash")
         login = world.http.post("/api/auth/login", json={"username": "mia", "password": "member-pass-1"})
         assert login.status_code == 200

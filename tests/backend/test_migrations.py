@@ -41,7 +41,7 @@ def test_models_are_covered_by_the_schema():
         missing = set(model.model_fields) - cols
         assert not missing, f"{coll}: model fields without a column: {sorted(missing)}"
     user_cols = set(TABLES["users"].column_names)
-    assert set(models.UserOut.model_fields) - {"has_password"} <= user_cols
+    assert set(models.UserOut.model_fields) - {"has_password", "permissions"} <= user_cols
     assert {"password_hash", "pw_changed"} <= user_cols
 
 

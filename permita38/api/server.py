@@ -18,6 +18,12 @@ from .routers import auth, files, finance, health, impressum, planning, records,
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
 
 
+def all_routers() -> list:
+    """Every router of the API in registration order (tests enumerate the routes through this)."""
+    modules = (health, auth, totp, users, time, planning, finance, settings, files, sales, impressum, records)
+    return [router for module in modules for router in module.routers]
+
+
 def _clean_msg(msg: str) -> str:
     msg = msg.removeprefix("Value error, ")
     return msg[:300]
@@ -80,9 +86,8 @@ def get_app(config: Config) -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    for module in (health, auth, totp, users, time, planning, finance, settings, files, sales, impressum, records):
-        for router in module.routers:
-            app.include_router(router, prefix="/api")
+    for router in all_routers():
+        app.include_router(router, prefix="/api")
 
     if config.serve_web and config.web_dir and config.web_dir.is_dir():
         app.mount("/", StaticFiles(directory=config.web_dir, html=True), name="web")

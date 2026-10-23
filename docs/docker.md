@@ -72,12 +72,12 @@ file > default. In a container no YAML file is needed or written.
 ## Users and passwords in a container
 
 ```bash
-# add a member (prompts for the password; add -it)
-docker compose run --rm -it permita38 create-user --username mia --name "Mia Member"
+# add an employee (prompts for the password; add -it)
+docker compose run --rm -it permita38 create-user --username mia --name "Mia Example"
 
 # add another boss, password from a file/secret
 docker compose run --rm -v ./secrets/pw.txt:/run/secrets/pw:ro permita38 \
-    create-user --username second --name "Second Boss" --role boss --password-file /run/secrets/pw
+    create-user --username second --name "Second Boss" --role boss  # or employee / accountant --password-file /run/secrets/pw
 
 # reset a forgotten password
 docker compose run --rm -it permita38 set-password mia

@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None):
     cu = sub.add_parser("create-user", help="create a user (e.g. via `docker compose run --rm permita38 create-user`)")
     cu.add_argument("--username", required=True)
     cu.add_argument("--name", required=True)
-    cu.add_argument("--role", choices=("boss", "member"), default="member")
+    cu.add_argument("--role", choices=("boss", "employee", "accountant", "member"), default="employee")
     cu.add_argument("--password-file", type=Path, help="read the password from this file (default: prompt)")
     args = ap.parse_args(argv)
 

@@ -557,13 +557,13 @@ def test_revision_two_database_is_upgraded_and_projects_get_their_period(tmp_pat
     raw.close()
     repo = SQLiteRepository(data)
     repo.startup()
-    assert repo.get_revision() == CURRENT_REVISION == 3
+    assert repo.get_revision() == CURRENT_REVISION
     p = repo.get("projects", "proj00000001")
     assert p["start"] == "2026-01-20" and p["end"] == "2026-03-15"  # entries widen the contract period
     late = repo.get("projects", "proj00000003")
     assert late["start"] == late["end"] == "2026-05-04"  # entries only
     assert repo.get("projects", "proj00000002").get("start") is None
-    assert list((data / "backups").glob("pre-migration-r2-to-r3-*.sqlite3"))
+    assert list((data / "backups").glob(f"pre-migration-r2-to-r{CURRENT_REVISION}-*.sqlite3"))
     repo.close()
 
 

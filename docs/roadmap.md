@@ -21,7 +21,7 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 
 | Item | Status |
 |---|---|
-| **Roles and rights** (boss / employee / accountant, per-area permissions) | in progress |
+| **Roles and rights** (boss / employee / accountant, per-area permissions) | done (fixed roles; custom roles and per-user overrides not planned yet) |
 | **Validation and sanity-check layer** (plausibility checks for invoices, dates, tax ids, totals) | in progress |
 | Impressum extraction (if not in alpha.1) | planned |
 | Full data export as JSON and CSV, re-importable by the app (round-trip tested) | in progress |

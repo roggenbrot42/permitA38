@@ -336,15 +336,15 @@ const WD = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 PAGES.team = async () => {
   await loadAll(['users', 'entries']);
   const dashes = await Promise.all(S.d.users.filter(u => u.active !== false).map(async u => [u, await api('GET', 'dashboard?user_id=' + u.id)]));
-  return `<div class="head"><div><h1>Team</h1><div class="muted">You (boss) plan; members track their own time.</div></div><button class="primary" data-a="editUser">+ Add person</button></div>
+  return `<div class="head"><div><h1>Team</h1><div class="muted">You (boss) plan; employees track their own time; accountants read the books.</div></div><button class="primary" data-a="editUser">+ Add person</button></div>
   <div class="card"><table><tr><th>Person</th><th>Role</th><th class="num">Weekly h</th><th>This week</th><th class="num">Rate</th><th class="num">Cost/h</th></tr>${dashes.map(([u, d]) => `<tr class="click" data-a="editUser" data-id="${u.id}"><td><span class="dot" style="background:${esc(u.color || '#888')}"></span><b>${esc(u.name)}</b></td><td><span class="pill ${u.role === 'boss' ? 'blue' : ''}">${u.role}</span> ${u.totp_enabled ? `<span class="pill good" title="Two-factor authentication is on">2FA</span> <button class="ghost sm" data-a="resetTotp" data-id="${u.id}">Reset 2FA</button>` : ''}</td><td class="num">${u.weekly_hours || 0}</td><td style="min-width:140px"><div class="bar"><div style="width:${d.target ? Math.min(100, d.worked / d.target * 100) : 0}%"></div></div><span class="small muted">${hm(d.worked)} / ${hm(d.target)}</span></td><td class="num">${u.default_rate ? eur(u.default_rate) : ''}</td><td class="num">${u.cost_rate ? eur(u.cost_rate) : ''}</td></tr>`).join('')}</table></div>
   <div class="hint">🔒 Passwords keep team members out of each other's data inside the app. Because the data is plain files in a synced folder, anyone with access to that folder can read everything – share it only with people you trust.</div>`;
 };
 A.editUser = el => {
-  const u = el?.dataset?.id ? S.d.users.find(x => x.id === el.dataset.id) : { role: 'member', weekly_hours: 40, color: COLORS[S.d.users.length % COLORS.length], active: true };
+  const u = el?.dataset?.id ? S.d.users.find(x => x.id === el.dataset.id) : { role: 'employee', weekly_hours: 40, color: COLORS[S.d.users.length % COLORS.length], active: true };
   openForm({
     title: u.id ? 'Edit person' : 'Add person', vals: u,
-    fields: [{ k: 'name', l: 'Name' }, { k: 'role', l: 'Role', t: 'select', o: [['member', 'Member – tracks own time'], ['boss', 'Boss – plans & sees everything']], row: 1 }, { k: 'color', l: 'Colour', t: 'color', row: 1 },
+    fields: [{ k: 'name', l: 'Name' }, { k: 'role', l: 'Role', t: 'select', o: [['employee', 'Employee – tracks own time and time off'], ['accountant', 'Accountant – reads the books, enters expenses'], ['boss', 'Boss – plans & sees everything']], row: 1 }, { k: 'color', l: 'Colour', t: 'color', row: 1 },
       { k: 'weekly_hours', l: 'Weekly hours', t: 'number', row: 2 }, { k: 'tracking_start', l: 'Tracking since', t: 'date', row: 2, h: 'Starts the flex-time balance' },
       { k: 'default_rate', l: 'Billing rate €/h', t: 'number', row: 3, h: 'Fallback when project/customer have none' }, { k: 'cost_rate', l: 'Cost €/h', t: 'number', row: 3, h: 'For project margins' },
       { k: 'username', l: 'Username', h: 'Used to sign in (letters, digits, . - _)' }, { k: 'password', l: u.id ? 'New password (leave empty to keep)' : 'Password (min. 8 characters)', t: 'password', h: 'At least 8 characters' }, { k: 'active', l: 'Active', t: 'check' }],

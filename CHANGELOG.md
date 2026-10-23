@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Roles and rights** (`docs/roles.md`): the roles `boss`, `employee` (formerly `member`, behaviour unchanged) and
+  `accountant` (read access to customers, projects, time, contracts, offers, invoices, finance and settings; can
+  enter expenses and upload bills). A per-area permission matrix (`permita38/core/rights.py`) is enforced on every
+  API route; the web app hides what a role cannot use. The user record and `/api/bootstrap` carry the resulting
+  `permissions`. Migration 0004 renames `member` to `employee` (renumber at merge time); `member` is still accepted
+  as input. `permitA38 create-user --role` accepts `employee` and `accountant`.
 - **Planning and vacation planner** (`docs/planning.md`): per-day capacity (weekly hours, holidays, absences, busy
   time from `services.busy`) against confirmed contracts and open offers in the worst case; offer feasibility with
   exact weeks, causes and options; numbers that do not add up on offers and invoices; project periods with manual

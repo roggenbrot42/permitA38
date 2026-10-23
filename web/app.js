@@ -15,6 +15,10 @@ const mondayOf = s => { const d = parseD(s); d.setDate(d.getDate() - ((d.getDay(
 const fmtDate = s => s ? parseD(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 const dayName = s => parseD(s).toLocaleDateString('en-GB', { weekday: 'short' });
 const isBoss = () => S.me && S.me.role === 'boss';
+/* permissions come from the server with the user: S.me.permissions[area] = {read, write} with scope none|limited|all.
+   The server enforces them; the UI only hides what a role cannot use. */
+const scopeOf = (area, op = 'read') => S.me?.permissions?.[area]?.[op] || 'none';
+const can = (area, op = 'read') => scopeOf(area, op) !== 'none';
 const by = (arr, k = 'id') => Object.fromEntries(arr.map(x => [x[k], x]));
 const nameOf = (coll, id) => (S.d[coll] || []).find(x => x.id === id)?.name || '';
 
@@ -22,10 +26,9 @@ api.onUnauthorized = () => { if (S.me) S.expired = true; S.me = null; render(); 
 function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.className = 'on' + (err ? ' err' : ''); clearTimeout(toast.t); toast.t = setTimeout(() => t.className = '', err ? 4000 : 1800); }
 const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message, true); } };
 
-const BOSS_COLLS = ['customers', 'projects', 'tasks', 'entries', 'contracts', 'absences', 'offers', 'invoices', 'expenses', 'users'];
-const MEMBER_COLLS = ['projects', 'tasks', 'entries', 'absences', 'users'];
+const COLL_AREA = { customers: 'customers', projects: 'projects', tasks: 'projects', entries: 'time', contracts: 'contracts', absences: 'absences', offers: 'offers', invoices: 'invoices', expenses: 'expenses', users: 'team' };
 async function loadAll(only) {
-  const colls = only || (isBoss() ? BOSS_COLLS : MEMBER_COLLS);
+  const colls = (only || Object.keys(COLL_AREA)).filter(c => can(COLL_AREA[c]));
   const res = await Promise.all(colls.map(c => api('GET', c)));
   colls.forEach((c, i) => S.d[c] = res[i]);
 }
@@ -95,7 +98,7 @@ const taskOptions = pid => [['', '— no task —'], ...(S.d.tasks || []).filter
 
 function entryForm(e = {}, after) {
   const vals = { date: todayISO(), billable: true, ...e, dur: e.minutes ? hm(e.minutes / 60) : '' };
-  const users = isBoss() ? [{ k: 'user_id', l: 'Who', t: 'select', o: (S.d.users || []).filter(u => u.active !== false).map(u => [u.id, u.name]), def: S.me.id }] : [];
+  const users = scopeOf('time', 'write') === 'all' ? [{ k: 'user_id', l: 'Who', t: 'select', o: (S.d.users || []).filter(u => u.active !== false).map(u => [u.id, u.name]), def: S.me.id }] : [];
   const fields = [...users,
     { k: 'date', l: 'Date', t: 'date', row: 1 }, { k: 'start', l: 'From', t: 'time', row: 1 }, { k: 'end', l: 'To', t: 'time', row: 1 }, { k: 'dur', l: 'or duration (1:30, 1.5, 90m)', row: 1 },
     { k: 'project_id', l: 'Project', t: 'select', o: projectOptions() },
@@ -121,32 +124,56 @@ function entryForm(e = {}, after) {
 }
 
 /* ---------- layout + router ---------- */
-const NAV_BOSS = [['today', '⏱', 'Today'], ['time', '🗓', 'Timesheet'], ['plan', '📈', 'Planning'], ['customers', '👥', 'Customers'], ['projects', '📁', 'Projects'], ['sales', '🧾', 'Offers & Invoices'], ['expenses', '💳', 'Expenses'], ['money', '💶', 'Money & Taxes'], ['team', '🧑‍🤝‍🧑', 'Team'], ['settings', '⚙️', 'Settings']];
-const NAV_MEMBER = [['today', '⏱', 'Today'], ['time', '🗓', 'Timesheet'], ['timeoff', '🏖', 'Time off']];
+/* nav: [route, icon, label, area needed to see it, 'write' if it needs write access (or 'all' when the read scope must be all, not a restricted view)] */
+const NAV = [['today', '⏱', 'Today', 'timer'], ['time', '🗓', 'Timesheet', 'time', 'write'], ['timeoff', '🏖', 'Time off', 'absences'], ['plan', '📈', 'Planning', 'planning'], ['customers', '👥', 'Customers', 'customers'], ['projects', '📁', 'Projects', 'projects', 'all'],
+  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['money', '💶', 'Money & Taxes', 'finance'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['settings', '⚙️', 'Settings', 'settings', 'all']];
+const navAllowed = ([, , , area, need]) => (need === 'write' ? can(area, 'write') : need === 'all' ? scopeOf(area) === 'all' : can(area));
+const navFor = () => NAV.filter(n => navAllowed(n) && !(n[0] === 'timeoff' && can('planning')));
+/* which area (and, for the read-only lock, which write area) a page belongs to */
+function pageArea(p, args) {
+  if (p === 'doc') return args[0] === 'offers' ? 'offers' : 'invoices';
+  if (p === 'sales') return can('invoices') ? 'invoices' : 'offers';
+  return { customer: 'customers', project: 'projects' }[p] || NAV.find(n => n[0] === p)?.[3] || null;
+}
+const ROLE_LABEL = { boss: 'Boss', employee: 'Employee', accountant: 'Accountant' };
 function route() { const [p, ...a] = (location.hash.replace(/^#\/?/, '') || 'today').split('/'); return [p, a]; }
-const MEMBER_PAGES = ['today', 'time', 'timeoff'];
-function denyMember() { toast('Not available for your role'); location.hash = '#/today'; }
+function deny() { toast('Not available for your role'); const first = navFor()[0]; location.hash = '#/' + (first ? first[0] : 'today'); }
+/* a page whose area the role may read but not write: take the write controls away */
+const WRITE_ACTIONS = ['editCustomer', 'newDoc', 'billTime', 'billTimeInto', 'editProject', 'editTask', 'docSave', 'docFinalize', 'docAccept', 'docToInvoice', 'addLine', 'saveSettings', 'editTemplate', 'editUser', 'delLine', 'docPdfDelete'];
+function lockPage(root, p) {
+  root.querySelectorAll('[data-a]').forEach(el => { if (WRITE_ACTIONS.includes(el.dataset.a)) { if (el.tagName === 'TR') { delete el.dataset.a; el.classList.remove('click'); } else el.remove(); } });
+  root.querySelectorAll('[data-change="docStatus"]').forEach(el => el.remove());
+  if (p === 'doc' || p === 'settings') root.querySelectorAll('input,select,textarea').forEach(el => { el.disabled = true; });
+  root.insertAdjacentHTML('afterbegin', '<div class="banner info" role="status">Read-only for your role.</div>');
+}
 async function render() {
   const app = $('#app');
   clearInterval(render.tick);
   if (!S.me) return renderLogin(app);
   const [p, args] = route();
   if (p !== 'doc' && typeof DOC !== 'undefined') DOC = null;
-  const nav = isBoss() ? NAV_BOSS : NAV_MEMBER;
+  const nav = navFor();
   const active = { customer: 'customers', project: 'projects', doc: 'sales' }[p] || p;
-  if (!isBoss() && !MEMBER_PAGES.includes(p)) return denyMember();
+  const area = pageArea(p, args), item = NAV.find(n => n[0] === p);
+  const ok = item ? navAllowed(item) : ['customer', 'project', 'doc'].includes(p) && !!area && scopeOf(area) === 'all';
+  if (!PAGES[p] || !ok) {
+    const first = nav[0];
+    if (first && (!PAGES[p] || p === 'today')) { location.hash = '#/' + first[0]; return; }  // unknown page or default landing
+    return deny();
+  }
   let html;
-  try { html = await (PAGES[p] || PAGES.today)(...args); } catch (e) {
+  try { html = await PAGES[p](...args); } catch (e) {
     if (!S.me) return;
-    if (e.status === 403 && !isBoss()) return denyMember();
+    if (e.status === 403 && !isBoss()) return deny();
     if (e.status) { toast(e.message, true); html = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; }  // API error: shown, not a crash
     else { html = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; console.error(e); }
   }
   if (!S.me) return;
   app.innerHTML = `<div class="shell"><nav class="side"><div class="brand"><i></i>permitA38</div>
     ${nav.map(([k, ic, l]) => `<a class="nav ${k === active ? 'on' : ''}" href="#/${k}"><span>${ic}</span>${l}</a>`).join('')}
-    <div class="spacer"></div><div class="me"><b>${esc(S.me.name)}</b><br>${S.me.role === 'boss' ? 'Boss' : 'Member'}</div>
-    <a class="nav" data-a="changePassword">🔑 Change password</a><a class="nav" data-a="twoFactor">🛡 Two-factor authentication</a><a class="nav" data-a="logout">↩ Sign out</a></nav><main>${S.conflicts?.length ? `<div class="banner">⚠ ${S.conflicts.length} sync conflict file(s) found in your data folder (e.g. <code>${esc(S.conflicts[0])}</code>). Compare and delete the copy you do not need.</div>` : ''}${html}</main></div>`;
+    <div class="spacer"></div><div class="me"><b>${esc(S.me.name)}</b><br>${esc(ROLE_LABEL[S.me.role] || S.me.role)}</div>
+    <a class="nav" data-a="changePassword">🔑 Change password</a><a class="nav" data-a="twoFactor">🛡 Two-factor authentication</a><a class="nav" data-a="logout">↩ Sign out</a></nav><main id="main">${S.conflicts?.length ? `<div class="banner">⚠ ${S.conflicts.length} sync conflict file(s) found in your data folder (e.g. <code>${esc(S.conflicts[0])}</code>). Compare and delete the copy you do not need.</div>` : ''}${html}</main></div>`;
+  if (area && can(area) && !can(area, 'write') && !(p === 'sales' && can('offers', 'write'))) lockPage($('#main'), p);
   if (render.after) { const f = render.after; render.after = null; f(); }
 }
 window.addEventListener('hashchange', guard(render));
@@ -282,14 +309,14 @@ A.timerStop = async () => { const r = await api('POST', 'timer/stop', { note: $(
 
 /* ================= TIMESHEET ================= */
 PAGES.time = async (week, uid) => {
-  week = week || mondayOf(todayISO()); uid = isBoss() ? (uid || S.me.id) : S.me.id;
+  week = week || mondayOf(todayISO()); uid = scopeOf('time', 'write') === 'all' ? (uid || S.me.id) : S.me.id;
   await loadAll(['entries', 'absences']);
   const dash = await api('GET', 'dashboard' + (uid !== S.me.id ? '?user_id=' + uid : '')), ws = mondayOf(week);
   const prev = addDays(ws, -7), next = addDays(ws, 7), projects = by(S.d.projects);
   const days = [...Array(7)].map((_, i) => addDays(ws, i));
   const mine = S.d.entries.filter(e => e.user_id === uid);
   const total = days.reduce((a, d) => a + mine.filter(e => e.date === d).reduce((x, e) => x + e.minutes, 0), 0) / 60;
-  const sel = isBoss() ? `<select style="width:auto" data-change="timeUser" data-week="${ws}">${S.d.users.filter(u => u.active !== false).map(u => `<option value="${u.id}" ${u.id === uid ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>` : '';
+  const sel = scopeOf('time', 'write') === 'all' ? `<select style="width:auto" data-change="timeUser" data-week="${ws}">${S.d.users.filter(u => u.active !== false).map(u => `<option value="${u.id}" ${u.id === uid ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select>` : '';
   return `<div class="head"><div><h1>Timesheet</h1><div class="muted">Week of ${fmtDate(ws)} · ${hm(total)} of ${hm(dash.target)} h</div></div>
     <div class="row tight" style="flex:none;align-items:center">${sel}<button href="#" data-a="goto" data-to="time/${prev}/${uid}">←</button><button data-a="goto" data-to="time/${mondayOf(todayISO())}/${uid}">This week</button><button data-a="goto" data-to="time/${next}/${uid}">→</button><button class="primary" data-a="addTime">+ Add time</button></div></div>
     ${days.map((d, i) => { const es = mine.filter(e => e.date === d), dd = dash.days[i], sum = es.reduce((a, e) => a + e.minutes, 0) / 60;
@@ -366,7 +393,7 @@ A.editAbsence = el => {
   const a = el.dataset.id ? S.d.absences.find(x => x.id === el.dataset.id) : { kind: 'vacation', start: todayISO(), end: todayISO(), user_id: S.me.id };
   openForm({
     title: a.id ? 'Edit time off' : 'Add time off', vals: a,
-    fields: [...(isBoss() ? [{ k: 'user_id', l: 'Who', t: 'select', o: S.d.users.filter(u => u.active !== false).map(u => [u.id, u.name]) }] : []), { k: 'kind', l: 'Type', t: 'select', o: ABS_KINDS },
+    fields: [...(scopeOf('absences', 'write') === 'all' ? [{ k: 'user_id', l: 'Who', t: 'select', o: S.d.users.filter(u => u.active !== false).map(u => [u.id, u.name]) }] : []), { k: 'kind', l: 'Type', t: 'select', o: ABS_KINDS },
       { k: 'start', l: 'From', t: 'date', row: 1 }, { k: 'end', l: 'To (inclusive)', t: 'date', row: 1 }, { k: 'note', l: 'Note' }],
     save: async v => { if (!v.end || v.end < v.start) v.end = v.start; await save('absences', v); render(); },
     del: a.id ? async () => { await api('DELETE', 'absences/' + a.id); await loadAll(['absences']); render(); } : null

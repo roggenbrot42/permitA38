@@ -1,12 +1,14 @@
 # mypy: disable-error-code="valid-type,attr-defined"
 """Typed CRUD routers generated per collection."""
 
+from typing import Annotated
+
 from fastapi import APIRouter, Response
 from pydantic import BaseModel
 
-from permita38.api.deps import CurrentUser, ServicesDep
+from permita38.api.deps import Needs, ServicesDep
 from permita38.api.responses import stored
-from permita38.core import models
+from permita38.core import models, rights
 
 # collections whose saved records also return non-blocking planning warnings (never stored)
 WARNED = ("projects", "contracts", "offers", "invoices")
@@ -23,7 +25,7 @@ def _result(model: type[models.Record]) -> type[models.Record]:
 
 
 def _with_warnings(services, coll: str, rec: dict, user: dict) -> dict:
-    if coll in WARNED and user["role"] == "boss":
+    if coll in WARNED and rights.scope(user["role"], "planning") == rights.Scope.ALL:
         return {**rec, "planning_warnings": services.planning.warnings_for(coll, rec)}
     return rec
 
@@ -31,27 +33,30 @@ def _with_warnings(services, coll: str, rec: dict, user: dict) -> dict:
 def crud_router(coll: str, model: type[models.Record], in_model: type[BaseModel]) -> APIRouter:
     router = APIRouter(prefix=f"/{coll}", tags=[coll])
     out_model = _result(model) if coll in WARNED else model
+    area = rights.COLLECTION_AREA[coll]
+    reader = Annotated[dict, Needs(area, "read")]
+    writer = Annotated[dict, Needs(area, "write")]
 
     @router.get("", response_model=list[model], response_model_exclude_none=True, name=f"list_{coll}")
-    def list_records(user: CurrentUser, services: ServicesDep):
+    def list_records(user: reader, services: ServicesDep):
         return stored(model, services.records.list_records(user, coll))
 
     @router.post("", response_model=out_model, response_model_exclude_none=True, name=f"create_{coll}")
-    def create_record(body: in_model, user: CurrentUser, services: ServicesDep):  # type: ignore[valid-type]
+    def create_record(body: in_model, user: writer, services: ServicesDep):  # type: ignore[valid-type]
         rec = services.records.create(user, coll, body.model_dump(exclude_none=True))
         return stored(out_model, _with_warnings(services, coll, rec, user))
 
     @router.get("/{rid}", response_model=model, response_model_exclude_none=True, name=f"get_{coll}")
-    def get_record(rid: str, user: CurrentUser, services: ServicesDep):
+    def get_record(rid: str, user: reader, services: ServicesDep):
         return stored(model, services.records.get(user, coll, rid))
 
     @router.put("/{rid}", response_model=out_model, response_model_exclude_none=True, name=f"update_{coll}")
-    def update_record(rid: str, body: in_model, user: CurrentUser, services: ServicesDep):  # type: ignore[valid-type]
+    def update_record(rid: str, body: in_model, user: writer, services: ServicesDep):  # type: ignore[valid-type]
         rec = services.records.update(user, coll, rid, body.model_dump(exclude_none=True))
         return stored(out_model, _with_warnings(services, coll, rec, user))
 
     @router.delete("/{rid}", status_code=204, name=f"delete_{coll}")
-    def delete_record(rid: str, user: CurrentUser, services: ServicesDep):
+    def delete_record(rid: str, user: writer, services: ServicesDep):
         services.records.delete(user, coll, rid)
         return Response(status_code=204)
 

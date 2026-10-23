@@ -1,4 +1,4 @@
-from permita38.core import documents
+from permita38.core import documents, rights
 from permita38.core.holidays import STATES
 from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
@@ -23,7 +23,7 @@ class SettingsService:
 
     def bootstrap(self, me: dict, timer: dict) -> dict:
         st = self.get()
-        if me["role"] != "boss":
+        if rights.scope(me.get("role"), "settings") != rights.Scope.ALL:
             st = {k: st.get(k) for k in ("company_name", "state")}
         return dict(
             me=public_user(me),

@@ -1,10 +1,10 @@
 import re
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Response
 from pydantic import BaseModel, Field
 
-from permita38.api.deps import BossUser, ServicesDep
+from permita38.api.deps import Needs, ServicesDep
 from permita38.core import validation as v
 from permita38.core.models import Document
 
@@ -36,34 +36,34 @@ def _pdf(services, coll: str, rid: str) -> Response:
 
 
 @router.post("/invoices/from-time", response_model=DocumentResult, response_model_exclude_none=True)
-def invoice_from_time(body: FromTime, _: BossUser, services: ServicesDep):
+def invoice_from_time(body: FromTime, _: Annotated[dict, Needs("invoices", "write")], services: ServicesDep):
     """Group unbilled, billable time by project/task/rate into a draft invoice."""
     inv = services.sales.invoice_from_time(body.customer_id, body.project_id, body.date_from, body.date_to)
     return _doc(services, "invoices", inv)
 
 
 @router.post("/invoices/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
-def finalize_invoice(rid: str, _: BossUser, services: ServicesDep):
+def finalize_invoice(rid: str, _: Annotated[dict, Needs("invoices", "write")], services: ServicesDep):
     return _doc(services, "invoices", services.sales.finalize("invoices", rid))
 
 
 @router.get("/invoices/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})
-def invoice_pdf(rid: str, _: BossUser, services: ServicesDep):
+def invoice_pdf(rid: str, _: Annotated[dict, Needs("invoices")], services: ServicesDep):
     return _pdf(services, "invoices", rid)
 
 
 @router.post("/offers/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
-def finalize_offer(rid: str, _: BossUser, services: ServicesDep):
+def finalize_offer(rid: str, _: Annotated[dict, Needs("offers", "write")], services: ServicesDep):
     return _doc(services, "offers", services.sales.finalize("offers", rid))
 
 
 @router.get("/offers/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})
-def offer_pdf(rid: str, _: BossUser, services: ServicesDep):
+def offer_pdf(rid: str, _: Annotated[dict, Needs("offers")], services: ServicesDep):
     return _pdf(services, "offers", rid)
 
 
 @router.post("/offers/{rid}/accept", summary="mark accepted; creates or extends a project and, if planned, a contract")
-def accept_offer(rid: str, _: BossUser, services: ServicesDep) -> dict[str, Any]:
+def accept_offer(rid: str, _: Annotated[dict, Needs("offers", "write")], services: ServicesDep) -> dict[str, Any]:
     out = services.sales.accept_offer(rid)
     out["planning_warnings"] = services.planning.warnings_for("projects", out["project"])
     if out.get("contract"):
@@ -72,5 +72,5 @@ def accept_offer(rid: str, _: BossUser, services: ServicesDep) -> dict[str, Any]
 
 
 @router.post("/offers/{rid}/to-invoice", response_model=DocumentResult, response_model_exclude_none=True)
-def offer_to_invoice(rid: str, _: BossUser, services: ServicesDep):
+def offer_to_invoice(rid: str, _: Annotated[dict, Needs("invoices", "write")], services: ServicesDep):
     return _doc(services, "invoices", services.sales.offer_to_invoice(rid))

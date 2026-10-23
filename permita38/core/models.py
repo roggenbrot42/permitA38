@@ -177,6 +177,9 @@ class UserOut(Record):
     active: bool | None = None
     has_password: bool | None = None
     totp_enabled: bool | None = None
+    permissions: dict[str, dict[str, Literal["none", "limited", "all"]]] | None = Field(
+        None, description="read/write scope per area, derived from the role (never stored)"
+    )
 
 
 class UserIn(BaseModel):
@@ -184,7 +187,9 @@ class UserIn(BaseModel):
     id: str | None = None
     username: str = Field(max_length=64)
     name: v.Name
-    role: Literal["boss", "member"] = "member"
+    role: Literal["boss", "employee", "accountant", "member"] = Field(
+        "employee", description='"member" is the old name of "employee" and is still accepted'
+    )
     password: str | None = Field(default=None, max_length=1000)
     weekly_hours: v.Hours = 40
     workdays: list[int] = Field(default=[0, 1, 2, 3, 4], min_length=1, max_length=7)

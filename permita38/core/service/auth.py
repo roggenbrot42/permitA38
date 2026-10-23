@@ -8,6 +8,7 @@ import re
 import secrets
 import time
 
+from permita38.core import rights
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 from permita38.core.settings import DEFAULT_SETTINGS
@@ -46,6 +47,8 @@ def _unb64(s: str) -> bytes:
 
 def public_user(u: dict) -> dict:
     out = {k: v for k, v in u.items() if k not in _PRIVATE}
+    out["role"] = rights.normalize_role(u.get("role"))
+    out["permissions"] = rights.permissions(out["role"])
     out["has_password"] = bool(u.get("password_hash"))
     out["totp_enabled"] = bool(u.get("totp_enabled"))
     return out
@@ -111,7 +114,7 @@ class AuthService:
                 return None  # password / 2FA changed after this token was issued
         elif claims["iat"] < int(user.get("pw_changed") or 0):
             return None  # token without a version claim (older release)
-        return user
+        return {**user, "role": rights.normalize_role(user.get("role"))}
 
     # ---------- login ----------
     def needs_setup(self) -> bool:
@@ -151,7 +154,7 @@ class AuthService:
                 dict(
                     username=username,
                     name=name.strip(),
-                    role="boss",
+                    role=rights.BOSS,
                     weekly_hours=weekly_hours,
                     active=True,
                     workdays=[0, 1, 2, 3, 4],
@@ -171,7 +174,9 @@ class AuthService:
             [
                 u
                 for u in self.store.list("users")
-                if u["role"] == "boss" and u["id"] != excluding and u.get("active", True)
+                if rights.normalize_role(u.get("role")) == rights.BOSS
+                and u["id"] != excluding
+                and u.get("active", True)
             ]
         )
 
@@ -181,8 +186,9 @@ class AuthService:
             raise ServiceError(404, "User not found")
         password = data.pop("password", None)
         data["username"] = normalize_username(data["username"])
-        if data.get("role") not in ("boss", "member"):
-            raise ServiceError(400, "Role must be boss or member")
+        data["role"] = rights.normalize_role(data.get("role"))
+        if data["role"] not in rights.ROLES:
+            raise ServiceError(400, "Role must be boss, employee or accountant")
         if any(u.get("username") == data["username"] and u["id"] != data.get("id") for u in self.store.list("users")):
             raise ServiceError(400, "This username is already taken")
         rec = {**(old or {}), **data}
@@ -191,7 +197,11 @@ class AuthService:
             rec["password_hash"], rec["pw_changed"] = hash_password(password), next_session_version(old)
         elif not old:
             raise ServiceError(400, "A password is required for new users")
-        if old and old["role"] == "boss" and (rec["role"] != "boss" or not rec.get("active", True)):
+        if (
+            old
+            and rights.normalize_role(old.get("role")) == rights.BOSS
+            and (rec["role"] != rights.BOSS or not rec.get("active", True))
+        ):
             if self._boss_count(excluding=old["id"]) == 0:
                 raise ServiceError(400, "There must be at least one active boss")
         return public_user(self.store.save("users", rec))
@@ -202,7 +212,7 @@ class AuthService:
             return
         if user_id == actor["id"]:
             raise ServiceError(400, "You cannot delete yourself")
-        if old["role"] == "boss" and self._boss_count(excluding=user_id) == 0:
+        if rights.normalize_role(old.get("role")) == rights.BOSS and self._boss_count(excluding=user_id) == 0:
             raise ServiceError(400, "Cannot delete the only boss")
         self.store.delete("users", user_id)
 

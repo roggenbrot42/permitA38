@@ -162,7 +162,7 @@ def test_member_permissions(boss_client, member_client):
     ):
         assert member_client.get(path).status_code == 403, path
     assert member_client.post("/api/customers", json={"name": "X"}).status_code == 403
-    assert member_client.get("/api/auth/me").json()["role"] == "member"
+    assert member_client.get("/api/auth/me").json()["role"] == "employee"
 
     boss_id = boss_client.get("/api/auth/me").json()["id"]
     proj = boss_client.post("/api/projects", json={"name": "Site"}).json()
