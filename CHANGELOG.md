@@ -34,6 +34,8 @@ All notable changes to this project are documented here. The format is based on
   the VAT. Input VAT of bills in the category *Business meals* is now reclaimed in full (§ 15 Abs. 1a UStG, to be
   confirmed by your tax adviser); other categories are unchanged. Bills you entered earlier keep their old figures: open
   and save them again after choosing the category.
+- Money & Taxes: a year outside 2000–2100 in the address (typed or stale) showed a validation error page; it is clamped
+  now and the arrows stop at the ends (found by the nightly randomized browser run).
 
 ## [0.4.0-alpha.1] - 2026-10-22
 
