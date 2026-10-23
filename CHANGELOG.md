@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format is based on
 - Planner: a job with a total number of hours was spread over all workdays of its period, including vacation and
   holidays, so the week before a vacation looked overloaded although the work fitted before it. The hours are now
   spread over the available days (workdays that are neither a holiday nor time off); `docs/planning.md` has the rule.
+- Bill preview: a PDF or image that the browser downloads or shows blank now has a visible "Not showing? Open or download the bill" line.
 
 ## [0.4.0-alpha.2] - 2026-10-23
 
