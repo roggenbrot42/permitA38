@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- Attachments: a file uploaded with a `.html` or `.svg` name was served from the app's own origin and could run as a
+  page. Only PDF and image types are now served inline; all other files are downloads. Uploads whose content does not
+  match a PDF or image extension are refused (415).
 - Planner: after the first keyboard move the bar lost keyboard focus (the page redrew), so it could not be moved or
   resized again. Focus now survives redraws, Ctrl+←/→ resizes the start, and each draft change has its own Discard
   button (and Esc on a focused bar).
@@ -15,6 +18,10 @@ All notable changes to this project are documented here. The format is based on
   ←/→ (move), PageUp/PageDown (a week), Shift+←/→ (end), Ctrl+←/→ (start).
 
 ### Added
+- **Itemised expenses (API)** (`docs/specs/itemised-expenses.md`): an expense can carry up to 50 `lines`, each with its
+  own gross amount, VAT rate and deductible share (and optional business-meal VAT share or category). VAT is computed
+  per rate group as on a printed bill; the server derives net and VAT per line and the totals for the tax figures use
+  the lines. Bills without lines work as before. Migration `0005-expense_lines`.
 - **Planning and vacation planner** (`docs/planning.md`): per-day capacity (weekly hours, holidays, absences, busy
   time from `services.busy`) against confirmed contracts and open offers in the worst case; offer feasibility with
   exact weeks, causes and options; numbers that do not add up on offers and invoices; project periods with manual
