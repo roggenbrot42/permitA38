@@ -184,8 +184,10 @@
     if (!el) return;
     const act = document.activeElement, focused = act && act.closest && act.closest('.pln-bar');
     const focusKey = focused && el.contains(focused) ? focused.dataset.key : null;   // a redraw must not drop keyboard focus
+    const wasDiscard = !!(act && act.closest && act.closest('.pln-draftlist') && el.contains(act));
     el.innerHTML = view();
     bindPlanner();
+    if (wasDiscard) (el.querySelector('.pln-draftlist button') || el.querySelector('.pln-bar'))?.focus();   // the clicked button is gone
     if (focusKey) { const again = document.querySelector(`.pln-bar[data-key="${CSS.escape(focusKey)}"]`); if (again) again.focus(); }
   }
   // One line per draft change, each with its own "Discard", so single items can be dropped without losing the rest.
@@ -217,7 +219,7 @@
       <span class="right auto"><button type="button" class="ghost" data-a="plnDiscard" ${n ? '' : 'disabled'}>Discard</button> <button type="button" class="primary" data-a="plnApply" ${n ? '' : 'disabled'}>Apply</button></span>
     </div>
     ${draftList()}
-    <div class="pln-help small muted">Keyboard: focus a bar, then ←/→ moves it one day (Shift: one week); Alt+←/→ changes its end, Ctrl+←/→ its start; Esc discards this item's change; Delete removes a time-off entry. Touch: drag bars and the time-off row.</div>
+    <div class="pln-help small muted">Keyboard: focus a bar, then ←/→ moves it one day (Shift: one week); Alt+←/→ changes its end, Ctrl+←/→ its start; Esc discards this item's change; Delete or Backspace removes a time-off entry. Touch: drag bars and the time-off row.</div>
     <div class="pln-wrap" id="plnWrap" aria-label="Timeline">
       <div class="pln-grid">
         ${headerRow()}
