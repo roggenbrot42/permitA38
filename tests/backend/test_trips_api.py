@@ -567,9 +567,33 @@ def test_statement_cells_are_cut_to_their_column_and_every_text_is_escaped(boss_
     assert any(t == "Zweck \\ (1)" for t in texts)  # short text stays whole
     assert any(t == "Nach (y)" for t in texts)
     assert b"Ort \\(Nord\\) \\\\ y" in raw  # written with PDF escapes
+    # the rendered text fits its column: the place cell is 128 pt wide, the mileage 'from' cell 110 pt (2 pt padding
+    # on each side); a cut cell also fills its column up to about one character
+    from permita38.core.pdf import text_width
+
+    place = next(t for t in texts if t.startswith("Ort (Nord)"))
+    frm = next(t for t in texts if t.startswith("Von (x)"))
+    assert text_width(place, 9) <= 128 - 4 and text_width(place, 9) > 128 - 4 - 8
+    assert text_width(frm, 9) <= 110 - 4 and text_width(frm, 9) > 110 - 4 - 8
 
 
 def test_statement_prints_the_placeholder_note_in_full(boss_client):
     trip = make_trip(boss_client, places=[{"from_date": "2026-11-09", "country": "AT"}])
     texts = _pdf_text(boss_client.get(f"/api/trips/{trip['id']}/statement.pdf").content)
     assert any("Rate for AT is a placeholder: verify" in t for t in texts)
+
+
+def test_limited_role_can_link_its_own_trip_via_expense_trip_id(boss_client, accountant, monkeypatch):
+    from permita38.core import rights
+    from permita38.core.rights import Scope
+
+    # accountant creates a trip of their own while trips write is allowed (the matrix is narrowed afterwards)
+    monkeypatch.setitem(rights.MATRIX["accountant"], "trips", (Scope.ALL, Scope.ALL))
+    own = accountant.post("/api/trips", json=trip_body())
+    assert own.status_code == 200, own.text
+    # now the trips area is LIMITED for read: only the trip's own user may link to it
+    monkeypatch.setitem(rights.MATRIX["accountant"], "trips", (Scope.LIMITED, Scope.NONE))
+    body = {"date": "2026-11-09", "net": 10, "vat": 0, "trip_id": own.json()["id"]}
+    r = accountant.post("/api/expenses", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["trip_id"] == own.json()["id"]

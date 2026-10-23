@@ -396,3 +396,75 @@ def test_meal_reduction_on_the_last_day():
 def test_trip_across_a_year_mileage_uses_the_start_year():
     r = calc(trip("2026-12-30T08:00", "2027-01-02T18:00", mileage=[{"date": "2026-12-30", "km": 10}]))
     assert r["mileage_total"] == 3.00
+
+
+# ------------------------------------------------------------------ review round 3: limit key and reset boundary
+def _limit_trip(places, end="2026-04-10T18:00"):
+    """A 96-day trip (too long for the API, fine for the pure calculation): 5 Jan to 10 Apr 2026."""
+    return trip("2026-01-05T08:00", end, places=places)
+
+
+def test_city_name_is_compared_case_folded_and_trimmed():
+    # 'Hamburg' and ' hamburg ' are one place: no gap, so the period started on 5 Jan continues and is over on 5 Apr
+    places = [
+        {"from_date": "2026-01-05", "country": "DE", "city": "Hamburg"},
+        {"from_date": "2026-02-01", "country": "DE", "city": " hamburg "},
+    ]
+    r = calc(_limit_trip(places))
+    assert day(r, "2026-04-04")["amount"] == 28.00
+    assert day(r, "2026-04-05")["amount"] == 0.00
+    assert "Three-month limit reached" in day(r, "2026-04-05")["note"]
+
+
+def test_same_city_in_two_countries_is_two_periods_de_at():
+    # DE Hamburg 5 Jan - 31 Jan, AT Hamburg 1 Feb - 10 Mar, DE Hamburg again from 11 Mar: the DE gap is 38 days, so
+    # the DE period restarts on 11 Mar and 5 Apr is paid. Keyed on the city alone, 5 Apr would be over the limit.
+    places = [
+        {"from_date": "2026-01-05", "country": "DE", "city": "Hamburg"},
+        {"from_date": "2026-02-01", "country": "AT", "city": "Hamburg"},
+        {"from_date": "2026-03-11", "country": "DE", "city": "Hamburg"},
+    ]
+    r = calc(_limit_trip(places))
+    assert day(r, "2026-02-01")["country"] == "AT"
+    assert day(r, "2026-04-05")["amount"] == 28.00
+    assert "Three-month" not in day(r, "2026-04-05")["note"]
+
+
+def test_two_unknown_countries_falling_back_to_lu_are_still_two_periods():
+    # XX and YY both use the Luxembourg row, but the limit is keyed on the ORIGINAL code: the XX period restarts
+    places = [
+        {"from_date": "2026-01-05", "country": "XX", "city": "Hamburg"},
+        {"from_date": "2026-02-01", "country": "YY", "city": "Hamburg"},
+        {"from_date": "2026-03-11", "country": "XX", "city": "Hamburg"},
+    ]
+    r = calc(_limit_trip(places))
+    assert day(r, "2026-04-05")["country"] == "LU"
+    assert day(r, "2026-04-05")["amount"] == 45.00  # Luxembourg 24-hour row (placeholder), middle day
+    assert "Three-month" not in day(r, "2026-04-05")["note"]
+
+
+@pytest.mark.parametrize(
+    "absence_days,continues",
+    [(27, True), (28, False)],
+)
+def test_four_week_reset_boundary_27_continues_28_resets(absence_days, continues):
+    # Hamburg 5-10 Jan, then Berlin for `absence_days` days, then Hamburg again. The period started on 5 Jan ends
+    # with 4 Apr; a short gap keeps it (5 Apr over the limit), 28 days away starts a new period (5 Apr paid).
+    from datetime import timedelta
+
+    back = date(2026, 1, 11) + timedelta(days=absence_days)  # first day back in Hamburg
+    places = [
+        {"from_date": "2026-01-05", "country": "DE", "city": "Hamburg"},
+        {"from_date": "2026-01-11", "country": "DE", "city": "Berlin"},
+        {"from_date": back.isoformat(), "country": "DE", "city": "Hamburg"},
+    ]
+    r = calc(_limit_trip(places))
+    assert day(r, "2026-04-04")["amount"] == 28.00
+    if continues:
+        assert day(r, "2026-04-05")["amount"] == 0.00
+        assert "Three-month limit reached" in day(r, "2026-04-05")["note"]
+        assert day(r, "2026-04-10")["amount"] == 0.00
+    else:
+        assert day(r, "2026-04-05")["amount"] == 28.00
+        assert day(r, "2026-04-10")["amount"] == 14.00  # last date: from8h, no limit note
+        assert "Three-month" not in day(r, "2026-04-10")["note"]
