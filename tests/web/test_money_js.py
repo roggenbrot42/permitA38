@@ -7,12 +7,13 @@ import json
 import random
 import shutil
 import subprocess
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from permita38.core import calc
-from permita38.core.money import dec, q2
+from permita38.core.money import dec, q2, split_gross
 
 NODE = shutil.which("node")
 MONEY_JS = Path(__file__).resolve().parents[2] / "web" / "money.js"
@@ -27,8 +28,10 @@ const out = cases.map(c => {
   const t = Money.totals(c.doc, c.settings);
   const vat = {}; for (const [r, v] of Object.entries(t.vat)) vat[r] = Money.toNumber(v);
   const split = c.split ? Money.splitGross(c.split[0], c.split[1]) : null;
+  const itemised = c.bill ? Money.splitLines(c.bill) : null;
+  const totals = c.bill ? Money.lineTotals(c.bill) : null;
   return { net: Money.toNumber(t.net), vat, vatTotal: Money.toNumber(t.vatTotal), gross: Money.toNumber(t.gross),
-           lines: t.lines.map(Money.toNumber), split };
+           lines: t.lines.map(Money.toNumber), split, itemised, totals };
 });
 process.stdout.write(JSON.stringify(out));
 """
@@ -53,6 +56,28 @@ def _cases(n: int, seed: int):
         }
 
 
+def _bill_cases(n: int, seed: int):
+    """Random itemised bills: gross with up to 3 decimals (exact on both sides), rates from the UI and a few others."""
+    rnd = random.Random(seed)
+    for _ in range(n):
+        bill = [
+            [rnd.randint(0, 40000) / rnd.choice([100, 1000]), rnd.choice([19, 7, 0, 5.5])]
+            for _ in range(rnd.randint(0, 12))
+        ]
+        yield bill
+
+
+# Hand-checked line sets (docs/specs/itemised-expenses.md); the expected values are literals, not computed.
+TABLE = [
+    ([[160, 7], [30, 19], [6, 0]], [(149.53, 10.47), (25.21, 4.79), (6, 0)]),  # hotel: 7 % VAT is 10.47 in total
+    ([[0.5, 7], [0.5, 7]], [(0.47, 0.03), (0.46, 0.04)]),  # group VAT 0,07, the later line gets the cent
+    ([[0.04, 19]] * 5, [(0.04, 0), (0.04, 0), (0.03, 0.01), (0.03, 0.01), (0.03, 0.01)]),  # never negative
+    ([[0.01, 7], [2.52, 7], [0, 7]], [(0.01, 0), (2.35, 0.17), (0, 0)]),  # per-line rounding would give 0.16
+    ([[100, 19]], [(84.03, 15.97)]),  # business lunch
+    ([], []),
+]
+
+
 def test_money_js_equals_the_python_backend():
     cases = list(_cases(400, seed=20261022))
     done = subprocess.run(
@@ -70,6 +95,41 @@ def test_money_js_equals_the_python_backend():
         gross, rate = case["split"]
         net = q2(dec(gross) * 100 / (100 + dec(rate)))
         assert js["split"] == {"net": float(net), "vat": float(q2(dec(gross) - net))}, (case["split"], js["split"])
+
+
+def test_money_js_itemised_split_equals_python_split_gross():
+    bills = [b for b, _ in TABLE] + list(_bill_cases(300, seed=20261023))
+    done = subprocess.run(
+        [NODE, "-e", RUNNER, str(MONEY_JS)],
+        input=json.dumps([{"doc": {}, "settings": {}, "bill": b} for b in bills]),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert done.returncode == 0, done.stderr
+    for bill, js in zip(bills, json.loads(done.stdout)):
+        py = split_gross([(dec(str(g)), dec(str(r))) for g, r in bill])
+        assert js["itemised"] == [{"net": float(n), "vat": float(v)} for n, v in py], bill
+        assert js["totals"]["vat"] == float(sum((v for _, v in py), dec(0))), bill
+        gross_total = sum((dec(str(g)) for g, _ in bill), dec(0))
+        assert js["totals"]["gross"] == float(gross_total), bill
+        per_rate: dict[str, Decimal] = {}
+        for (_, rate), (_, v) in zip(bill, py):
+            per_rate[str(dec(str(rate)))] = per_rate.get(str(dec(str(rate))), dec(0)) + v
+        assert js["totals"]["byRate"] == {k: float(v) for k, v in per_rate.items()}, bill
+
+
+@pytest.mark.parametrize("bill, expected", TABLE)
+def test_money_js_itemised_table_is_hand_checked(bill, expected):
+    run = subprocess.run(
+        [NODE, "-e", RUNNER, str(MONEY_JS)],
+        input=json.dumps([{"doc": {}, "settings": {}, "bill": bill}]),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    got = [(x["net"], x["vat"]) for x in json.loads(run.stdout)[0]["itemised"]]
+    assert got == expected
 
 
 def test_money_js_rounding_examples():
