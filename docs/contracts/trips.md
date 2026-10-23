@@ -11,7 +11,8 @@ file and the spec differ on the HTTP shape, this file wins. Conventions are thos
   `71.25`, `0`.
 * Dates `YYYY-MM-DD`; local date-times `YYYY-MM-DDTHH:MM` (no zone, no seconds, 24 h clock).
 * Ids match `^[0-9a-z]{6,32}$`. An empty string for an optional id is read as `null`.
-* Request bodies use the strict `TripIn` model: unknown fields are 422. Responses use the lenient `Trip` model:
+* Request bodies use the `TripIn` model: known fields are validated strictly; unknown fields are kept
+  (`extra="allow"`, as in the rest of the repository), they are not rejected with 422. Responses use the lenient `Trip` model:
   unknown stored fields are returned unchanged; `null` fields are omitted (`response_model_exclude_none`).
 * **Response-only** fields are marked below. If a client sends one, it is ignored (not an error), as `net`/`vat` of
   expense lines.
@@ -104,18 +105,32 @@ Response (`Trip`; POST, PUT, GET one; GET list returns an array of the same obje
   "project_id": "p8d2m4qz7w",
   "start": "2026-11-09T08:00",
   "end": "2026-11-11T18:00",
-  "places": [{"from_date": "2026-11-09", "country": "DE", "city": "Hamburg"}],
-  "meals_provided": [{"date": "2026-11-10", "breakfast": true, "lunch": false, "dinner": false}],
-  "mileage": [{"date": "2026-11-09", "from": "Berlin", "to": "Hamburg", "km": 288.5, "purpose": "Outbound"}],
+  "places": [
+    {"from_date": "2026-11-09", "country": "DE", "city": "Hamburg"},
+    {"from_date": "2026-11-11", "country": "AT", "city": "Wien"}
+  ],
+  "meals_provided": [
+    {"date": "2026-11-10", "breakfast": true, "lunch": false, "dinner": false}
+  ],
+  "mileage": [
+    {"date": "2026-11-09", "from": "Berlin", "to": "Hamburg", "km": 288.5, "purpose": "Outbound"}
+  ],
   "cost_centre": "project",
   "not_needed": ["material", "food"],
   "status": "draft",
-  "allowance_total": 56.0,
+  "allowance_total": 66.4,
   "mileage_km": 288.5,
   "mileage_total": 86.55,
   "rules_version": "2025-12-05",
-  "days": [ "... see Day breakdown ..." ],
-  "bills": {"count": 2, "net": 180.0, "vat": 12.6},
+  "days": [
+    {"date": "2026-11-09", "country": "DE", "city": "Hamburg", "absence_hours": 16.0, "base": 14.0,
+     "reductions": [], "amount": 14.0, "note": ""},
+    {"date": "2026-11-10", "country": "DE", "city": "Hamburg", "absence_hours": 24.0, "base": 28.0,
+     "reductions": [{"meal": "breakfast", "amount": 5.6}], "amount": 22.4, "note": ""},
+    {"date": "2026-11-11", "country": "AT", "city": "Wien", "absence_hours": 18.0, "base": 30.0,
+     "reductions": [], "amount": 30.0, "note": "Rate for AT is a placeholder: verify"}
+  ],
+  "bills": {"count": 2, "net": 180.0, "vat": 22.8},
   "checklist": [ "... see Checklist ..." ]
 }
 ```
@@ -130,6 +145,12 @@ computed on every read): `id`, `created`, `updated`, `user_id`, `allowance_total
 boss editing a trip keeps the original owner).
 
 ## Day breakdown (`days`, and the result of preview)
+
+Times and days: an `end` of exactly 00:00 on a later date is read as 24:00 of the previous day, before the days are
+classified (Monday 09:00 to Tuesday 00:00 is a one-day trip on Monday, 15 hours). Absence is elapsed time in
+Europe/Berlin, so a DST change day has 23 or 25 hours. An arrival or departure day needs at least one minute of
+absence to pay. A country whose rate row is a placeholder adds the note `Rate for <CC> is a placeholder: verify`
+(this includes the Luxembourg fallback row). Notes are shown in full, never as tooltips.
 
 ```json
 {
@@ -171,9 +192,15 @@ Body: a `TripIn` (all validation of POST applies; `status` is accepted and ignor
 
 ```json
 {
-  "days": [ { "date": "2026-11-09", "country": "DE", "city": "Hamburg", "absence_hours": 16.0, "base": 14.0,
-              "reductions": [], "amount": 14.0, "note": "" } ],
-  "allowance_total": 56.0,
+  "days": [
+    {"date": "2026-11-09", "country": "DE", "city": "Hamburg", "absence_hours": 16.0, "base": 14.0,
+     "reductions": [], "amount": 14.0, "note": ""},
+    {"date": "2026-11-10", "country": "DE", "city": "Hamburg", "absence_hours": 24.0, "base": 28.0,
+     "reductions": [{"meal": "breakfast", "amount": 5.6}], "amount": 22.4, "note": ""},
+    {"date": "2026-11-11", "country": "AT", "city": "Wien", "absence_hours": 18.0, "base": 30.0,
+     "reductions": [], "amount": 30.0, "note": "Rate for AT is a placeholder: verify"}
+  ],
+  "allowance_total": 66.4,
   "mileage_km": 288.5,
   "mileage_rate": 0.3,
   "mileage_total": 86.55,
@@ -187,7 +214,7 @@ All fields are response-only. The numbers are identical to what a save of the sa
 ### `POST /api/trips` -> 200 `Trip`
 
 Returns the created `Trip` (200, same as the generic CRUD routers). Errors: 401, 403, 422. 409 if
-`status` is `final` and the checklist has open lines (see Finalizing).
+`status` is `final` and the checklist has open lines (see Finalizing), unless `?force=true`.
 
 ### `GET /api/trips/{id}` -> 200 `Trip`
 
@@ -241,11 +268,11 @@ state is computed on every read:
 ```json
 [
   {"id": "allowance", "label": "Daily allowance", "hint": "Computed from the trip itself; no receipts needed.",
-   "state": "added", "count": 3, "sum": 56.0},
+   "state": "added", "count": 3, "sum": 66.4},
   {"id": "accommodation", "label": "Hotel / accommodation", "hint": "...",
    "state": "open", "count": 0, "sum": 0},
   {"id": "transportation", "label": "Transportation", "hint": "...",
-   "state": "added", "count": 2, "sum": 86.55},
+   "state": "added", "count": 3, "sum": 266.55},
   {"id": "food", "label": "Food", "hint": "...", "state": "not_needed", "count": 0, "sum": 0},
   {"id": "material", "label": "Material", "hint": "...", "state": "not_needed", "count": 0, "sum": 0},
   {"id": "cost_centre", "label": "Cost centre / project", "hint": "...", "state": "added", "count": 1, "sum": 0}
@@ -266,6 +293,12 @@ state is computed on every read:
 Other checklist ids added to the file later: `added` when a linked bill has `category` equal to the item `id`'s label,
 else `open`, skippable. Matching of `category` is case-insensitive on the stored text. The checklist is a view: it
 is never stored, only `not_needed` and `cost_centre` are.
+
+## Finance
+
+The finance report counts only **final** trips: a draft adds nothing until it is finalised. A final trip adds its
+meal allowance per day on that day's date and its mileage at the trip start date, with the rate of the start year,
+as deductible expenses without VAT ("Meal allowance" and "Mileage").
 
 ## Expense changes
 

@@ -179,7 +179,14 @@ country table is a placeholder until the BMF table is imported). Everything mark
 - **Input VAT:** German VAT on receipts is input VAT; foreign VAT is recorded with VAT 0 in this version. The flat
   allowance and the mileage carry no VAT. *(verify)*
 - **In the books:** allowance and mileage count as deductible expenses at 100 % without VAT, shown as their own lines
-  ("Meal allowance", "Mileage") in the finance report and the tax estimate.
+  ("Meal allowance", "Mileage") in the finance report and the tax estimate. Only final trips count; mileage is booked
+  at the trip start date with the start year's rate.
+- **Three-month limit, scope (verify):** the limit applies within one trip only (a new trip starts a new count). The
+  last paid day is start + 3 months - 1 day, or the last day of the end month if the start day does not exist there
+  (for example 31 Jan pays up to 30 Apr). The count is kept per country and city of the trip.
+- **Days of a DST change (verify):** absence is counted as elapsed time in Berlin time, so 25 October 2026 from
+  00:00 to 07:30 is 8.5 hours and pays the one-day allowance.
+- **Midnight end (verify):** a trip that ends at exactly 00:00 is counted to the previous day's 24:00.
 
 ## Where this goes next
 

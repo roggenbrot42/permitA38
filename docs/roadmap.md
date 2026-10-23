@@ -94,7 +94,7 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | **ELSTER transmission** | research: certificate handling, ERiC library licensing, or an export for the official software |
 | **Public customer demo** | per-visitor sandboxes with fake data, risky features off; see [`specs/demo-deployment.md`](specs/demo-deployment.md) |
 | **Team timeline** (who is away, who works on what) | read-only people-per-row chart in the planner, visibility set per role by the boss; see [`specs/team-timeline.md`](specs/team-timeline.md) |
-| **Business trips** (meal allowance, mileage, receipts per trip, trip statement) | backend in progress; rules in [`compliance.md` section 10](compliance.md) and [`specs/business-trips.md`](specs/business-trips.md); API in [`contracts/trips.md`](contracts/trips.md) |
+| **Business trips** (meal allowance, mileage, receipts per trip, trip statement) | backend in progress; rules in [`compliance.md` section 10](compliance.md) and [`specs/business-trips.md`](specs/business-trips.md); API in [`contracts/trips.md`](contracts/trips.md). Reminder: add `permita38/core/trip_rates/2027.json` when the BMF letter for 2027 appears (December 2026); the country rows of 2026 are placeholders until the BMF table is imported |
 | Recurring invoices, credit notes, reminders (Mahnungen) | |
 | macOS and Linux arm64 bundles | needs signing and notarisation |
 
