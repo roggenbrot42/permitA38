@@ -33,6 +33,7 @@ Per area there is a read scope and a write scope (`read / write`):
 | `offers` | Offers | all / all | none / none | all / none |
 | `invoices` | Invoices | all / all | none / none | all / none |
 | `expenses` | Expenses | all / all | none / none | all / all |
+| `trips` | Business trips: meal allowance, mileage and trip statements (own trips only for employees) | all / all | limited / limited | all / none |
 | `finance` | Revenue, profit, VAT and project reports | all / all | none / none | all / none |
 | `templates` | Document templates | all / all | none / none | all / none |
 | `settings` | Business settings | all / all | limited / none | all / none |

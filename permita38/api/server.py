@@ -29,6 +29,7 @@ from .routers import (
     settings,
     time,
     totp,
+    trips,
     users,
 )
 
@@ -57,6 +58,7 @@ def all_routers() -> list:
         impressum,
         records,
         calendars,
+        trips,
     )
     return [router for module in modules for router in module.routers]
 

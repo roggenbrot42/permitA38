@@ -24,6 +24,7 @@ from permita38.core.service.sanity import SanityService
 from permita38.core.service.settings import SettingsService
 from permita38.core.service.time import TimeService
 from permita38.core.service.totp import TotpService
+from permita38.core.service.trips import TripService
 
 COOKIE_NAME = "authorization"
 
@@ -44,6 +45,7 @@ class Services:
     busy: BusyTimeProvider
     planning: PlanningService
     sanity: SanityService
+    trips: TripService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
@@ -58,6 +60,7 @@ class Services:
             busy=busy,
             planning=PlanningService(store, busy),
             sanity=SanityService(store),
+            trips=TripService(store),
             config=config,
             store=store,
             auth=auth,
