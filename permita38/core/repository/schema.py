@@ -135,10 +135,20 @@ TABLES: dict[str, Table] = {
             "expenses",
             _cols(
                 _BASE + "date:str net:float vat:float vat_rate:float vendor:str description:text category:str "
-                "project_id:id deductible:float attachment:str vat_deductible:float external_id:str import_batch:str lines:json"
-                + _EXTRA
+                "project_id:id deductible:float attachment:str vat_deductible:float external_id:str import_batch:str lines:json "
+                "trip_id:id" + _EXTRA
             ),
             (Index("idx_expenses_date", ("date",)), Index("idx_expenses_project", ("project_id",))),
+        ),
+        # business trips (docs/specs/business-trips.md): the meal allowance and mileage are computed from these rows
+        Table(
+            "trips",
+            _cols(
+                _BASE + "user_id:id title:str purpose:text customer_id:id project_id:id start:str end:str "
+                "places:json meals_provided:json mileage:json not_needed:json status:str allowance_total:float "
+                "mileage_total:float rules_version:str days:json" + _EXTRA
+            ),
+            (Index("idx_trips_user", ("user_id",)),),
         ),
         Table(
             "users",
