@@ -484,7 +484,7 @@ class SettingsIn(v.StrictRecord):
     @classmethod
     def _numbering_pattern(cls, value: str) -> str:
         try:
-            parse_pattern(value)
+            parse_pattern(value, strict=False)  # stored legacy patterns must still round-trip
         except PatternError as e:
             raise ValueError(str(e)) from None
         return value

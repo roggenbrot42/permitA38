@@ -101,6 +101,12 @@ class ImportService:
         return self._report(self._build(data, filename, doc_type, mapping, options, pdfs, sheet, delimiter))
 
     def run(self, data: bytes, filename: str, doc_type: str, **kwargs: Any) -> dict:
+        # planning reads the existing numbers and external ids: do it inside the writing transaction, so nothing
+        # can be created between the check and the write
+        with self.store.transaction():
+            return self._run(data, filename, doc_type, **kwargs)
+
+    def _run(self, data: bytes, filename: str, doc_type: str, **kwargs: Any) -> dict:
         built = self._build(
             data,
             filename,
@@ -272,6 +278,8 @@ class ImportService:
                 ["customer_name", "vat_id", "tax_number", "email", "customer_no"],
                 ["net", "gross"],
             ]
+        if "line_description" in index and doc_type in DOC_KINDS:
+            need = [n for n in need if n != ["net", "gross"]]  # line mode computes the totals itself
         for alternatives in need:
             if not any(a in index for a in alternatives):
                 names = " or ".join(alternatives)
@@ -351,6 +359,7 @@ class ImportService:
                 out.messages.append(str(e))
                 outcomes.append(out)
                 continue
+            pending_customer = record.pop("_new_customer", None)
             out.customer = customer_info
             _note_similar(out)
             doc_day = V.parse_date(record["date"]) if doc_type in DOC_KINDS else None
@@ -423,6 +432,9 @@ class ImportService:
             if out.action == "error":
                 outcomes.append(out)
                 continue
+            if pending_customer is not None:  # only rows that are imported create their customer
+                customers.add(pending_customer)
+                new_customers.append(pending_customer)
             if key_value is not None:
                 planned_numbers.add(key_value)
             planned_external.add(ext)
@@ -466,16 +478,27 @@ class ImportService:
             raise V.CellError(f"status {status!r} is not allowed for {doc_type}")
         V.parse_currency(values.get("currency"))
         customer_rec = _customer_record(values, required=True)
+        for m in members[1:]:  # later lines of one document must agree with its first row
+            other_day = V.parse_date(m.values.get("date"), options["date_order"])
+            if other_day is not None and other_day != day:
+                raise V.CellError(f"row {m.number} has another date than the first row of {number}")
+            if any(
+                not V.is_blank(m.values.get(k))
+                for k in ("customer_name", "vat_id", "tax_number", "email", "customer_no")
+            ):
+                other = _customer_record(m.values, required=True)
+                if _customer_key(other).casefold() != _customer_key(customer_rec).casefold():
+                    raise V.CellError(f"row {m.number} has another customer than the first row of {number}")
         found, score = customers.find(customer_rec)
         info: dict
+        pending_customer: dict | None = None
         if found is not None:
             info = {"action": "merge", "id": found["id"], "score": score, "name": found.get("name")}
             customer_id = found["id"]
         else:
             customer_id = new_id()
             customer_rec["id"] = customer_id
-            customers.add(customer_rec)
-            new_customers.append(customer_rec)
+            pending_customer = customer_rec  # registered by the caller only if the row is really imported
             info = {"action": "create", "id": customer_id, "score": score, "name": customer_rec.get("name")}
         rate_given = V.parse_rate(values.get("vat_rate"))
         net_given = V.parse_amount(values.get("net"), options["decimal"])
@@ -536,6 +559,7 @@ class ImportService:
                 raise V.CellError("totals do not match the lines (" + "; ".join(mismatches) + ")")
         record["_totals"] = totals_info
         record["_messages"] = messages
+        record["_new_customer"] = pending_customer
         return record, info
 
     def _lines(self, values, members, options, net_given, gross_given, vat_given):
@@ -557,6 +581,8 @@ class ImportService:
                 lines.append({"description": desc, "qty": float(qty), "unit": None, "price": to_float(price)})
             if not lines:
                 raise V.CellError("no line")
+            if abs(total) > Decimal("1000000000"):
+                raise V.CellError("net amount is too large")
             return lines, q2(total)
         net = net_given
         if net is None and gross_given is not None and vat_given is not None:
@@ -588,21 +614,32 @@ class ImportService:
         if day is None:
             raise V.CellError("date is missing")
         V.parse_currency(values.get("currency"))
-        net = V.parse_amount(values.get("net"), options["decimal"])
-        vat = V.parse_amount(values.get("vat"), options["decimal"])
-        gross = V.parse_amount(values.get("gross"), options["decimal"])
-        rate = V.parse_rate(values.get("vat_rate"))
-        if net is None and gross is not None and vat is not None:
-            net = gross - vat
+        net_given = V.parse_amount(values.get("net"), options["decimal"])
+        vat_given = V.parse_amount(values.get("vat"), options["decimal"])
+        gross_given = V.parse_amount(values.get("gross"), options["decimal"])
+        rate_given = V.parse_rate(values.get("vat_rate"))
+        net = net_given
+        if net is None and gross_given is not None:
+            if vat_given is not None:
+                net = gross_given - vat_given
+            else:  # gross-only: net from gross at the stated (or default) rate, like invoices
+                r = rate_given if rate_given is not None else dec(settings.get("vat_rate", 19))
+                net = q2(gross_given / (1 + r / 100))
         if net is None:
             raise V.CellError("net amount is missing")
         if net < 0:
             raise V.CellError("net amount must not be negative (refunds are credit notes)")
-        if vat is None:
-            vat = vat_amount(net, rate if rate is not None else dec(settings.get("vat_rate", 19)))
-        if rate is None:
-            rate = Decimal(round(vat / net * 100)) if net else dec(settings.get("vat_rate", 19))
-        return {
+        if net > Decimal("1000000000"):
+            raise V.CellError("net amount is too large")
+        rate = self._rate(rate_given, vat_given, net, settings)  # also rejects rates outside the allowed set
+        vat = vat_amount(net, rate)
+        computed = {"net": net, "vat": vat, "gross": net + vat}
+        mismatches = [
+            f"{key}: file {given}, computed {computed[key]}"
+            for key, given in (("net", net_given), ("vat", vat_given), ("gross", gross_given))
+            if given is not None and given != computed[key]
+        ]
+        record: dict[str, Any] = {
             "date": day.isoformat(),
             "net": to_float(net),
             "vat": to_float(vat),
@@ -612,6 +649,17 @@ class ImportService:
             "category": text_or_none(values.get("category"), 200, "category"),
             "external_id": text_or_none(values.get("external_id"), 100, "external id"),
         }
+        if mismatches:
+            if not options["accept_unverified"]:
+                raise V.CellError("totals do not match (" + "; ".join(mismatches) + ")")
+            record["totals_unverified"] = True
+            record["given_totals"] = {
+                k: to_float(v)
+                for k, v in (("net", net_given), ("vat", vat_given), ("gross", gross_given))
+                if v is not None
+            }
+            record["_messages"] = ["totals unverified, imported as given (" + "; ".join(mismatches) + ")"]
+        return record
 
     # ------------------------------------------------------------------ report
     def _report(self, built: _Plan) -> dict:
@@ -619,9 +667,9 @@ class ImportService:
         rows = []
         for o in built.outcomes:
             counts[o.action] = counts.get(o.action, 0) + 1
-            if o.customer and o.customer["action"] == "create" and o.action != "error":
+            if o.customer and o.customer["action"] == "create" and o.action in ("create", "overwrite"):
                 counts["customers_created"] += 1
-            if o.customer and o.customer["action"] == "merge" and o.action != "error":
+            if o.customer and o.customer["action"] == "merge" and o.action in ("create", "overwrite"):
                 counts["customers_merged"] += 1
             rows.append(
                 {

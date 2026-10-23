@@ -385,6 +385,7 @@ class ApiMachine(RuleBasedStateMachine):
             exp.pop("number", None)
             if old.get("number"):
                 exp["number"] = old["number"]
+            exp["date"] = exp.get("date") or old.get("date") or TODAY.isoformat()  # a PUT cannot drop the date
         exp.setdefault("template_id", "classic")
         lines = []
         for ln in exp["lines"]:
@@ -644,6 +645,9 @@ class ApiMachine(RuleBasedStateMachine):
             assert r.status_code == g
             return
         old = self.m[coll].get(rid)
+        if coll == "invoices" and old is not None and old.get("number"):
+            assert r.status_code == 409  # numbered invoices are cancelled, never deleted (gapless numbering)
+            return
         me = self.m["users"][s.user_id]
         if old is not None and me["role"] != "boss":
             own = coll in MEMBER_OWN and old.get("user_id") == me["id"] and not old.get("invoice_id")
@@ -1140,7 +1144,7 @@ class ApiMachine(RuleBasedStateMachine):
                     recv += t["gross"]
                     if not accrual:
                         continue
-                when = (inv.get("date") or TODAY.isoformat()) if accrual else inv.get("paid_date")
+                when = inv["date"] if accrual else inv.get("paid_date")
                 if when and when.startswith(f"{year}-"):
                     rev += t["net"]
                     vat_out += t["vat"]

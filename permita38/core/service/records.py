@@ -152,11 +152,14 @@ class RecordService:
 
     def prepare_document(self, doc: dict, old: dict | None) -> dict:
         st = effective_settings(self.store.settings())
+        for k in _IMPORT_FIELDS:  # owned by the importer: a client can neither forge nor drop them
+            doc.pop(k, None)
         if old:
             doc["number"] = old.get("number")  # numbers are only assigned via finalize
-            for k in _IMPORT_FIELDS:  # owned by the importer: an edit must not lose the legal original
+            for k in _IMPORT_FIELDS:
                 if k in old:
                     doc[k] = old[k]
+            doc["date"] = doc.get("date") or old.get("date") or _today()  # a document never loses its date
         else:
             doc["status"] = "draft"
             doc.pop("number", None)
