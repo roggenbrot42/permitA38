@@ -290,6 +290,39 @@ class Monkey:
         self.say(f"route #/{r}")
         self.page.evaluate("h => { location.hash = h; }", f"#/{r}")
 
+    def calendar_episode(self):
+        """Connect a calendar with a hostile or blocked link: it must be refused, and the link must not stay on the page."""
+        if self.page.evaluate("() => document.querySelector('#modal-root').children.length > 0"):
+            self.say("calendar: closing the open dialog first")
+            try:
+                self.page.click("#m-cancel", timeout=1500)
+            except Exception:
+                return  # a dialog without a cancel button: leave it to the other episodes
+        if not self.page.query_selector("#cal_link"):
+            self.say("calendar: going to #/settings")
+            self.page.evaluate("h => { location.hash = h; }", "#/settings")
+            self.settle()
+            try:
+                self.page.wait_for_selector("#cal_link", timeout=5000)
+            except Exception:
+                return  # members do not see the settings page
+        token = f"CALSECRET{self.rng.randrange(10**9)}"
+        link = self.rng.choice(
+            [
+                f"https://127.0.0.1/{token}.ics",
+                f"http://example.invalid/{token}.ics",
+                f"javascript:alert('{token}')",
+                f"https://<img src=x onerror=alert(1)>.example.invalid/{token}.ics",
+                f"webcal://10.0.0.5/{token}.ics",
+            ]
+        )
+        self.say(f"calendar: connect a hostile link ({link[:24]}…)")
+        self.page.fill("#cal_name", self._plausible("name") if hasattr(self, "_plausible") else "Monkey")
+        self.page.fill("#cal_link", link)
+        self.page.click("[data-a=calConnect]", timeout=3000)
+        self.page.wait_for_timeout(300)
+        assert token not in self.page.content(), "calendar link stayed on the page"
+
     def history(self):
         d = self.rng.choice(["back", "forward", "reload"])
         self.say(d)
@@ -406,6 +439,7 @@ class Monkey:
         ("press_key", 5),
         ("go_route", 8),
         ("history", 4),
+        ("calendar_episode", 4),
     ]
 
     # ---- invariants

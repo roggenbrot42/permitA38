@@ -35,6 +35,16 @@ All notable changes to this project are documented here. The format is based on
   never blocking) for invoice/offer/expense dates, totals, VAT, duplicates and outliers; USt-IdNr (with check digit),
   Steuernummer, IBAN and BIC format checks for customers and settings; working-time warnings (ArbZG breaks, 10 h,
   11 h rest, Sunday/holiday) on time entries; shown in the web app as a banner.
+- **Calendars: meetings reduce your capacity.** Connect a personal calendar by its ICS link (Proton Calendar
+  "Share via link", Nextcloud, Google, Outlook, Apple, Fastmail: `https://` or `webcal://`) or by uploading an `.ics`
+  file. Read-only, refreshed every 6 hours by default, and the stored events are expanded recurrences (RRULE, EXDATE,
+  RECURRENCE-ID) inside a bounded window. Busy time counts only inside each person's working hours and time zone,
+  overlaps are merged, and a daily target caps it. No meeting titles are stored by default; the subscription link is
+  a secret, is never shown again and never logged. Out-of-office entries are offered as suggestions, never created.
+  Settings → Calendars includes a guided Proton Calendar card. Database migration 0007 adds the calendar tables and the per-user working time fields; the boss account
+  manages its own calendars. Command: `permita38 calendar refresh`. See [docs/calendar.md](docs/calendar.md).
+- `SafeFetcher.fetch_resource`: the SSRF-safe download for files (https only, conditional requests with ETag and
+  Last-Modified, size and content-type limits).
 - **Planning and vacation planner** (`docs/planning.md`): per-day capacity (weekly hours, holidays, absences, busy
   time from `services.busy`) against confirmed contracts and open offers in the worst case; offer feasibility with
   exact weeks, causes and options; numbers that do not add up on offers and invoices; project periods with manual

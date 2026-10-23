@@ -121,6 +121,9 @@ def main(argv: list[str] | None = None):
     cp.add_argument("name")
     dp = sub.add_parser("dump-ddl", help="print the schema DDL generated for a SQL dialect")
     dp.add_argument("--dialect", default="sqlite", choices=["sqlite", "postgresql", "mariadb"])
+    cal = sub.add_parser("calendar", help="calendar subscriptions")
+    cal_sub = cal.add_subparsers(dest="calendar_command", required=True)
+    cal_sub.add_parser("refresh", help="download every connected calendar link now (files are not touched)")
     cu = sub.add_parser("create-user", help="create a user (e.g. via `docker compose run --rm permita38 create-user`)")
     cu.add_argument("--username", required=True)
     cu.add_argument("--name", required=True)
@@ -192,6 +195,11 @@ def main(argv: list[str] | None = None):
             return
         if command == "import-documents":
             return _import_documents(services, args)
+        if command == "calendar":
+            services.store.startup()
+            for name, status in services.calendar.refresh_all():
+                print(f"  {name}: {status}")
+            return
         if command == "reset-totp":
             services.store.startup()
             try:

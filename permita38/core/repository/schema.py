@@ -145,7 +145,8 @@ TABLES: dict[str, Table] = {
             _cols(
                 _BASE + "username:str name:str role:str weekly_hours:float workdays:json default_rate:float "
                 "cost_rate:float color:str tracking_start:str active:bool password_hash:str pw_changed:int "
-                "totp_secret:str totp_enabled:bool totp_last_step:int totp_recovery:json" + _EXTRA
+                "totp_secret:str totp_enabled:bool totp_last_step:int totp_recovery:json work_start:str work_end:str timezone:str"
+                + _EXTRA
             ),
             (Index("idx_users_username", ("username",), unique=True),),
         ),
@@ -154,6 +155,26 @@ TABLES: dict[str, Table] = {
             _cols(
                 _BASE + "name:str layout:str accent:str language:str show_logo:bool intro_offer:text "
                 "outro_offer:text intro_invoice:text outro_invoice:text closing:text" + _EXTRA
+            ),
+        ),
+        Table(
+            "calendar_sources",
+            _cols(
+                _BASE + "user_id:id name:str kind:str url:text refresh_minutes:int title_policy:str "
+                "all_day_blocks:bool include_keywords:json exclude_keywords:json busy_default:bool "
+                "last_fetched:int last_status:str last_error:text etag:str last_modified:str event_count:int" + _EXTRA
+            ),
+            (Index("idx_calendar_sources_user", ("user_id",)),),
+        ),
+        Table(
+            "calendar_events",
+            _cols(
+                _BASE + "source_id:id uid:str recurrence_id:str start_utc:str end_utc:str all_day:bool busy:bool "
+                "title:str categories:json ooo:bool" + _EXTRA
+            ),
+            (
+                Index("idx_calendar_events_source", ("source_id",)),
+                Index("idx_calendar_events_start", ("start_utc",)),
             ),
         ),
         Table(
@@ -181,6 +202,14 @@ TABLES: dict[str, Table] = {
 }
 
 # internal per-user collections that are not exposed through the CRUD API
-INTERNAL_COLLECTIONS = ["timers", "number_sequences", "numbering_log", "import_batches", "plan_scenarios"]
+INTERNAL_COLLECTIONS = [
+    "timers",
+    "number_sequences",
+    "numbering_log",
+    "import_batches",
+    "plan_scenarios",
+    "calendar_sources",
+    "calendar_events",
+]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]

@@ -12,7 +12,9 @@ from permita38.core.config import Config
 from permita38.core.netsafe import SafeFetcher
 from permita38.core.repository import Repository, auto_backup, create_repository
 from permita38.core.service.auth import AuthService
-from permita38.core.service.busy import BusyTimeProvider, NullBusyProvider
+from permita38.core.service.busy import BusyTimeProvider
+from permita38.core.service.calendar.busy_provider import CalendarBusyProvider
+from permita38.core.service.calendar.service import CalendarService, ResourceFetcher
 from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.plan_service import PlanningService
@@ -38,16 +40,20 @@ class Services:
     settings: SettingsService
     impressum: ImpressumService
     imports: ImportService
+    calendar: CalendarService
     busy: BusyTimeProvider
     planning: PlanningService
     sanity: SanityService
 
     @classmethod
-    def create(cls, config: Config) -> "Services":
+    def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
+        """``calendar_fetcher`` exists for tests (a local fake server); production always uses the SSRF-safe fetcher."""
         store = create_repository(config)
         records = RecordService(store)
         auth = AuthService(store, config.secret_key, config.token_ttl_hours)
-        busy: BusyTimeProvider = NullBusyProvider()  # the calendar module replaces this (shared contract)
+        user_agent = f"permitA38/{__version__} (+https://github.com/roggenbrot42/permitA38)"
+        calendar = CalendarService(store, calendar_fetcher or SafeFetcher(user_agent))
+        busy = CalendarBusyProvider(store, on_request=calendar.schedule_stale_refresh)
         return cls(
             busy=busy,
             planning=PlanningService(store, busy),
@@ -62,9 +68,10 @@ class Services:
             time=TimeService(store),
             settings=SettingsService(store),
             impressum=ImpressumService(
-                SafeFetcher(f"permitA38/{__version__} (+https://github.com/roggenbrot42/permitA38)"),
+                SafeFetcher(user_agent),
                 enabled=config.features.impressum_lookup,
             ),
+            calendar=calendar,
         )
 
 

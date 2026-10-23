@@ -192,6 +192,9 @@ class UserOut(Record):
     permissions: dict[str, dict[str, Literal["none", "limited", "all"]]] | None = Field(
         None, description="read/write scope per area, derived from the role (never stored)"
     )
+    work_start: str | None = None
+    work_end: str | None = None
+    timezone: str | None = None
 
 
 class UserIn(BaseModel):
@@ -212,6 +215,9 @@ class UserIn(BaseModel):
     vacation_days_per_year: Annotated[float, Field(ge=0, le=366, allow_inf_nan=False)] | None = None
     vacation_carry_over: Annotated[float, Field(ge=0, le=366, allow_inf_nan=False)] | None = None
     active: bool = True
+    work_start: v.OptTime = None  # working time used for calendar capacity (default 09:00)
+    work_end: v.OptTime = None  # (default 17:00)
+    timezone: v.OptTimeZone = None  # IANA zone of the working time (default Europe/Berlin)
 
     @field_validator("workdays")
     @classmethod
@@ -495,6 +501,64 @@ class SettingsIn(v.StrictRecord):
         except PatternError as e:
             raise ValueError(str(e)) from None
         return value
+
+
+CalendarTitlePolicy = Literal["none", "redacted", "full"]
+
+
+class CalendarIn(BaseModel):
+    """Connect a calendar: an https ICS link (``url``) or a file uploaded alongside these fields."""
+
+    model_config = ConfigDict(extra="ignore")
+    name: v.Name
+    url: str | None = Field(default=None, max_length=2048)
+    refresh_minutes: int = Field(default=360, ge=15, le=10080)
+    title_policy: CalendarTitlePolicy = "none"
+    all_day_blocks: bool = False
+    include_keywords: list[v.Keyword] = Field(default=[], max_length=20)
+    exclude_keywords: list[v.Keyword] = Field(default=[], max_length=20)
+    busy_default: bool = True
+
+
+class CalendarPatchIn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: v.Name | None = None
+    refresh_minutes: int | None = Field(default=None, ge=15, le=10080)
+    title_policy: CalendarTitlePolicy | None = None
+    all_day_blocks: bool | None = None
+    include_keywords: list[v.Keyword] | None = Field(default=None, max_length=20)
+    exclude_keywords: list[v.Keyword] | None = Field(default=None, max_length=20)
+    busy_default: bool | None = None
+
+
+class CalendarOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    name: str | None = None
+    kind: str | None = None
+    url_masked: str | None = None  # the subscription address is a secret: only a masked form is returned
+    refresh_minutes: int | None = None
+    title_policy: str | None = None
+    all_day_blocks: bool = False
+    include_keywords: list[str] = []
+    exclude_keywords: list[str] = []
+    busy_default: bool = True
+    last_fetched: int | None = None
+    last_status: str | None = None
+    last_error: str | None = None
+    event_count: int = 0
+    reupload_advised: bool = False  # an uploaded file whose stored period has run short: upload it again
+    last_warnings: list[str] = []  # notes from the last import (unsupported rules, unknown zones ...), no user data
+
+
+class CalendarEventOut(BaseModel):
+    start: str
+    end: str
+    all_day: bool = False
+    title: str | None = None  # only when the source's title policy allows it
+    ooo: bool = False
+    source_id: str | None = None
+    source_name: str | None = None
 
 
 # ---- planning: what-if changes and named scenarios -------------------------------------------------------------

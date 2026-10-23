@@ -11,10 +11,12 @@ from fastapi.staticfiles import StaticFiles
 from permita38 import __version__
 from permita38.core.config import Config
 from permita38.core.errors import ServiceError
+from permita38.core.service.calendar.service import ResourceFetcher
 
 from .deps import Services, startup_services
 from .routers import (
     auth,
+    calendars,
     files,
     finance,
     health,
@@ -50,6 +52,7 @@ def all_routers() -> list:
         imports,
         impressum,
         records,
+        calendars,
     )
     return [router for module in modules for router in module.routers]
 
@@ -59,8 +62,9 @@ def _clean_msg(msg: str) -> str:
     return msg[:300]
 
 
-def get_app(config: Config) -> FastAPI:
-    services = Services.create(config)
+def get_app(config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> FastAPI:
+    """Build the app. ``calendar_fetcher`` is a test-only seam (never set by the CLI)."""
+    services = Services.create(config, calendar_fetcher=calendar_fetcher)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):

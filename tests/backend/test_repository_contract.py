@@ -245,3 +245,44 @@ def test_user_roles_round_trip_unchanged(repo):
     for role in ("boss", "employee", "accountant", "member"):
         saved = repo.save("users", {"username": f"u-{role}", "name": role, "role": role})
         assert repo.get("users", saved["id"])["role"] == role
+
+
+# ------------------------------------------------------------------ equality queries (calendar storage)
+def test_find_matches_plain_columns_and_orders_like_list(repo):
+    repo.save("calendar_sources", {"id": "srcaaaaa1", "user_id": "userAAAA1", "name": "A"})
+    repo.save("calendar_sources", {"id": "srcbbbbb2", "user_id": "userBBBB2", "name": "B"})
+    for i in range(3):
+        repo.save("calendar_events", {"id": f"evt{i}aaaa", "source_id": "srcaaaaa1", "start_utc": f"2030-01-0{i + 1}"})
+    repo.save("calendar_events", {"id": "evtbbbbbb", "source_id": "srcbbbbb2", "start_utc": "2030-01-01"})
+    found = repo.find("calendar_events", source_id="srcaaaaa1")
+    assert [r["id"] for r in found] == [r["id"] for r in repo.list("calendar_events") if r["source_id"] == "srcaaaaa1"]
+    assert len(found) == 3
+    assert repo.find("calendar_events", source_id="nosuchsrc") == []
+    assert [r["name"] for r in repo.find("calendar_sources", user_id="userBBBB2")] == ["B"]
+
+
+def test_find_refuses_json_and_unknown_columns(repo):
+    with pytest.raises(ValueError):
+        repo.find("calendar_sources", include_keywords=["x"])
+    with pytest.raises(ValueError):
+        repo.find("calendar_sources", no_such_column="x")
+
+
+def test_delete_where_removes_only_matching_rows(repo):
+    for i in range(3):
+        repo.save("calendar_events", {"id": f"del{i}aaaa", "source_id": "srcdel001"})
+    repo.save("calendar_events", {"id": "keepkeep1", "source_id": "srckeep01"})
+    assert repo.delete_where("calendar_events", source_id="srcdel001") == 3
+    assert [r["id"] for r in repo.list("calendar_events")] == ["keepkeep1"]
+    with pytest.raises(ValueError):
+        repo.delete_where("calendar_events")  # an empty condition would wipe the table
+
+
+def test_save_many_is_all_or_nothing(repo):
+    repo.save("calendar_events", {"id": "survivor1", "source_id": "srcx0001"})
+    rows = [{"id": "batchaa01", "source_id": "srcx0002"}, {"id": "bad id!!", "source_id": "srcx0002"}]
+    with pytest.raises(ValueError):
+        repo.save_many("calendar_events", rows)
+    assert [r["id"] for r in repo.list("calendar_events")] == ["survivor1"]
+    saved = repo.save_many("calendar_events", [{"id": "batchbb02", "source_id": "srcx0003"}])
+    assert saved[0]["id"] == "batchbb02" and repo.get("calendar_events", "batchbb02")

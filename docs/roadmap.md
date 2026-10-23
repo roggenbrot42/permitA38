@@ -24,6 +24,7 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | **Roles and rights** (boss / employee / accountant, per-area permissions) | done (fixed roles; custom roles and per-user overrides not planned yet) |
 | **Validation and sanity-check layer** (plausibility checks for invoices, dates, tax ids, totals; ArbZG warnings), see [`sanity-checks.md`](sanity-checks.md) | done (feat/sanity-v2, awaiting merge) |
 | Impressum extraction (if not in alpha.1) | planned |
+| **Calendars**: import a personal calendar by ICS link or file (Proton Calendar, Nextcloud, Google, Outlook); meetings reduce planned capacity; read-only | done on branch (steps for Proton may change, see [docs/calendar.md](calendar.md)) |
 | Full data export as JSON and CSV, re-importable by the app (round-trip tested) | in progress |
 | Quarterly **tax-rule review process** (issue reminder, checklist, rule tables with source and valid-from date) | planned (reminder workflow already in place) |
 

@@ -5,6 +5,9 @@ Everything here is generic: records are encoded/decoded from the declarative sch
 (connect, execute, begin/commit/rollback, run a migration, read the revision).
 """
 
+from __future__ import annotations
+
+import builtins
 import math
 import os
 import re
@@ -317,6 +320,44 @@ class SQLRepository(Repository):
             self._ensure()
             rows = self._rows(self.dialect.select_all(table, f"{q('created')}, {q('id')}"))
         return [self._decode(table, r) for r in rows]
+
+    def _where(self, table: Table, equals: dict[str, Any]) -> tuple[str, builtins.list[Any]]:
+        """``WHERE`` clause for equality on plain columns (JSON columns and unknown names are rejected)."""
+        q = self.dialect.quote
+        parts: list[str] = []
+        params: builtins.list[Any] = []
+        for name, value in equals.items():
+            col = table.column(name)
+            if col is None or col.type == JSON:
+                raise ValueError(f"cannot filter {table.name} by {name!r}")
+            ok, db = self._coerce(col, value)
+            if not ok:
+                raise ValueError(f"bad value for {name!r}")
+            parts.append(f"{q(name)} = {self.dialect.placeholder}")
+            params.append(db)
+        return (" WHERE " + " AND ".join(parts)) if parts else "", params
+
+    def find(self, coll: str, **equals: Any) -> RecordList:
+        check_collection(coll)
+        table = TABLES[coll]
+        q = self.dialect.quote
+        where, params = self._where(table, equals)
+        sql = self.dialect.select_all(table, f"{q('created')}, {q('id')}")
+        marker = " ORDER BY"
+        head, sep, tail = sql.partition(marker)
+        with self.lock:
+            self._ensure()
+            rows = self._rows(head + where + sep + tail, params)
+        return [self._decode(table, r) for r in rows]
+
+    def delete_where(self, coll: str, **equals: Any) -> int:
+        check_collection(coll)
+        table = TABLES[coll]
+        where, params = self._where(table, equals)
+        if not where:
+            raise ValueError("delete_where needs at least one condition")
+        with self.transaction():
+            return self._exec(f"DELETE FROM {self.dialect.quote(table.name)}{where}", params)
 
     def get(self, coll: str, rid: str) -> Record | None:
         check_collection(coll)

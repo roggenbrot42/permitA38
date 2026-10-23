@@ -121,6 +121,16 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("POST", "/api/users"): ("team", "write", False),
     ("PUT", "/api/users/{user_id}"): ("team", "write", False),
     ("DELETE", "/api/users/{user_id}"): ("team", "write", False),
+    # calendars are boss-only (planning write, full scope); each boss manages only their own sources (service check)
+    ("GET", "/api/calendars"): ("planning", "write", True),
+    ("POST", "/api/calendars"): ("planning", "write", True),
+    ("POST", "/api/calendars/upload"): ("planning", "write", True),
+    ("PUT", "/api/calendars/{source_id}"): ("planning", "write", True),
+    ("DELETE", "/api/calendars/{source_id}"): ("planning", "write", True),
+    ("POST", "/api/calendars/{source_id}/refresh"): ("planning", "write", True),
+    ("GET", "/api/calendars/busy"): ("planning", "write", True),
+    ("GET", "/api/calendars/suggestions"): ("planning", "write", True),
+    ("GET", "/api/calendars/{source_id}/preview"): ("planning", "write", True),
     ("GET", "/api/timer"): ("timer", "read", False),
     ("POST", "/api/timer/start"): ("timer", "write", False),
     ("POST", "/api/timer/stop"): ("timer", "write", False),
@@ -410,6 +420,13 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
     later = [m.id for m in chain[chain.index(roles_mig) :]]
     raw.executemany("DELETE FROM schema_migrations WHERE id = ?", [(i,) for i in later])
     raw.execute(f"PRAGMA user_version = {len(chain) - len(later)}")
+    # undo the schema of the later migrations too, so that the runner can apply them again
+    if "calendars" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.executescript(
+            'DROP TABLE "calendar_events"; DROP TABLE "calendar_sources";'
+            ' ALTER TABLE "users" DROP COLUMN "work_start"; ALTER TABLE "users" DROP COLUMN "work_end";'
+            ' ALTER TABLE "users" DROP COLUMN "timezone";'
+        )
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)
