@@ -15,6 +15,7 @@ from permita38.core.service.busy import BusyTimeProvider
 from permita38.core.service.calendar.busy_provider import CalendarBusyProvider
 from permita38.core.service.calendar.service import CalendarService, ResourceFetcher
 from permita38.core.service.impressum import ImpressumService
+from permita38.core.service.plan_service import PlanningService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.settings import SettingsService
@@ -37,6 +38,7 @@ class Services:
     impressum: ImpressumService
     calendar: CalendarService
     busy: BusyTimeProvider
+    planning: PlanningService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
@@ -46,7 +48,10 @@ class Services:
         auth = AuthService(store, config.secret_key, config.token_ttl_hours)
         user_agent = f"permitA38/{__version__} (+https://github.com/roggenbrot42/permitA38)"
         calendar = CalendarService(store, calendar_fetcher or SafeFetcher(user_agent))
+        busy = CalendarBusyProvider(store, on_request=calendar.schedule_stale_refresh)
         return cls(
+            busy=busy,
+            planning=PlanningService(store, busy),
             config=config,
             store=store,
             auth=auth,
@@ -60,7 +65,6 @@ class Services:
                 enabled=config.features.impressum_lookup,
             ),
             calendar=calendar,
-            busy=CalendarBusyProvider(store, on_request=calendar.schedule_stale_refresh),
         )
 
 

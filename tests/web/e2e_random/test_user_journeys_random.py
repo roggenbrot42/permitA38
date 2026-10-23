@@ -302,6 +302,7 @@ class Journey:
             vals["personal"] = True
         else:
             vals["customer_id"] = cust.id
+            vals["start"], vals["end"] = "2026-01-01", "2027-12-31"  # customer projects need a period
             if rate:
                 vals["rate"] = rate
         self.fill_form(vals)

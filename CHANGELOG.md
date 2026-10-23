@@ -12,11 +12,21 @@ All notable changes to this project are documented here. The format is based on
   RECURRENCE-ID) inside a bounded window. Busy time counts only inside each person's working hours and time zone,
   overlaps are merged, and a daily target caps it. No meeting titles are stored by default; the subscription link is
   a secret, is never shown again and never logged. Out-of-office entries are offered as suggestions, never created.
-  Settings → Calendars includes a guided Proton Calendar card. Database migration 0003 (renumbered 0011 when the
-  feature branches are merged) adds the calendar tables and the per-user working time fields; the boss account
+  Settings → Calendars includes a guided Proton Calendar card. Database migration 0004 adds the calendar tables and the per-user working time fields; the boss account
   manages its own calendars. Command: `permita38 calendar refresh`. See [docs/calendar.md](docs/calendar.md).
 - `SafeFetcher.fetch_resource`: the SSRF-safe download for files (https only, conditional requests with ETag and
   Last-Modified, size and content-type limits).
+- **Planning and vacation planner** (`docs/planning.md`): per-day capacity (weekly hours, holidays, absences, busy
+  time from `services.busy`) against confirmed contracts and open offers in the worst case; offer feasibility with
+  exact weeks, causes and options; numbers that do not add up on offers and invoices; project periods with manual
+  and offer-based extensions; revenue basis (contracted, open offers, assumed); vacation entitlement; and the
+  **Plan & vacation** page with drag-to-vacation, moving and resizing bars, keyboard editing, draft and apply,
+  scenarios and comparison, and suggestions (vacation windows, earliest start, what must move).
+  Migration 0003 (renumbered to 0009 at merge time, see the migration header).
+
+### Changed
+- Forecast revenue is based first on contracted hours, then open offers, and only then on assumed hours; every week
+  states its basis. Contract hours are spread over the workdays of the assignee.
 
 ## [0.4.0-alpha.1] - 2026-10-22
 

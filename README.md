@@ -147,6 +147,12 @@ Set your **company type**, **federal state**, **Kleinunternehmer** status and **
 
 ---
 
+## Planning and vacation
+
+**Planning → Plan & vacation** shows your capacity week by week against contracts and open offers, lets you drag
+vacation onto the timeline and try what-if scenarios before anything is saved, and checks new offers for feasibility.
+See [docs/planning.md](docs/planning.md).
+
 ## Prefill customers from their Impressum
 
 ![Customer form prefilled from an Impressum (demo data)](docs/img/impressum-prefill.png)

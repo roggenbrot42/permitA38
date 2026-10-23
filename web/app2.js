@@ -144,10 +144,11 @@ A.editProject = el => {
     fields: [{ k: 'name', l: 'Project name' }, { k: 'personal', l: 'Personal project (no customer, never billed)', t: 'check' },
       { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '— none —'], ...S.d.customers.map(c => [c.id, c.name])] },
       { k: 'rate', l: 'Hourly rate (€)', t: 'number', row: 1, h: 'Overrides the customer rate' }, { k: 'budget_hours', l: 'Budget (hours)', t: 'number', row: 1 },
+      { k: 'start', l: 'Start (period)', t: 'date', row: 3, h: 'Required for customer projects' }, { k: 'end', l: 'End (period)', t: 'date', row: 3 },
       { k: 'status', l: 'Status', t: 'select', o: ['active', 'paused', 'done', 'archived'], row: 2 }, { k: 'color', l: 'Colour', t: 'color', row: 2 },
       { k: 'notes', l: 'Notes', t: 'area' }],
     extra: `<div class="field"><label>Team (leave empty = everyone)</label>${S.d.users.filter(u => u.active !== false).map(u => `<label style="display:inline-block;margin-right:14px"><input type="checkbox" class="pm" value="${u.id}" ${(p.member_ids || []).includes(u.id) ? 'checked' : ''}> ${esc(u.name)}</label>`).join('')}</div>`,
-    save: async v => { if (!v.name) throw new Error('Name is required'); v.member_ids = [...document.querySelectorAll('.pm:checked')].map(x => x.value); v.customer_id = v.customer_id || null; if (v.personal) v.customer_id = null; const r = await save('projects', v); if (!p.id) location.hash = '#/project/' + r.id; else render(); },
+    save: async v => { if (!v.name) throw new Error('Name is required'); if (!v.personal && v.customer_id && (!v.start || !v.end)) throw new Error('Customer projects need a start and an end date'); v.member_ids = [...document.querySelectorAll('.pm:checked')].map(x => x.value); v.customer_id = v.customer_id || null; if (v.personal) v.customer_id = null; const r = await save('projects', v); if (!p.id) location.hash = '#/project/' + r.id; else render(); },
     del: p.id ? async () => { await api('DELETE', 'projects/' + p.id); location.hash = '#/projects'; await loadAll(['projects']); render(); } : null
   });
 };
