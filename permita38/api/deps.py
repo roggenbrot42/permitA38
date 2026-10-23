@@ -11,8 +11,10 @@ from permita38.core.config import Config
 from permita38.core.netsafe import SafeFetcher
 from permita38.core.repository import Repository, auto_backup, create_repository
 from permita38.core.service.auth import AuthService
+from permita38.core.service.busy import BusyTimeProvider, NullBusyProvider
 from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
+from permita38.core.service.plan_service import PlanningService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.settings import SettingsService
@@ -34,13 +36,18 @@ class Services:
     settings: SettingsService
     impressum: ImpressumService
     imports: ImportService
+    busy: BusyTimeProvider
+    planning: PlanningService
 
     @classmethod
     def create(cls, config: Config) -> "Services":
         store = create_repository(config)
         records = RecordService(store)
         auth = AuthService(store, config.secret_key, config.token_ttl_hours)
+        busy: BusyTimeProvider = NullBusyProvider()  # the calendar module replaces this (shared contract)
         return cls(
+            busy=busy,
+            planning=PlanningService(store, busy),
             config=config,
             store=store,
             auth=auth,

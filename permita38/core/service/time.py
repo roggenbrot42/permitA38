@@ -66,9 +66,6 @@ class TimeService:
             target = found
         return calc.dashboard(self.store, target)
 
-    def forecast(self, weeks: int, user_id: str | None, include_offers: bool) -> dict:
-        return calc.forecast(self.store, weeks, user_id or None, include_offers)
-
     def holidays(self, year: int, state: str) -> dict:
         from permita38.core.holidays import holidays
 

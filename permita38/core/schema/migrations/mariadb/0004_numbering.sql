@@ -1,4 +1,4 @@
--- permitA38 migration 0003 (renumber to 0010 when merging the branches, see the fork notes)
+-- permitA38 migration 0004 (numbering and import)
 -- permitA38 migration: document numbering sequences and document import (mariadb)
 -- number_sequences: atomic counters per document type and period; numbering_log: audit trail of number changes;
 -- import_batches: one row per import run;

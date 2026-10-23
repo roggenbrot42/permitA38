@@ -1,0 +1,54 @@
+/* permitA38 – Plan & vacation timeline. Colours come from the theme tokens in style.css (light and dark). */
+.pln-toolbar { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
+.pln-toolbar .pln-kpis { display: flex; gap: 16px; margin-left: auto; flex-wrap: wrap; }
+.pln-ent { background: var(--accent-soft); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14px; }
+.pln-ent.bad { background: var(--bad-soft); color: var(--bad); }
+.pln-draftbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px; background: var(--card); border: 1px dashed var(--line); margin-bottom: 8px; flex-wrap: wrap; }
+.pln-draftbar.on { border-color: var(--warn); background: var(--warn-soft); }
+.pln-wrap { overflow: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); max-width: 100%; }
+.pln-grid { display: block; min-width: max-content; padding: 6px 0; }
+.pln-row { display: flex; align-items: stretch; min-height: 32px; border-bottom: 1px solid var(--line); }
+.pln-row.dim { opacity: .45; }
+.pln-row.pln-head { font-size: 12px; color: var(--muted); }
+.pln-label { position: sticky; left: 0; z-index: 2; width: 200px; min-width: 200px; background: var(--card); padding: 6px 10px; font-size: 13px; display: flex; flex-direction: column; justify-content: center; border-right: 1px solid var(--line); }
+.pln-pick { all: unset; cursor: pointer; font-weight: 600; color: var(--accent); }
+.pln-pick.sel, .pln-pick:focus-visible { text-decoration: underline; }
+.pln-lane { position: relative; display: flex; height: 34px; }
+.pln-head .pln-lane { height: 22px; }
+.pln-wk { position: absolute; top: 3px; font-size: 11px; padding-left: 2px; }
+.pln-cell { flex: 0 0 12px; width: 12px; height: 100%; border-right: 1px solid transparent; }
+.pln-cell.wk { background: rgba(127,127,127,.08); }
+.pln-cell.hol { background: rgba(37,99,235,.10); }
+.pln-cell:nth-child(7n) { border-right: 1px solid var(--line); }
+.pln-mark { position: absolute; top: 0; bottom: 0; width: 3px; background: var(--muted); opacity: .5; }
+.pln-weeks .pln-week { position: absolute; top: 4px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 12px; background: var(--bg); color: var(--ink); border: 0; }
+.pln-weeks .pln-week.util { cursor: pointer; font-weight: 600; }
+.pln-weeks .util.ok { background: var(--good-soft); color: var(--good); }
+.pln-weeks .util.tight { background: var(--warn-soft); color: var(--warn); }
+.pln-weeks .util.over { background: var(--bad-soft); color: var(--bad); }
+.pln-bar { position: absolute; top: 4px; height: 26px; border-radius: 7px; background: var(--accent); color: var(--accent-ink); cursor: grab; touch-action: none; user-select: none; overflow: visible; display: flex; align-items: center; min-width: 8px; }
+.pln-bar:focus-visible { outline: 3px solid var(--warn); outline-offset: 1px; }
+.pln-bar-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 0 8px; font-size: 12px; pointer-events: none; }
+.pln-bar.offer { background: repeating-linear-gradient(45deg, var(--accent-soft) 0 6px, var(--accent) 6px 8px); color: var(--ink); }
+.pln-bar.contract { background: var(--accent); }
+.pln-bar.abs { background: var(--good); color: var(--accent-ink); }
+.pln-bar.abs.sick { background: var(--warn); }
+.pln-bar.draft { outline: 2px dashed var(--warn); outline-offset: 1px; }
+.pln-bar.sel { box-shadow: 0 0 0 2px var(--accent); }
+.pln-bar .h { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.pln-bar .h.l { left: 0; } .pln-bar .h.r { right: 0; }
+.pln-drag { position: sticky; left: 200px; margin: 6px 0; font-size: 13px; background: var(--accent-soft); border-radius: 8px; padding: 6px 10px; width: max-content; }
+.pln-form { margin: 0 0 12px; }
+.pln-form h3 { margin-top: 10px; }
+.pln-page .pln-panels { margin-top: 16px; }
+.basis-contract { background: var(--good-soft); color: var(--good); }
+.basis-offer-binding { background: var(--warn-soft); color: var(--warn); }
+.basis-intended { background: var(--bg); color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .pln-bar { transition: none; } }
+@media (max-width: 720px) {
+  .pln-toolbar .pln-kpis { margin-left: 0; }
+  .pln-label { width: 150px; min-width: 150px; }
+}
+.plnwarn { border: 1px solid var(--warn); }
+.plnwarn-list { margin: 6px 0 8px 18px; padding: 0; font-size: 14px; }
+.pln-proj details { margin-top: 8px; }

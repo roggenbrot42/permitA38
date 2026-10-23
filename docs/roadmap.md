@@ -27,6 +27,23 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | Full data export as JSON and CSV, re-importable by the app (round-trip tested) | in progress |
 | Quarterly **tax-rule review process** (issue reminder, checklist, rule tables with source and valid-from date) | planned (reminder workflow already in place) |
 
+### Maintainer priorities (added after the first alpha, highest first)
+
+| Item | Status |
+|---|---|
+| **Interactive vacation and capacity planner** with what-if scenarios: drag vacation and contracts around, see over-capacity weeks instantly, apply or discard | in progress |
+| **Binding offers in capacity planning**: every open offer counts (worst case "all accepted"); warnings when an offer does not fit into the free hours of its time frame | in progress |
+| **Revenue forecast basis**: contractually owed hours first, intended weekly hours only where nothing is contracted; each row shows its basis | in progress |
+| **Projects have a start and an end**; extended manually or by an offer, with history | in progress |
+| **"Numbers don't add up" warnings** for offers and billing (hours vs. offered hours, price vs. rate, billed vs. offered budget) | in progress |
+| **Calendar connection** (Proton "Share via link" ICS URL, ICS file; works with any ICS source): meetings reduce capacity | in progress |
+| **Adjustable document numbering** (pattern, start number, yearly reset, preview) and an adopter checklist | in progress |
+| **Import of existing documents** (invoices/offers/customers/expenses from CSV/XLSX/JSON, originals attached, undo) | in progress |
+| **Subcontractors**: external people (with or without login) you allocate time to, who send offers you can accept; treated like team members in capacity and costs | planned (needs the planner merged first) |
+| **Itemised expenses**: a bill can have several lines, each with its own VAT rate and deductible share (business lunch, hotel with breakfast/city tax) | planned |
+| **Bill extraction from PDF/image** (prefill vendor, date, lines, VAT rates; also e-invoice XML); local OCR/LLM, you confirm before saving | later (see AI ideas) |
+| **Gantt chart** for the overall plan and for project subtasks | later |
+
 ## v0.4.0-alpha.3
 
 | Item | Status |
@@ -96,7 +113,7 @@ release; `proposed` means not yet scheduled.
 | **Reminders (Mahnwesen)** with default interest and flat fee (§ 288 BGB) | Getting paid | alpha.3 |
 | **Bank statement import** (CAMT.053/MT940/CSV) and payment matching; **EPC GiroCode QR** on invoices | Faster payment and reconciliation | alpha.4 |
 | **SEPA direct-debit file export** | Optional collection of recurring payments | beta |
-| **Working-time law checks** (ArbZG breaks, rest, 10 h) as sanity warnings; absence entitlement (BUrlG) | Teams with employees | alpha.2 (warnings in progress), entitlement beta |
+| **Working-time law checks** (ArbZG breaks, rest, 10 h) as sanity warnings; absence entitlement (BUrlG) | Teams with employees | alpha.2 (warnings in progress; vacation entitlement and planner done on `feat/planner`), entitlement beta |
 | **Scheinselbständigkeit hint** (one customer dominates the forecast) | Informational risk hint for freelancers | beta |
 | **One-Stop-Shop (OSS)** support | EU sales to private customers | later |
 | **Security baseline self-assessment (OWASP ASVS L2)** and **CRA readiness** review | Trust, regulatory outlook | beta |

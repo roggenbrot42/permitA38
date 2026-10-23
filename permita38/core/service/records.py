@@ -104,6 +104,10 @@ class RecordService:
             self._check_document_amounts(data)
         elif coll == "expenses":
             self._check_vat_rates(data.get("vat_rate"))
+        elif coll == "projects":  # the extension history is server-managed: never taken from the request
+            data.pop("extensions", None)
+            if old and old.get("extensions") is not None:
+                data["extensions"] = old["extensions"]
         elif coll == "entries":
             data["minutes"] = int(round(float(data.get("minutes") or 0)))
             data.setdefault("billable", True)

@@ -18,8 +18,20 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 - Numbered invoices can no longer be deleted (cancel them instead) so that the numbers stay gapless.
-- Database revision 3 (numbering counters, numbering log, import columns). Back up before upgrading; the app does this
+- Database revision 4 (numbering counters, numbering log, import columns). Back up before upgrading; the app does this
   automatically.
+
+- **Planning and vacation planner** (`docs/planning.md`): per-day capacity (weekly hours, holidays, absences, busy
+  time from `services.busy`) against confirmed contracts and open offers in the worst case; offer feasibility with
+  exact weeks, causes and options; numbers that do not add up on offers and invoices; project periods with manual
+  and offer-based extensions; revenue basis (contracted, open offers, assumed); vacation entitlement; and the
+  **Plan & vacation** page with drag-to-vacation, moving and resizing bars, keyboard editing, draft and apply,
+  scenarios and comparison, and suggestions (vacation windows, earliest start, what must move).
+  Migration 0003 (planning).
+
+### Changed
+- Forecast revenue is based first on contracted hours, then open offers, and only then on assumed hours; every week
+  states its basis. Contract hours are spread over the workdays of the assignee.
 
 ## [0.4.0-alpha.1] - 2026-10-22
 

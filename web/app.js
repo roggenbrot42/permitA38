@@ -301,8 +301,9 @@ A.timeUser = el => { location.hash = `#/time/${el.dataset.week}/${el.value}`; };
 
 /* ================= PLANNING (boss) ================= */
 PAGES.plan = async (tab = 'forecast') => {
-  const tabs = [['forecast', 'Forecast'], ['contracts', 'Contracts'], ['timeoff', 'Time off & holidays']];
+  const tabs = [['forecast', 'Forecast'], ['vacation', 'Plan & vacation'], ['contracts', 'Contracts'], ['timeoff', 'Time off & holidays']];
   const head = `<div class="head"><div><h1>Planning</h1><div class="muted">Where is your time going – and what is still free?</div></div></div><div class="tabs">${tabs.map(([k, l]) => `<a href="#/plan/${k}" class="${k === tab ? 'on' : ''}">${l}</a>`).join('')}</div>`;
+  if (tab === 'vacation') return head + await PAGES.planVacation();
   await loadAll(['contracts', 'absences', 'customers', 'users', 'offers']);
   if (tab === 'contracts') return head + contractsView();
   if (tab === 'timeoff') return head + await timeoffView(true);
@@ -321,10 +322,10 @@ PAGES.plan = async (tab = 'forecast') => {
   return head + `<div class="row" style="margin-bottom:12px"><div class="auto"><label>Horizon</label><select data-change="fcWeeks">${[13, 26, 52].map(n => `<option value="${n}" ${n === weeks ? 'selected' : ''}>${n} weeks</option>`).join('')}</select></div>
     <div class="auto"><label>Who</label><select data-change="fcUser"><option value="">Whole team</option>${S.d.users.filter(u => u.active !== false).map(u => `<option value="${u.id}" ${u.id === uid ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div></div>
     <div class="grid g4"><div class="card kpi"><div class="l">Capacity</div><div class="v">${num(totals.cap, 0)} h</div></div><div class="card kpi"><div class="l">Booked (contracts)</div><div class="v">${num(totals.conf, 0)} h</div></div>
-      <div class="card kpi ${totals.cap - totals.conf > 0 ? 'good' : 'bad'}"><div class="l">Free capacity</div><div class="v">${num(totals.cap - totals.conf, 0)} h</div></div><div class="card kpi"><div class="l">Expected revenue</div><div class="v">${eur(totals.rev)}</div><span class="small muted">+ ${eur(totals.trev)} if open offers are won</span></div></div>
+      <div class="card kpi ${totals.cap - totals.conf > 0 ? 'good' : 'bad'}"><div class="l">Free capacity</div><div class="v">${num(totals.cap - totals.conf, 0)} h</div></div><div class="card kpi"><div class="l">Contracted revenue</div><div class="v">${eur(fc.totals.contracted_revenue)}</div><span class="small muted">assumed ${eur(fc.totals.assumed_revenue)} where no contract exists yet</span></div></div>
     <div class="card"><h2>Weekly load</h2>${chart}<div class="small muted"><span class="dot" style="background:var(--accent)"></span>booked <span class="dot" style="background:var(--accent);opacity:.35;margin-left:10px"></span>open offers <span class="dot" style="background:var(--good);margin-left:10px"></span>capacity (after holidays & time off)</div></div>
     <div class="card"><h2>Week by week</h2><table><tr><th>Week of</th><th class="num">Capacity</th><th class="num">Booked</th><th class="num">Offers</th><th class="num">Free</th><th class="num">Revenue</th><th>Notes</th></tr>
-    ${W.map(w => `<tr><td class="nowrap">${fmtDate(w.week)}</td><td class="num">${w.capacity}</td><td class="num">${w.confirmed}</td><td class="num muted">${w.tentative || ''}</td><td class="num ${w.free < 0 ? 'free-bad' : w.free > 0 ? 'free-good' : ''}">${w.free}</td><td class="num">${w.revenue ? eur(w.revenue) : ''}</td><td class="small muted">${w.events.map(esc).join(', ')}</td></tr>`).join('')}</table></div>`;
+    ${W.map(w => `<tr><td class="nowrap">${fmtDate(w.week)}</td><td class="num">${w.capacity}</td><td class="num">${w.confirmed}</td><td class="num muted">${w.tentative || ''}</td><td class="num ${w.free < 0 ? 'free-bad' : w.free > 0 ? 'free-good' : ''}">${w.free}</td><td class="num">${w.revenue ? eur(w.revenue) : ''} <span class="pill basis-${esc(w.basis)}">${esc({ contract: 'contract', 'offer-binding': 'offers', intended: 'assumed' }[w.basis] || w.basis)}</span></td><td class="small muted">${w.events.map(esc).join(', ')}</td></tr>`).join('')}</table></div>`;
 };
 A.fcWeeks = el => { localStorage.fcWeeks = el.value; render(); };
 A.fcUser = el => { localStorage.fcUser = el.value; render(); };
