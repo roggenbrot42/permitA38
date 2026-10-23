@@ -182,8 +182,24 @@
   function paint() {
     const el = document.getElementById('pln');
     if (!el) return;
+    const act = document.activeElement, focused = act && act.closest && act.closest('.pln-bar');
+    const focusKey = focused && el.contains(focused) ? focused.dataset.key : null;   // a redraw must not drop keyboard focus
     el.innerHTML = view();
     bindPlanner();
+    if (focusKey) { const again = document.querySelector(`.pln-bar[data-key="${CSS.escape(focusKey)}"]`); if (again) again.focus(); }
+  }
+  // One line per draft change, each with its own "Discard", so single items can be dropped without losing the rest.
+  function draftList() {
+    const items = [];
+    for (const [key, a] of Object.entries(P.abs)) {
+      const what = a.delete ? `Remove time off ${fmtDate(a.start || (realAbs(a.id) || {}).start)}` : key.startsWith('n:') ? `New ${KINDS[a.kind] || a.kind}: ${fmtDate(a.start)} – ${fmtDate(a.end)}` : `Move ${KINDS[a.kind] || a.kind}: ${fmtDate(a.start)} – ${fmtDate(a.end)}`;
+      items.push({ store: 'abs', key, what });
+    }
+    for (const [key, c] of Object.entries(P.com)) {
+      items.push({ store: 'com', key, what: `${key.startsWith('offer') ? 'Offer' : 'Contract'}: ${fmtDate(c.start)} – ${fmtDate(c.end)}` });
+    }
+    if (!items.length) return '';
+    return `<ul class="pln-draftlist">${items.map(i => `<li><span>${esc(i.what)}</span> <button type="button" class="ghost sm" data-a="plnDiscardOne" data-store="${i.store}" data-key="${esc(i.key)}">Discard</button></li>`).join('')}</ul>`;
   }
   function view() {
     const W = weekRows();
@@ -200,7 +216,8 @@
       <span>${n ? `${n} draft change${n === 1 ? '' : 's'} – nothing is saved yet.` : 'No draft changes. Drag on the time-off row to add vacation; drag bars to move or resize them.'}</span>
       <span class="right auto"><button type="button" class="ghost" data-a="plnDiscard" ${n ? '' : 'disabled'}>Discard</button> <button type="button" class="primary" data-a="plnApply" ${n ? '' : 'disabled'}>Apply</button></span>
     </div>
-    <div class="pln-help small muted">Keyboard: focus a bar, then ←/→ moves it one day (Shift: one week); Alt+←/→ changes its end. Touch: drag bars and the time-off row.</div>
+    ${draftList()}
+    <div class="pln-help small muted">Keyboard: focus a bar, then ←/→ moves it one day (Shift: one week); Alt+←/→ changes its end, Ctrl+←/→ its start; Esc discards this item's change; Delete removes a time-off entry. Touch: drag bars and the time-off row.</div>
     <div class="pln-wrap" id="plnWrap" aria-label="Timeline">
       <div class="pln-grid">
         ${headerRow()}
@@ -328,11 +345,18 @@
       schedule();
       return;
     }
+    if (e.key === 'Escape') {   // drop just this item's draft change
+      const store = bar.dataset.kind === 'abs' ? P.abs : P.com;
+      if (!store[bar.dataset.key]) return;
+      e.preventDefault();
+      delete store[bar.dataset.key];
+      schedule();
+      return;
+    }
     if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
     e.preventDefault();
     const step = (e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 7 : 1);
-    applyBarDelta(bar.dataset.kind, bar.dataset.key, bar.dataset.id, e.altKey ? 'end' : 'move', step);
-    setTimeout(() => { const again = document.querySelector(`.pln-bar[data-key="${CSS.escape(bar.dataset.key)}"]`); if (again) again.focus(); }, 0);
+    applyBarDelta(bar.dataset.kind, bar.dataset.key, bar.dataset.id, e.altKey ? 'end' : e.ctrlKey || e.metaKey ? 'start' : 'move', step);
   }
 
   function bindPlanner() {
@@ -345,6 +369,7 @@
   /* ---------- actions ---------- */
   A.plnSelect = el => { P.sel = el.dataset.key; paint(); };
   A.plnWhy = el => toast(explain(weekRows()[+el.dataset.i]));
+  A.plnDiscardOne = el => { delete (el.dataset.store === 'abs' ? P.abs : P.com)[el.dataset.key]; schedule(); };
   A.plnDiscard = () => { P.abs = {}; P.com = {}; P.sugg = null; schedule(); };
   A.plnAddVac = () => {
     const s = document.getElementById('plnFrom').value, t = document.getElementById('plnTo').value;

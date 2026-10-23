@@ -122,3 +122,101 @@ def test_keyboard_moves_a_contract_bar_and_the_draft_is_visible(srv, ui, seeded)
     assert "1 draft change" in ui.inner_text(".pln-draftbar")
     ui.click("[data-a=plnDiscard]")
     ui.wait_for_selector(".pln-bar.draft", state="detached")
+
+
+def drag_vacation(ui, first: str, last: str):
+    x1, y1 = cell_center(ui, first)
+    x2, _ = cell_center(ui, last)
+    ui.mouse.move(x1, y1)
+    ui.mouse.down()
+    ui.mouse.move(x2, y1, steps=4)
+    ui.mouse.up()
+    ui.wait_for_selector(".pln-bar.draft.abs")
+
+
+def abs_range(ui):
+    return ui.locator(".pln-bar.abs").first.get_attribute("aria-label")
+
+
+def test_keyboard_moves_and_resizes_a_time_off_draft(srv, ui, seeded):
+    w2 = seeded["week2"]
+    drag_vacation(ui, w2.isoformat(), (w2 + timedelta(days=1)).isoformat())
+    before = abs_range(ui)
+    bar = ui.locator(".pln-bar.abs.draft").first
+    bar.focus()
+    ui.keyboard.press("ArrowRight")
+    ui.wait_for_function("(b) => document.querySelector('.pln-bar.abs').getAttribute('aria-label') !== b", arg=before)
+    moved = abs_range(ui)
+    assert moved != before
+    assert ui.evaluate("() => document.activeElement.classList.contains('pln-bar')")  # focus survives the redraw
+    ui.keyboard.press("Alt+ArrowRight")  # extend the end by a day
+    ui.wait_for_function("(b) => document.querySelector('.pln-bar.abs').getAttribute('aria-label') !== b", arg=moved)
+    assert "1 draft change" in ui.inner_text(".pln-draftbar")
+
+
+def test_single_time_off_items_can_be_discarded(srv, ui, seeded):
+    w2 = seeded["week2"]
+    drag_vacation(ui, w2.isoformat(), (w2 + timedelta(days=1)).isoformat())
+    drag_vacation(ui, (w2 + timedelta(days=7)).isoformat(), (w2 + timedelta(days=8)).isoformat())
+    ui.wait_for_function("() => document.querySelectorAll('.pln-bar.abs.draft').length === 2")
+    ui.locator(".pln-bar.abs.draft").first.focus()
+    ui.keyboard.press("Delete")
+    ui.wait_for_function("() => document.querySelectorAll('.pln-bar.abs.draft').length === 1")
+    assert "1 draft change" in ui.inner_text(".pln-draftbar")
+
+
+def test_keyboard_resizes_the_start_and_keeps_focus_for_repeated_presses(srv, ui, seeded):
+    w2 = seeded["week2"]
+    drag_vacation(ui, (w2 + timedelta(days=1)).isoformat(), (w2 + timedelta(days=2)).isoformat())
+    ui.locator(".pln-bar.abs.draft").first.focus()
+    for _ in range(3):  # three presses in a row: each one needs the focus to survive the previous redraw
+        before = abs_range(ui)
+        ui.keyboard.press("Control+ArrowLeft")
+        ui.wait_for_function(
+            "(b) => document.querySelector('.pln-bar.abs').getAttribute('aria-label') !== b", arg=before
+        )
+    start = (w2 + timedelta(days=1) - timedelta(days=3)).strftime("%d.%m.")
+    assert start in abs_range(ui)
+
+
+def test_each_draft_change_can_be_discarded_on_its_own(srv, ui, seeded):
+    w2 = seeded["week2"]
+    drag_vacation(ui, w2.isoformat(), (w2 + timedelta(days=1)).isoformat())
+    drag_vacation(ui, (w2 + timedelta(days=7)).isoformat(), (w2 + timedelta(days=8)).isoformat())
+    ui.wait_for_function("() => document.querySelectorAll('.pln-draftlist li').length === 2")
+    ui.locator("[data-a=plnDiscardOne]").first.click()
+    ui.wait_for_function("() => document.querySelectorAll('.pln-draftlist li').length === 1")
+    assert ui.locator(".pln-bar.abs.draft").count() == 1
+    assert "1 draft change" in ui.inner_text(".pln-draftbar")
+    # Escape on a focused bar drops that item too
+    ui.locator(".pln-bar.abs.draft").first.focus()
+    ui.keyboard.press("Escape")
+    ui.wait_for_selector(".pln-bar.draft", state="detached")
+    assert srv.app.state.services.store.list("absences") == []
+
+
+def test_a_marked_for_deletion_time_off_can_be_restored_from_the_list(srv, ui, seeded):
+    import httpx
+
+    w2 = seeded["week2"]
+    h = {"Authorization": "Bearer " + srv.token}
+    httpx.post(
+        srv.base + "/api/absences",
+        headers=h,
+        json={
+            "user_id": seeded["me"]["id"],
+            "kind": "vacation",
+            "start": (w2 + timedelta(days=14)).isoformat(),
+            "end": (w2 + timedelta(days=15)).isoformat(),
+        },
+    ).raise_for_status()
+    ui.reload()
+    ui.wait_for_selector(".pln-bar.abs")
+    ui.locator(".pln-bar.abs").first.focus()
+    ui.keyboard.press("Delete")
+    ui.wait_for_selector(".pln-bar.abs", state="detached")
+    ui.wait_for_selector(".pln-draftlist li")
+    ui.click("[data-a=plnDiscardOne]")
+    ui.wait_for_selector(".pln-bar.abs")
+    assert "No draft changes" in ui.inner_text(".pln-draftbar")
+    assert len(srv.app.state.services.store.list("absences")) == 1
