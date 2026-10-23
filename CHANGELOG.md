@@ -18,6 +18,10 @@ All notable changes to this project are documented here. The format is based on
 - Forecast revenue is based first on contracted hours, then open offers, and only then on assumed hours; every week
   states its basis. Contract hours are spread over the workdays of the assignee.
 
+### Fixed
+- Money & Taxes: a year outside 2000–2100 in the address (typed or stale) showed a validation error page; it is clamped
+  now and the arrows stop at the ends (found by the nightly randomized browser run).
+
 ## [0.4.0-alpha.1] - 2026-10-22
 
 First public alpha. Expect rough edges and read [docs/release-plan.md](docs/release-plan.md) for the scope, known
