@@ -283,6 +283,47 @@ class Settings(BaseModel):
     planning_default_win_probability: float = 100
 
 
+class TimelineAbsence(BaseModel):
+    """One stored absence as the viewer may see it (``kind`` and ``label`` are null where the level hides them)."""
+
+    model_config = ConfigDict(extra="allow")
+    start: str
+    end: str
+    kind: str | None = None
+    label: str | None = None
+
+
+class TimelineContract(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    title: str | None = None
+    customer: str | None = None
+    start: str
+    end: str | None = None
+    hours_per_week: float | None = None
+
+
+class TimelinePerson(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    name: str | None = None
+    color: str | None = None
+    weekly_hours: float | None = None
+    absences: list[TimelineAbsence] = []
+    contracts: list[TimelineContract] = []
+
+
+class TeamTimeline(BaseModel):
+    """GET /api/team/timeline (docs/contracts/team-timeline.md)."""
+
+    model_config = ConfigDict(extra="allow")
+    level: str
+    start: str
+    end: str
+    holidays: dict[str, str] = {}
+    people: list[TimelinePerson] = []
+
+
 # ======================================================================================================
 # Strict request models. They accept exactly what is sane; the lenient classes above describe responses
 # (a record stored by an older version or another device must never turn a *response* into an error).
@@ -488,6 +529,18 @@ class TemplateIn(v.StrictRecord):
     closing: v.Short | None = None
 
 
+TeamLevel = Literal["off", "away", "time-off", "full"]
+
+
+class TeamTimelineVisibilityIn(v.StrictRecord):
+    """``team_timeline_visibility`` of PUT /settings: the level per role. Only ``employee`` and ``accountant`` (the
+    boss is always ``full``); any other key, the boss included, is rejected. A missing key keeps its value."""
+
+    model_config = ConfigDict(extra="forbid")
+    employee: TeamLevel = "away"
+    accountant: TeamLevel = "off"
+
+
 class SettingsIn(v.StrictRecord):
     """PUT /settings: any subset of the settings, each value checked."""
 
@@ -527,6 +580,7 @@ class SettingsIn(v.StrictRecord):
     other_deductions: v.NonNegAmount = 0
     planning_min_rate: v.Rate = 0
     planning_default_win_probability: v.Percent = 100
+    team_timeline_visibility: TeamTimelineVisibilityIn = TeamTimelineVisibilityIn()
 
     @field_validator("state")
     @classmethod
