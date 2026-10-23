@@ -249,3 +249,16 @@ def test_spread_sums_to_total_and_skips_absences(start, length, total, ranges):
             assert all(days[x] == pytest.approx(total / len(avail)) for x in avail)
         finally:
             repo.close()
+
+
+def test_a_window_narrower_than_the_period_keeps_the_per_day_load(repo):
+    # contract 2-27 Feb 2026 (20 workdays), 80 h, vacation 11-13 Feb -> 17 available days -> 80/17 h each, whatever window
+    # is asked for (the denominator is the whole period, not the window)
+    u = add_user(repo)
+    c = add_contract(repo, u, MON, date(2026, 2, 27), total=80)
+    add_absence(repo, u, "2026-02-11", "2026-02-13")
+    days = per_day(repo, c, date(2026, 2, 9), date(2026, 2, 15), today=MON)
+    assert days[date(2026, 2, 9)] == pytest.approx(80 / 17)
+    assert days[date(2026, 2, 10)] == pytest.approx(80 / 17)
+    assert all(days.get(date(2026, 2, d), 0) == 0 for d in (11, 12, 13, 14, 15))
+    assert sum(days.values()) == pytest.approx(2 * 80 / 17)

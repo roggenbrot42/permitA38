@@ -319,9 +319,9 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
             elif it.total:
                 # spread over the days the person can actually work: workdays that are neither a public holiday nor an
                 # absence day. With none left the nominal spread over all workdays stays, so the overload is visible.
-                absent = cap.absences[uid]
+                off_days = cap.absences[uid]
                 period = [y for y in _daterange(it.start, it.end) if y.weekday() in wdset]
-                free = [y for y in period if not cap.holiday(y) and y not in absent]
+                free = [y for y in period if not cap.holiday(y) and y not in off_days]
                 days_used = free or period
                 if days_used:
                     chosen = set(days_used)

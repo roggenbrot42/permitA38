@@ -197,11 +197,8 @@ class PlanningService:
             for c in r["contributions"]:
                 if not c["binding"] or c["id"] != item.id:
                     causes.append(f"{c['title']} ({_h(c['hours'])} h in week of {r['week']})")
-            if r["vacation_hours"]:
-                causes.append(f"time off ({_h(r['vacation_hours'])} h in week of {r['week']})")
-            if r["holiday_hours"]:
-                causes.append(f"public holidays ({_h(r['holiday_hours'])} h in week of {r['week']})")
-            # (time off and holidays are no longer placed into the weeks they remove; name them wherever they cut the capacity)
+        # time off and holidays are not booked into the weeks they remove, so name them wherever they cut the capacity
+        # of the item's period (after the competing commitments, which are the more actionable causes)
         lo = eng.week_start(item.start)
         n_weeks = (eng.week_start(item.end) - lo).days // 7 + 1
         for r in eng.weeks(base, lo, n_weeks, None):
