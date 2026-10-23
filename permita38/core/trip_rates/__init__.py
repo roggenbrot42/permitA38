@@ -28,7 +28,7 @@ def load_rates(year: int) -> dict[str, Any]:
     """The rate table of ``year`` with Decimal values. Raises :class:`RateTableMissing` when there is none."""
     path = _DIR.joinpath(f"{year}.json")
     if not path.is_file():
-        raise RateTableMissing(f"no business-trip rate table for {year}")
+        raise RateTableMissing(f"No rate table for year {year}")
     raw = json.loads(path.read_text(encoding="utf-8"))
     countries = {}
     for code, row in raw["countries"].items():

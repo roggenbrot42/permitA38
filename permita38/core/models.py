@@ -823,18 +823,21 @@ class TripIn(v.StrictRecord):
 
     @model_validator(mode="after")
     def _period(self):
+        from .trips_calc import effective_last  # an end of exactly 00:00 belongs to the day before
+
         start = datetime.strptime(self.start, "%Y-%m-%dT%H:%M")
         end = datetime.strptime(self.end, "%Y-%m-%dT%H:%M")
         if end <= start:
             raise ValueError("end must be after start")
-        days = (end.date() - start.date()).days + 1
+        last = effective_last(start, end)
+        days = (last - start.date()).days + 1
         if days > TRIP_MAX_DAYS:
             raise ValueError(f"a trip may cover at most {TRIP_MAX_DAYS} calendar days (this one covers {days})")
         for meal in self.meals_provided:
-            if not start.date().isoformat() <= meal.date <= end.date().isoformat():
+            if not start.date().isoformat() <= meal.date <= last.isoformat():
                 raise ValueError(f"meal date {meal.date} is outside the trip")
         for row in self.mileage:
-            if not start.date().isoformat() <= row.date <= end.date().isoformat():
+            if not start.date().isoformat() <= row.date <= last.isoformat():
                 raise ValueError(f"mileage date {row.date} is outside the trip")
         if self.cost_centre == "project" and not (self.project_id or self.customer_id):
             raise ValueError("Choose a customer or project, or general")
