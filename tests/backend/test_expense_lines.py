@@ -418,3 +418,21 @@ def test_property_lines_add_up_exactly_and_group_vat_adds_up(boss_client, lines)
         assert sum((dd(x["net"]) for x in members), D(0)) == group_net
     assert dd(got["vat"]) == sum((v for v, _ in summary.values()), D(0))
     assert all(dd(x["net"]) >= 0 and dd(x["vat"]) >= 0 for x in out)
+
+
+# ------------------------------------------------------------------ 7. importer and classic expenses
+def test_an_imported_expense_has_no_lines_and_stays_classic_after_a_put_without_lines(boss_client):
+    csv_text = "Datum;Lieferant;Beschreibung;Netto;USt;Kategorie\n01.03.2026;Büro AG;Papier;100,00;19,00;Büro\n"
+    r = boss_client.post(
+        "/api/import/run", data={"type": "expenses"}, files={"file": ("e.csv", csv_text.encode(), "text/csv")}
+    )
+    assert r.status_code == 200, r.text
+    exp = next(x for x in boss_client.get("/api/expenses").json() if x["vendor"] == "Büro AG")
+    assert "lines" not in exp
+    r = boss_client.put(
+        f"/api/expenses/{exp['id']}", json={"date": "2026-03-01", "net": 120.0, "vat": 22.8, "vendor": "Büro AG"}
+    )
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert "lines" not in got and dd(got["net"]) == D("120.00") and dd(got["vat"]) == D("22.80")
+    assert "lines" not in boss_client.get(f"/api/expenses/{exp['id']}").json()
