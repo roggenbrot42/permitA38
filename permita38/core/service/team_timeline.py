@@ -25,7 +25,9 @@ CONFIGURABLE = ("employee", "accountant")
 DEFAULT_VISIBILITY = {"employee": "away", "accountant": "off"}
 #: the window: ``end - start`` is at most this many days (366 days inclusive)
 MAX_SPAN_DAYS = 365
-#: kinds that carry a label at ``time-off`` (sick days never do)
+#: kinds shown at ``time-off`` (allow-list: any other stored kind, legacy or unknown, is shown as plain away)
+TIME_OFF_KINDS = ("vacation", "holiday", "other")
+#: kinds that carry a label at ``time-off`` (sick days and other kinds never do)
 LABELLED_AT_TIME_OFF = ("vacation", "holiday")
 
 
@@ -146,7 +148,7 @@ def _absence(a: dict, level: str, own: bool) -> dict:
     s, e = a["start"].isoformat(), a["end"].isoformat()
     if own or level == "full":
         return {"start": s, "end": e, "kind": a["kind"], "label": a["note"]}
-    if level == "time-off" and a["kind"] != "sick":
+    if level == "time-off" and a["kind"] in TIME_OFF_KINDS:
         label = a["note"] if a["kind"] in LABELLED_AT_TIME_OFF else None
         return {"start": s, "end": e, "kind": a["kind"], "label": label}
     return {"start": s, "end": e, "kind": None, "label": None}
