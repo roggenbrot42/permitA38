@@ -416,7 +416,10 @@ def test_employee_without_expense_right_gets_no_add_bill_button(browser):
         "id": "u5e5e5e5e5",
         "name": "Demo Employee",
         "role": "employee",
-        "permissions": {"trips": {"read": "limited", "write": "limited"}, "projects": {"read": "limited", "write": "none"}},
+        "permissions": {
+            "trips": {"read": "limited", "write": "limited"},
+            "projects": {"read": "limited", "write": "none"},
+        },
     }
     api = FakeTripApi(employee, copy.deepcopy(CONTRACT_TRIP))
     ctx, pg, problems = open_app(browser, api)
