@@ -1,0 +1,244 @@
+"""Business trips: the calculation oracle (docs/specs/business-trips.md, "Calculation").
+
+Every expected amount is written out by hand below (German rules, 2026 domestic values 14 / 28 EUR, mileage 0,30 EUR,
+country values from the placeholder table in permita38/core/trip_rates/2026.json). Nothing here calls the code under
+test to compute an expectation.
+"""
+
+from decimal import Decimal
+
+import pytest
+
+from permita38.core import trips_calc
+from permita38.core.trip_rates import load_rates
+
+RATES_2026 = load_rates(2026)
+
+
+def rates(year):
+    """The real 2026 table; any other year is a synthetic table so that a trip can cross a year end."""
+    if year == 2026:
+        return RATES_2026
+    return SYNTHETIC_2027
+
+
+SYNTHETIC_2027 = {
+    "year": 2027,
+    "rules_version": "2027-SYNTH",
+    "mileage_per_km": Decimal("0.30"),
+    "fallback_country": "LU",
+    "domestic": {"from8h": Decimal("15.00"), "h24": Decimal("30.00")},
+    "countries": {
+        "DE": {"name": "Germany", "from8h": Decimal("15.00"), "h24": Decimal("30.00")},
+        "LU": {"name": "Luxembourg", "from8h": Decimal("31.00"), "h24": Decimal("46.00")},
+    },
+}
+
+
+def trip(start, end, places=None, meals=None, mileage=None):
+    out = {"start": start, "end": end}
+    if places is not None:
+        out["places"] = places
+    if meals is not None:
+        out["meals_provided"] = meals
+    if mileage is not None:
+        out["mileage"] = mileage
+    return out
+
+
+def day(result, iso):
+    return next(d for d in result["days"] if d["date"] == iso)
+
+
+def calc(t):
+    return trips_calc.compute(t, rates)
+
+
+# ------------------------------------------------------------------ worked examples (exact cents)
+def test_exactly_eight_hours_is_no_allowance():
+    r = calc(trip("2026-11-09T07:00", "2026-11-09T15:00"))
+    assert r["allowance_total"] == 0.0
+    assert day(r, "2026-11-09")["absence_hours"] == 8.0
+    assert day(r, "2026-11-09")["base"] == 0.0
+
+
+def test_eight_hours_and_one_minute_is_fourteen_euro():
+    r = calc(trip("2026-11-09T07:00", "2026-11-09T15:01"))
+    assert r["allowance_total"] == 14.00
+    assert day(r, "2026-11-09")["amount"] == 14.00
+
+
+def test_two_days_with_overnight_stay_is_fourteen_plus_fourteen():
+    r = calc(trip("2026-11-09T09:00", "2026-11-10T12:00"))
+    assert [d["amount"] for d in r["days"]] == [14.00, 14.00]
+    assert r["allowance_total"] == 28.00
+
+
+def test_three_days_first_and_last_fourteen_middle_full_day():
+    r = calc(trip("2026-11-09T08:00", "2026-11-11T18:00"))
+    assert [d["base"] for d in r["days"]] == [14.00, 28.00, 14.00]
+    assert r["allowance_total"] == 56.00
+
+
+def test_breakfast_on_middle_day_is_twenty_percent_of_full_day():
+    meals = [{"date": "2026-11-10", "breakfast": True, "lunch": False, "dinner": False}]
+    r = calc(trip("2026-11-09T08:00", "2026-11-11T18:00", meals=meals))
+    assert day(r, "2026-11-10")["reductions"] == 5.60
+    assert day(r, "2026-11-10")["amount"] == 22.40
+    assert r["allowance_total"] == 50.40
+
+
+def test_nine_hours_with_lunch_and_dinner_never_goes_below_zero():
+    meals = [{"date": "2026-11-09", "breakfast": False, "lunch": True, "dinner": True}]
+    r = calc(trip("2026-11-09T09:00", "2026-11-09T18:00", meals=meals))
+    d = day(r, "2026-11-09")
+    assert d["base"] == 14.00
+    assert d["reductions"] == 22.40  # 11,20 + 11,20
+    assert d["amount"] == 0.00
+    assert r["allowance_total"] == 0.00
+
+
+def test_nine_hours_with_lunch_only_leaves_two_euro_eighty():
+    meals = [{"date": "2026-11-09", "breakfast": False, "lunch": True, "dinner": False}]
+    r = calc(trip("2026-11-09T09:00", "2026-11-09T18:00", meals=meals))
+    assert r["allowance_total"] == 2.80
+
+
+def test_mileage_237_5_km_is_71_25_euro():
+    r = calc(trip("2026-11-09T08:00", "2026-11-09T18:00", mileage=[{"date": "2026-11-09", "from": "A", "to": "B", "km": 237.5}]))
+    assert r["mileage_km"] == 237.5
+    assert r["mileage_total"] == 71.25
+
+
+def test_mileage_is_rounded_once_per_trip_not_per_row():
+    # synthetic rate 0,333 EUR/km (not a real value; it makes the rounding visible). Three rows of 0,1 km:
+    # once per trip: 0,3 km x 0,333 = 0,0999 -> 0,10 ; per row would be 3 x round(0,0333) = 0,09
+    odd = dict(RATES_2026, mileage_per_km=Decimal("0.333"))
+    rows = [{"date": "2026-11-09", "from": "A", "to": "B", "km": 0.1}] * 3
+    r = trips_calc.compute(trip("2026-11-09T08:00", "2026-11-09T18:00", mileage=rows), lambda y: odd)
+    assert r["mileage_total"] == 0.10
+
+
+def test_unknown_country_uses_luxembourg_row_with_note():
+    places = [{"from_date": "2026-11-09", "country": "XX"}]
+    r = calc(trip("2026-11-09T08:00", "2026-11-11T18:00", places=places))
+    lu = RATES_2026["countries"]["LU"]  # placeholder values: 30,00 / 45,00
+    assert [d["base"] for d in r["days"]] == [float(lu["from8h"]), float(lu["h24"]), float(lu["from8h"])]
+    assert r["allowance_total"] == 30.00 + 45.00 + 30.00 == 105.00
+    assert all("not in the table" in d["note"] for d in r["days"])
+    assert all(d["country"] == "XX" for d in r["days"])
+
+
+def test_known_foreign_country_three_days_uses_its_row():
+    places = [{"from_date": "2026-11-09", "country": "CH", "city": "Zurich"}]
+    r = calc(trip("2026-11-09T08:00", "2026-11-11T18:00", places=places))
+    assert r["allowance_total"] == 40.00 + 65.00 + 40.00 == 145.00
+    assert day(r, "2026-11-09")["note"] == ""
+    assert day(r, "2026-11-09")["place"] == "Zurich"
+
+
+def test_foreign_reductions_are_twenty_and_forty_percent_of_its_full_day_rate():
+    places = [{"from_date": "2026-11-09", "country": "CH"}]
+    meals = [{"date": "2026-11-10", "breakfast": True, "lunch": True, "dinner": False}]
+    r = calc(trip("2026-11-09T08:00", "2026-11-11T18:00", places=places, meals=meals))
+    # CH full day 65,00: breakfast 13,00 and lunch 26,00 -> 65 - 39 = 26
+    assert day(r, "2026-11-10")["reductions"] == 39.00
+    assert day(r, "2026-11-10")["amount"] == 26.00
+    assert r["allowance_total"] == 40.00 + 26.00 + 40.00 == 106.00
+
+
+def test_no_places_means_domestic():
+    r = calc(trip("2026-11-09T08:00", "2026-11-09T18:00"))
+    assert day(r, "2026-11-09")["country"] == "DE"
+    assert r["allowance_total"] == 14.00
+
+
+# ------------------------------------------------------------------ boundaries
+def test_trip_over_midnight_counts_both_days_as_arrival_and_departure():
+    # 22:00 to 02:00: two calendar days of two hours each; a multi-day trip pays 14 on each of its first and last date
+    r = calc(trip("2026-11-09T22:00", "2026-11-10T02:00"))
+    assert [d["absence_hours"] for d in r["days"]] == [2.0, 2.0]
+    assert r["allowance_total"] == 28.00
+
+
+def test_end_exactly_at_midnight_gives_no_allowance_for_the_empty_last_day():
+    r = calc(trip("2026-11-09T09:00", "2026-11-10T00:00"))
+    assert day(r, "2026-11-10")["amount"] == 0.00
+    assert "no absence" in day(r, "2026-11-10")["note"]
+    assert r["allowance_total"] == 14.00
+
+
+def test_end_before_or_equal_start_is_rejected():
+    with pytest.raises(ValueError):
+        calc(trip("2026-11-09T09:00", "2026-11-09T09:00"))
+    with pytest.raises(ValueError):
+        calc(trip("2026-11-09T10:00", "2026-11-09T09:00"))
+
+
+def test_reductions_never_below_zero_on_arrival_day_with_all_meals():
+    meals = [{"date": "2026-11-09", "breakfast": True, "lunch": True, "dinner": True}]
+    r = calc(trip("2026-11-09T20:00", "2026-11-10T12:00", meals=meals))
+    assert day(r, "2026-11-09")["amount"] == 0.00  # 14 - 5,60 - 11,20 - 11,20 < 0
+    assert day(r, "2026-11-10")["amount"] == 14.00
+
+
+def test_year_change_inside_a_trip_uses_the_table_of_each_day():
+    # 2026 days: 14 (first), 28 (full day) ; 2027 days (synthetic table): 30 (full day), 15 (last date)
+    r = calc(trip("2026-12-30T08:00", "2027-01-02T18:00"))
+    assert [d["amount"] for d in r["days"]] == [14.00, 28.00, 30.00, 15.00]
+    assert r["allowance_total"] == 87.00
+    assert r["rules_version"] == "2025-12-05, 2027-SYNTH"
+
+
+def test_rounding_of_reductions_is_half_up_to_cents():
+    odd = {
+        "year": 2026,
+        "rules_version": "odd",
+        "mileage_per_km": Decimal("0.30"),
+        "fallback_country": "LU",
+        "domestic": {"from8h": Decimal("14.00"), "h24": Decimal("33.33")},
+        "countries": {"DE": {"name": "Germany", "from8h": Decimal("14.00"), "h24": Decimal("33.33")}},
+    }
+    meals = [{"date": "2026-11-10", "breakfast": True, "lunch": True, "dinner": False}]
+    t = trip("2026-11-09T08:00", "2026-11-11T18:00", meals=meals)
+    r = trips_calc.compute(t, lambda y: odd)
+    # 20 % of 33,33 = 6,666 -> 6,67 ; 40 % of 33,33 = 13,332 -> 13,33
+    assert day(r, "2026-11-10")["reductions"] == 20.00
+    assert day(r, "2026-11-10")["amount"] == 13.33
+
+
+def test_three_month_limit_pays_only_the_first_three_months_at_one_place():
+    # place Hamburg from 31 Jan: limit = 31 Jan + 3 months, clamped to 30 Apr; 30 Apr and 1 May get nothing.
+    # 31 Jan 14 + (1 Feb .. 29 Apr: 88 full days x 28) = 14 + 2464 = 2478
+    places = [{"from_date": "2026-01-31", "country": "DE", "city": "Hamburg"}]
+    r = calc(trip("2026-01-31T08:00", "2026-05-01T18:00", places=places))
+    assert day(r, "2026-04-29")["amount"] == 28.00
+    assert day(r, "2026-04-30")["amount"] == 0.00
+    assert "three-month limit" in day(r, "2026-04-30")["note"]
+    assert day(r, "2026-05-01")["amount"] == 0.00
+    assert r["allowance_total"] == 2478.00
+
+
+def test_four_week_interruption_starts_a_new_three_month_period():
+    # Hamburg 1-9 Jan, Berlin 10 Jan - 28 Feb, Hamburg again from 1 Mar (50 days away): new period, no limit in April
+    places = [
+        {"from_date": "2026-01-01", "country": "DE", "city": "Hamburg"},
+        {"from_date": "2026-01-10", "country": "DE", "city": "Berlin"},
+        {"from_date": "2026-03-01", "country": "DE", "city": "Hamburg"},
+    ]
+    r = calc(trip("2026-01-01T08:00", "2026-04-20T18:00", places=places))
+    assert day(r, "2026-04-15")["amount"] == 28.00
+    assert "three-month" not in day(r, "2026-04-15")["note"]
+
+
+def test_a_shorter_interruption_does_not_reset_the_limit():
+    # Hamburg 1 Jan - 9 Jan, Berlin from 10 Jan, Hamburg again from 1 Mar is the reset case; here Berlin only
+    # interrupts for 20 days (Hamburg from 30 Jan), so the Hamburg period started on 1 Jan continues: limit 1 Apr
+    places = [
+        {"from_date": "2026-01-01", "country": "DE", "city": "Hamburg"},
+        {"from_date": "2026-01-10", "country": "DE", "city": "Berlin"},
+        {"from_date": "2026-01-30", "country": "DE", "city": "Hamburg"},
+    ]
+    r = calc(trip("2026-01-01T08:00", "2026-04-20T18:00", places=places))
+    assert day(r, "2026-04-15")["amount"] == 0.00
+    assert "three-month limit" in day(r, "2026-04-15")["note"]
