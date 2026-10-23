@@ -313,7 +313,7 @@ class CalendarService:
         """Refresh every subscription now (used by ``permita38 calendar refresh``). Returns (name, status) pairs."""
         out = []
         for src in self.store.list("calendar_sources"):
-            if src.get("kind") != "ics_url" or self.store.get("users", src.get("user_id")) is None:
+            if src.get("kind") != "ics_url" or not src.get("user_id") or self.store.get("users", src["user_id"]) is None:
                 continue
             if self._begin(src["id"]):
                 try:

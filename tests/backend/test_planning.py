@@ -563,7 +563,7 @@ def test_revision_two_database_is_upgraded_and_projects_get_their_period(tmp_pat
     late = repo.get("projects", "proj00000003")
     assert late["start"] == late["end"] == "2026-05-04"  # entries only
     assert repo.get("projects", "proj00000002").get("start") is None
-    assert list((data / "backups").glob("pre-migration-r2-to-r3-*.sqlite3"))
+    assert list((data / "backups").glob(f"pre-migration-r2-to-r{CURRENT_REVISION}-*.sqlite3"))
     repo.close()
 
 
