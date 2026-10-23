@@ -43,6 +43,16 @@ class Dialect:
             cols.append(f"    {self.quote(table.extra_column)} {self.types[JSON]}")
         return f"CREATE TABLE {self.quote(table.name)} (\n" + ",\n".join(cols) + "\n);"
 
+    def create_migrations_table(self) -> str:
+        """Bookkeeping table of applied migrations; created by the runner itself, not by a migration file."""
+        q = self.quote
+        return (
+            f"CREATE TABLE IF NOT EXISTS {q('schema_migrations')} (\n"
+            f"    {q('id')} {self.types[ID]} PRIMARY KEY,\n"
+            f"    {q('name')} {self.types[STR]} NOT NULL,\n"
+            f"    {q('applied_at')} {self.types[STR]} NOT NULL\n);"
+        )
+
     def create_index(self, table: Table, index: Index) -> str:
         unique = "UNIQUE " if index.unique else ""
         cols = ", ".join(self.quote(c) for c in index.columns)

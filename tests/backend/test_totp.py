@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from permita38.cli.main import main
-from permita38.core.database import CURRENT_REVISION
+from permita38.core.database import head_id
 from permita38.core.repository import TABLES
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service import auth as auth_mod
@@ -618,9 +618,8 @@ def test_cli_reset_totp(app, boss_client, config, tmp_path, clock, capsys):
 def test_revision_two_adds_the_totp_columns_to_every_dialect():
     from permita38.core.database import DIALECT_NAMES, list_migrations
 
-    assert CURRENT_REVISION >= 2
     for d in DIALECT_NAMES:
-        m = next(x for x in list_migrations(d) if x.version == 2)
+        m = next(x for x in list_migrations(d) if x.id == "00000002")
         assert m.name == "totp"
         for col in ("totp_secret", "totp_enabled", "totp_last_step", "totp_recovery"):
             assert col in m.sql(), (d, col)
@@ -642,7 +641,7 @@ def test_upgrade_from_revision_one_keeps_users(tmp_path):
     data = tmp_path / "data"
     data.mkdir()
     raw = sqlite3.connect(data / DB_FILENAME)
-    raw.executescript((MIGRATIONS_DIR / "sqlite" / "0001_initial.sql").read_text())
+    raw.executescript((MIGRATIONS_DIR / "sqlite" / "0001-initial.sql").read_text())
     raw.execute("PRAGMA user_version = 1")
     raw.execute(
         "INSERT INTO users (id, username, name, role, active, password_hash, pw_changed) "
@@ -652,10 +651,10 @@ def test_upgrade_from_revision_one_keeps_users(tmp_path):
     raw.close()
     repo = SQLiteRepository(data)
     repo.startup()
-    assert repo.get_revision() == CURRENT_REVISION
+    assert repo.get_revision() == head_id()
     u = repo.get("users", "abcdef123456")
     assert u["username"] == "old" and not u.get("totp_enabled") and not u.get("totp_secret")
-    assert list((data / "backups").glob(f"pre-migration-r1-to-r{CURRENT_REVISION}-*.sqlite3"))
+    assert list((data / "backups").glob(f"pre-migration-*-before-{head_id()}.sqlite3"))
     repo.save("users", {**u, "totp_enabled": True, "totp_secret": "ABC", "totp_last_step": 7, "totp_recovery": ["a$b"]})
     again = repo.get("users", "abcdef123456")
     assert again["totp_enabled"] is True and again["totp_last_step"] == 7 and again["totp_recovery"] == ["a$b"]

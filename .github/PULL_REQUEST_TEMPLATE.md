@@ -8,7 +8,7 @@
 - [ ] Tests added or updated; `make lint test` passes locally
 - [ ] Docs updated (README / `docs/`), `api/openapi.json` regenerated if the API changed
 - [ ] `CHANGELOG.md` entry under *Unreleased*
-- [ ] Database change: new numbered migration in every dialect folder and `CURRENT_REVISION` bumped (never edit a released migration)
+- [ ] Database change: new migration (`permita38 create-migration`) in every dialect folder, `requires` points at the current head (never edit a released migration)
 - [ ] No personal, customer or business data in code, tests or screenshots
 - [ ] **Tax or legal rules:** source cited (law section / BMF letter / URL) and valid-from date given: <!-- n/a or source -->
 

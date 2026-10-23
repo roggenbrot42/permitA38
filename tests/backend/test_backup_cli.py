@@ -4,7 +4,7 @@ import sqlite3
 import time
 
 from permita38.cli.main import main
-from permita38.core.database import CURRENT_REVISION
+from permita38.core.database import head_id
 from permita38.core.repository import auto_backup
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 
@@ -16,7 +16,7 @@ def test_backup_is_a_consistent_openable_copy(tmp_path):
     repo.save("customers", {"name": "B"})  # later writes are not in the copy
     db = sqlite3.connect(dest)
     assert [r[0] for r in db.execute("SELECT name FROM customers")] == ["A"]
-    assert db.execute("PRAGMA user_version").fetchone()[0] == CURRENT_REVISION
+    assert db.execute("SELECT id FROM schema_migrations ORDER BY rowid DESC").fetchone()[0] == head_id()
     assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
     db.close()
     assert not list((tmp_path / "out").glob("*.tmp"))
@@ -68,9 +68,9 @@ def test_startup_of_the_app_takes_the_daily_backup(tmp_path):
 def test_cli_backup_and_migrate(tmp_path, capsys):
     cfg = ["-c", str(tmp_path / "cfg.yaml"), "--data", str(tmp_path / "d")]
     main([*cfg, "migrate"])
-    assert f"Migrated revision 0 -> {CURRENT_REVISION}" in capsys.readouterr().out
+    assert f"Migrated none -> {head_id()} (" in capsys.readouterr().out
     main([*cfg, "migrate"])
-    assert f"Database is at revision {CURRENT_REVISION}" in capsys.readouterr().out
+    assert f"Database is at revision {head_id()}" in capsys.readouterr().out
     target = tmp_path / "snap.sqlite3"
     main([*cfg, "backup", "--dest", str(target)])
     assert "Backup written to" in capsys.readouterr().out and target.is_file()
@@ -83,10 +83,11 @@ def test_cli_create_migration_and_dump_ddl(tmp_path, capsys, monkeypatch):
     root = tmp_path / "m"
     for d in database.DIALECT_NAMES:
         (root / d).mkdir(parents=True)
-        (root / d / "0001_initial.sql").write_text("-- x")
+        (root / d / "0001-initial.sql").write_text("-- migration: 00000001\n-- requires: none\n")
     monkeypatch.setattr(database, "MIGRATIONS_DIR", root)
     main(["create-migration", "add thing"])
-    assert all((root / d / "0002_add_thing.sql").is_file() for d in database.DIALECT_NAMES)
+    assert all((root / d / "0002-add_thing.sql").is_file() for d in database.DIALECT_NAMES)
+    assert "no revision constant" in capsys.readouterr().out
     capsys.readouterr()
     main(["dump-ddl", "--dialect", "postgresql"])
     assert 'CREATE TABLE "customers"' in capsys.readouterr().out
@@ -98,8 +99,21 @@ def test_cli_refuses_newer_database(tmp_path):
     cfg = ["-c", str(tmp_path / "cfg.yaml"), "--data", str(tmp_path / "d"), "--no-browser"]
     main([*cfg, "migrate"])
     raw = sqlite3.connect(tmp_path / "d" / DB_FILENAME)
-    raw.execute("PRAGMA user_version = 99")
+    raw.execute("INSERT INTO schema_migrations (id, name, applied_at) VALUES ('ffffffff', 'future', 'x')")
+    raw.commit()
     raw.close()
     with pytest.raises(SystemExit) as e:
         main([*cfg, "serve"])
     assert "cannot use this database" in str(e.value)
+
+
+def test_cli_migrate_status_lists_the_chain(tmp_path, capsys):
+    cfg = ["-c", str(tmp_path / "cfg.yaml"), "--data", str(tmp_path / "d")]
+    main([*cfg, "migrate", "--status"])
+    out = capsys.readouterr().out
+    assert "[ ] 00000001  0001-initial.sql" in out and "[x]" not in out
+    main([*cfg, "migrate"])
+    capsys.readouterr()
+    main([*cfg, "migrate", "--status"])
+    out = capsys.readouterr().out
+    assert "[ ]" not in out and f"[x] {head_id()}" in out

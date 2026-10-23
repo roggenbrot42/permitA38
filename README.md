@@ -183,7 +183,7 @@ permita38/core/repository/    Repository interface (base.py)  ← the ONLY thing
    ├─ sqlite.py               SQLiteRepository – the default (and only shipped) backend
    ├─ factory.py              create_repository(config) picks the backend
    └─ importer.py, backups.py import of the old JSON layout, automatic backups
-permita38/core/schema/migrations/<dialect>/0001_initial.sql   numbered migrations per dialect
+permita38/core/schema/migrations/<dialect>/0001-initial.sql   migrations per dialect
 api/openapi.json              the generated API contract
 ```
 
@@ -193,7 +193,7 @@ Layers: **web → API routers → services → `Repository` interface → backen
 - **Services, not routers, hold the logic.** Routers parse requests and call a service; services raise domain errors that the API maps to `{"detail": …}` responses.
 - **Typed records, tolerant files:** pydantic models describe every record, but unknown fields are preserved so files written by a newer version or another device survive a round-trip.
 - **Storage is a layer:** services, calculations, documents and the API depend only on the `Repository` interface (`core/repository/base.py`) – no SQL, no `sqlite3` outside the repository package. The default backend is **SQLite**; the interface, the dialect-neutral schema, per-dialect DDL/upsert generation and a backend-independent contract test suite are in place so a **PostgreSQL or MariaDB** backend is mostly wiring a driver ([porting guide](docs/porting-to-postgres.md)). *Honest status: only SQLite is implemented and tested; the PostgreSQL/MariaDB dialect classes and migration files are prepared but never ran against a real server.*
-- **Versioned schema migrations**, stustapay-style: numbered SQL files per dialect (`0001_initial.sql`, …), the database stores its revision, `CURRENT_REVISION` in `core/database.py` says what the app expects. On start permitA38 applies pending migrations (after taking a backup) and **refuses to start** on a database that is newer than the app. `permita38 create-migration <name>` creates the next numbered file for every dialect.
+- **Versioned schema migrations**, stustapay-style: SQL files per dialect (`0001-initial.sql`, …) with a random id and a `requires` chain (no revision constant), the database records the applied ids in `schema_migrations`. On start permitA38 applies pending migrations (after taking a backup) and **refuses to start** on a database that is newer than the app. `permita38 create-migration <name>` creates the next file for every dialect.
 - **Frontend hosted separately?** By default the API serves `web/` itself. To host the frontend elsewhere set `serve_web: false` and `cors_origins: ["https://your-frontend"]` in the config, and point the frontend at the API URL.
 
 **Per-device config** (`~/.config/permita38/config.yaml`, on Windows `%APPDATA%\permita38\config.yaml`) is created on first run:

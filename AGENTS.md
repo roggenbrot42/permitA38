@@ -5,7 +5,7 @@
   `config.py`, `database.py` (schema revision + migration files) and `service/` (business services).
 - `permita38/core/repository/` – the storage layer. `base.py` is the `Repository` interface; `schema.py` describes the
   tables once (dialect-neutral); `dialect.py` generates SQL per dialect; `sql.py` is the generic SQL implementation;
-  `sqlite.py` is the default backend. `permita38/core/schema/migrations/<dialect>/` holds the numbered migrations.
+  `sqlite.py` is the default backend. `permita38/core/schema/migrations/<dialect>/` holds the migrations (id/requires chain, `NNNN-slug.sql`).
 - `permita38/api/` – FastAPI app (`server.py`), dependency injection (`deps.py`) and one router per domain in `routers/`.
 - `permita38/cli/` – command line entry point (`serve`, `show-openapi`, `set-password`).
 - `web/` – vanilla-JS single-page frontend, no build step. It only talks to the HTTP API.
@@ -36,12 +36,20 @@
   (the repository keeps them in the row's `extra` JSON column).
 
 ## Database migrations
-- The schema lives in `core/repository/schema.py`. To change it: run `permita38 create-migration <name>` (creates the next
-  numbered file in **every** dialect folder under `core/schema/migrations/`), write the SQL for each dialect, update
-  `schema.py` and the pydantic model, and **bump `CURRENT_REVISION` in `core/database.py`**. Tests fail if the dialect
-  folders drift apart, if `CURRENT_REVISION` is not the highest number, or if a migrated SQLite database differs from
-  `schema.py`. Migration SQL must not contain `BEGIN`/`COMMIT` (the runner wraps each file in a transaction and
-  records the revision). Never edit a migration that has been released – add a new one.
+- The schema lives in `core/repository/schema.py`. To change it: run `permita38 create-migration <name>`. It creates
+  `NNNN-<slug>.sql` in **every** dialect folder under `core/schema/migrations/` with the header
+  `-- migration: <random 8-hex id>` / `-- requires: <id of the current head>`; write the SQL for each dialect and update
+  `schema.py` and the pydantic model. There is no revision constant to bump. The identity of a migration is its id, the
+  order is the `requires` chain (linear, exactly one head); `NNNN` is only a human-readable ordinal (head + 1, must not
+  decrease along the chain, ties are fine). Tests fail if a chain rule is violated, if the dialect folders drift
+  apart, or if a migrated SQLite database differs from `schema.py`. The runner records applied ids in
+  `schema_migrations` and keeps `PRAGMA user_version` = number of applied migrations (so old binaries refuse the
+  database). Migration SQL must not contain `BEGIN`/`COMMIT` (the runner wraps each file in a transaction and records
+  the id). Never edit a migration that has been released – add a new one. The first three migrations keep the fixed
+  ids `00000001`..`00000003` (the old integer revisions).
+- **Merge conflict on `requires`:** when two branches both added a migration, validation reports a fork. The second to
+  merge rebases its **first** new migration's `requires` onto the new head (in all three dialect folders) and changes
+  nothing else; renaming the `NNNN` prefix is optional. `permita38 migrate --status` lists the chain.
 - Commit messages use Conventional Commit prefixes (`feat:`, `fix:`, `chore:`, `docs:`), imperative summaries.
 - Licensed GPL-3.0-or-later; keep new files compatible.
 
