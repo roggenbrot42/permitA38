@@ -704,18 +704,42 @@ class TripMileage(BaseModel):
     purpose: str | None = None
 
 
+class TripReduction(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    meal: Literal["breakfast", "lunch", "dinner"]
+    amount: float
+
+
 class TripDay(BaseModel):
     """One calendar day of the trip (stored with the trip, returned by preview and the trip)."""
 
     model_config = ConfigDict(extra="allow")
     date: str
-    place: str
-    country: str
+    country: str  # the country whose rate row was used (LU after fallback)
+    city: str | None = None  # omitted when the place has no city
     absence_hours: float
     base: float
-    reductions: float
+    reductions: list[TripReduction] = []
     amount: float
     note: str = ""
+
+
+class TripBills(BaseModel):
+    """The linked bills (expenses with this trip_id): count and sums of their net and VAT."""
+
+    count: int = 0
+    net: float = 0
+    vat: float = 0
+
+
+class TripChecklistItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    label: str
+    hint: str
+    state: Literal["added", "open", "not_needed"]
+    count: int = 0
+    sum: float = 0
 
 
 class TripFigures(BaseModel):
@@ -742,11 +766,15 @@ class Trip(Record):
     meals_provided: list[TripMeal] = []
     mileage: list[TripMileage] = []
     not_needed: list[str] = []
+    cost_centre: Literal["project", "general"] | None = None
     status: Literal["draft", "final"] = "draft"
     allowance_total: float | None = None
+    mileage_km: float | None = None
     mileage_total: float | None = None
     rules_version: str | None = None
     days: list[TripDay] = []
+    bills: TripBills | None = None  # response-only, computed on every read
+    checklist: list[TripChecklistItem] | None = None  # response-only, computed on every read
 
 
 class TripPlaceIn(v.StrictRecord):
@@ -787,9 +815,10 @@ class TripIn(v.StrictRecord):
     start: v.LocalDateTime
     end: v.LocalDateTime
     places: Annotated[list[TripPlaceIn], Field(max_length=TRIP_MAX_PLACES)] = []
-    meals_provided: Annotated[list[TripMealIn], Field(max_length=TRIP_MAX_DAYS)] = []
+    meals_provided: Annotated[list[TripMealIn], Field(max_length=90)] = []
     mileage: Annotated[list[TripMileageIn], Field(max_length=TRIP_MAX_MILEAGE)] = []
     not_needed: Annotated[list[v.Short], Field(max_length=20)] = []
+    cost_centre: Literal["project", "general"] | None = None
     status: Literal["draft", "final"] = "draft"
 
     @model_validator(mode="after")
@@ -807,5 +836,7 @@ class TripIn(v.StrictRecord):
         for m in self.mileage:
             if not start.date().isoformat() <= m.date <= end.date().isoformat():
                 raise ValueError(f"mileage date {m.date} is outside the trip")
+        if self.cost_centre == "project" and not (self.project_id or self.customer_id):
+            raise ValueError("Choose a customer or project, or general")
         return self
 

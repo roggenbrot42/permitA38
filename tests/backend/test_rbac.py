@@ -220,10 +220,10 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("PUT", "/api/expenses/{rid}"): ("expenses", "write", False),
     ("DELETE", "/api/expenses/{rid}"): ("expenses", "write", False),
     # business trips: employees see and change their own trips only (service check); accountants read all, change none;
-    # reopening a final trip is boss only (full scope); preview is a read (nothing is saved)
+    # reopening a final trip is boss only (full scope); preview needs write access (contract), nothing is saved
     ("GET", "/api/trips"): ("trips", "read", False),
     ("POST", "/api/trips"): ("trips", "write", False),
-    ("POST", "/api/trips/preview"): ("trips", "read", False),
+    ("POST", "/api/trips/preview"): ("trips", "write", False),
     ("GET", "/api/trips/{rid}"): ("trips", "read", False),
     ("PUT", "/api/trips/{rid}"): ("trips", "write", False),
     ("DELETE", "/api/trips/{rid}"): ("trips", "write", False),

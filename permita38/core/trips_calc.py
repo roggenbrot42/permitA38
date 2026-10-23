@@ -25,10 +25,11 @@ LIMIT_MONTHS = 3
 RESET_DAYS = 28
 DEFAULT_COUNTRY = "DE"
 
-NOTE_FALLBACK = "country not in the table; the Luxembourg rate is used"
-NOTE_LIMIT = "three-month limit at this place reached: no allowance"
-NOTE_NO_ABSENCE = "no absence on this day"
-NOTE_UNDER_8H = "one-day trip of 8 hours or less: no allowance"
+NOTE_FALLBACK = "Country not in the rate table: Luxembourg rate used"
+NOTE_LIMIT = "Three-month limit reached: no allowance"
+NOTE_NO_ABSENCE = "No absence on this day: no allowance"
+NOTE_UNDER_8H = "Absence not more than 8 hours: no allowance"
+MEALS = (("breakfast", BREAKFAST_SHARE), ("lunch", LUNCH_DINNER_SHARE), ("dinner", LUNCH_DINNER_SHARE))
 
 
 def parse_local(value: str) -> datetime:
@@ -56,12 +57,6 @@ def _place_for(day: date, places: list[dict], one_day: bool) -> dict | None:
         if since <= day and (best_day is None or since >= best_day):
             best, best_day = p, since
     return best if best is not None else places[0]
-
-
-def _place_label(place: dict | None, country: str) -> str:
-    if place is None:
-        return country
-    return place.get("city") or country
 
 
 def compute(trip: dict[str, Any], rates_for: RatesFor) -> dict[str, Any]:
@@ -105,8 +100,8 @@ def compute(trip: dict[str, Any], rates_for: RatesFor) -> dict[str, Any]:
         elif code in rates["countries"]:
             row = rates["countries"][code]
         else:
-            fallback = rates["fallback_country"]
-            row = rates["countries"][fallback]
+            code = rates["fallback_country"]  # the row that was used
+            row = rates["countries"][code]
             notes.append(NOTE_FALLBACK)
 
         # base amount
@@ -124,13 +119,13 @@ def compute(trip: dict[str, Any], rates_for: RatesFor) -> dict[str, Any]:
 
         # meals provided: 20 % (breakfast) and 40 % (lunch, dinner) of the 24-hour rate, each rounded to cents
         meal = meals.get(day.isoformat(), {})
+        reduction_rows = []
         reductions = ZERO
-        if meal.get("breakfast"):
-            reductions += q2(row["h24"] * BREAKFAST_SHARE)
-        if meal.get("lunch"):
-            reductions += q2(row["h24"] * LUNCH_DINNER_SHARE)
-        if meal.get("dinner"):
-            reductions += q2(row["h24"] * LUNCH_DINNER_SHARE)
+        for name, share in MEALS:
+            if meal.get(name):
+                cut = q2(row["h24"] * share)
+                reductions += cut
+                reduction_rows.append({"meal": name, "amount": to_float(cut)})
         amount = max(base - reductions, ZERO)
 
         # three-month limit per place of activity; an interruption of four weeks or more starts a new period
@@ -146,18 +141,18 @@ def compute(trip: dict[str, Any], rates_for: RatesFor) -> dict[str, Any]:
                 notes.append(NOTE_LIMIT)
 
         allowance += amount
-        days.append(
-            {
-                "date": day.isoformat(),
-                "place": _place_label(place, code),
-                "country": code,
-                "absence_hours": to_float(q2(Decimal(minutes) / 60)),
-                "base": to_float(base),
-                "reductions": to_float(reductions),
-                "amount": to_float(amount),
-                "note": "; ".join(notes),
-            }
-        )
+        entry = {
+            "date": day.isoformat(),
+            "country": code,
+            "absence_hours": to_float(q2(Decimal(minutes) / 60)),
+            "base": to_float(base),
+            "reductions": reduction_rows,
+            "amount": to_float(amount),
+            "note": "; ".join(notes),
+        }
+        if place is not None and place.get("city"):
+            entry["city"] = place["city"]
+        days.append(entry)
         day += timedelta(days=1)
 
     mileage = list(trip.get("mileage") or [])

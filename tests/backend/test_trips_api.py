@@ -28,6 +28,10 @@ def trip_body(**kw):
     return body
 
 
+#: what a final trip needs: a cost centre and every checklist line either added or marked not needed
+FINAL_OK = {"cost_centre": "general", "not_needed": ["accommodation", "transportation", "food", "material"]}
+
+
 def make_trip(c, **kw):
     r = c.post("/api/trips", json=trip_body(**kw))
     assert r.status_code == 200, r.text
@@ -162,8 +166,8 @@ def test_missing_rate_table_for_the_year_is_422(boss_client):
 
 def test_unknown_country_is_saved_with_the_luxembourg_note(boss_client):
     made = make_trip(boss_client, places=[{"from_date": "2026-11-09", "country": "XX"}])
-    assert "not in the table" in made["days"][0]["note"]
-    assert made["days"][0]["country"] == "XX"
+    assert "Country not in the rate table" in made["days"][0]["note"]
+    assert made["days"][0]["country"] == "LU"  # the row that was used
 
 
 # ------------------------------------------------------------------ expenses link to trips
@@ -233,14 +237,14 @@ def test_accountant_reads_every_trip_and_changes_none(boss_client, accountant, m
     assert accountant.get(f"/api/trips/{trip['id']}").status_code == 200
     assert accountant.get(f"/api/trips/{trip['id']}/statement.pdf").status_code == 200
     assert accountant.post("/api/trips", json=trip_body()).status_code == 403
-    assert accountant.post("/api/trips/preview", json=trip_body()).status_code == 200  # a read: nothing saved
+    assert accountant.post("/api/trips/preview", json=trip_body()).status_code == 403  # preview needs write (contract)
     assert accountant.put(f"/api/trips/{trip['id']}", json=trip_body()).status_code == 403
     assert accountant.delete(f"/api/trips/{trip['id']}").status_code == 403
 
 
 def test_employee_cannot_reopen_but_the_boss_can(boss_client, member_client):
     mine = make_trip(member_client)
-    assert member_client.put(f"/api/trips/{mine['id']}", json=trip_body(status="final")).status_code == 200
+    assert member_client.put(f"/api/trips/{mine['id']}", json=trip_body(**FINAL_OK, status="final")).status_code == 200
     assert member_client.post(f"/api/trips/{mine['id']}/reopen").status_code == 403
     assert boss_client.post(f"/api/trips/{mine['id']}/reopen").status_code == 200
 
@@ -248,7 +252,7 @@ def test_employee_cannot_reopen_but_the_boss_can(boss_client, member_client):
 # ------------------------------------------------------------------ final lock
 def test_final_trip_is_locked_until_the_boss_reopens_it(boss_client):
     trip = make_trip(boss_client)
-    fin = boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(status="final", title="done"))
+    fin = boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(**FINAL_OK, status="final", title="done"))
     assert fin.status_code == 200, fin.text
     assert fin.json()["status"] == "final"
     assert boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(title="again")).status_code == 409
@@ -260,7 +264,7 @@ def test_final_trip_is_locked_until_the_boss_reopens_it(boss_client):
 
 def test_final_trip_keeps_its_stored_figures(boss_client):
     trip = make_trip(boss_client)
-    fin = boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(status="final")).json()
+    fin = boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(**FINAL_OK, status="final")).json()
     assert fin["allowance_total"] == trip["allowance_total"] == 56.00
 
 
@@ -326,3 +330,60 @@ def test_a_december_trip_changes_only_december(boss_client):
     after = boss_client.get("/api/finance", params={"year": 2026}).json()
     assert round(after["months"][11]["expenses"] - before["months"][11]["expenses"], 2) == 14.00
     assert round(after["months"][10]["expenses"] - before["months"][10]["expenses"], 2) == 0.00
+
+
+# ------------------------------------------------------------------ checklist, bills, finalising (contract)
+def test_final_is_refused_while_checklist_lines_are_open_unless_forced(boss_client):
+    trip = make_trip(boss_client)  # no cost centre, nothing marked not needed
+    r = boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(status="final"))
+    assert r.status_code == 409
+    assert r.json()["detail"] == (
+        "Checklist has open items: Hotel / accommodation, Transportation, Material, Cost centre / project"
+    )
+    forced = boss_client.put(f"/api/trips/{trip['id']}?force=true", json=trip_body(status="final"))
+    assert forced.status_code == 200, forced.text
+    assert forced.json()["status"] == "final"
+
+
+def test_create_as_final_is_checked_the_same_way(boss_client):
+    assert boss_client.post("/api/trips", json=trip_body(status="final")).status_code == 409
+    assert boss_client.post("/api/trips?force=true", json=trip_body(status="final")).status_code == 200
+
+
+def test_checklist_states_and_bills_follow_the_linked_bills(boss_client):
+    trip = make_trip(boss_client, cost_centre="general", not_needed=["material"],
+                     mileage=[{"date": "2026-11-09", "from": "A", "to": "B", "km": 100}])
+    for net, cat in ((100.0, "Accommodation"), (50.0, "Accommodation")):
+        boss_client.post("/api/expenses", json={"date": "2026-11-09", "net": net, "vat": 0,
+                                                "category": cat, "trip_id": trip["id"]})
+    got = boss_client.get(f"/api/trips/{trip['id']}").json()
+    assert got["bills"] == {"count": 2, "net": 150.0, "vat": 0.0}
+    rows = {r["id"]: r for r in got["checklist"]}
+    assert [r["id"] for r in got["checklist"]] == [
+        "allowance", "accommodation", "transportation", "food", "material", "cost_centre"]
+    assert rows["allowance"]["state"] == "added" and rows["allowance"]["count"] == 3
+    assert rows["allowance"]["sum"] == 56.0
+    assert rows["accommodation"] == {**rows["accommodation"], "state": "added", "count": 2, "sum": 150.0}
+    assert rows["transportation"] == {**rows["transportation"], "state": "added", "count": 1, "sum": 30.0}  # 100 km x 0,30
+    assert rows["material"]["state"] == "not_needed"
+    assert rows["food"]["state"] == "added"
+    assert rows["cost_centre"]["state"] == "added"
+
+
+def test_cost_centre_project_needs_a_customer_or_project(boss_client):
+    r = boss_client.post("/api/trips", json=trip_body(cost_centre="project"))
+    assert r.status_code == 422
+    assert "Choose a customer or project, or general" in r.text
+
+
+def test_list_is_sorted_by_start_descending(boss_client):
+    early = make_trip(boss_client, start="2026-03-02T08:00", end="2026-03-02T18:00", places=[])
+    late = make_trip(boss_client, start="2026-09-02T08:00", end="2026-09-02T18:00", places=[])
+    ids = [t["id"] for t in boss_client.get("/api/trips").json()]
+    assert ids.index(late["id"]) < ids.index(early["id"])
+
+
+def test_statement_says_draft_until_final(boss_client):
+    trip = make_trip(boss_client)
+    text = _pdf_text(boss_client.get(f"/api/trips/{trip['id']}/statement.pdf").content)
+    assert "Status: Draft" in text

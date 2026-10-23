@@ -50,6 +50,11 @@ def day(result, iso):
     return next(d for d in result["days"] if d["date"] == iso)
 
 
+def red(d):
+    """Sum of the reduction rows of a day (each row is {meal, amount})."""
+    return round(sum(x["amount"] for x in d["reductions"]), 2)
+
+
 def calc(t):
     return trips_calc.compute(t, rates)
 
@@ -83,7 +88,7 @@ def test_three_days_first_and_last_fourteen_middle_full_day():
 def test_breakfast_on_middle_day_is_twenty_percent_of_full_day():
     meals = [{"date": "2026-11-10", "breakfast": True, "lunch": False, "dinner": False}]
     r = calc(trip("2026-11-09T08:00", "2026-11-11T18:00", meals=meals))
-    assert day(r, "2026-11-10")["reductions"] == 5.60
+    assert red(day(r, "2026-11-10")) == 5.60
     assert day(r, "2026-11-10")["amount"] == 22.40
     assert r["allowance_total"] == 50.40
 
@@ -93,7 +98,8 @@ def test_nine_hours_with_lunch_and_dinner_never_goes_below_zero():
     r = calc(trip("2026-11-09T09:00", "2026-11-09T18:00", meals=meals))
     d = day(r, "2026-11-09")
     assert d["base"] == 14.00
-    assert d["reductions"] == 22.40  # 11,20 + 11,20
+    assert red(d) == 22.40  # 11,20 + 11,20
+    assert [x["meal"] for x in d["reductions"]] == ["lunch", "dinner"]
     assert d["amount"] == 0.00
     assert r["allowance_total"] == 0.00
 
@@ -125,8 +131,8 @@ def test_unknown_country_uses_luxembourg_row_with_note():
     lu = RATES_2026["countries"]["LU"]  # placeholder values: 30,00 / 45,00
     assert [d["base"] for d in r["days"]] == [float(lu["from8h"]), float(lu["h24"]), float(lu["from8h"])]
     assert r["allowance_total"] == 30.00 + 45.00 + 30.00 == 105.00
-    assert all("not in the table" in d["note"] for d in r["days"])
-    assert all(d["country"] == "XX" for d in r["days"])
+    assert all("Country not in the rate table" in d["note"] for d in r["days"])
+    assert all(d["country"] == "LU" for d in r["days"])  # the row that was used
 
 
 def test_known_foreign_country_three_days_uses_its_row():
@@ -134,7 +140,7 @@ def test_known_foreign_country_three_days_uses_its_row():
     r = calc(trip("2026-11-09T08:00", "2026-11-11T18:00", places=places))
     assert r["allowance_total"] == 40.00 + 65.00 + 40.00 == 145.00
     assert day(r, "2026-11-09")["note"] == ""
-    assert day(r, "2026-11-09")["place"] == "Zurich"
+    assert day(r, "2026-11-09")["city"] == "Zurich"
 
 
 def test_foreign_reductions_are_twenty_and_forty_percent_of_its_full_day_rate():
@@ -142,7 +148,7 @@ def test_foreign_reductions_are_twenty_and_forty_percent_of_its_full_day_rate():
     meals = [{"date": "2026-11-10", "breakfast": True, "lunch": True, "dinner": False}]
     r = calc(trip("2026-11-09T08:00", "2026-11-11T18:00", places=places, meals=meals))
     # CH full day 65,00: breakfast 13,00 and lunch 26,00 -> 65 - 39 = 26
-    assert day(r, "2026-11-10")["reductions"] == 39.00
+    assert red(day(r, "2026-11-10")) == 39.00
     assert day(r, "2026-11-10")["amount"] == 26.00
     assert r["allowance_total"] == 40.00 + 26.00 + 40.00 == 106.00
 
@@ -164,7 +170,7 @@ def test_trip_over_midnight_counts_both_days_as_arrival_and_departure():
 def test_end_exactly_at_midnight_gives_no_allowance_for_the_empty_last_day():
     r = calc(trip("2026-11-09T09:00", "2026-11-10T00:00"))
     assert day(r, "2026-11-10")["amount"] == 0.00
-    assert "no absence" in day(r, "2026-11-10")["note"]
+    assert "No absence" in day(r, "2026-11-10")["note"]
     assert r["allowance_total"] == 14.00
 
 
@@ -203,7 +209,7 @@ def test_rounding_of_reductions_is_half_up_to_cents():
     t = trip("2026-11-09T08:00", "2026-11-11T18:00", meals=meals)
     r = trips_calc.compute(t, lambda y: odd)
     # 20 % of 33,33 = 6,666 -> 6,67 ; 40 % of 33,33 = 13,332 -> 13,33
-    assert day(r, "2026-11-10")["reductions"] == 20.00
+    assert red(day(r, "2026-11-10")) == 20.00
     assert day(r, "2026-11-10")["amount"] == 13.33
 
 
@@ -214,7 +220,7 @@ def test_three_month_limit_pays_only_the_first_three_months_at_one_place():
     r = calc(trip("2026-01-31T08:00", "2026-05-01T18:00", places=places))
     assert day(r, "2026-04-29")["amount"] == 28.00
     assert day(r, "2026-04-30")["amount"] == 0.00
-    assert "three-month limit" in day(r, "2026-04-30")["note"]
+    assert "Three-month limit reached" in day(r, "2026-04-30")["note"]
     assert day(r, "2026-05-01")["amount"] == 0.00
     assert r["allowance_total"] == 2478.00
 
@@ -228,7 +234,7 @@ def test_four_week_interruption_starts_a_new_three_month_period():
     ]
     r = calc(trip("2026-01-01T08:00", "2026-04-20T18:00", places=places))
     assert day(r, "2026-04-15")["amount"] == 28.00
-    assert "three-month" not in day(r, "2026-04-15")["note"]
+    assert "Three-month" not in day(r, "2026-04-15")["note"]
 
 
 def test_a_shorter_interruption_does_not_reset_the_limit():
@@ -241,4 +247,4 @@ def test_a_shorter_interruption_does_not_reset_the_limit():
     ]
     r = calc(trip("2026-01-01T08:00", "2026-04-20T18:00", places=places))
     assert day(r, "2026-04-15")["amount"] == 0.00
-    assert "three-month limit" in day(r, "2026-04-15")["note"]
+    assert "Three-month limit reached" in day(r, "2026-04-15")["note"]

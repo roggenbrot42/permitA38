@@ -24,13 +24,18 @@ def list_trips(user: Annotated[dict, Needs("trips", "read")], services: Services
 
 
 @router.post("", response_model=models.Trip, response_model_exclude_none=True, name="create_trip")
-def create_trip(body: models.TripIn, user: Annotated[dict, Needs("trips", "write")], services: ServicesDep):
-    return stored(models.Trip, services.trips.create(user, _body(body)))
+def create_trip(
+    body: models.TripIn,
+    user: Annotated[dict, Needs("trips", "write")],
+    services: ServicesDep,
+    force: bool = False,  # skips the checklist check when status is final (contract: Finalizing)
+):
+    return stored(models.Trip, services.trips.create(user, _body(body), force))
 
 
 @router.post("/preview", response_model=models.TripFigures, name="preview_trip")
-def preview_trip(body: models.TripIn, user: Annotated[dict, Needs("trips", "read")], services: ServicesDep):
-    """The per-day figures and totals of a trip body; nothing is saved."""
+def preview_trip(body: models.TripIn, user: Annotated[dict, Needs("trips", "write")], services: ServicesDep):
+    """The per-day figures and totals of a trip body; nothing is saved. Needs write access (contract)."""
     return stored(models.TripFigures, services.trips.preview(user, _body(body)))
 
 
@@ -40,8 +45,14 @@ def get_trip(rid: str, user: Annotated[dict, Needs("trips", "read")], services: 
 
 
 @router.put("/{rid}", response_model=models.Trip, response_model_exclude_none=True, name="update_trip")
-def update_trip(rid: str, body: models.TripIn, user: Annotated[dict, Needs("trips", "write")], services: ServicesDep):
-    return stored(models.Trip, services.trips.update(user, rid, _body(body)))
+def update_trip(
+    rid: str,
+    body: models.TripIn,
+    user: Annotated[dict, Needs("trips", "write")],
+    services: ServicesDep,
+    force: bool = False,
+):
+    return stored(models.Trip, services.trips.update(user, rid, _body(body), force))
 
 
 @router.delete("/{rid}", status_code=204, name="delete_trip")

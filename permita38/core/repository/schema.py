@@ -145,8 +145,8 @@ TABLES: dict[str, Table] = {
             "trips",
             _cols(
                 _BASE + "user_id:id title:str purpose:text customer_id:id project_id:id start:str end:str "
-                "places:json meals_provided:json mileage:json not_needed:json status:str allowance_total:float "
-                "mileage_total:float rules_version:str days:json" + _EXTRA
+                "places:json meals_provided:json mileage:json not_needed:json cost_centre:str status:str allowance_total:float "
+                "mileage_km:float mileage_total:float rules_version:str days:json" + _EXTRA
             ),
             (Index("idx_trips_user", ("user_id",)),),
         ),

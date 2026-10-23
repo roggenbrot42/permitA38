@@ -76,15 +76,15 @@ def render(
     w.line(f"Purpose: {trip.get('purpose') or ''}", gap=13)
     w.line(f"Period: {period} (local time)", gap=13)
     w.line(f"Destination: {', '.join(destinations) or 'Germany (no destination entered)'}", gap=13)
-    w.line(f"Status: {trip.get('status') or 'draft'}", gap=13)
+    w.line(f"Status: {'Final' if trip.get('status') == 'final' else 'Draft'}", gap=13)
     w.y += 8
 
     w.line("Meal allowance per day", size=11, bold=True, gap=16)
     w.row([(0, "Date"), (62, "Place"), (200, "Hours"), (250, "Base"), (300, "Reduct."), (355, "Amount"), (400, "Note")],
           bold=True)
     for d in figures.get("days") or []:
-        w.row([(0, _date(d["date"])), (62, str(d["place"])), (200, _de(d["absence_hours"])), (250, _de(d["base"])),
-               (300, _de(d["reductions"])), (355, _de(d["amount"])), (400, str(d.get("note") or ""))])
+        w.row([(0, _date(d["date"])), (62, str(d.get("city") or d["country"])), (200, _de(d["absence_hours"])), (250, _de(d["base"])),
+               (300, _de(sum(x["amount"] for x in d.get("reductions") or []))), (355, _de(d["amount"])), (400, str(d.get("note") or ""))])
     w.row([(250, "Total allowance"), (355, _de(figures.get("allowance_total") or 0))], bold=True)
     w.y += 10
 
