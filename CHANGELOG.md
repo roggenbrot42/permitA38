@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Team timeline API** (`GET /api/team/timeline`): who is away and when, public holidays and contracts for a window of
+  at most 365 days. What a viewer gets depends on a level per role that the boss sets with
+  `team_timeline_visibility` in the settings (`off`, `away`, `time-off`, `full`; defaults: employee `away`, accountant
+  `off`). Hidden details are removed on the server. New permission area `team_timeline`. See
+  `docs/contracts/team-timeline.md` and `docs/roles.md`.
+
 ## [0.4.0-alpha.2] - 2026-10-23
 
 Second alpha. Adds roles, sanity warnings, calendars, document numbering and import, itemised expenses with a bill
