@@ -212,7 +212,8 @@ def test_wrong_type_is_422(boss_client, method, url, body, field):
 
 
 def test_the_surrogate_is_refused_before_anything_is_stored(boss_client):
-    r = _send(boss_client, "POST", "/api/users", _with(BODIES[12][2], ("name",), SURROGATE))
+    users_body = next(body for _method, url, body, _fields in BODIES if url == "/api/users")
+    r = _send(boss_client, "POST", "/api/users", _with(users_body, ("name",), SURROGATE))
     assert r.status_code == 422
     assert [u["username"] for u in boss_client.get("/api/users").json()] == ["boss"]
 
@@ -226,23 +227,31 @@ GOOD = [
     ("POST", "/api/users", {"username": "zed", "name": "Zed Zeller", "password": PASSWORD, "role": "employee"}, 200),
     ("POST", "/api/plan/simulate", {"changes": {"absences": [], "commitments": []}, "weeks": 4}, 200),
     ("POST", "/api/numbering/check", {"type": "invoice", "pattern": "RE-{year}-{n}"}, 200),
-    (
-        "POST",
-        "/api/plan/suggest-vacation",
-        {"user_id": ID, "days": 3, "window_from": "2026-01-01", "window_to": "2026-02-01"},
-        None,
-    ),
-    ("POST", "/api/invoices/from-time", {"from": "2026-01-01", "to": "2026-12-31"}, None),
 ]
 
 
 @pytest.mark.parametrize("method,url,body,expected", GOOD)
 def test_valid_bodies_are_still_accepted(boss_client, method, url, body, expected):
     r = _send(boss_client, method, url, body)
-    if expected is None:
-        assert r.status_code not in (422, 500), (url, r.status_code, r.text[:300])
-    else:
-        assert r.status_code == expected, (url, r.status_code, r.text[:300])
+    assert r.status_code == expected, (url, r.status_code, r.text[:300])
+
+
+def test_from_time_body_is_accepted_with_unbilled_time(boss_client):
+    c = boss_client
+    cust = c.post("/api/customers", json={"name": "ACME"}).json()["id"]
+    proj = c.post("/api/projects", json={"name": "Site", "customer_id": cust}).json()["id"]
+    assert c.post("/api/entries", json={"date": "2026-03-02", "minutes": 60, "project_id": proj}).status_code == 200
+    body = {"customer_id": cust, "project_id": proj, "from": "2026-01-01", "to": "2026-12-31"}
+    r = _send(c, "POST", "/api/invoices/from-time", body)
+    assert r.status_code == 200, r.text[:300]
+
+
+def test_suggest_vacation_body_is_accepted_for_a_real_user(boss_client):
+    c = boss_client
+    me = c.get("/api/auth/me").json()["id"]
+    body = {"user_id": me, "days": 3, "window_from": "2027-01-04", "window_to": "2027-02-28"}
+    r = _send(c, "POST", "/api/plan/suggest-vacation", body)
+    assert r.status_code == 200, r.text[:300]
 
 
 # ------------------------------------------------------------------ multipart form fields (no JSON model)
