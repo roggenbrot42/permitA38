@@ -189,8 +189,9 @@ def test_deductible_defaults_to_100_per_line(boss_client):
 # ------------------------------------------------------------------ 2. round trip, update, listing
 def test_round_trip_get_list_put(boss_client):
     created = book(boss_client, HOTEL, vendor="Hotel Beispiel", category="Travel")
-    assert boss_client.get(f"/api/expenses/{created['id']}").json() == created
-    assert created in boss_client.get("/api/expenses").json()
+    stored = {k: v for k, v in created.items() if k != "sanity_warnings"}  # response-only advisory field
+    assert boss_client.get(f"/api/expenses/{created['id']}").json() == stored
+    assert stored in boss_client.get("/api/expenses").json()
     new_lines = [L(100.00, 19, "Lunch", deductible=70, vat_deductible=100, category="Business meals")]
     r = boss_client.put(f"/api/expenses/{created['id']}", json={"date": "2026-03-10", "net": 0, "lines": new_lines})
     assert r.status_code == 200, r.text
@@ -198,7 +199,9 @@ def test_round_trip_get_list_put(boss_client):
     assert len(upd["lines"]) == 1 and dd(upd["net"]) == D("84.03") and dd(upd["vat"]) == D("15.97")
     assert upd["lines"][0]["category"] == "Business meals"
     assert upd["lines"][0]["vat_deductible"] == 100 and upd["lines"][0]["deductible"] == 70
-    assert boss_client.get(f"/api/expenses/{created['id']}").json() == upd
+    assert boss_client.get(f"/api/expenses/{created['id']}").json() == {
+        k: v for k, v in upd.items() if k != "sanity_warnings"
+    }
 
 
 def test_put_back_to_a_single_amount_drops_the_lines(boss_client):
