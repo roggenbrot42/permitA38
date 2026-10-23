@@ -122,3 +122,24 @@ def test_database_at_the_previous_head_upgrades_and_old_expenses_keep_working(tm
     raw = sqlite3.connect(data / DB_FILENAME)
     assert raw.execute("SELECT lines FROM expenses WHERE id = ?", (rec["id"],)).fetchone()[0] is not None
     raw.close()
+
+
+def test_find_and_delete_where_work_on_a_database_without_the_lines_column(tmp_path, monkeypatch):
+    chain = list_migrations("sqlite")
+    keep = [m.file_name for m in chain[: [m.id for m in chain].index(PREVIOUS_HEAD) + 1]]
+    root = tmp_path / "old_chain"
+    for d in DIALECT_NAMES:
+        shutil.copytree(MIGRATIONS_DIR / d, root / d)
+        for f in (root / d).glob("*.sql"):
+            if f.name not in keep:
+                f.unlink()
+    monkeypatch.setattr(sql_module, "list_migrations", lambda dialect: list_migrations(dialect, root))
+    old = SQLiteRepository(tmp_path / "data")
+    old.startup()
+    old.save("expenses", {"date": "2026-03-10", "net": 84.03, "vat": 15.97, "vat_rate": 19, "vendor": "Old"})
+    assert "lines" not in [r[1] for r in old.conn.execute('PRAGMA table_info("expenses")')]
+    found = old.find("expenses", vendor="Old")
+    assert len(found) == 1 and found[0]["net"] == 84.03 and "lines" not in found[0]
+    assert old.delete_where("expenses", vendor="Old") == 1
+    assert old.find("expenses", vendor="Old") == []
+    old.close()

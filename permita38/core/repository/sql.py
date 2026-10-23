@@ -354,24 +354,24 @@ class SQLRepository(Repository):
 
     def find(self, coll: str, **equals: Any) -> RecordList:
         check_collection(coll)
-        table = TABLES[coll]
         q = self.dialect.quote
-        where, params = self._where(table, equals)
-        sql = self.dialect.select_all(table, f"{q('created')}, {q('id')}")
-        marker = " ORDER BY"
-        head, sep, tail = sql.partition(marker)
         with self.lock:
             self._ensure()
+            table = self._table(coll)
+            where, params = self._where(table, equals)
+            sql = self.dialect.select_all(table, f"{q('created')}, {q('id')}")
+            marker = " ORDER BY"
+            head, sep, tail = sql.partition(marker)
             rows = self._rows(head + where + sep + tail, params)
         return [self._decode(table, r) for r in rows]
 
     def delete_where(self, coll: str, **equals: Any) -> int:
         check_collection(coll)
-        table = TABLES[coll]
-        where, params = self._where(table, equals)
-        if not where:
-            raise ValueError("delete_where needs at least one condition")
         with self.transaction():
+            table = self._table(coll)
+            where, params = self._where(table, equals)
+            if not where:
+                raise ValueError("delete_where needs at least one condition")
             return self._exec(f"DELETE FROM {self.dialect.quote(table.name)}{where}", params)
 
     def get(self, coll: str, rid: str) -> Record | None:
