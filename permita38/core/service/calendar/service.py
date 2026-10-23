@@ -306,8 +306,8 @@ class CalendarService:
         """
         threads = []
         for src in self.store.find("calendar_sources", user_id=user_id):
-            if not self.is_stale(src) or not self._begin(src["id"]):
-                continue
+            if not src.get("busy_default", True) or not self.is_stale(src) or not self._begin(src["id"]):
+                continue  # info-only sources are refreshed by hand or by the command, not by planner requests
             thread = threading.Thread(target=self._background, args=(src["id"],), daemon=True)
             thread.start()
             threads.append(thread)

@@ -5226,11 +5226,18 @@
           },
           "title_policy": {
             "type": "string",
+            "enum": [
+              "none",
+              "redacted",
+              "full"
+            ],
             "title": "Title Policy",
             "default": "none"
           },
           "refresh_minutes": {
             "type": "integer",
+            "maximum": 10080.0,
+            "minimum": 15.0,
             "title": "Refresh Minutes",
             "default": 360
           },
@@ -5526,6 +5533,14 @@
             "type": "integer",
             "title": "Event Count",
             "default": 0
+          },
+          "last_warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Last Warnings",
+            "default": []
           }
         },
         "additionalProperties": true,

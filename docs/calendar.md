@@ -66,6 +66,9 @@ meetings found, so you can check the result.
 - **The link is a secret.** Anyone who has it can read your whole calendar. permitA38 keeps it only in the server
   database, never returns it (the screen shows only the host, for example `calendar.proton.me/…/****`), and never
   writes it to logs or error messages. Revoke the link in your calendar provider if it leaks, then connect a new one.
+  The link is stored in plain text in the database (it must be, to download the calendar again). That means it
+  travels with the data folder: if the folder is synced between devices, or copied into a backup, the link goes
+  with it. Treat the data folder and its backups like the calendar itself, and do not share them.
 - **Other people's data.** Meeting attendees and titles are personal data of third parties. The default stores no
   titles and no categories; UIDs are stored as hashes. Keep it that way unless you need the titles.
 - **Deleting.** *Delete* removes the calendar and its stored meetings at once.
@@ -81,8 +84,17 @@ meetings found, so you can check the result.
   calendar are read; larger calendars are refused with a message.
 - Recurrence rules: daily, weekly, monthly and yearly rules are expanded; hourly and minute rules, and the rarer
   week-number and year-day rules, keep only the first occurrence and are reported as a warning.
-- Time zones: IANA names (for example `Europe/Berlin`) are used exactly. Windows-style names such as
-  `W. Europe Standard Time` use the offset of the calendar's own definition and are flagged as approximate.
+- Time zones: IANA names (for example `Europe/Berlin`) are used exactly. Common Windows names such as
+  `W. Europe Standard Time` are mapped to the matching IANA zone; any other zone is evaluated from the rules in the
+  calendar's own definition. A zone that cannot be understood falls back to your time zone and is reported.
+- Changes to "this and all following" occurrences (`RANGE=THISANDFUTURE`) are not supported: only the named
+  occurrence is changed.
+- A single repeating meeting that is too complex to expand (for example February 31st) is skipped and reported; the
+  rest of the calendar is still imported.
+- Uploads are limited to 5 MB; the size is checked from the request header before the file is read, but a client that
+  hides the real size can still make the server receive the data before it is refused.
+- Notes about the last import (unsupported rules, unknown zones, skipped meetings) are shown under the calendar in
+  *Settings → Calendars*.
 - Members cannot connect calendars in this alpha (the rights name `calendar.manage_own` is ready for the rights work).
 - Attendee status (accepted/declined) and reminders are not used.
 

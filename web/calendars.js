@@ -33,8 +33,10 @@
     const kind = s.kind === 'ics_url' ? `Link · ${esc(s.url_masked || '')}` : 'File upload';
     const status = STATUS[s.last_status] || esc(s.last_status || 'not synced yet');
     const err = s.last_error ? `<div class="small" style="color:var(--danger, #b00)">${esc(s.last_error)}</div>` : '';
+    const WARN = { unsupported_rrule: 'A repeat rule is not supported; only the first meeting of that series is used.', unknown_timezone: 'A time zone was not recognised; your own time zone was assumed.', event_too_complex: 'A repeating meeting was too complex and was skipped.', out_of_range: 'A meeting with an impossible date was skipped.', bad_event: 'An unreadable entry was skipped.', bad_value: 'An unreadable date was skipped.' };
+    const warn = (s.last_warnings || []).length ? `<div class="small muted">Note: ${s.last_warnings.map(w => esc(WARN[w] || w)).join(' ')}</div>` : '';
     const sync = s.kind === 'ics_url' ? `<button class="sm" data-a="calSync" data-id="${esc(s.id)}">Sync now</button>` : '';
-    return `<tr><td><b>${esc(s.name)}</b><div class="muted small">${kind}</div>${err}</td>
+    return `<tr><td><b>${esc(s.name)}</b><div class="muted small">${kind}</div>${err}${warn}</td>
       <td class="small">${status}<div class="muted">last: ${epoch(s.last_fetched)}</div><div class="muted">${s.event_count} events · ${esc(s.title_policy)} · ${s.kind === 'ics_url' ? EVERY.find(([m]) => m === s.refresh_minutes)?.[1] || 'every ' + s.refresh_minutes + ' min' : 'manual upload'}</div></td>
       <td class="right"><button class="sm" data-a="calPreview" data-id="${esc(s.id)}">Preview 14 days</button> ${sync}
       <button class="sm" data-a="calEdit" data-id="${esc(s.id)}">Options</button> <button class="sm danger" data-a="calDelete" data-id="${esc(s.id)}">Delete</button></td></tr>`;

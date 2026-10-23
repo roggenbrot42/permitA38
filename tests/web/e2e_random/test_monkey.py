@@ -292,7 +292,10 @@ class Monkey:
         """Connect a calendar with a hostile or blocked link: it must be refused, and the link must not stay on the page."""
         if self.page.evaluate("() => document.querySelector('#modal-root').children.length > 0"):
             self.say("calendar: closing the open dialog first")
-            self.page.evaluate("() => { document.querySelector('#modal-root').innerHTML = ''; }")
+            try:
+                self.page.click("#m-cancel", timeout=1500)
+            except Exception:
+                return  # a dialog without a cancel button: leave it to the other episodes
         if not self.page.query_selector("#cal_link"):
             self.say("calendar: going to #/settings")
             self.page.evaluate("h => { location.hash = h; }", "#/settings")
