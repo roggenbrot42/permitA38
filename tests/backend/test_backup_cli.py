@@ -37,12 +37,12 @@ def test_auto_backup_once_per_day_and_prunes(tmp_path):
     folder.mkdir()
     for day in range(1, 21):  # 20 old daily backups
         (folder / f"permita38-202601{day:02d}-030000.sqlite3").write_bytes(b"old")
-    (folder / "pre-migration-r1-to-r2-20260101-000000.sqlite3").write_bytes(b"keep")  # never pruned
+    (folder / "pre-migration-20260101-000000-before-3f9a1c02.sqlite3").write_bytes(b"keep")  # never pruned
     made = auto_backup(repo, keep=5)
     assert made is not None and made.name.startswith("permita38-" + time.strftime("%Y%m%d"))
     regular = sorted(p.name for p in folder.glob("permita38-*.sqlite3"))
     assert len(regular) == 5 and regular[-1] == made.name  # newest 5 kept
-    assert (folder / "pre-migration-r1-to-r2-20260101-000000.sqlite3").exists()
+    assert (folder / "pre-migration-20260101-000000-before-3f9a1c02.sqlite3").exists()
     assert auto_backup(repo, keep=5) is None  # already one today
     assert len(list(folder.glob("permita38-*.sqlite3"))) == 5
     repo.close()
