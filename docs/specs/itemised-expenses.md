@@ -24,6 +24,7 @@ Line (strict `ExpenseLineIn`, lenient `ExpenseLine`, every field with a hard bou
 | `gross` | `v.NonNegAmount` | amount **as printed on the bill**, incl. VAT (input) |
 | `vat_rate` | `v.Percent` | the UI offers 19, 7, 0 |
 | `deductible` | `v.Percent`, default 100 | share of **this line** that is deductible |
+| `vat_deductible` | `v.Percent \| None` | share of this line's input VAT that is reclaimed; `None` = same as `deductible` (private use). The *Business meals* category sets it to 100: only the cost is 70 % deductible, the input VAT is reclaimed in full (§ 15 Abs. 1a UStG, *verify*). Same field and rule as on single-amount expenses (`fix/meal-input-vat`). |
 | `category` | `v.Short \| None` | optional; default = the expense's category |
 | `net`, `vat` | derived, ignored on input | stored by the server (see below) |
 
@@ -51,7 +52,7 @@ Everything in `core/money.py` (exact `Decimal`, half-up cents), never floats.
    gross amount is the cost and no input VAT is reclaimed.
 4. Tax figures (`calc.py` finance/yearly: `expenses`, `vat_in`, category breakdown) iterate over the **effective
    lines** (a helper `expense_lines(x)` yields the stored lines, or one implicit line built from the top-level fields
-   for old records): non-klein cost = `q2(net_i * d_i / 100)`, `vat_in += q2(vat_i * d_i / 100)`; klein cost =
+   for old records): non-klein cost = `q2(net_i * d_i / 100)`, `vat_in += q2(vat_i * v_i / 100)` where `v_i` is the line's `vat_deductible` or, if empty, `d_i`; klein cost =
    `q2(gross_i * d_i / 100)` where `gross_i = net_i + vat_i`. The category of a line is `line.category` or the
    expense category or "Other". The project report (`calc.py` ~l.355) keeps using the expense's top-level `net`
    (full net, not the deductible share), as today.
@@ -64,7 +65,7 @@ Hotel bill: room 160,00 @7 %, breakfast 30,00 @19 %, city tax 6,00 @0 %, all 100
 Rounding by group vs by line: two lines of 0,50 @7 %: group VAT `q2(1.00*7/107)` = 0,07 (net 0,93); line 1 VAT 0,03,
 line 2 VAT 0,04 (remainder), whereas rounding per line would give 0,03 + 0,03 = 0,06 (this is the case the tests
 must pin down). Business lunch 100,00 @19 % with 70 % deductible: VAT 15,97, net 84,03; cost `q2(84.03*0.7)` =
-58,82, input VAT `q2(15.97*0.7)` = 11,18 (klein mode: cost `q2(100*0.7)` = 70,00).
+58,82, input VAT **15,97 in full** when the line is a business meal (`vat_deductible` 100); a line with `deductible` 70 and no `vat_deductible` gives `q2(15.97*0.7)` = 11,18 (klein mode: cost `q2(100*0.7)` = 70,00).
 
 ## API
 
@@ -84,8 +85,10 @@ must pin down). Business lunch 100,00 @19 % with 70 % deductible: VAT 15,97, net
   left (otherwise disabled with a hint).
 * The expense list shows "n items" under the description for itemised bills; the edit dialog opens with the checkbox
   on. Existing bills open as before.
-* Sanity layer: the expense VAT check (`net x rate` to the cent) must be skipped for itemised bills or run per
-  group; coordinate with `feat/sanity-v2` when it merges (note in the report).
+* Sanity layer (review finding on `feat/sanity-v2`): for a bill with `lines` the checks `expense.vat_mismatch`,
+  `expense.vat_rate_implausible` and `expense.vat_exceeds_net` must be skipped (the server sets `vat_rate` to null when
+  the rates are mixed, so the hotel example would be flagged), or run per rate group (`vat_group == q2(G*r/(100+r))`).
+  `amount_outlier` and `possible_duplicate` keep using the summed top-level fields. Add a test with the hotel example.
 
 ## Bill preview in the expense dialog (same release)
 
