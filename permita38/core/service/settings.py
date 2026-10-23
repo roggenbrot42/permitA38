@@ -5,6 +5,7 @@ from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
 from .auth import public_user
+from .records import RESPONSE_ONLY
 
 #: numbering settings: changed only through the guarded numbering service
 NUMBERING_KEYS = ("invoice_pattern", "offer_pattern", "invoice_reset", "offer_reset", "numbering_shared")
@@ -18,7 +19,8 @@ class SettingsService:
         return effective_settings(self.store.settings())
 
     def update(self, data: dict) -> dict:
-        current = self.get()
+        data = {k: v for k, v in data.items() if k not in RESPONSE_ONLY}  # response-only warnings are never stored
+        current = {k: v for k, v in self.get().items() if k not in RESPONSE_ONLY}
         changed = [k for k in NUMBERING_KEYS if k in data and data[k] != current.get(k)]
         if changed:
             raise ServiceError(

@@ -1889,7 +1889,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Settings"
+                  "$ref": "#/components/schemas/SettingsResult"
                 }
               }
             }
@@ -2858,7 +2858,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Customer"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__1"
                 }
               }
             }
@@ -2965,7 +2965,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Customer"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__1"
                 }
               }
             }
@@ -3072,7 +3072,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__1"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__2"
                 }
               }
             }
@@ -3179,7 +3179,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__1"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__2"
                 }
               }
             }
@@ -3500,7 +3500,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Entry"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__3"
                 }
               }
             }
@@ -3607,7 +3607,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Entry"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__3"
                 }
               }
             }
@@ -3714,7 +3714,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__2"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__4"
                 }
               }
             }
@@ -3821,7 +3821,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__2"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__4"
                 }
               }
             }
@@ -4142,7 +4142,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__3"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__5"
                 }
               }
             }
@@ -4249,7 +4249,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__3"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__5"
                 }
               }
             }
@@ -4356,7 +4356,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__4"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__6"
                 }
               }
             }
@@ -4463,7 +4463,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__4"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__6"
                 }
               }
             }
@@ -4570,7 +4570,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Expense"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__7"
                 }
               }
             }
@@ -4677,7 +4677,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Expense"
+                  "$ref": "#/components/schemas/permita38__api__routers__records___result___locals___Result__7"
                 }
               }
             }
@@ -7174,6 +7174,21 @@
               }
             ],
             "title": "Planning Warnings"
+          },
+          "sanity_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanity Warnings"
           }
         },
         "additionalProperties": true,
@@ -9298,6 +9313,215 @@
         "title": "SettingsIn",
         "description": "PUT /settings: any subset of the settings, each value checked."
       },
+      "SettingsResult": {
+        "properties": {
+          "company_name": {
+            "type": "string",
+            "title": "Company Name",
+            "default": ""
+          },
+          "owner_name": {
+            "type": "string",
+            "title": "Owner Name",
+            "default": ""
+          },
+          "street": {
+            "type": "string",
+            "title": "Street",
+            "default": ""
+          },
+          "zip": {
+            "type": "string",
+            "title": "Zip",
+            "default": ""
+          },
+          "city": {
+            "type": "string",
+            "title": "City",
+            "default": ""
+          },
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "default": ""
+          },
+          "phone": {
+            "type": "string",
+            "title": "Phone",
+            "default": ""
+          },
+          "website": {
+            "type": "string",
+            "title": "Website",
+            "default": ""
+          },
+          "tax_number": {
+            "type": "string",
+            "title": "Tax Number",
+            "default": ""
+          },
+          "vat_id": {
+            "type": "string",
+            "title": "Vat Id",
+            "default": ""
+          },
+          "bank_name": {
+            "type": "string",
+            "title": "Bank Name",
+            "default": ""
+          },
+          "iban": {
+            "type": "string",
+            "title": "Iban",
+            "default": ""
+          },
+          "bic": {
+            "type": "string",
+            "title": "Bic",
+            "default": ""
+          },
+          "logo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logo"
+          },
+          "company_type": {
+            "type": "string",
+            "title": "Company Type",
+            "default": "freiberufler"
+          },
+          "accounting": {
+            "type": "string",
+            "title": "Accounting",
+            "default": "eur"
+          },
+          "kleinunternehmer": {
+            "type": "boolean",
+            "title": "Kleinunternehmer",
+            "default": false
+          },
+          "vat_rate": {
+            "type": "number",
+            "title": "Vat Rate",
+            "default": 19
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "default": ""
+          },
+          "hebesatz": {
+            "type": "number",
+            "title": "Hebesatz",
+            "default": 400
+          },
+          "default_rate": {
+            "type": "number",
+            "title": "Default Rate",
+            "default": 80
+          },
+          "payment_days": {
+            "type": "integer",
+            "title": "Payment Days",
+            "default": 14
+          },
+          "offer_valid_days": {
+            "type": "integer",
+            "title": "Offer Valid Days",
+            "default": 30
+          },
+          "default_template": {
+            "type": "string",
+            "title": "Default Template",
+            "default": "classic"
+          },
+          "invoice_pattern": {
+            "type": "string",
+            "title": "Invoice Pattern",
+            "default": "RE-{year}-{n:04d}"
+          },
+          "offer_pattern": {
+            "type": "string",
+            "title": "Offer Pattern",
+            "default": "AN-{year}-{n:04d}"
+          },
+          "invoice_reset": {
+            "type": "string",
+            "title": "Invoice Reset",
+            "default": "yearly"
+          },
+          "offer_reset": {
+            "type": "string",
+            "title": "Offer Reset",
+            "default": "yearly"
+          },
+          "numbering_shared": {
+            "type": "boolean",
+            "title": "Numbering Shared",
+            "default": false
+          },
+          "social_monthly": {
+            "type": "number",
+            "title": "Social Monthly",
+            "default": 0
+          },
+          "church_tax": {
+            "type": "number",
+            "title": "Church Tax",
+            "default": 0
+          },
+          "splitting": {
+            "type": "boolean",
+            "title": "Splitting",
+            "default": false
+          },
+          "other_income": {
+            "type": "number",
+            "title": "Other Income",
+            "default": 0
+          },
+          "other_deductions": {
+            "type": "number",
+            "title": "Other Deductions",
+            "default": 0
+          },
+          "planning_min_rate": {
+            "type": "number",
+            "title": "Planning Min Rate",
+            "default": 0
+          },
+          "planning_default_win_probability": {
+            "type": "number",
+            "title": "Planning Default Win Probability",
+            "default": 100
+          },
+          "sanity_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanity Warnings"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "SettingsResult",
+        "description": "Saved settings plus advisory warnings about the tax ids and bank data (never stored)."
+      },
       "SetupPayload": {
         "properties": {
           "username": {
@@ -10377,6 +10601,237 @@
             "type": "string",
             "title": "Name"
           },
+          "customer_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer No"
+          },
+          "street": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street"
+          },
+          "zip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zip"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "tax_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Number"
+          },
+          "vat_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Id"
+          },
+          "contact": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contact"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phone"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "import_batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Batch"
+          },
+          "planning_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planning Warnings"
+          },
+          "sanity_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanity Warnings"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CustomerResult"
+      },
+      "permita38__api__routers__records___result___locals___Result__2": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
           "customer_id": {
             "anyOf": [
               {
@@ -10512,6 +10967,21 @@
               }
             ],
             "title": "Planning Warnings"
+          },
+          "sanity_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanity Warnings"
           }
         },
         "additionalProperties": true,
@@ -10521,7 +10991,182 @@
         ],
         "title": "ProjectResult"
       },
-      "permita38__api__routers__records___result___locals___Result__2": {
+      "permita38__api__routers__records___result___locals___Result__3": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "minutes": {
+            "type": "integer",
+            "title": "Minutes"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "billable": {
+            "type": "boolean",
+            "title": "Billable",
+            "default": true
+          },
+          "invoice_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice Id"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
+          },
+          "planning_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planning Warnings"
+          },
+          "sanity_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanity Warnings"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "minutes"
+        ],
+        "title": "EntryResult"
+      },
+      "permita38__api__routers__records___result___locals___Result__4": {
         "properties": {
           "id": {
             "anyOf": [
@@ -10661,6 +11306,21 @@
               }
             ],
             "title": "Planning Warnings"
+          },
+          "sanity_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanity Warnings"
           }
         },
         "additionalProperties": true,
@@ -10672,7 +11332,7 @@
         ],
         "title": "ContractResult"
       },
-      "permita38__api__routers__records___result___locals___Result__3": {
+      "permita38__api__routers__records___result___locals___Result__5": {
         "properties": {
           "id": {
             "anyOf": [
@@ -11008,13 +11668,28 @@
               }
             ],
             "title": "Planning Warnings"
+          },
+          "sanity_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanity Warnings"
           }
         },
         "additionalProperties": true,
         "type": "object",
         "title": "DocumentResult"
       },
-      "permita38__api__routers__records___result___locals___Result__4": {
+      "permita38__api__routers__records___result___locals___Result__6": {
         "properties": {
           "id": {
             "anyOf": [
@@ -11350,11 +12025,217 @@
               }
             ],
             "title": "Planning Warnings"
+          },
+          "sanity_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanity Warnings"
           }
         },
         "additionalProperties": true,
         "type": "object",
         "title": "DocumentResult"
+      },
+      "permita38__api__routers__records___result___locals___Result__7": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "net": {
+            "type": "number",
+            "title": "Net"
+          },
+          "vat": {
+            "type": "number",
+            "title": "Vat",
+            "default": 0
+          },
+          "vat_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Rate"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "deductible": {
+            "type": "number",
+            "title": "Deductible",
+            "default": 100
+          },
+          "vat_deductible": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Deductible"
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "import_batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Batch"
+          },
+          "planning_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planning Warnings"
+          },
+          "sanity_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanity Warnings"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "net"
+        ],
+        "title": "ExpenseResult"
       }
     },
     "securitySchemes": {

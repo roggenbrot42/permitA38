@@ -26,6 +26,13 @@ def get_settings(_: Annotated[dict, Needs("settings", full=True)], services: Ser
     return services.settings.get()
 
 
-@router.put("/settings", response_model=Settings, summary="merge the given values into the settings")
+class SettingsResult(Settings):
+    """Saved settings plus advisory warnings about the tax ids and bank data (never stored)."""
+
+    sanity_warnings: list[dict] | None = None
+
+
+@router.put("/settings", response_model=SettingsResult, summary="merge the given values into the settings")
 def update_settings(body: SettingsIn, _: Annotated[dict, Needs("settings", "write")], services: ServicesDep):
-    return services.settings.update(body.model_dump(exclude_unset=True))
+    saved = services.settings.update(body.model_dump(exclude_unset=True))
+    return {**saved, "sanity_warnings": services.sanity.settings_warnings(saved)}

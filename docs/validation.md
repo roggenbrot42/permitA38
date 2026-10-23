@@ -48,7 +48,7 @@ nesting depth).
 | Query `year` | 2000 … 2100 |
 
 Only *hard* limits live here – values that can never be right. "Suspicious but possible" input (an amount 100× your
-usual one, a date far in the future) is for the soft-warning layer planned for a later alpha.
+usual one, a date far in the future) is for the advisory warnings of [`sanity-checks.md`](sanity-checks.md), which never block saving.
 
 ## Stored data that is already damaged
 

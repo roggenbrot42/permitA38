@@ -31,6 +31,10 @@ All notable changes to this project are documented here. The format is based on
   API route; the web app hides what a role cannot use. The user record and `/api/bootstrap` carry the resulting
   `permissions`. Migration `0006-roles` renames `member` to `employee`; `member` is still accepted
   as input. `permitA38 create-user --role` accepts `employee` and `accountant`.
+- **Sanity-check layer** (`docs/sanity-checks.md`): advisory plausibility warnings (`sanity_warnings`, never stored,
+  never blocking) for invoice/offer/expense dates, totals, VAT, duplicates and outliers; USt-IdNr (with check digit),
+  Steuernummer, IBAN and BIC format checks for customers and settings; working-time warnings (ArbZG breaks, 10 h,
+  11 h rest, Sunday/holiday) on time entries; shown in the web app as a banner.
 - **Planning and vacation planner** (`docs/planning.md`): per-day capacity (weekly hours, holidays, absences, busy
   time from `services.busy`) against confirmed contracts and open offers in the worst case; offer feasibility with
   exact weeks, causes and options; numbers that do not add up on offers and invoices; project periods with manual

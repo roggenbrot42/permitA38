@@ -35,7 +35,10 @@ def start_timer(
 def stop_timer(
     body: TimerStop, user: Annotated[dict, Needs("timer", "write")], services: ServicesDep
 ) -> dict[str, Any]:
-    return services.time.stop_timer(user, body.note)
+    out = services.time.stop_timer(user, body.note)
+    if out.get("entry"):
+        out["sanity_warnings"] = services.sanity.check("entries", out["entry"])
+    return out
 
 
 @router.get("/dashboard", summary="weekly goal, remaining hours and per-day breakdown")

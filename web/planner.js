@@ -531,17 +531,24 @@
     return `<div class="pln-page"><div id="pln">${view()}</div></div>`;
   };
   /* ---------- non-blocking planning warnings (banner) and the project period box ---------- */
-  function showWarnings(list) {
+  // The warnings stay in `pending` until dismissed (or the user moves on), because saving usually re-renders the page.
+  let pending = null;
+  function paintWarnings() {
     const main = document.querySelector('main');
-    if (!main) return;
     let box = document.getElementById('plnWarn');
+    if (!pending) { if (box) box.remove(); return; }
+    if (!main || (box && box.dataset.at === String(pending.at))) return;
     if (!box) { box = document.createElement('div'); box.id = 'plnWarn'; box.className = 'banner plnwarn'; main.prepend(box); }
-    const rows = list.map(w => `<li><b>${esc(w.severity)}</b>: ${esc(w.message)}</li>`).join('');
-    box.innerHTML = `<div><b>${list.length} planning warning${list.length === 1 ? '' : 's'}</b> (saved – you can still continue)</div><ul class="plnwarn-list">${rows}</ul><button type="button" class="ghost sm" data-a="plnDismiss">Dismiss</button>`;
+    box.dataset.at = String(pending.at);
+    const list = pending.list;
+    const rows = list.map(w => `<li data-code="${esc(w.code)}"><b>${esc(w.severity)}</b>: ${esc(w.message)}</li>`).join('');
+    box.innerHTML = `<div><b>${list.length} warning${list.length === 1 ? '' : 's'}</b> (saved – you can still continue)</div><ul class="plnwarn-list">${rows}</ul><button type="button" class="ghost sm" data-a="plnDismiss">Dismiss</button>`;
   }
-  A.plnDismiss = () => { const b = document.getElementById('plnWarn'); if (b) b.remove(); };
+  function showWarnings(list) { pending = { list, at: Date.now() }; paintWarnings(); }
+  A.plnDismiss = () => { pending = null; paintWarnings(); };
   api.onWarnings = showWarnings;
-  window.addEventListener('hashchange', () => { const b = document.getElementById('plnWarn'); if (b) b.remove(); });
+  new MutationObserver(() => { if (pending) paintWarnings(); }).observe(document.body, { childList: true, subtree: true });
+  window.addEventListener('hashchange', () => { if (pending && Date.now() - pending.at > 1500) A.plnDismiss(); });
 
   async function projectPlanBox(id) {
     let t;

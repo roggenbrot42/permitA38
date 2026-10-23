@@ -16,6 +16,9 @@ from .auth import public_user
 OWN_COLLECTIONS = {"entries", "absences"}
 VIEW_COLLECTIONS = {"projects", "tasks"}
 
+#: fields that only exist in responses
+RESPONSE_ONLY = ("sanity_warnings", "planning_warnings")
+
 
 _IMPORT_FIELDS = (
     "imported",
@@ -90,6 +93,8 @@ class RecordService:
         return self._write(me, coll, {**data, "id": rid, "created": old.get("created")}, old)
 
     def _write(self, me: dict, coll: str, data: dict, old: dict | None) -> dict:
+        for k in RESPONSE_ONLY:  # advisory warnings are computed per response, never stored
+            data.pop(k, None)
         sc = _scope(me, coll, "write")
         full = sc == Scope.ALL
         if not full:

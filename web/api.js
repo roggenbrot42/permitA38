@@ -34,7 +34,10 @@
       err.status = r.status;
       throw err;
     }
-    if (data && Array.isArray(data.planning_warnings) && data.planning_warnings.length && typeof api.onWarnings === 'function') api.onWarnings(data.planning_warnings, method, path);
+    if (data && typeof api.onWarnings === 'function') {
+      const list = [].concat(Array.isArray(data.planning_warnings) ? data.planning_warnings : [], Array.isArray(data.sanity_warnings) ? data.sanity_warnings : []);
+      if (list.length) api.onWarnings(list, method, path);
+    }
     return data;
   }
   // legacy-compatible signature: api(method, path, body)
@@ -48,6 +51,6 @@
   api.upload = file => { const fd = new FormData(); fd.append('file', file); return request('POST', 'attachments', fd); };
   api.url = path => base() + path;   // for plain links (cookie-authenticated downloads)
   api.onUnauthorized = null;
-  api.onWarnings = null;   // (warnings, method, path): non-blocking planning warnings from a saved record
+  api.onWarnings = null;   // (warnings, method, path): non-blocking planning and sanity warnings from a saved record
   window.api = api;
 })();
