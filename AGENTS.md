@@ -62,12 +62,21 @@
 - **Review** (code, tests, logic) is done by the stronger model, see "Merge gate".
 
 ## Merge gate (before anything lands on `main`)
-- Implementation work may be done with smaller/cheaper models, but **every branch is reviewed with Sonnet 5.5 before it is
-  merged into `main`**, in three passes: (1) **code review** of the diff (correctness, security, edge cases),
-  (2) **test review** (do the tests prove the intent, are assertions meaningful, are cases missing, would they fail if
-  the code were wrong), (3) **logic review** of the domain rules (recompute key numbers by hand or with an independent
-  oracle: capacity, VAT/rounding, numbering, calendar hours, permissions). Findings go back to the branch and are fixed
-  first. Only then: merge, regenerate `api/openapi.json`, run `make test lint`, push.
+- Implementation may be done with smaller/cheaper models. The review effort scales with the risk of the branch:
+  - **Light** (cosmetic UI, docs, tooling, small bug fixes that touch no money, rights, storage or outside input):
+    one Haiku pass over the diff plus the targeted tests.
+  - **Standard** (schema/migrations, advisory checks, other non-security logic): one Sonnet 5.5 pass covering code and
+    tests together; a smaller model may check the test list against the specification.
+  - **Full** (money/VAT/numbering, rights, uploads and served files, parsing of outside input, network access): three
+    Sonnet 5.5 passes. (1) **code review** of the diff (correctness, security, edge cases), (2) **test review** (do the
+    tests prove the intent, are assertions meaningful, are cases missing, would they fail if the code were wrong),
+    (3) **logic review** of the domain rules (recompute key numbers by hand or with an independent oracle: capacity,
+    VAT/rounding, numbering, calendar hours, permissions). The logic pass is never done by a smaller model.
+  - The maintainer or architect assigns the tier in the task specification; when in doubt take the higher one.
+  - Findings go back to the branch and are fixed first. Only then: merge, regenerate `api/openapi.json`, run
+    `make test lint`, push.
+- **Before every release** run the whole suite once on `main` (`make test-summary` with backend, browser, randomized and
+  release suites) and click through the main path by hand. Branches only run their affected tests.
 - Releases are always tagged (annotated) from `main`, see `RELEASING.md`.
 
 ## Security
