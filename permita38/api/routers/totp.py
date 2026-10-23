@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep
 from permita38.api.routers.auth import LoginResult, TokenResult, _set_cookie, cookie_secure
+from permita38.core import validation as v
 from permita38.core.models import UserOut
 
 router = APIRouter(prefix="/auth", tags=["two-factor"])
@@ -14,14 +15,16 @@ admin_router = APIRouter(prefix="/users", tags=["two-factor"])
 routers = [router, admin_router]
 
 
-class TotpLoginPayload(BaseModel):
-    mfa_token: str
-    code: str | None = Field(default=None, description="6-digit code from the authenticator app")
-    recovery_code: str | None = Field(default=None, description="one-time recovery code (instead of `code`)")
+class TotpLoginPayload(v.CheckedBody):
+    mfa_token: str = Field(max_length=4096)
+    code: str | None = Field(default=None, max_length=64, description="6-digit code from the authenticator app")
+    recovery_code: str | None = Field(
+        default=None, max_length=64, description="one-time recovery code (instead of `code`)"
+    )
 
 
-class PasswordPayload(BaseModel):
-    password: str
+class PasswordPayload(v.CheckedBody):
+    password: str = Field(max_length=1000)
 
 
 class TotpSetupResult(BaseModel):
@@ -32,8 +35,8 @@ class TotpSetupResult(BaseModel):
     account: str
 
 
-class CodePayload(BaseModel):
-    code: str
+class CodePayload(v.CheckedBody):
+    code: str = Field(max_length=64)
 
 
 class EnableResult(BaseModel):
@@ -41,15 +44,15 @@ class EnableResult(BaseModel):
     recovery_codes: list[str] = Field(description="shown exactly once; only hashes are stored")
 
 
-class DisablePayload(BaseModel):
-    password: str
-    code: str | None = None
-    recovery_code: str | None = None
+class DisablePayload(v.CheckedBody):
+    password: str = Field(max_length=1000)
+    code: str | None = Field(default=None, max_length=64)
+    recovery_code: str | None = Field(default=None, max_length=64)
 
 
-class RegeneratePayload(BaseModel):
-    password: str
-    code: str
+class RegeneratePayload(v.CheckedBody):
+    password: str = Field(max_length=1000)
+    code: str = Field(max_length=64)
 
 
 class RecoveryCodesResult(BaseModel):
@@ -62,8 +65,8 @@ class TotpStatus(BaseModel):
     recovery_codes_left: int
 
 
-class ResetPayload(BaseModel):
-    password: str = Field(description="the boss's own password, as confirmation")
+class ResetPayload(v.CheckedBody):
+    password: str = Field(max_length=1000, description="the boss's own password, as confirmation")
 
 
 @router.post("/login/totp", response_model=LoginResult, summary="sign in, second step: authenticator or recovery code")

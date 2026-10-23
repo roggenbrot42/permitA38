@@ -213,7 +213,7 @@ class UserOut(Record):
     timezone: str | None = None
 
 
-class UserIn(BaseModel):
+class UserIn(v.CheckedBody):
     model_config = ConfigDict(extra="ignore")
     id: str | None = None
     username: str = Field(max_length=64)
@@ -418,7 +418,7 @@ class ExpenseIn(v.StrictRecord):
         return self
 
 
-class LineIn(BaseModel):
+class LineIn(v.CheckedBody):
     model_config = ConfigDict(extra="allow")
     description: v.Desc = ""
     qty: v.Qty = 0
@@ -428,7 +428,7 @@ class LineIn(BaseModel):
     amount: v.Amount | None = None  # ignored: always recomputed on the server
 
 
-class PlanIn(BaseModel):
+class PlanIn(v.CheckedBody):
     model_config = ConfigDict(extra="allow")
     start: v.OptDate = None
     end: v.OptDate = None
@@ -548,7 +548,7 @@ class SettingsIn(v.StrictRecord):
 CalendarTitlePolicy = Literal["none", "redacted", "full"]
 
 
-class CalendarIn(BaseModel):
+class CalendarIn(v.CheckedBody):
     """Connect a calendar: an https ICS link (``url``) or a file uploaded alongside these fields."""
 
     model_config = ConfigDict(extra="ignore")
@@ -562,7 +562,7 @@ class CalendarIn(BaseModel):
     busy_default: bool = True
 
 
-class CalendarPatchIn(BaseModel):
+class CalendarPatchIn(v.CheckedBody):
     model_config = ConfigDict(extra="ignore")
     name: v.Name | None = None
     refresh_minutes: int | None = Field(default=None, ge=15, le=10080)
@@ -604,7 +604,7 @@ class CalendarEventOut(BaseModel):
 
 
 # ---- planning: what-if changes and named scenarios -------------------------------------------------------------
-class AbsenceChange(BaseModel):
+class AbsenceChange(v.CheckedBody):
     """Changes one absence (``id`` given) or adds one (no ``id``). ``delete`` removes an existing one."""
 
     model_config = ConfigDict(extra="forbid")
@@ -621,7 +621,7 @@ class AbsenceChange(BaseModel):
         return self
 
 
-class CommitmentChange(BaseModel):
+class CommitmentChange(v.CheckedBody):
     """Overrides the period or hours of an existing contract or open offer. Omitted fields keep their value."""
 
     model_config = ConfigDict(extra="forbid")
@@ -638,10 +638,24 @@ class CommitmentChange(BaseModel):
         return self
 
 
-class ScenarioChanges(BaseModel):
+class ScenarioChanges(v.CheckedBody):
     model_config = ConfigDict(extra="forbid")
     absences: list[AbsenceChange] = Field(default=[], max_length=500)
     commitments: list[CommitmentChange] = Field(default=[], max_length=500)
+
+
+class TimerStartIn(v.CheckedBody):
+    """Start the running timer of the current user (replaces a running one)."""
+
+    project_id: v.OptId = None
+    task_id: v.OptId = None
+    note: v.Note = ""
+
+
+class TimerStopIn(v.CheckedBody):
+    """Stop the running timer and save it as a time entry; the note is optional."""
+
+    note: v.Note | None = None
 
 
 class ScenarioIn(v.StrictRecord):

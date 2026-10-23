@@ -18,6 +18,7 @@ from .throttle import AttemptThrottle
 PBKDF2_ITERATIONS = 200_000
 USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
 MIN_PASSWORD_LENGTH = 8
+MAX_PASSWORD_LENGTH = 1000  # the API accepts at most this many characters, so a longer password could never log in
 # never leave the server: credentials and second-factor state
 _PRIVATE = ("password_hash", "pw_changed", "totp_secret", "totp_last_step", "totp_recovery")
 
@@ -63,6 +64,8 @@ def next_session_version(user: dict | None = None) -> int:
 def validate_password(password: str):
     if len(password) < MIN_PASSWORD_LENGTH:
         raise ServiceError(400, f"Password must be at least {MIN_PASSWORD_LENGTH} characters long")
+    if len(password) > MAX_PASSWORD_LENGTH:
+        raise ServiceError(400, f"Password must be at most {MAX_PASSWORD_LENGTH} characters long")
 
 
 def normalize_username(username: str) -> str:

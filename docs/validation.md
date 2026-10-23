@@ -21,7 +21,12 @@ The backend and the browser use the same rule; `tests/web/test_money_js.py` chec
 ## Input validation
 
 Request bodies are validated by strict models (`permita38/core/models.py` `*In`, building blocks in
-`permita38/core/validation.py`). A violation is answered with **HTTP 422** and `{"detail": [{"loc", "msg", "type"}]}`;
+`permita38/core/validation.py`). Every request model derives from `CheckedBody` (or `StrictRecord`, which is a
+`CheckedBody` that keeps unknown fields). Its check runs on the whole raw body before the declared fields are validated,
+so a NUL character, a lone surrogate, a text over 100 000 characters or nesting deeper than 8 is refused even in a field
+the model does not declare. `tests/backend/test_body_model_coverage.py` fails when a route takes a request model that is
+not a `CheckedBody`. Text fields of multipart requests (form fields next to an upload) get the same checks through
+`permita38/api/forms.py`. A violation is answered with **HTTP 422** and `{"detail": [{"loc", "msg", "type"}]}`;
 the offending input is never echoed back. Values are stored exactly as typed (no silent trimming). Unknown fields are
 kept for forward compatibility, but every value in the body is checked (valid Unicode, finite numbers, 64-bit range,
 nesting depth).
@@ -41,6 +46,12 @@ nesting depth).
 | VAT rates | 0 … 100, and on write one of 0, 5, 7, 16, 19 or the rate configured in the settings |
 | Documents | ≤ 500 lines; line description ≤ 2000 chars; line amount and document total ≤ 1 000 000 000 |
 | Names (customer, project, task, contract, user, template) | 1 … 200 characters, not blank |
+| Timer note | ≤ 5 000 characters; project and task id optional (blank = none) |
+| Passwords | 8 … 1 000 characters (login, change, setup, CLI `set-password`; a longer one could never log in) |
+| Usernames | ≤ 64 characters in the request; the service requires 2–32 letters, digits, `.`, `-`, `_` |
+| Two-factor codes | `code` and `recovery_code` ≤ 64 characters (a recovery code is 19); `mfa_token` ≤ 4 096 |
+| Sign-up | setup: name 1 … 200 (not blank), company name ≤ 200, weekly hours 0 … 168 |
+| URLs (company website, calendar link) | ≤ 2 048 characters |
 | Short text (street, city, title, …) | ≤ 200 characters; notes/intro/outro ≤ 5 000 |
 | Status / kind / role / layout / language | from the allowed sets (e.g. project status `active, paused, done, archived`) |
 | Colours | `#rrggbb` |

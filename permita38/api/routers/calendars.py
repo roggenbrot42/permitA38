@@ -4,9 +4,11 @@ from datetime import date
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, UploadFile
+from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
 from permita38.api.deps import Needs, ServicesDep
+from permita38.api.forms import check_form
 from permita38.core.models import CalendarEventOut, CalendarIn, CalendarOut, CalendarPatchIn, CalendarTitlePolicy
 
 router = APIRouter(prefix="/calendars", tags=["calendars"])
@@ -55,6 +57,15 @@ def upload_calendar(
     include_keywords: Annotated[str, Form(max_length=2000)] = "",
     exclude_keywords: Annotated[str, Form(max_length=2000)] = "",
 ):
+    check_form(
+        {
+            "name": name,
+            "all_day_blocks": all_day_blocks,
+            "busy_default": busy_default,
+            "include_keywords": include_keywords,
+            "exclude_keywords": exclude_keywords,
+        }
+    )
     declared = request.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > MAX_UPLOAD + 65536:  # refuse before the body is spooled to disk
         raise HTTPException(413, "The calendar file is too large (max 5 MB).")
@@ -69,9 +80,7 @@ def upload_calendar(
             exclude_keywords=[k.strip() for k in exclude_keywords.split(",") if k.strip()][:20],
         ).model_dump(exclude={"url"})
     except ValidationError as err:  # built by hand from form fields: report it like any other invalid input
-        raise HTTPException(
-            422, "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in err.errors())
-        ) from None
+        raise RequestValidationError([{**e, "loc": ("form", *e["loc"])} for e in err.errors()]) from None
     blob = file.file.read(MAX_UPLOAD + 1)
     if len(blob) > MAX_UPLOAD:
         raise HTTPException(413, "The calendar file is too large (max 5 MB).")

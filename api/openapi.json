@@ -738,7 +738,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TimerStart"
+                "$ref": "#/components/schemas/TimerStartIn"
               }
             }
           },
@@ -786,7 +786,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/TimerStop"
+                "$ref": "#/components/schemas/TimerStopIn"
               }
             }
           },
@@ -6363,10 +6363,12 @@
         "properties": {
           "old_password": {
             "type": "string",
+            "maxLength": 1000,
             "title": "Old Password"
           },
           "new_password": {
             "type": "string",
+            "maxLength": 1000,
             "title": "New Password"
           }
         },
@@ -6381,6 +6383,7 @@
         "properties": {
           "code": {
             "type": "string",
+            "maxLength": 64,
             "title": "Code"
           }
         },
@@ -7096,12 +7099,14 @@
         "properties": {
           "password": {
             "type": "string",
+            "maxLength": 1000,
             "title": "Password"
           },
           "code": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 64
               },
               {
                 "type": "null"
@@ -7112,7 +7117,8 @@
           "recovery_code": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 64
               },
               {
                 "type": "null"
@@ -9110,10 +9116,12 @@
         "properties": {
           "username": {
             "type": "string",
+            "maxLength": 64,
             "title": "Username"
           },
           "password": {
             "type": "string",
+            "maxLength": 1000,
             "title": "Password"
           }
         },
@@ -9339,6 +9347,7 @@
         "properties": {
           "password": {
             "type": "string",
+            "maxLength": 1000,
             "title": "Password"
           }
         },
@@ -9845,10 +9854,12 @@
         "properties": {
           "password": {
             "type": "string",
+            "maxLength": 1000,
             "title": "Password"
           },
           "code": {
             "type": "string",
+            "maxLength": 64,
             "title": "Code"
           }
         },
@@ -9863,6 +9874,7 @@
         "properties": {
           "password": {
             "type": "string",
+            "maxLength": 1000,
             "title": "Password",
             "description": "the boss's own password, as confirmation"
           }
@@ -10579,23 +10591,30 @@
         "properties": {
           "username": {
             "type": "string",
+            "maxLength": 64,
             "title": "Username"
           },
           "name": {
             "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Name"
           },
           "password": {
             "type": "string",
+            "maxLength": 1000,
             "title": "Password"
           },
           "company_name": {
             "type": "string",
+            "maxLength": 200,
             "title": "Company Name",
             "default": ""
           },
           "weekly_hours": {
             "type": "number",
+            "maximum": 168.0,
+            "minimum": 0.0,
             "title": "Weekly Hours",
             "default": 40
           }
@@ -11048,12 +11067,13 @@
         ],
         "title": "TemplateIn"
       },
-      "TimerStart": {
+      "TimerStartIn": {
         "properties": {
           "project_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
               },
               {
                 "type": "null"
@@ -11064,7 +11084,8 @@
           "task_id": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
               },
               {
                 "type": "null"
@@ -11074,19 +11095,22 @@
           },
           "note": {
             "type": "string",
+            "maxLength": 5000,
             "title": "Note",
             "default": ""
           }
         },
         "type": "object",
-        "title": "TimerStart"
+        "title": "TimerStartIn",
+        "description": "Start the running timer of the current user (replaces a running one)."
       },
-      "TimerStop": {
+      "TimerStopIn": {
         "properties": {
           "note": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 5000
               },
               {
                 "type": "null"
@@ -11096,7 +11120,8 @@
           }
         },
         "type": "object",
-        "title": "TimerStop"
+        "title": "TimerStopIn",
+        "description": "Stop the running timer and save it as a time entry; the note is optional."
       },
       "TokenResult": {
         "properties": {
@@ -11115,12 +11140,14 @@
         "properties": {
           "mfa_token": {
             "type": "string",
+            "maxLength": 4096,
             "title": "Mfa Token"
           },
           "code": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 64
               },
               {
                 "type": "null"
@@ -11132,7 +11159,8 @@
           "recovery_code": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "maxLength": 64
               },
               {
                 "type": "null"
