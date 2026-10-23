@@ -273,7 +273,7 @@ A.docToInvoice = async () => { await persistDoc(); const r = await api('POST', `
 A.billTimeInto = () => A.billTime({ dataset: { cust: DOC.customer_id } });
 
 /* ================= EXPENSES ================= */
-const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & coworking', 'Travel', 'Marketing', 'Insurance', 'Phone & internet', 'Training', 'Subcontractors', 'Fees & bank', 'Other'];
+const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & coworking', 'Travel', 'Business meals', 'Marketing', 'Insurance', 'Phone & internet', 'Training', 'Subcontractors', 'Fees & bank', 'Other'];
 PAGES.expenses = async () => {
   await loadAll(['expenses', 'projects']);
   const y = new Date().getFullYear(), list = S.d.expenses.sort((a, b) => a.date < b.date ? 1 : -1), yr = list.filter(e => (e.date || '').startsWith(y));
@@ -283,13 +283,14 @@ PAGES.expenses = async () => {
 };
 A.editExpense = el => {
   const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: EXP_CATS[0] };
+  const cats = e.category && !EXP_CATS.includes(e.category) ? [...EXP_CATS, e.category] : EXP_CATS;   // keep a category entered elsewhere
   const v0 = { ...e, gross: e.net != null ? Math.round((e.net + (e.vat || 0)) * 100) / 100 : '', vat_rate: e.vat_rate ?? 19 };
   openForm({
     title: e.id ? 'Edit bill' : 'Add bill', vals: v0,
     fields: [{ k: 'date', l: 'Paid on', t: 'date', row: 1 }, { k: 'vendor', l: 'Vendor', row: 1 }, { k: 'description', l: 'Description' },
       { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: [19, 7, 0], row: 2 },
-      { k: 'category', l: 'Category', t: 'select', o: EXP_CATS, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
-      { k: 'deductible', l: 'Deductible %', t: 'number', h: '100 normally; 70 for business meals' }],
+      { k: 'category', l: 'Category', t: 'select', o: cats, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
+      { k: 'deductible', l: 'Deductible %', t: 'number', h: '100 normally; 70 for business meals (set automatically with that category)' }],
     extra: `<div class="field"><label>Attach the bill (PDF / photo)</label><input type="file" id="e_file">${e.attachment ? `<div class="small"><a href="${api.url('attachments/' + e.attachment)}" target="_blank">Current attachment</a></div>` : ''}</div>`,
     save: async v => {
       if (!v.gross) throw new Error('Enter the amount'); const r = +v.vat_rate || 0;
@@ -301,6 +302,12 @@ A.editExpense = el => {
       await save('expenses', v); render();
     },
     del: e.id ? async () => { await api('DELETE', 'expenses/' + e.id); await loadAll(['expenses']); render(); } : null
+  });
+  // Business meals are 70 % deductible: choosing the category proposes that, leaving it restores 100 (a hand-typed value stays)
+  $('#f_category')?.addEventListener('change', ev => {
+    const ded = $('#f_deductible'); if (!ded) return;
+    if (ev.target.value === 'Business meals' && +ded.value === 100) ded.value = 70;
+    else if (ev.target.value !== 'Business meals' && +ded.value === 70) ded.value = 100;
   });
 };
 

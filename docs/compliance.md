@@ -108,7 +108,7 @@ readable and unchanged. The backup module (alpha.4) keeps yearly archives protec
 - **Fixed assets and depreciation (*Anlagenverzeichnis, AfA*)**: equipment above the low-value limit (800 € net,
   *verify*) is written off over several years; a simple asset register would produce the booking entries (proposed).
 - **Trade tax return**, **annual accounts / e-balance sheet (*E-Bilanz*)** for GmbH/UG: out of scope for now (research).
-- **Entertainment costs** (70 % deductible) are already supported by the *deductible %* field on expenses.
+- **Entertainment costs** (70 % deductible) are supported: choose the category *Business meals* (it proposes 70 %) or set the *deductible %* field yourself.
 
 ## 7. People who work for you
 

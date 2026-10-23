@@ -18,6 +18,10 @@ All notable changes to this project are documented here. The format is based on
 - Forecast revenue is based first on contracted hours, then open offers, and only then on assumed hours; every week
   states its basis. Contract hours are spread over the workdays of the assignee.
 
+### Fixed
+- Expenses: there was no "Business meals" category to choose. It exists now and proposes 70 % deductible (your own value is
+  never overwritten); a category entered elsewhere stays selectable when editing.
+
 ## [0.4.0-alpha.1] - 2026-10-22
 
 First public alpha. Expect rough edges and read [docs/release-plan.md](docs/release-plan.md) for the scope, known
