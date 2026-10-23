@@ -392,3 +392,108 @@ def test_stored_attachment_is_previewed_when_editing_and_stays_served_safely(srv
     assert ui.get_attribute("#e_preview", "data-kind") == "image"
     ui.wait_for_function("() => document.querySelector('#e_preview img').naturalWidth > 0")  # loads under the CSP
     assert "attachments/" + up["name"] in ui.get_attribute("#e_preview_open", "href")
+
+
+# ------------------------------------------------------------------ review fixes
+def test_a_file_is_previewed_with_the_type_of_its_extension_not_the_browser_guess(ui):
+    open_new(ui)
+    # record the Blob behind each object URL (the page CSP has no blob: connect-src, so fetch(blob:) cannot be used)
+    ui.evaluate(
+        "() => { const c = URL.createObjectURL.bind(URL); window.__made = [];"
+        " URL.createObjectURL = b => { window.__made.push(b); return c(b); }; }"
+    )
+    choose(ui, "bill.pdf", b"<!doctype html><p>not a pdf</p>", "text/html")
+    ui.wait_for_selector("#e_preview iframe")
+    assert ui.get_attribute("#e_preview iframe", "src").startswith("blob:")
+    assert ui.evaluate("() => window.__made.at(-1).type") == "application/pdf"
+
+
+def test_a_stored_rate_outside_19_7_0_is_offered_and_agrees_with_the_totals(srv, ui):
+    r = httpx.post(
+        srv.base + "/api/expenses",
+        headers={"Authorization": "Bearer " + srv.token},
+        json={
+            "date": "2026-03-10",
+            "net": 0,
+            "lines": [
+                {"description": "Odd rate", "gross": 10.5, "vat_rate": 16},  # the API allows 0, 5, 7, 16, 19
+                {"description": "Std", "gross": 1, "vat_rate": 19},
+            ],
+        },
+    )
+    assert r.status_code == 200, r.text
+    ui.reload()
+    ui.wait_for_selector("tr[data-a=editExpense]")
+    ui.click("tr[data-a=editExpense]")
+    ui.wait_for_selector("#e_lines tr[data-line]")
+    row = ui.locator("#e_lines tr[data-line]").first
+    assert row.locator("[data-f=vat_rate]").input_value() == "16"
+    assert amount(ui.inner_text('[data-tot-vat="16"]')) == D("1.45")  # 10.50 * 16 / 116
+
+
+def test_enter_pressed_twice_in_a_row_saves_exactly_one_bill(srv, ui):
+    open_new(ui)
+    ui.fill("#f_vendor", "Double")
+    ui.fill("#f_gross", "10")
+    ui.select_option("#f_vat_rate", "19")
+    # two Enter key events in the same task: the second must find the save still running
+    ui.evaluate(
+        "() => { const el = document.querySelector('#f_vendor');"
+        " for (let i = 0; i < 2; i++) el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); }"
+    )
+    ui.wait_for_selector("#m-save", state="detached")
+    assert [x["vendor"] for x in api(srv, "expenses")] == ["Double"]
+
+
+def test_business_meals_line_defaults_to_70_percent_and_saves_full_input_vat(srv, ui):
+    open_new(ui)
+    ui.fill("#f_vendor", "Restaurant")
+    ui.select_option("#f_category", "Business meals")
+    assert ui.input_value("#f_deductible") == "70"
+    ui.check("#f_itemise")
+    ui.wait_for_selector("#e_lines tr[data-line]")
+    assert ui.locator("#e_lines tr[data-line]").first.locator("[data-f=deductible]").input_value() == "70"
+    fill_line(ui, 0, "Dinner", "119", "19")
+    ui.click("[data-a=addLine]")
+    ui.wait_for_function("() => document.querySelectorAll('#e_lines tr[data-line]').length === 2")
+    assert ui.locator("#e_lines tr[data-line]").nth(1).locator("[data-f=deductible]").input_value() == "70"
+    ui.locator("#e_lines tr[data-line]").nth(1).locator("[data-f=gross]").fill("0")
+    ui.click("#m-save")
+    ui.wait_for_selector("#m-save", state="detached")
+    (e,) = api(srv, "expenses")
+    assert e["lines"][0]["deductible"] == 70 and e["lines"][0]["vat_deductible"] == 100
+    assert e["category"] == "Business meals"
+
+
+@pytest.mark.parametrize("amount_text,message", [("", "enter the amount"), ("-5", "must not be negative")])
+def test_empty_or_negative_line_amount_shows_the_message_and_saves_nothing(srv, ui, amount_text, message):
+    itemise_hotel(ui)
+    fill_line(ui, 1, "Breakfast", amount_text, "19")
+    ui.click("#m-save")
+    ui.wait_for_selector("#toast.err")
+    assert message in ui.inner_text("#toast")
+    assert ui.locator("#m-save").count() == 1  # the dialog stays open
+    assert api(srv, "expenses") == []
+
+
+def test_remove_button_is_disabled_on_the_last_line(ui):
+    open_new(ui)
+    ui.check("#f_itemise")
+    ui.wait_for_selector("#e_lines tr[data-line]")
+    assert ui.locator("#e_lines [data-a=removeLine]").first.is_disabled()
+    ui.click("[data-a=addLine]")
+    ui.wait_for_function("() => document.querySelectorAll('#e_lines tr[data-line]').length === 2")
+    assert ui.locator("#e_lines [data-a=removeLine]").first.is_enabled()
+
+
+def test_switching_itemising_off_after_removing_lines_saves_a_classic_bill(srv, ui):
+    itemise_hotel(ui)
+    ui.locator("#e_lines tr[data-line]").nth(2).locator("[data-a=removeLine]").click()
+    ui.locator("#e_lines tr[data-line]").nth(1).locator("[data-a=removeLine]").click()
+    ui.uncheck("#f_itemise")
+    ui.wait_for_selector("#f_gross", state="visible")
+    ui.click("#m-save")
+    ui.wait_for_selector("#m-save", state="detached")
+    (e,) = api(srv, "expenses")
+    assert "lines" not in e and e["vendor"] == "Hotel Beispiel"
+    assert e["net"] + e["vat"] == pytest.approx(160)
