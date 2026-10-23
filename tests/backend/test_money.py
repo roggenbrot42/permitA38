@@ -207,6 +207,13 @@ def test_rest_zero_when_every_share_is_exact_or_below_the_group_rounding():
     assert split_gross([(D("119.00"), D(19))]) == [(D("100.00"), D("19.00"))]
 
 
+def test_exact_tie_between_unequal_grosses_goes_to_the_later_line():
+    # 28.53 and 116.59 at 19 %: both cent remainders are exactly 62/119 (a true tie). Decimal division used to break it
+    # by rounding noise; the later line (116.59) must get the extra cent.
+    out = split_gross([(D("28.53"), D(19)), (D("116.59"), D(19))])
+    assert out == [(D("23.98"), D("4.55")), (D("97.97"), D("18.62"))]
+
+
 def test_hotel_bill_literals_are_unchanged():
     out = split_gross([(D("160.00"), D(7)), (D("30.00"), D(19)), (D("6.00"), D(0))])
     assert out == [(D("149.53"), D("10.47")), (D("25.21"), D("4.79")), (D("6.00"), D("0.00"))]
