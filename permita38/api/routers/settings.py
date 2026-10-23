@@ -22,8 +22,9 @@ def bootstrap(user: CurrentUser, services: ServicesDep) -> dict:
 
 
 @router.get("/settings", response_model=Settings)
-def get_settings(_: Annotated[dict, Needs("settings", full=True)], services: ServicesDep):
-    return services.settings.get()
+def get_settings(user: Annotated[dict, Needs("settings", full=True)], services: ServicesDep):
+    # the team timeline visibility is the boss's setting: other roles do not get the field
+    return services.settings.get(team=rights.normalize_role(user.get("role")) == rights.BOSS)
 
 
 class SettingsResult(Settings):

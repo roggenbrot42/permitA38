@@ -297,7 +297,9 @@ def run_session(seed: int, steps: int):
             if who == "member":
                 after = world.snapshot()
                 changed = {k for k in set(before) | set(after) if before.get(k) != after.get(k)}
-                own = {"users"} if url.endswith("/auth/change-password") else set()
+                # a member may change their own user row: password and two-factor enrolment (/auth/totp/*)
+                own_row = url.endswith("/auth/change-password") or "/auth/totp/" in url
+                own = {"users"} if own_row else set()
                 bad = {k for k in changed if k not in MEMBER_WRITE_TABLES and k not in own}
                 assert not bad, f"{who} {method} {url} wrote to {sorted(bad)}"
         verify_consistency(world)
