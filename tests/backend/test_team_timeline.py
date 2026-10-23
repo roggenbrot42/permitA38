@@ -347,20 +347,21 @@ def test_the_holidays_follow_the_business_state(world):
 
 # ------------------------------------------------------------------ the window
 @pytest.mark.parametrize(
-    "query",
+    ("query", "offending"),
     [
-        "start=2026-11-02",  # end missing
-        "start=2026-02-30&end=2026-03-01",  # not a real date
-        "start=1999-12-31&end=2000-01-01",  # before 2000
-        "start=2026-11-02&end=2101-01-01",  # after 2100
-        "start=2026-11-02&end=2026-11-03&foo=1",  # unknown parameter
+        ("start=2026-11-02", "2026-11-02"),  # end missing (the value sent is a legal one; still never echoed)
+        ("start=2026-02-30&end=2026-03-01", "2026-02-30"),  # not a real date
+        ("start=1999-12-31&end=2000-01-01", "1999-12-31"),  # before 2000 (the bounds text itself is not an echo)
+        ("start=2026-11-02&end=2101-01-01", "2101-01-01"),  # after 2100
+        ("start=2026-11-02&end=2026-11-03&foo=zzmarker", "zzmarker"),  # unknown parameter
     ],
 )
-def test_malformed_query_is_a_list_form_422(world, query):
+def test_malformed_query_is_a_list_form_422_that_never_echoes_the_input(world, query, offending):
     r = world["boss"].get(f"/api/team/timeline?{query}")
     assert r.status_code == 422
     assert isinstance(r.json()["detail"], list) and r.json()["detail"][0]["loc"][0] == "query"
-    assert "2030" not in r.text  # never echoes the input
+    assert offending not in r.text
+    assert '"input"' not in r.text  # the key that would carry the offending input
 
 
 def test_end_before_start_is_a_plain_422(world):
@@ -375,7 +376,10 @@ def test_the_window_is_at_most_366_days_inclusive(world):
     assert r.status_code == 422 and r.json() == {"detail": "the window may span at most 365 days"}
 
 
-# ------------------------------------------------------------------ clash days (client-side rule, oracle here)
+# ------------------------------------------------------------------ clash days: FIXTURE DATA, not the rule
+# The backend does not compute clashes (the UI does, docs/contracts/team-timeline.md "Clash threshold"). These tests
+# do not call production code: they check that the fixture's hand-computed clash days equal a local oracle, so the
+# same expected values can be reused by the UI tests.
 @pytest.mark.parametrize(
     ("n", "expected"),
     [
@@ -384,7 +388,7 @@ def test_the_window_is_at_most_366_days_inclusive(world):
         (3, []),  # three people is not more than three
     ],
 )
-def test_clash_days_are_strictly_more_than_n_on_weekdays_that_are_no_holiday(world, n, expected):
+def test_fixture_clash_days_match_the_hand_computed_expectations(world, n, expected):
     boss_view = world["boss"].get(TIMELINE).json()
     dana_view = world["dana"].get(TIMELINE).json()  # away: the same counts, sick days included
     assert _clash_days(boss_view, n) == expected
@@ -400,3 +404,88 @@ def test_visibility_and_level_helpers_defaults_and_legacy_roles():
     assert tt.level_for("member", {}) == "away"  # legacy role: employee
     assert tt.level_for("accountant", {tt.SETTING: {"accountant": "time-off"}}) == "time-off"
     assert tt.level_for("wizard", {}) == "off" and tt.level_for(None, {}) == "off"
+
+
+# ------------------------------------------------------------------ review follow-ups
+def test_legacy_or_unknown_stored_kinds_are_hidden_at_time_off(world, app):
+    store = app.state.services.store
+    alex = world["ids"]["alex"]
+    store.save("absences", {"user_id": alex, "kind": "Sick", "start": "2026-11-06", "end": "2026-11-06",
+                            "note": "Legacy secret"})  # fmt: skip
+    store.save("absences", {"user_id": alex, "kind": "illness", "start": "2026-11-05", "end": "2026-11-05",
+                            "note": "Unknown secret"})  # fmt: skip
+    _set_visibility(world, employee="time-off")
+    body = world["dana"].get(TIMELINE).json()
+    absences = _by_name(body)["Alex Example"]["absences"]
+    assert {"start": "2026-11-05", "end": "2026-11-05", "kind": None, "label": None} in absences
+    assert {"start": "2026-11-06", "end": "2026-11-06", "kind": None, "label": None} in absences
+    raw = world["dana"].get(TIMELINE).text
+    assert "Legacy secret" not in raw and "Unknown secret" not in raw
+
+
+def test_accountant_at_time_off_and_full_end_to_end(world):
+    bea, ids = world["bea"], world["ids"]
+    _set_visibility(world, accountant="time-off")
+    body = bea.get(TIMELINE).json()
+    assert body["level"] == "time-off"
+    by = _by_name(body)
+    assert by["Alex Example"]["absences"][1] == {"start": "2026-11-09", "end": "2026-11-13", "kind": "vacation",
+                                                 "label": "Autumn break"}  # fmt: skip
+    assert by["Alex Example"]["absences"][2] == {"start": "2026-11-18", "end": "2026-11-18", "kind": None,
+                                                 "label": None}  # fmt: skip
+    assert by["Alex Example"]["weekly_hours"] is None and by["Alex Example"]["contracts"] == []
+    assert by["Bea Example"]["absences"][0] == {
+        "start": "2026-10-30",
+        "end": "2026-11-02",
+        "kind": "vacation",
+        "label": "Early start",
+    }  # own row in full
+    assert by["Bea Example"]["weekly_hours"] == 38.5
+
+    _set_visibility(world, accountant="full")
+    body = bea.get(TIMELINE).json()
+    assert body["level"] == "full"
+    by = _by_name(body)
+    assert by["Alex Example"]["absences"][2] == {"start": "2026-11-18", "end": "2026-11-18", "kind": "sick",
+                                                 "label": "Flu"}  # fmt: skip
+    assert by["Alex Example"]["contracts"] == [_web(ids), _support(ids)]
+    assert by["Alex Example"]["weekly_hours"] == 32
+
+
+def test_others_sick_and_other_notes_are_absent_from_the_raw_text_at_time_off(world):
+    _set_visibility(world, accountant="time-off")
+    raw = world["bea"].get(TIMELINE).text  # Bea is the viewer: her own notes are not in this list
+    for hidden in ("Flu", "Migraine", "Dentist", "Christmas shift", "Inactive secret", "Long ago"):
+        assert hidden not in raw, hidden
+
+
+def test_bootstrap_never_carries_the_visibility_map(world):
+    for client in (world["boss"], world["bea"], world["alex"]):
+        assert "team_timeline_visibility" not in client.get("/api/bootstrap").json()["settings"]
+
+
+def test_a_garbage_stored_map_falls_back_to_the_defaults_over_http(world, app):
+    store = app.state.services.store
+    stored = store.settings()
+    stored["team_timeline_visibility"] = {"employee": "boss", "boss": "full", "accountant": 7}
+    store.save_settings(stored)
+    assert world["boss"].get("/api/settings").json()["team_timeline_visibility"] == {
+        "employee": "away",
+        "accountant": "off",
+    }
+    assert world["alex"].get(TIMELINE).json()["level"] == "away"
+    assert world["bea"].get(TIMELINE).status_code == 403
+    _set_visibility(world, accountant="away")  # a partial PUT keeps the default of the role not given
+    assert world["boss"].get("/api/settings").json()["team_timeline_visibility"] == {
+        "employee": "away",
+        "accountant": "away",
+    }
+
+
+def test_end_before_start_status_follows_the_order_of_checks(world):
+    # the level is checked first: accountant at off gets 403 for a bad window; a visible level gets the 422
+    backwards = "/api/team/timeline?start=2026-11-03&end=2026-11-02"
+    assert world["bea"].get(backwards).json() == {"detail": "Forbidden"}
+    assert world["bea"].get(backwards).status_code == 403
+    assert world["alex"].get(backwards).status_code == 422
+    assert world["alex"].get(backwards).json() == {"detail": "end must not be before start"}
