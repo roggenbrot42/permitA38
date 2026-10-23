@@ -15,7 +15,11 @@ from permita38.core.errors import ServiceError
 from .deps import Services, startup_services
 from .routers import auth, files, finance, health, impressum, planning, records, sales, settings, time, totp, users
 
-CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
+# blob: is only used by the expense dialog to preview a bill before it is uploaded (see docs/specs/itemised-expenses.md)
+CSP = (
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; "
+    "frame-ancestors 'none'; frame-src 'self' blob:"
+)
 
 
 def _clean_msg(msg: str) -> str:
