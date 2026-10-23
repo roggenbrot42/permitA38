@@ -19,6 +19,8 @@ ids ``openForm`` already creates):
                           ``[data-a=zoomFit]``, ``[data-a=zoom100]``; link ``#e_preview_open`` ("Open in a new tab",
                           always present while a file is shown) and ``#e_preview_fallback`` (text node for browsers
                           without an inline PDF viewer; must be in the DOM for pdf, visibility is not asserted).
+* help line              ``#e_preview_help`` ("Not showing? Open or download the bill", under every image and PDF) with
+                          ``#e_preview_help_open`` (target _blank, rel noopener) and ``#e_preview_download`` (download = file name).
 * Zoom steps: "+"/"-" multiply/divide by 1.25 and clamp to 25..800; wheel up (deltaY < 0) zooms in, wheel down out;
   keys ``+`` ``-`` zoom, ``0`` = Fit, arrow keys pan. "Fit" scales the whole image into the pane (a 1200x900 image
   gives a zoom below 100).
@@ -375,6 +377,38 @@ def test_hostile_file_name_is_escaped_in_the_preview(ui):
     ui.wait_for_selector("#e_preview img")
     assert ui.get_attribute("#e_preview img", "alt") == name
     assert ui.locator("#e_preview b").count() == 0
+
+
+def test_help_line_is_visible_for_a_pdf_and_for_an_image(ui):
+    open_new(ui)
+    choose(ui, "bill.png", PNG, "image/png")
+    ui.wait_for_selector("#e_preview img")
+    assert ui.is_visible("#e_preview_help")
+    choose(ui, "bill.pdf", PDF, "application/pdf")
+    ui.wait_for_selector("#e_preview iframe")
+    assert ui.is_visible("#e_preview_help")
+    assert ui.get_attribute("#e_preview_help_open", "target") == "_blank"
+    assert ui.get_attribute("#e_preview_help_open", "rel") == "noopener"
+    assert ui.get_attribute("#e_preview_help_open", "href").startswith("blob:")
+
+
+def test_help_download_link_carries_the_file_name(ui):
+    open_new(ui)
+    choose(ui, "bill.png", PNG, "image/png")
+    ui.wait_for_selector("#e_preview img")
+    assert ui.get_attribute("#e_preview_download", "download") == "bill.png"
+    assert ui.get_attribute("#e_preview_download", "href").startswith("blob:")
+
+
+def test_hostile_file_name_in_the_help_line_is_escaped(ui):
+    name = "<img src=x onerror=window.__pwn=1>.pdf"
+    open_new(ui)
+    choose(ui, name, PDF, "application/pdf")
+    ui.wait_for_selector("#e_preview iframe")
+    assert ui.get_attribute("#e_preview_download", "download") == name
+    assert ui.locator("#e_preview_help img").count() == 0
+    assert ui.locator("#e_preview img").count() == 0
+    assert ui.evaluate("window.__pwn") == 0
 
 
 def test_stored_attachment_is_previewed_when_editing_and_stays_served_safely(srv, ui):
