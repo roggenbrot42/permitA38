@@ -253,14 +253,17 @@ function recalcDoc() {
 document.addEventListener('input', e => { if (e.target.closest('[data-l],#d_vat')) recalcDoc(); });
 A.addLine = () => { syncDoc(); DOC.lines.push({ description: '', qty: 1, unit: 'h', price: S.settings.default_rate || 0 }); render(); };
 A.delLine = el => { syncDoc(); DOC.lines.splice(+el.dataset.i, 1); render(); };
+/** Warnings are response-only; never echo them back into a PUT body. */
+function stripWarnings(o) { delete o.sanity_warnings; delete o.planning_warnings; return o; }
 async function persistDoc() {
   syncDoc(); const d = DOC;
   if (!d.customer_id) throw new Error('Choose a customer first');
-  const { coll, __route, ...body } = d; const r = await api.upsert(coll, body); DOC = { coll, ...r };
+  const { coll, __route, ...body } = d; stripWarnings(body);
+  const r = await api.upsert(coll, body); DOC = { coll, ...stripWarnings({ ...r }) };
   await loadAll([coll]); return r;
 }
 A.docSave = async () => { const wasNew = !DOC.id; const r = await persistDoc(); toast('Saved'); if (wasNew) location.hash = `#/doc/${DOC.coll}/${r.id}`; else render(); };
-A.docFinalize = async () => { await persistDoc(); const r = await api('POST', `${DOC.coll}/${DOC.id}/finalize`); DOC = { coll: DOC.coll, ...r }; toast('Finalized as ' + r.number); await loadAll([DOC.coll]); location.hash = `#/doc/${DOC.coll}/${r.id}`; render(); };
+A.docFinalize = async () => { await persistDoc(); const r = await api('POST', `${DOC.coll}/${DOC.id}/finalize`); DOC = { coll: DOC.coll, ...stripWarnings({ ...r }) }; toast('Finalized as ' + r.number); await loadAll([DOC.coll]); location.hash = `#/doc/${DOC.coll}/${r.id}`; render(); };
 A.docPdf = async () => { await persistDoc(); window.open(api.url(`${DOC.coll}/${DOC.id}/pdf`), '_blank'); };
 A.docStatus = async el => {
   if (!el.value) return;
@@ -386,7 +389,7 @@ A.saveSettings = async () => {
   ['kleinunternehmer', 'splitting'].forEach(k => s[k] = $('#f_' + k).checked);
   const lf = $('#logo_file').files[0];
   if (lf) s.logo = (await api.upload(lf)).name;
-  S.settings = await api('PUT', 'settings', s); toast('Settings saved'); render();
+  S.settings = await api('PUT', 'settings', s); delete S.settings.sanity_warnings; toast('Settings saved'); render();
 };
 A.editTemplate = el => {
   const all = S.templates, src = el?.dataset?.id ? all.find(t => t.id === el.dataset.id) : { layout: 'classic', accent: '#1f4e79', language: 'de', show_logo: true };

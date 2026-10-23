@@ -30,7 +30,7 @@ EU_VAT_FORMATS = {
     "XI": r"(?:\d{9}|\d{12}|GD\d{3}|HA\d{3})",
 }  # fmt: skip
 # outside the EU VAT system but common on invoices
-OTHER_VAT_FORMATS = {"GB": r"(?:\d{9}|\d{12}|GD\d{3}|HA\d{3})", "CH": r"E\d{9}(?:MWST|TVA|IVA)"}
+OTHER_VAT_FORMATS = {"GB": r"(?:\d{9}|\d{12}|GD\d{3}|HA\d{3})", "CH": r"E\d{9}(?:MWST|TVA|IVA)", "NO": r"\d{9}MVA"}
 
 
 def iban_error(value: str) -> str | None:
@@ -65,11 +65,20 @@ def vat_id_error(value: str) -> str | None:
         if validate_vat_id_de(raw) is None:
             return "the check digit of this German USt-IdNr is wrong (probably a typo)"
         return None
+    if prefix == "GR":  # the VAT prefix of Greece is EL; GR is the ISO country code people often use
+        prefix = "EL"
     pattern = EU_VAT_FORMATS.get(prefix) or OTHER_VAT_FORMATS.get(prefix)
     if pattern is None:
         return f"{prefix} is not a known VAT country prefix"
     if not re.fullmatch(pattern, rest):
         return f"this does not look like a valid {prefix} VAT id"
+    return None
+
+
+def vat_id_hint(value: str) -> str | None:
+    """An info-level remark on a VAT id that is accepted but written unusually (GR instead of EL)."""
+    if re.sub(r"[\s.\-]", "", value).upper().startswith("GR"):
+        return "The VAT prefix of Greece is EL, not GR; use EL followed by the 9 digits."
     return None
 
 

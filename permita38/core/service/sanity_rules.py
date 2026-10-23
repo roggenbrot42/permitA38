@@ -36,6 +36,9 @@ OUTLIER_MIN_SAMPLES = 5
 OUTLIER_MIN_AMOUNT = Decimal(500)
 VAT_TOLERANCE = Decimal("0.01")
 
+#: a bill may be dated a few days ahead (post-dated, time zones)
+EXPENSE_FUTURE_DAYS = 3
+
 
 def _w(code: str, severity: str, field: str | None, message: str, details: dict | None = None) -> dict:
     return warning(code, severity, field, message, details, confirmable=False)  # advisory: there is nothing to confirm
@@ -180,6 +183,9 @@ def check_entry(
     spans = [_span(e) for e in [rec, *same_day]]
     if span and all(spans):
         work, breaks, longest = break_analysis([s for s in spans if s])
+        # a pause already deducted from the minutes of an entry with clock times counts as break time
+        deducted = sum(max(0, sp[1] - sp[0] - _minutes(e)) for sp, e in zip(spans, [rec, *same_day]) if sp)
+        breaks += deducted
         need = BREAK_AFTER_9H if work > 9 * 60 else BREAK_AFTER_6H if work > 6 * 60 else 0
         if need and breaks < need:
             out.append(
@@ -189,7 +195,7 @@ def check_entry(
                     {"work_minutes": work, "break_minutes": breaks, "required_minutes": need},
                 )
             )  # fmt: skip
-        elif longest > 6 * 60:
+        elif longest > 6 * 60 and deducted < MIN_BREAK_PART:
             out.append(
                 _w(
                     "time.break_missing",
@@ -370,7 +376,7 @@ def check_document(
 def check_expense(rec: dict, *, old: dict | None, settings: dict, others: list[dict], today: date) -> list[dict]:
     out: list[dict] = []
     if _changed(old, rec, "date"):
-        out += _date_age("expense.date", "The expense date", rec.get("date"), today, 0)
+        out += _date_age("expense.date", "The expense date", rec.get("date"), today, EXPENSE_FUTURE_DAYS)
     net, vat = dec(rec.get("net")), dec(rec.get("vat"))
     if net > 0 and vat > net:
         out.append(
@@ -464,4 +470,6 @@ def check_identifiers(rec: dict, *, owner: str) -> list[dict]:
             err = fn(value)
             if err:
                 out.append(_w(f"{owner}.{key}_invalid", "warning", key, f"The {label} looks wrong: {err}."))
+            elif key == "vat_id" and (hint := identifiers.vat_id_hint(value)):
+                out.append(_w(f"{owner}.vat_id_prefix", "info", key, hint))
     return out

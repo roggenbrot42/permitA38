@@ -52,6 +52,13 @@ def test_german_vat_id_accepts_correct_check_digit_rejects_every_other(first8):
         ("NL123456789B01", True),
         ("NL123456789A01", False),
         ("ZZ123456789", False),
+        ("NO923456783MVA", True),
+        ("NO 923 456 783 MVA", True),
+        ("NO923456783", False),  # MVA suffix missing
+        ("NO92345678MVA", False),
+        ("EL123456789", True),
+        ("GR123456789", True),  # alias of EL
+        ("GR12345678", False),
     ],
 )
 def test_vat_id_formats(value, ok):
@@ -83,6 +90,13 @@ def test_iban_checksum_and_length():
     assert identifiers.iban_error("XX89370400440532013000")  # unknown country
     assert identifiers.bic_error("COBADEFFXXX") is None
     assert identifiers.bic_error("COBADEF") is not None
+
+
+def test_greek_gr_prefix_gets_an_info_hint_el_does_not():
+    ws = r.check_identifiers({"vat_id": "GR123456789"}, owner="customer")
+    assert codes(ws) == ["customer.vat_id_prefix"] and ws[0]["severity"] == "info" and "EL" in ws[0]["message"]
+    assert r.check_identifiers({"vat_id": "EL123456789"}, owner="customer") == []
+    assert r.check_identifiers({"vat_id": "NO923456783MVA"}, owner="customer") == []
 
 
 def test_check_identifiers_skips_blank_and_names_the_field():
@@ -133,6 +147,15 @@ def test_break_thirty_after_six_and_forty_five_after_nine_hours():
     b = entry("12:29", "16:29")
     ws = [w for w in check(b, same=[a]) if w["code"] == "time.break_missing"]
     assert ws and ws[0]["details"] == {"work_minutes": 480 + 0, "break_minutes": 29, "required_minutes": 30}
+
+
+def test_pause_deducted_from_minutes_counts_as_break():
+    assert "time.break_missing" not in codes(check(entry("08:00", "18:00", 540)))  # 1 h pause already deducted
+    assert "time.break_missing" in codes(check(entry("08:00", "18:00", 600)))  # no pause
+    # two entries with a real gap: unchanged
+    a, b = entry("08:00", "12:00"), entry("12:29", "16:29")
+    ws = [w for w in check(b, same=[a]) if w["code"] == "time.break_missing"]
+    assert ws and ws[0]["details"]["break_minutes"] == 29
 
 
 def test_nine_hours_exactly_needs_30_but_nine_hours_one_needs_45():
@@ -338,7 +361,8 @@ def test_expense_implied_rate_when_no_rate_given():
 
 
 def test_expense_dates_duplicate_and_outlier():
-    assert codes(check_exp(exp(date="2026-06-16"))) == ["expense.date.far_future"]
+    assert check_exp(exp(date="2026-06-18")) == []  # 3 days ahead: tolerated
+    assert codes(check_exp(exp(date="2026-06-19"))) == ["expense.date.far_future"]  # 4 days
     assert codes(check_exp(exp(date="2025-06-13"))) == ["expense.date.far_past"]  # 367 days
     assert check_exp(exp(date="2025-06-14")) == []  # 366 days
     a = exp(id="x0", vendor="Cafe Demo", net=10, vat=1.9)

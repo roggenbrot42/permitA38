@@ -11,6 +11,8 @@ from permita38.core.validation import ALLOWED_VAT_RATES, MAX_MONEY
 
 from .auth import public_user
 
+#: fields that only exist in responses
+RESPONSE_ONLY = ("sanity_warnings", "planning_warnings")
 MEMBER_READ = {"projects", "tasks", "entries", "absences", "users"}
 MEMBER_WRITE_OWN = {"entries", "absences"}
 
@@ -74,6 +76,8 @@ class RecordService:
         return self._write(me, coll, {**data, "id": rid, "created": old.get("created")}, old)
 
     def _write(self, me: dict, coll: str, data: dict, old: dict | None) -> dict:
+        for k in RESPONSE_ONLY:  # advisory warnings are computed per response, never stored
+            data.pop(k, None)
         boss = me["role"] == "boss"
         if not boss:
             if coll not in MEMBER_WRITE_OWN:

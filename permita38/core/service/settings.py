@@ -14,7 +14,9 @@ class SettingsService:
         return effective_settings(self.store.settings())
 
     def update(self, data: dict) -> dict:
-        merged = effective_settings({**self.get(), **data})
+        data = {k: v for k, v in data.items() if k not in ("sanity_warnings", "planning_warnings")}  # response-only
+        stored = {k: v for k, v in self.get().items() if k not in ("sanity_warnings", "planning_warnings")}
+        merged = effective_settings({**stored, **data})
         self.store.save_settings(merged)
         return merged
 

@@ -149,7 +149,7 @@ def test_clean_invoice_has_no_warnings(boss_client):
 
 def test_expense_warnings(boss_client):
     r = boss_client.post(
-        "/api/expenses", json={"date": day(1), "net": 100, "vat": 5, "vat_rate": 19, "vendor": "Cafe Demo"}
+        "/api/expenses", json={"date": day(10), "net": 100, "vat": 5, "vat_rate": 19, "vendor": "Cafe Demo"}
     )
     assert r.status_code == 200
     assert sorted(codes(r.json())) == ["expense.date.far_future", "expense.vat_mismatch"]
@@ -166,3 +166,47 @@ def test_a_failing_rule_never_breaks_a_save(boss_client, app, monkeypatch):
     monkeypatch.setattr(sanity_rules, "check_expense", boom)
     r = boss_client.post("/api/expenses", json={"date": day(0), "net": 10, "vat": 1.9, "vat_rate": 19})
     assert r.status_code == 200 and r.json()["sanity_warnings"] == []
+
+
+# ---------------------------------------------------------------------------------------------- response-only fields
+FAKE = [{"code": "stale.warning", "severity": "warning", "message": "old"}]
+
+
+def _raw(app, coll, rid):
+    return app.state.services.store.get(coll, rid)
+
+
+def _no_warning_keys(row):
+    assert "sanity_warnings" not in row and "planning_warnings" not in row, row
+
+
+def test_warning_fields_in_a_request_are_never_stored(app, boss_client):
+    junk = {"sanity_warnings": FAKE, "planning_warnings": FAKE}
+    cust = boss_client.post("/api/customers", json={"name": "Demo GmbH"}).json()
+    bodies = {
+        "entries": {"date": last_weekday(1), "minutes": 60},
+        "expenses": {"date": last_weekday(1), "vendor": "Demo", "net": 10, "vat": 1.9, "vat_rate": 19},
+        "offers": {"customer_id": cust["id"], "lines": [{"description": "x", "qty": 1, "unit": "h", "price": 10}]},
+        "invoices": {"customer_id": cust["id"], "lines": [{"description": "x", "qty": 1, "unit": "h", "price": 10}]},
+    }
+    for coll, body in bodies.items():
+        created = boss_client.post(f"/api/{coll}", json={**body, **junk})
+        assert created.status_code == 200, created.text
+        rid = created.json()["id"]
+        _no_warning_keys(_raw(app, coll, rid))
+        updated = boss_client.put(f"/api/{coll}/{rid}", json={**body, **junk})
+        assert updated.status_code == 200, updated.text
+        _no_warning_keys(_raw(app, coll, rid))
+        got = boss_client.get(f"/api/{coll}/{rid}").json()
+        _no_warning_keys(got)
+        assert "stale.warning" not in [w["code"] for w in updated.json().get("sanity_warnings") or []]
+
+
+def test_warning_fields_in_a_settings_put_are_never_stored(app, boss_client):
+    r = boss_client.put("/api/settings", json={"company_name": "Demo", "sanity_warnings": FAKE})
+    assert r.status_code == 200, r.text
+    _no_warning_keys(app.state.services.store.settings())
+    assert "stale.warning" not in [w["code"] for w in r.json().get("sanity_warnings") or []]
+    again = boss_client.put("/api/settings", json={"company_name": "Demo 2"})
+    _no_warning_keys(app.state.services.store.settings())
+    assert "stale.warning" not in [w["code"] for w in again.json().get("sanity_warnings") or []]
