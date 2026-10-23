@@ -30,6 +30,7 @@ dev = [
     "pytest>=8",
     "httpx>=0.27",
     "hypothesis>=6.100",
+    "pytest-xdist>=3.5",  # the randomized and browser suites run on several workers (make test-random / test-web)
     "playwright==1.64.0",
     "ruff",
     "mypy",

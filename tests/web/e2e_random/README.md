@@ -5,7 +5,7 @@ compare what they see with an independent model of what should have happened.
 
 ```bash
 pip install playwright httpx            # + a Chromium (see below); the API tests need only httpx
-pytest tests/web/e2e_random -q              # everything, ~3 minutes
+pytest tests/web/e2e_random -q              # everything, ~4 minutes; add `-n 4 --dist worksteal` (pytest-xdist) for ~1.5 minutes
 pytest tests/web/e2e_random -m e2e_random   # same, selected by marker
 pytest tests/web/e2e_random/test_api_random.py -q          # no browser needed, ~45 s
 ```

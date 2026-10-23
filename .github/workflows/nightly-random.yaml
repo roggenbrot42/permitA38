@@ -27,7 +27,7 @@ jobs:
       - name: Hypothesis "thorough" profile
         env:
           HYPOTHESIS_PROFILE: thorough
-        run: python -m pytest tests/backend/randomized -q -p no:cacheprovider
+        run: python -m pytest tests/backend/randomized -q -n 4 --dist worksteal -p no:cacheprovider
       - name: Keep failing examples
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -55,7 +55,7 @@ jobs:
             export PERMITA38_E2E_SEED
           fi
           echo "seeds: $PERMITA38_E2E_SEED"
-          python -m pytest tests/web -q -p no:cacheprovider
+          python -m pytest tests/web -q -n 4 --dist worksteal -p no:cacheprovider
       - name: Upload failure screenshots
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -33,6 +33,8 @@
   nightly workflow. Run them locally **once** (`make test-summary SUITES="random"`) before a branch is merged when it
   touches records, rights, numbering, documents, import or the data model (they hold a model of the API, and that
   model must be updated with the behaviour), and after merging several branches into `main`.
+  `make test-random` / `make test-web` / `make test-summary` run on 4 pytest-xdist workers (`XDIST="-n 1"` for one process);
+  the stateful machine and the fuzzer are split into independent shards (`SHARDS` / `FUZZ_SHARDS`) so they spread over the workers.
 - When CI is not available (offline, before the first push) run `make test-summary` once at the end: one line per
   suite, full logs in `test-artifacts/`, a lock makes concurrent runs wait. Never run several full suites in parallel.
   Read `test-artifacts/<suite>.log` only for a failing suite.
