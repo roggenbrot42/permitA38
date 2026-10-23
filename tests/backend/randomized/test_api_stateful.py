@@ -123,6 +123,7 @@ def maybe_none(strategy):
 class ApiMachine(RuleBasedStateMachine):
     def __init__(self):
         super().__init__()
+        self.counters: dict[tuple[str, int], int] = {}  # (prefix, year of the document date) -> last number given
         self.tmp = Path(tempfile.mkdtemp(prefix="p38-stateful-"))
         self.clock = FakeClock(time.time())
         self._real_time = auth_module.time
@@ -300,7 +301,7 @@ class ApiMachine(RuleBasedStateMachine):
                 lambda t: {**t[0], "project_id": t[1][0], "task_id": t[1][1]}
             )
         elif coll == "contracts":
-            req = {"title": TEXT, "start": iso_days(-10, 5), "end": iso_days(6, 90)}
+            req = {"title": TEXT.filter(lambda t: t.strip()), "start": iso_days(-10, 5), "end": iso_days(6, 90)}
             opt = dict(hours_per_week=maybe_none(RATE), total_hours=maybe_none(RATE), rate=maybe_none(RATE),
                        customer_id=self.ref("customers"), project_id=self.ref("projects"),
                        status=st.sampled_from(["confirmed", "done"]),
@@ -742,11 +743,12 @@ class ApiMachine(RuleBasedStateMachine):
         self.m[coll][rid], self.bodies[rid] = exp, body
         self.dirty.add(coll)
 
-    def next_number(self, coll):
+    def next_number(self, coll, year):
+        """Sequences are per document type and per year of the document date; a counter never moves back."""
         prefix = "RE" if coll == "invoices" else "AN"
-        nums = [int(d["number"].rsplit("-", 1)[1]) for d in self.m[coll].values()
-                if d.get("number", "").startswith(f"{prefix}-{YEAR}-")]  # fmt: skip
-        return f"{prefix}-{YEAR}-{max(nums, default=0) + 1:04d}"
+        n = self.counters.get((prefix, year), 0) + 1
+        self.counters[(prefix, year)] = n
+        return f"{prefix}-{year}-{n:04d}"
 
     @precondition(lambda self: self.m["offers"] or self.m["invoices"])
     @rule(data=st.data(), coll=st.sampled_from(["offers", "invoices"]))
@@ -767,10 +769,11 @@ class ApiMachine(RuleBasedStateMachine):
             return
         assert r.status_code == 200, r.text
         new = dict(doc)
-        new.setdefault("number", self.next_number(coll))
+        base = date.fromisoformat(new["date"]) if new.get("date") else TODAY
+        if not new.get("number"):
+            new["number"] = self.next_number(coll, base.year)
         if new["status"] == "draft":
             new["status"] = "sent"
-        base = date.fromisoformat(new["date"]) if new.get("date") else TODAY
         if coll == "invoices":
             new.setdefault("due_date", (base + timedelta(days=14)).isoformat())
         else:
@@ -1137,7 +1140,7 @@ class ApiMachine(RuleBasedStateMachine):
                     recv += t["gross"]
                     if not accrual:
                         continue
-                when = inv["date"] if accrual else inv.get("paid_date")
+                when = (inv.get("date") or TODAY.isoformat()) if accrual else inv.get("paid_date")
                 if when and when.startswith(f"{year}-"):
                     rev += t["net"]
                     vat_out += t["vat"]
