@@ -109,6 +109,113 @@ def test_declared_areas_exist(app):
             assert area in rights.AREAS and op in ("read", "write")
 
 
+# Hand-written, independent of the router declarations: (method, path) -> (area, operation, needs full scope).
+# Reviewed line by line against docs/roles.md. A new guarded route must be added here.
+# Notes: read-only planning calls are POSTs but need only `planning` read; the Impressum lookup is part of
+# `customers` (write, it creates data); converting an offer into an invoice creates an invoice (`invoices` write);
+# GET /settings needs full scope because employees get their limited view through /bootstrap.
+EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
+    ("POST", "/api/users/{user_id}/totp/reset"): ("team", "write", False),
+    ("GET", "/api/users"): ("team", "read", False),
+    ("POST", "/api/users"): ("team", "write", False),
+    ("PUT", "/api/users/{user_id}"): ("team", "write", False),
+    ("DELETE", "/api/users/{user_id}"): ("team", "write", False),
+    ("GET", "/api/timer"): ("timer", "read", False),
+    ("POST", "/api/timer/start"): ("timer", "write", False),
+    ("POST", "/api/timer/stop"): ("timer", "write", False),
+    ("GET", "/api/dashboard"): ("timer", "read", False),
+    ("GET", "/api/forecast"): ("planning", "read", False),
+    ("POST", "/api/plan/simulate"): ("planning", "read", False),
+    ("POST", "/api/plan/check-offer"): ("planning", "read", False),
+    ("POST", "/api/plan/what-must-move"): ("planning", "read", False),
+    ("POST", "/api/plan/suggest-vacation"): ("planning", "read", False),
+    ("POST", "/api/plan/suggest-start"): ("planning", "read", False),
+    ("GET", "/api/plan/vacation"): ("planning", "read", False),
+    ("POST", "/api/plan/apply"): ("planning", "write", False),
+    ("GET", "/api/plan/scenarios"): ("planning", "read", False),
+    ("POST", "/api/plan/scenarios"): ("planning", "write", False),
+    ("PUT", "/api/plan/scenarios/{rid}"): ("planning", "write", False),
+    ("DELETE", "/api/plan/scenarios/{rid}"): ("planning", "write", False),
+    ("POST", "/api/plan/scenarios/{rid}/apply"): ("planning", "write", False),
+    ("POST", "/api/projects/{rid}/extend"): ("planning", "write", False),
+    ("GET", "/api/projects/{rid}/planning"): ("planning", "read", False),
+    ("GET", "/api/finance"): ("finance", "read", False),
+    ("GET", "/api/project-report"): ("finance", "read", False),
+    ("GET", "/api/settings"): ("settings", "read", True),
+    ("PUT", "/api/settings"): ("settings", "write", False),
+    ("POST", "/api/attachments"): ("attachments", "write", False),
+    ("GET", "/api/attachments/{name}"): ("attachments", "read", False),
+    ("POST", "/api/invoices/from-time"): ("invoices", "write", False),
+    ("POST", "/api/invoices/{rid}/finalize"): ("invoices", "write", False),
+    ("GET", "/api/invoices/{rid}/pdf"): ("invoices", "read", False),
+    ("POST", "/api/offers/{rid}/finalize"): ("offers", "write", False),
+    ("GET", "/api/offers/{rid}/pdf"): ("offers", "read", False),
+    ("POST", "/api/offers/{rid}/accept"): ("offers", "write", False),
+    ("POST", "/api/offers/{rid}/to-invoice"): ("invoices", "write", False),
+    ("POST", "/api/customers/lookup-impressum"): ("customers", "write", False),
+    ("GET", "/api/customers"): ("customers", "read", False),
+    ("POST", "/api/customers"): ("customers", "write", False),
+    ("GET", "/api/customers/{rid}"): ("customers", "read", False),
+    ("PUT", "/api/customers/{rid}"): ("customers", "write", False),
+    ("DELETE", "/api/customers/{rid}"): ("customers", "write", False),
+    ("GET", "/api/projects"): ("projects", "read", False),
+    ("POST", "/api/projects"): ("projects", "write", False),
+    ("GET", "/api/projects/{rid}"): ("projects", "read", False),
+    ("PUT", "/api/projects/{rid}"): ("projects", "write", False),
+    ("DELETE", "/api/projects/{rid}"): ("projects", "write", False),
+    ("GET", "/api/tasks"): ("projects", "read", False),
+    ("POST", "/api/tasks"): ("projects", "write", False),
+    ("GET", "/api/tasks/{rid}"): ("projects", "read", False),
+    ("PUT", "/api/tasks/{rid}"): ("projects", "write", False),
+    ("DELETE", "/api/tasks/{rid}"): ("projects", "write", False),
+    ("GET", "/api/entries"): ("time", "read", False),
+    ("POST", "/api/entries"): ("time", "write", False),
+    ("GET", "/api/entries/{rid}"): ("time", "read", False),
+    ("PUT", "/api/entries/{rid}"): ("time", "write", False),
+    ("DELETE", "/api/entries/{rid}"): ("time", "write", False),
+    ("GET", "/api/contracts"): ("contracts", "read", False),
+    ("POST", "/api/contracts"): ("contracts", "write", False),
+    ("GET", "/api/contracts/{rid}"): ("contracts", "read", False),
+    ("PUT", "/api/contracts/{rid}"): ("contracts", "write", False),
+    ("DELETE", "/api/contracts/{rid}"): ("contracts", "write", False),
+    ("GET", "/api/absences"): ("absences", "read", False),
+    ("POST", "/api/absences"): ("absences", "write", False),
+    ("GET", "/api/absences/{rid}"): ("absences", "read", False),
+    ("PUT", "/api/absences/{rid}"): ("absences", "write", False),
+    ("DELETE", "/api/absences/{rid}"): ("absences", "write", False),
+    ("GET", "/api/offers"): ("offers", "read", False),
+    ("POST", "/api/offers"): ("offers", "write", False),
+    ("GET", "/api/offers/{rid}"): ("offers", "read", False),
+    ("PUT", "/api/offers/{rid}"): ("offers", "write", False),
+    ("DELETE", "/api/offers/{rid}"): ("offers", "write", False),
+    ("GET", "/api/invoices"): ("invoices", "read", False),
+    ("POST", "/api/invoices"): ("invoices", "write", False),
+    ("GET", "/api/invoices/{rid}"): ("invoices", "read", False),
+    ("PUT", "/api/invoices/{rid}"): ("invoices", "write", False),
+    ("DELETE", "/api/invoices/{rid}"): ("invoices", "write", False),
+    ("GET", "/api/expenses"): ("expenses", "read", False),
+    ("POST", "/api/expenses"): ("expenses", "write", False),
+    ("GET", "/api/expenses/{rid}"): ("expenses", "read", False),
+    ("PUT", "/api/expenses/{rid}"): ("expenses", "write", False),
+    ("DELETE", "/api/expenses/{rid}"): ("expenses", "write", False),
+    ("GET", "/api/templates"): ("templates", "read", False),
+    ("POST", "/api/templates"): ("templates", "write", False),
+    ("GET", "/api/templates/{rid}"): ("templates", "read", False),
+    ("PUT", "/api/templates/{rid}"): ("templates", "write", False),
+    ("DELETE", "/api/templates/{rid}"): ("templates", "write", False),
+}
+
+
+def test_declared_rights_equal_the_hand_written_table(app):
+    actual = {}
+    for method, route, path in _routes(app):
+        reqs = declared(route)
+        if reqs:
+            assert len(reqs) == 1, (method, path, reqs)
+            actual[(method, path)] = reqs[0]
+    assert actual == EXPECTED
+
+
 def test_every_route_is_denied_exactly_where_the_matrix_says(app, clients):
     """All routes x all roles: 403 if and only if the role lacks the declared access; otherwise the request gets
     past the permission check (whatever the handler then says about the dummy ids)."""
@@ -295,3 +402,95 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
     assert roles == {"b": "boss", "m": "employee", "a": "accountant"}
     assert new.get("users", "user00000002")["future"] == 1  # unknown fields survive
     new.close()
+
+
+# ------------------------------------------------------------------ review follow-ups
+def test_bootstrap_only_contains_what_the_role_may_see(app, boss_client, clients):
+    store = app.state.services.store
+    store.save("templates", {"name": "Mine", "kind": "offer", "body": "x"})
+    (store.data_dir / "users.sync-conflict-20260101.json").write_text("{}")
+    boot = {role: c.get("/api/bootstrap").json() for role, c in clients.items()}
+    assert boot["boss"]["conflicts"] and any(t.get("name") == "Mine" for t in boot["boss"]["templates"])
+    assert boot["employee"]["templates"] == [] and boot["employee"]["conflicts"] == []
+    assert boot["accountant"]["templates"] and boot["accountant"]["conflicts"] == []
+
+
+def test_boss_count_normalises_legacy_and_ignores_unknown_roles(app, boss_client):
+    auth = app.state.services.auth
+    store = app.state.services.store
+    boss_id = boss_client.get("/api/auth/me").json()["id"]
+    assert auth._boss_count() == 1
+    store.save("users", {"username": "old", "name": "Old", "role": "member", "active": True})
+    store.save("users", {"username": "odd", "name": "Odd", "role": "BOSS", "active": True})  # no rights at all
+    store.save("users", {"username": "gone", "name": "Gone", "role": "boss", "active": False})
+    assert auth._boss_count() == 1
+    assert auth._boss_count(excluding=boss_id) == 0
+    r = boss_client.put(
+        f"/api/users/{boss_id}", json={"username": "boss", "name": "Test Boss", "role": "employee", "active": True}
+    )
+    assert r.status_code == 400  # the odd-cased and the inactive "boss" do not count
+
+
+def test_last_boss_check_and_save_share_one_transaction(app, boss_client, monkeypatch):
+    store = app.state.services.store
+    boss_id = boss_client.get("/api/auth/me").json()["id"]
+    depth = {"now": 0, "at_count": None, "at_save": None}
+    real_tx, real_count, real_save = store.transaction, app.state.services.auth._boss_count, store.save
+    from contextlib import contextmanager
+
+    @contextmanager
+    def tx():
+        with real_tx():
+            depth["now"] += 1
+            try:
+                yield
+            finally:
+                depth["now"] -= 1
+
+    def count(*a, **k):
+        depth["at_count"] = depth["now"]
+        return real_count(*a, **k)
+
+    def save(*a, **k):
+        depth["at_save"] = depth["now"]
+        return real_save(*a, **k)
+
+    monkeypatch.setattr(store, "transaction", tx)
+    monkeypatch.setattr(app.state.services.auth, "_boss_count", count)
+    monkeypatch.setattr(store, "save", save)
+    boss_client.post("/api/users", json={"username": "b2", "name": "B2", "role": "boss", "password": PASSWORD})
+    r = boss_client.put(
+        f"/api/users/{boss_id}", json={"username": "boss", "name": "Test Boss", "role": "employee", "active": True}
+    )
+    assert r.status_code == 200, r.text
+    assert depth["at_count"] == 1 and depth["at_save"] == 1
+
+
+def test_planning_warnings_only_for_roles_with_planning_access():
+    from permita38.api.routers.records import _with_warnings
+
+    class Stub:
+        class planning:  # noqa: N801
+            @staticmethod
+            def warnings_for(coll, rec):
+                return [{"kind": "x"}]
+
+    rec = {"id": "p1"}
+    for role in ("employee", "accountant"):
+        assert "planning_warnings" not in _with_warnings(Stub, "projects", rec, {"role": role})
+    assert _with_warnings(Stub, "projects", rec, {"role": "boss"})["planning_warnings"] == [{"kind": "x"}]
+
+
+def test_employee_gets_404_for_unassigned_project_and_does_not_see_its_tasks(boss_client, clients):
+    emp = clients["employee"]
+    mine = boss_client.post("/api/projects", json={"name": "Mine", "member_ids": [emp.user_id]}).json()
+    other = boss_client.post(
+        "/api/projects", json={"name": "Other", "member_ids": [boss_client.get("/api/auth/me").json()["id"]]}
+    ).json()
+    t_mine = boss_client.post("/api/tasks", json={"name": "T1", "project_id": mine["id"]}).json()
+    t_other = boss_client.post("/api/tasks", json={"name": "T2", "project_id": other["id"]}).json()
+    assert emp.get(f"/api/projects/{other['id']}").status_code == 404
+    assert emp.get(f"/api/projects/{mine['id']}").status_code == 200
+    assert [p["id"] for p in emp.get("/api/projects").json()] == [mine["id"]]
+    assert emp.get(f"/api/tasks/{t_other['id']}").status_code == 404
+    assert [t["id"] for t in emp.get("/api/tasks").json()] == [t_mine["id"]]

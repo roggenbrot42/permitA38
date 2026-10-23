@@ -18,7 +18,7 @@ Per area there is a read scope and a write scope (`read / write`):
 
 * `none` – no access (the API answers `403 Forbidden`),
 * `limited` – a restricted view: own records only (timer, time entries, time off), assigned projects and their
-  tasks without rates (projects), business name and federal state only (settings), names only (team),
+  tasks without rates (projects), business name and federal state only (settings), names and roles only (team; the web app needs the role),
 * `all` – full access.
 
 | Area | Covers | boss | employee | accountant |

@@ -197,14 +197,15 @@ class AuthService:
             rec["password_hash"], rec["pw_changed"] = hash_password(password), next_session_version(old)
         elif not old:
             raise ServiceError(400, "A password is required for new users")
-        if (
-            old
-            and rights.normalize_role(old.get("role")) == rights.BOSS
-            and (rec["role"] != rights.BOSS or not rec.get("active", True))
-        ):
-            if self._boss_count(excluding=old["id"]) == 0:
-                raise ServiceError(400, "There must be at least one active boss")
-        return public_user(self.store.save("users", rec))
+        with self.store.transaction():
+            if (
+                old
+                and rights.normalize_role(old.get("role")) == rights.BOSS
+                and (rec["role"] != rights.BOSS or not rec.get("active", True))
+            ):
+                if self._boss_count(excluding=old["id"]) == 0:
+                    raise ServiceError(400, "There must be at least one active boss")
+            return public_user(self.store.save("users", rec))
 
     def delete_user(self, user_id: str, actor: dict):
         old = self.store.get("users", user_id)
