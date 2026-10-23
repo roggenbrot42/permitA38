@@ -2,7 +2,7 @@
 
 import pytest
 
-from permita38.core.netsafe import FetchError
+from permita38.core.netsafe import FetchError, SafeFetcher
 from tests.backend.test_impressum_netsafe import _Site, make_fetcher
 
 
@@ -100,5 +100,5 @@ def test_redirect_into_a_private_address_is_refused(site):
 
 def test_https_on_port_80_is_refused_when_https_is_required(site):
     with pytest.raises(FetchError) as err:
-        download(make_fetcher(site), "https://calendar.example.test:80/a.ics", https_only=True)
+        download(SafeFetcher("test-agent"), "https://calendar.example.test:80/a.ics", https_only=True)
     assert err.value.code == "invalid_url"
