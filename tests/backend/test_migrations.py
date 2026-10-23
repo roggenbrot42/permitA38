@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 import sqlite3
 
@@ -244,6 +245,7 @@ def test_fresh_database_reaches_the_head_and_a_second_run_is_a_noop(tmp_path):
 
 def test_health_reports_ids_and_count(tmp_path):
     repo = SQLiteRepository(tmp_path)
+    repo.startup()
     h = repo.health()
     assert h["revision"] == HEAD == h["current_revision"] and h["applied"] == len(CHAIN)
     repo.close()
@@ -451,3 +453,26 @@ def test_crlf_migration_files_parse_and_execute_without_carriage_returns(tmp_pat
         "crlf_probe2",
     }
 
+
+def test_read_only_calls_leave_an_alpha1_database_byte_for_byte_unchanged(tmp_path):
+    data = tmp_path / "data"
+    legacy_db(data, 3).close()  # alpha.1 style: user_version = 3, no schema_migrations table
+    path = data / DB_FILENAME
+    before = hashlib.sha256(path.read_bytes()).hexdigest()
+
+    repo = SQLiteRepository(data, auto_migrate=False)
+    assert repo.applied_ids() == [m.id for m in CHAIN[:3]]
+    assert repo.get_revision() == CHAIN[2].id
+    h = repo.health()
+    assert h["revision"] == CHAIN[2].id and h["applied"] == 3 and h["current_revision"] == HEAD
+    assert list_migrations("sqlite")  # the status listing reads the chain only
+    repo.close()
+
+    assert hashlib.sha256(path.read_bytes()).hexdigest() == before
+    assert not (data / (DB_FILENAME + "-journal")).exists()
+    raw = sqlite3.connect(path)
+    try:
+        tables = {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    finally:
+        raw.close()
+    assert "schema_migrations" not in tables

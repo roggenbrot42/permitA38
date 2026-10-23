@@ -22,6 +22,8 @@ from .base import ID_RE, DatabaseRevisionError, Record, RecordList, Repository, 
 from .dialect import Dialect
 from .schema import BOOL, FLOAT, ID, INT, JSON, STR, TABLES, TEXT, Column, Table
 
+MIGRATIONS_TABLE = "schema_migrations"
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -79,11 +81,18 @@ class SQLRepository(Repository):
         return 0
 
     # ------------------------------------------------------------------ migration state
+    def _migrations_table_exists(self) -> bool:
+        return bool(self._rows(self.dialect.table_exists_sql(), (MIGRATIONS_TABLE,)))
+
     def _migration_state(self, chain: list[Migration]) -> tuple[list[str], list[str], bool]:
-        """(applied ids in chain order, unknown ids, applied ids come from the legacy revision)."""
-        self._exec(self.dialect.create_migrations_table())
-        rows = self._rows(f"SELECT {self.dialect.quote('id')} FROM {self.dialect.quote('schema_migrations')}")
-        ids = {str(r[0]) for r in rows}
+        """(applied ids in chain order, unknown ids, applied ids come from the legacy revision).
+
+        Read-only: a missing `schema_migrations` table means nothing is recorded yet (legacy or empty database).
+        Only `migrate()` creates the table."""
+        ids: set[str] = set()
+        if self._migrations_table_exists():
+            rows = self._rows(f"SELECT {self.dialect.quote('id')} FROM {self.dialect.quote(MIGRATIONS_TABLE)}")
+            ids = {str(r[0]) for r in rows}
         legacy = False
         if not ids:
             rev = self._read_legacy_revision()
@@ -165,6 +174,7 @@ class SQLRepository(Repository):
             pending = chain[len(applied) :]
             if pending and applied:
                 self._pre_migration_backup(chain[-1].id)
+            self._exec(self.dialect.create_migrations_table())
             if legacy:
                 self._record_applied([m for m in chain if m.id in applied])
             for i, m in enumerate(pending, start=len(applied) + 1):
@@ -194,7 +204,8 @@ class SQLRepository(Repository):
             self.backup(self.backup_dir / f"pre-migration-{stamp}-before-{head}.sqlite3")
 
     def health(self) -> Record:
-        self._ensure()
+        # Read-only: reports the state without migrating (startup() / migrate() do that).
+        self._open()
         chain = list_migrations(self.dialect.name)
         applied = self.applied_ids()
         return {

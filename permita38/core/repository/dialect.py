@@ -43,6 +43,16 @@ class Dialect:
             cols.append(f"    {self.quote(table.extra_column)} {self.types[JSON]}")
         return f"CREATE TABLE {self.quote(table.name)} (\n" + ",\n".join(cols) + "\n);"
 
+    #: schema expression for information_schema lookups (SQLite overrides table_exists_sql)
+    current_schema_sql = "current_schema()"
+
+    def table_exists_sql(self) -> str:
+        """SELECT returning one row when the table named by the single placeholder exists in the current schema."""
+        return (
+            "SELECT 1 FROM information_schema.tables "
+            f"WHERE table_schema = {self.current_schema_sql} AND table_name = {self.placeholder}"
+        )
+
     def create_migrations_table(self) -> str:
         """Bookkeeping table of applied migrations; created by the runner itself, not by a migration file."""
         q = self.quote
@@ -113,6 +123,9 @@ class SQLiteDialect(Dialect):
     name = "sqlite"
     types = {ID: "TEXT", STR: "TEXT", TEXT: "TEXT", INT: "INTEGER", FLOAT: "REAL", BOOL: "INTEGER", JSON: "TEXT"}
 
+    def table_exists_sql(self) -> str:
+        return "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
+
     def upsert(self, table: Table, columns: list[str]) -> str:
         updates = ", ".join(f"{self.quote(c)} = excluded.{self.quote(c)}" for c in columns if c != table.pk)
         return self._insert_head(table, columns) + f" ON CONFLICT ({self.quote(table.pk)}) DO UPDATE SET {updates}"
@@ -149,6 +162,7 @@ class MariaDBDialect(Dialect):
     placeholder = "%s"
     json_placeholder = "%s"
     quote_char = "`"
+    current_schema_sql = "DATABASE()"
     types = {
         ID: "VARCHAR(32)",
         STR: "VARCHAR(255)",
