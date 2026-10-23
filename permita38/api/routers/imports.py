@@ -2,11 +2,11 @@
 
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
 from permita38.api.deps import Needs, ServicesDep
-from permita38.core import validation as v
+from permita38.api.forms import check_form
 from permita38.core.errors import ServiceError
 from permita38.core.service.importer.tables import MAX_BYTES
 
@@ -25,12 +25,9 @@ def _read(upload: UploadFile | None) -> bytes | None:
     return data
 
 
-def _checked_form(*values: str | None) -> None:
+def _checked_form(mapping: str | None, sheet: str | None) -> None:
     """Text form fields are not parsed by a model: they get the same NUL / surrogate / length checks as a JSON body."""
-    try:
-        v.check_form_values(*values)
-    except ValueError as err:
-        raise HTTPException(422, f"form fields: {err}") from None
+    check_form({"mapping": mapping, "sheet": sheet})
 
 
 @router.post("/import/preview", summary="dry run: validate a file and report what an import would do")

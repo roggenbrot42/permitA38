@@ -279,6 +279,9 @@ def test_nul_in_a_form_field_is_422(boss_client, url, field):
     data = {**data, field: NUL}
     r = boss_client.post(url, data=data, files=files)
     assert r.status_code == 422, (url, field, r.status_code, r.text[:300])
+    detail = r.json()["detail"]  # the same shape as every other 422, located at the form field
+    assert [e["loc"] for e in detail] == [["form", field]], detail
+    assert set(detail[0]) == {"loc", "msg", "type"} and "\x00" not in r.text
 
 
 @pytest.mark.parametrize("url,field", FORM_FIELDS)

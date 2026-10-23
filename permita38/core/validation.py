@@ -8,6 +8,7 @@ values are left to a later soft-warning layer.
 
 import math
 import re
+from collections.abc import Mapping
 from datetime import date
 from typing import Annotated, Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -176,11 +177,16 @@ class StrictRecord(CheckedBody):
     model_config = ConfigDict(extra="allow")
 
 
-def check_form_values(*values: Any) -> None:
-    """For values read from multipart form fields, which have no model: same checks as a JSON body.
-    Raises ValueError with a readable message."""
-    for value in values:
-        _check_value(value)
+def form_value_errors(fields: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Multipart text fields have no model: they get the same checks as a JSON body. Returns pydantic-style errors
+    with ``loc == (field name,)``; the API layer turns them into the usual 422 shape."""
+    errors: list[dict[str, Any]] = []
+    for name, value in fields.items():
+        try:
+            _check_value(value)
+        except ValueError as err:
+            errors.append({"loc": (name,), "msg": f"Value error, {err}", "type": "value_error"})
+    return errors
 
 
 def check_period(start: str | None, end: str | None, what: str = "end") -> None:
