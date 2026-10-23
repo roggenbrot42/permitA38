@@ -30,7 +30,11 @@ function tripDates(start, end) {
 const dayLabel = d => `${dayName(d)} ${parseD(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' })}`;
 const tripCountryOptions = () => TRIP_COUNTRY_CODES.map(c => countryLabel(c)).sort((a, b) => a.localeCompare(b)).map(l => `<option value="${esc(l)}"></option>`).join('');
 /** Trips for the bill dialog's trip select (newest first, as the server sends them). */
-const tripOptions = () => (S.d.trips || []).map(t => [t.id, `${fmtDate(t.start.slice(0, 10))} ${t.title || t.purpose}`]);
+const tripOptions = keep => {
+  const opts = (S.d.trips || []).map(t => [t.id, `${fmtDate(t.start.slice(0, 10))} ${t.title || t.purpose}`]);
+  if (keep && !opts.some(o => o[0] === keep)) opts.push([keep, 'Other trip']);   // never drop a link the list does not know: saving would unlink the bill
+  return opts;
+};
 const destinationOf = t => {
   const names = (t.places || []).map(p => (p.city ? `${p.city} (${countryName(p.country)})` : countryName(p.country)));
   if (!names.length) names.push(countryName('DE'));
@@ -97,9 +101,9 @@ function dayRowHTML(r, ro) {
 }
 function daysHTML(rows, ro) {
   if (!rows.length) return '<p class="hint" role="status">Set the start and the end (the end after the start, at most 90 days) to list the days.</p>';
-  return `<table class="trip-table lines"><caption class="sr-only">Days, destinations and meals provided</caption>
+  return `<div class="table-wrap"><table class="trip-table lines"><caption class="sr-only">Days, destinations and meals provided</caption>
     <thead><tr><th scope="col">Day</th><th scope="col">Country</th><th scope="col">City</th><th scope="col">Breakfast provided</th><th scope="col">Lunch provided</th><th scope="col">Dinner provided</th></tr></thead>
-    <tbody>${rows.map(r => dayRowHTML(r, ro)).join('')}</tbody></table>`;
+    <tbody>${rows.map(r => dayRowHTML(r, ro)).join('')}</tbody></table></div>`;
 }
 function rebuildDays() {
   const rows = fillDays(tripDates($('#t_start').value, $('#t_end').value) || [], tripRowsFromDOM());
@@ -253,7 +257,7 @@ function billsHTML(trip, ro) {
   const b = trip.bills || { count: 0, net: 0, vat: 0 };
   return `<h3>Bills of this trip</h3>
     <p>${b.count} ${b.count === 1 ? 'bill' : 'bills'}: net ${esc(eur(b.net))}, VAT ${esc(eur(b.vat))}</p>
-    ${bills.length ? `<table class="lines"><caption class="sr-only">Bills of this trip</caption><tr><th scope="col">Date</th><th scope="col">Vendor</th><th scope="col">Category</th><th scope="col" class="num">Net</th><th scope="col" class="num">VAT</th></tr>${bills.map(e => `<tr><td class="nowrap">${fmtDate(e.date)}</td><td>${esc(e.vendor || '')}</td><td>${esc(e.category || '')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td></tr>`).join('')}</table>` : '<p class="small muted">No bills linked yet.</p>'}
+    ${bills.length ? `<table class="lines"><caption class="sr-only">Bills of this trip</caption><tr><th scope="col">Date</th><th scope="col">Vendor</th><th scope="col">Category</th><th scope="col" class="num">Net</th><th scope="col" class="num">VAT</th></tr>${bills.map(e => `<tr><td class="nowrap">${esc(fmtDate(e.date))}</td><td>${esc(e.vendor || '')}</td><td>${esc(e.category || '')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td></tr>`).join('')}</table>` : '<p class="small muted">No bills linked yet.</p>'}
     ${ro ? '' : `<p><button type="button" class="ghost" data-a="editExpense" data-trip="${esc(trip.id)}" data-project="${esc(trip.project_id || '')}">Add bill to this trip</button></p>`}`;
 }
 
@@ -353,15 +357,29 @@ function closeTrip() {
   render();
 }
 
+/** A second click while a write runs is ignored (no double trip, no double finalize). */
+let TRIP_BUSY = false;
+const once = fn => async (...a) => { if (TRIP_BUSY) return; TRIP_BUSY = true; try { return await fn(...a); } finally { TRIP_BUSY = false; } };
+
+/* A bill started from a trip returns to the trip when its dialog closes, so the checklist shows the new state. */
+const editExpenseBase = A.editExpense;
+A.editExpense = el => {
+  editExpenseBase(el);
+  const id = el?.dataset?.trip;
+  if (!id) return;
+  const prev = closeModal.onClose;
+  closeModal.onClose = () => { if (prev) prev(); setTimeout(() => guard(async () => { await loadAll(['trips', 'expenses']); if (!$('#modal-root .modal')) renderTripDialog(await api('GET', `trips/${encodeURIComponent(id)}`)); })(), 0); };
+};
+
 A.newTrip = () => renderTripDialog(null);
 A.editTrip = async el => renderTripDialog(await api('GET', `trips/${el.dataset.id}`));
 A.tripClose = () => closeTrip();
-A.tripSave = async () => {
+A.tripSave = once(async () => {
   const t = await tripWrite(tripBody('draft'));
   toast('Trip saved');
   await tripAfterWrite(t);
-};
-A.tripFinalize = async () => {
+});
+A.tripFinalize = once(async () => {
   const body = tripBody('final');
   let t;
   try { t = await tripWrite(body); }
@@ -372,16 +390,16 @@ A.tripFinalize = async () => {
   }
   toast('Trip finalized');
   await tripAfterWrite(t);
-};
-A.tripReopen = async el => {
+});
+A.tripReopen = once(async el => {
   const t = await api('POST', `trips/${el.dataset.id}/reopen`, {});
   toast('Trip reopened');
   await tripAfterWrite(t);
-};
-A.tripDelete = async el => {
+});
+A.tripDelete = once(async el => {
   if (!confirm('Delete this draft trip? Its bills stay and lose the trip link.')) return;
   await api('DELETE', `trips/${el.dataset.id}`);
   toast('Trip deleted');
   await loadAll(['trips', 'expenses']);
   closeTrip();
-};
+});
