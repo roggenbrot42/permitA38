@@ -45,6 +45,14 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | **Bill extraction from PDF/image** (prefill vendor, date, lines, VAT rates; also e-invoice XML); local OCR/LLM, you confirm before saving | later (see AI ideas) |
 | **Gantt chart** for the overall plan and for project subtasks | later |
 
+## Known bugs for the next release
+
+Reported by the maintainer; fixed before any new feature (see `docs/planning.md` for the rules involved).
+
+| # | Bug | Analysis | Proposed fix |
+|---|---|---|---|
+| 1 | **Planner shows an overloaded week although all hours fit before the vacation.** Two jobs from now to 31 Dec: A = 220 h total until 15 Dec, B = 45 h total until 31 Dec; vacation from 15 Dec to 10 Jan 2027. The week of 14 Dec is reported as over capacity instead of the work being finished before the vacation. | By design today (`permita38/core/service/planning.py`, module docstring): `total_hours` is spread **evenly over the workdays of the contract period** and holidays and absences do **not** reduce commitments. B therefore books its nominal share on 14-31 Dec although the vacation removes nearly all capacity there, and the week of 14 Dec (one workday of capacity: Monday) carries the share of that week plus part of A. | (a) **Bug fix, first:** spread `total_hours` over the assignee's **available** days (workdays minus holidays and absences), so hours before a vacation grow and no hours fall into it; if the available capacity of the period is smaller than the total, say so ("only x h fit before the deadline") instead of showing a silent overload. (b) **Later, a feature:** deadline-driven levelling (fill the earliest free capacity first), see "Planning" below. Add a regression test with exactly this scenario (fixed dates, hand-computed weeks) and update `docs/planning.md`, which currently documents the nominal spread as intended. |
+
 ## v0.4.0-alpha.3
 
 | Item | Status |
