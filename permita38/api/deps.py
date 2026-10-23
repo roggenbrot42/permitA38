@@ -16,6 +16,7 @@ from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.plan_service import PlanningService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
+from permita38.core.service.sanity import SanityService
 from permita38.core.service.settings import SettingsService
 from permita38.core.service.time import TimeService
 from permita38.core.service.totp import TotpService
@@ -36,6 +37,7 @@ class Services:
     impressum: ImpressumService
     busy: BusyTimeProvider
     planning: PlanningService
+    sanity: SanityService
 
     @classmethod
     def create(cls, config: Config) -> "Services":
@@ -46,6 +48,7 @@ class Services:
         return cls(
             busy=busy,
             planning=PlanningService(store, busy),
+            sanity=SanityService(store),
             config=config,
             store=store,
             auth=auth,

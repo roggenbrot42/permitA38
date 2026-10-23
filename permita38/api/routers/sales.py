@@ -16,10 +16,15 @@ class DocumentResult(Document):
     """A saved offer or invoice plus its non-blocking planning warnings (never stored)."""
 
     planning_warnings: list[dict] | None = None
+    sanity_warnings: list[dict] | None = None
 
 
-def _doc(services, coll: str, doc: dict) -> dict:
-    return {**doc, "planning_warnings": services.planning.warnings_for(coll, doc)}
+def _doc(services, coll: str, doc: dict, finalize: bool = False) -> dict:
+    return {
+        **doc,
+        "planning_warnings": services.planning.warnings_for(coll, doc),
+        "sanity_warnings": services.sanity.check(coll, doc, None, finalize=finalize),
+    }
 
 
 class FromTime(BaseModel):
@@ -44,7 +49,7 @@ def invoice_from_time(body: FromTime, _: BossUser, services: ServicesDep):
 
 @router.post("/invoices/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
 def finalize_invoice(rid: str, _: BossUser, services: ServicesDep):
-    return _doc(services, "invoices", services.sales.finalize("invoices", rid))
+    return _doc(services, "invoices", services.sales.finalize("invoices", rid), finalize=True)
 
 
 @router.get("/invoices/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})
@@ -54,7 +59,7 @@ def invoice_pdf(rid: str, _: BossUser, services: ServicesDep):
 
 @router.post("/offers/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
 def finalize_offer(rid: str, _: BossUser, services: ServicesDep):
-    return _doc(services, "offers", services.sales.finalize("offers", rid))
+    return _doc(services, "offers", services.sales.finalize("offers", rid), finalize=True)
 
 
 @router.get("/offers/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})
