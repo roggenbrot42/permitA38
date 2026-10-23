@@ -126,6 +126,7 @@ def test_blocked_address_shows_an_error_and_never_the_link(ui, fetcher):
     ui.wait_for_selector("#cal-err:not([hidden])")
     assert "not allowed" in ui.inner_text("#cal-err")
     assert SECRET_TOKEN not in ui.content()
+    assert ui.input_value("#cal_link") == SECRET_URL  # a failed attempt keeps the pasted link for correcting it
 
 
 def test_invalid_file_is_reported(ui, tmp_path):

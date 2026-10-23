@@ -548,7 +548,9 @@ def _read_event(comp: _Comp, ctx: _Context) -> _Master | None:
     for prop in props.get("EXDATE", []):
         for value in _split_values(prop.value)[:5000]:
             try:
-                exdates.add(_stamp(_Prop(prop.name, prop.params, value), ctx.zones).key())
+                ex = _stamp(_Prop(prop.name, prop.params, value), ctx.zones)
+                # EXDATE;VALUE=DATE on a timed series removes the instance(s) of that local day
+                exdates.add(f"D:{ex.key()}" if ex.is_date and not start.is_date else ex.key())
             except _Bad:
                 ctx.warnings.append("bad_value")
 
@@ -579,7 +581,13 @@ def _until(text: str, start: _Stamp, zones: _Zones) -> _Stamp:
     stamp = _stamp(prop, zones)
     if stamp.is_date:
         raise _Bad()
+    if not value.endswith("Z"):  # floating UNTIL: wall clock of DTSTART's own zone, not the default zone
+        return _Stamp(False, stamp.wall, start.tz)
     return stamp
+
+
+def _excluded(master: _Master, stamp: _Stamp, key: str) -> bool:
+    return key in master.exdates or f"D:{stamp.wall.date().isoformat()}" in master.exdates
 
 
 def _expand(master: _Master, overrides: set[str], ctx: _Context) -> list[tuple[_Stamp, str]]:
@@ -588,7 +596,7 @@ def _expand(master: _Master, overrides: set[str], ctx: _Context) -> list[tuple[_
     found: list[tuple[_Stamp, str]] = []
     generated = 0
 
-    if master.start.key() not in overrides and master.start.key() not in master.exdates:
+    if master.start.key() not in overrides and not _excluded(master, master.start, master.start.key()):
         if (
             not master.cancelled
             and not master.transparent
@@ -613,7 +621,7 @@ def _expand(master: _Master, overrides: set[str], ctx: _Context) -> list[tuple[_
             if key in seen:
                 continue
             seen.add(key)
-            if key not in master.exdates and key not in overrides:
+            if not _excluded(master, stamp, key) and key not in overrides:
                 if (
                     not master.cancelled
                     and not master.transparent
@@ -629,7 +637,7 @@ def _expand(master: _Master, overrides: set[str], ctx: _Context) -> list[tuple[_
         if key in seen:
             continue
         seen.add(key)
-        if key not in master.exdates and key not in overrides:
+        if not _excluded(master, stamp, key) and key not in overrides:
             if (
                 not master.cancelled
                 and not master.transparent

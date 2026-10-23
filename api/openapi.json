@@ -5534,6 +5534,11 @@
             "title": "Event Count",
             "default": 0
           },
+          "reupload_advised": {
+            "type": "boolean",
+            "title": "Reupload Advised",
+            "default": false
+          },
           "last_warnings": {
             "items": {
               "type": "string"

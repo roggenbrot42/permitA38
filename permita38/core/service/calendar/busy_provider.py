@@ -12,7 +12,8 @@ from permita38.core.service.calendar.service import event_bounds, user_zone
 
 DEFAULT_WORK_START = time(9, 0)
 DEFAULT_WORK_END = time(17, 0)
-MAX_SPAN_DAYS = 400
+MAX_SPAN_DAYS = 400  # one query; longer ranges are answered in chunks of this size
+MAX_TOTAL_DAYS = 3660  # about ten years
 
 
 def _clock(text: str | None, default: time) -> time:
@@ -38,8 +39,19 @@ class CalendarBusyProvider:
         self.on_request = on_request
 
     def busy_hours(self, user_id: str, start: date, end: date) -> dict[date, float]:
-        if end < start or (end - start).days > MAX_SPAN_DAYS:
+        """Busy hours per day. Long ranges (the planner asks for up to 156 weeks) are answered in chunks; days beyond
+        the stored calendar horizon simply have no events, i.e. no busy time."""
+        if end < start or (end - start).days > MAX_TOTAL_DAYS:
             return {}
+        out: dict[date, float] = {}
+        chunk_start = start
+        while chunk_start <= end:
+            chunk_end = min(end, chunk_start + timedelta(days=MAX_SPAN_DAYS))
+            out.update(self._busy_range(user_id, chunk_start, chunk_end))
+            chunk_start = chunk_end + timedelta(days=1)
+        return out
+
+    def _busy_range(self, user_id: str, start: date, end: date) -> dict[date, float]:
         sources = {
             s["id"]: s for s in self.store.find("calendar_sources", user_id=user_id) if s.get("busy_default", True)
         }

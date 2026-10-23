@@ -36,7 +36,7 @@
     const WARN = { unsupported_rrule: 'A repeat rule is not supported; only the first meeting of that series is used.', unknown_timezone: 'A time zone was not recognised; your own time zone was assumed.', event_too_complex: 'A repeating meeting was too complex and was skipped.', out_of_range: 'A meeting with an impossible date was skipped.', bad_event: 'An unreadable entry was skipped.', bad_value: 'An unreadable date was skipped.' };
     const warn = (s.last_warnings || []).length ? `<div class="small muted">Note: ${s.last_warnings.map(w => esc(WARN[w] || w)).join(' ')}</div>` : '';
     const sync = s.kind === 'ics_url' ? `<button class="sm" data-a="calSync" data-id="${esc(s.id)}">Sync now</button>` : '';
-    return `<tr><td><b>${esc(s.name)}</b><div class="muted small">${kind}</div>${err}${warn}</td>
+    return `<tr><td><b>${esc(s.name)}</b><div class="muted small">${kind}</div>${err}${warn}${s.reupload_advised ? '<div class="small muted">This file was uploaded a while ago: upload it again to extend repeating meetings.</div>' : ''}</td>
       <td class="small">${status}<div class="muted">last: ${epoch(s.last_fetched)}</div><div class="muted">${s.event_count} events · ${esc(s.title_policy)} · ${s.kind === 'ics_url' ? EVERY.find(([m]) => m === s.refresh_minutes)?.[1] || 'every ' + s.refresh_minutes + ' min' : 'manual upload'}</div></td>
       <td class="right"><button class="sm" data-a="calPreview" data-id="${esc(s.id)}">Preview 14 days</button> ${sync}
       <button class="sm" data-a="calEdit" data-id="${esc(s.id)}">Options</button> <button class="sm danger" data-a="calDelete" data-id="${esc(s.id)}">Delete</button></td></tr>`;
@@ -91,7 +91,8 @@
         refresh_minutes: Number(document.getElementById('cal_refresh').value), all_day_blocks: document.getElementById('cal_allday').checked,
         include_keywords: words(document.getElementById('cal_inc').value), exclude_keywords: words(document.getElementById('cal_exc').value),
       });
-    } catch (e) { showErr(e.message); return; } finally { document.getElementById('cal_link').value = ''; }
+    } catch (e) { showErr(e.message); return; }  // on failure the pasted link stays so it can be corrected
+    document.getElementById('cal_link').value = '';
     toast('Calendar connected');
     await redraw();
   };

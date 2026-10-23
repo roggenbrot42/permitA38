@@ -80,13 +80,18 @@ meetings found, so you can check the result.
 
 ## Limits
 
-- Calendars are imported for a window from 30 days in the past to about 18 months ahead. Up to 20,000 events per
+- Calendars are imported for a window from 30 days in the past to about 18 months ahead. The planner can look further
+  ahead (up to 156 weeks); beyond the stored window no meetings are known, so no busy time is counted there (it is
+  never an error). Up to 20,000 events per
   calendar are read; larger calendars are refused with a message.
 - Recurrence rules: daily, weekly, monthly and yearly rules are expanded; hourly and minute rules, and the rarer
   week-number and year-day rules, keep only the first occurrence and are reported as a warning.
 - Time zones: IANA names (for example `Europe/Berlin`) are used exactly. Common Windows names such as
   `W. Europe Standard Time` are mapped to the matching IANA zone; any other zone is evaluated from the rules in the
   calendar's own definition. A zone that cannot be understood falls back to your time zone and is reported.
+- An uploaded file is read once and its text is not kept (it would contain meeting titles), so repeating meetings are
+  not extended later. After about six months *Settings → Calendars* advises uploading the file again; a link
+  subscription is re-read automatically.
 - Changes to "this and all following" occurrences (`RANGE=THISANDFUTURE`) are not supported: only the named
   occurrence is changed.
 - A single repeating meeting that is too complex to expand (for example February 31st) is skipped and reported; the

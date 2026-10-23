@@ -522,6 +522,7 @@ class CalendarOut(BaseModel):
     last_status: str | None = None
     last_error: str | None = None
     event_count: int = 0
+    reupload_advised: bool = False  # an uploaded file whose stored period has run short: upload it again
     last_warnings: list[str] = []  # notes from the last import (unsupported rules, unknown zones ...), no user data
 
 

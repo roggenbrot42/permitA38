@@ -118,7 +118,7 @@ def test_bad_ranges_and_unknown_users_are_empty(repo):
     source(repo, "srcbad001")
     event(repo, "srcbad001", "2026-11-02T10:00:00Z", "2026-11-02T11:00:00Z")
     assert busy(repo, date(2026, 11, 3), date(2026, 11, 2)) == {}
-    assert busy(repo, date(2026, 1, 1), date(2028, 1, 1)) == {}
+    assert busy(repo, date(2026, 1, 1), date(2040, 1, 1)) == {}  # absurd span (beyond ten years)
     assert busy(repo, date(2026, 11, 2), date(2026, 11, 2), user_id="nosuchuser") == {}
 
 

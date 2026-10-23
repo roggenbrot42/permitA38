@@ -34,6 +34,7 @@ DEFAULT_REFRESH_MINUTES = 360
 MIN_REFRESH_MINUTES = 15
 MAX_REFRESH_MINUTES = 10080
 MAX_SOURCES = 20
+REUPLOAD_AFTER_SECONDS = 180 * 24 * 3600  # uploaded files: advise a new upload after about six months
 FULL_REFETCH_SECONDS = 24 * 3600  # conditional requests are used for at most a day after the last full import
 PAST_DAYS = 30  # the stored horizon: 30 days back ...
 FUTURE_DAYS = 548  # ... and about 18 months ahead
@@ -171,7 +172,15 @@ class CalendarService:
             "last_error": src.get("last_error"),
             "event_count": src.get("event_count") or 0,
             "last_warnings": list(src.get("last_warnings") or [])[:MAX_WARNINGS],
+            "reupload_advised": self._reupload_advised(src),
         }
+
+    def _reupload_advised(self, src: dict) -> bool:
+        """An uploaded file is expanded once (its text is not kept: it would hold titles): after about half a year the
+        stored horizon has shrunk noticeably, so the file should be uploaded again."""
+        if src.get("kind") != "ics_file":
+            return False
+        return self._clock() - (src.get("imported_at") or src.get("last_fetched") or 0) > REUPLOAD_AFTER_SECONDS
 
     def list_sources(self, user: dict) -> list[dict]:
         return [self._view(s) for s in self.store.find("calendar_sources", user_id=user["id"])]
@@ -235,26 +244,38 @@ class CalendarService:
 
     # ----------------------------------------------------------------------------- update/delete
     def update(self, user: dict, source_id: str, changes: dict) -> dict:
+        """Change options. Only the changed fields are written (a running import keeps its own fields), and a change
+        that needs a re-download is refused up front, before anything is saved, when a refresh is already running."""
         src = self._own(user, source_id)
+        fields: dict[str, object] = {}
         for key in ("name", "refresh_minutes", "all_day_blocks", "busy_default"):
-            if changes.get(key) is not None:
-                src[key] = changes[key]
+            if changes.get(key) is not None and changes[key] != src.get(key):
+                fields[key] = changes[key]
         relabel = changes.get("title_policy") not in (None, src.get("title_policy"))
         if relabel:
-            src["title_policy"] = changes["title_policy"]
-        resync = relabel and src["title_policy"] == "full"  # full titles were never stored
+            fields["title_policy"] = changes["title_policy"]
+        resync = relabel and changes["title_policy"] == "full"  # full titles were never stored
         for key in ("include_keywords", "exclude_keywords"):
             if changes.get(key) is not None and list(changes[key]) != list(src.get(key) or []):
-                src[key] = list(changes[key])
+                fields[key] = list(changes[key])
                 resync = True  # keywords are applied while importing
         if resync and src.get("kind") == "ics_url":
-            self.store.save("calendar_sources", src)
-            return self.sync(user, source_id, force=True)  # the stored events must be rebuilt: no 304 shortcut
+            if not self._begin(source_id):
+                raise ServiceError(409, "This calendar is being refreshed already. Try again in a moment.")
+            try:
+                if self._patch_source(source_id, **fields) is None:
+                    raise ServiceError(404, "Calendar not found")
+                # the stored events must be rebuilt: no 304 shortcut
+                self._refresh_source(self._require(source_id), force=True)
+            finally:
+                self._end(source_id)
+            return self._view(self._require(source_id))
         if resync:
-            src.update(last_status="needs_upload", last_error="The filter changed: upload the calendar file again.")
+            fields.update(last_status="needs_upload", last_error="The filter changed: upload the calendar file again.")
         elif relabel:
-            self._apply_title_policy(source_id, src["title_policy"])
-        self.store.save("calendar_sources", src)
+            self._apply_title_policy(source_id, str(fields["title_policy"]))
+        if fields and self._patch_source(source_id, **fields) is None:
+            raise ServiceError(404, "Calendar not found")
         return self._view(self._require(source_id))
 
     def _apply_title_policy(self, source_id: str, policy: str) -> None:

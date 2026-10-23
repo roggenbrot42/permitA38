@@ -185,7 +185,7 @@ def period_dates(rule: Rule, start: date, index: int) -> list[date]:
     if rule.byday and not rule.bymonth and not rule.bymonthday:
         return _year_days(rule, year)  # RFC 5545: without BYMONTH an ordinal counts within the whole year
     explicit = bool(rule.bymonthday or rule.byday)
-    months = rule.bymonth or (tuple(range(1, 13)) if explicit else (start.month,))
+    months = sorted(set(rule.bymonth)) if rule.bymonth else (list(range(1, 13)) if explicit else [start.month])
     out: list[date] = []
     for month in months:
         out.extend(_month_days(rule, year, month, start, explicit))
