@@ -135,7 +135,7 @@ def itemise_hotel(pg):
     fill_line(pg, 0, "Room 2 nights", "160", "7")
     for n, (d, g, r) in enumerate([("Breakfast", "30", "19"), ("City tax", "6", "0")], 1):
         pg.click("[data-a=addLine]")
-        pg.wait_for_function("n => document.querySelectorAll('#e_lines tr[data-line]').length === n", n + 1)
+        pg.wait_for_function("n => document.querySelectorAll('#e_lines tr[data-line]').length === n", arg=n + 1)
         fill_line(pg, n, d, g, r)
 
 
@@ -360,7 +360,7 @@ def test_blob_url_is_revoked_when_the_file_changes_and_when_the_dialog_closes(ui
     ui.wait_for_selector("#e_preview img")
     first = ui.get_attribute("#e_preview img", "src")
     choose(ui, "two.png", make_png(20, 20), "image/png")
-    ui.wait_for_function("u => document.querySelector('#e_preview img').src !== u", first)
+    ui.wait_for_function("u => document.querySelector('#e_preview img').src !== u", arg=first)
     assert first in ui.evaluate("window.__revoked")
     second = ui.get_attribute("#e_preview img", "src")
     ui.click("#m-cancel")
