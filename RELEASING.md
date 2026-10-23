@@ -18,13 +18,15 @@ edit only `permita38/__init__.py`; `pyproject.toml` reads it.
 ## Pre-flight checklist
 
 1. All work for the release is merged to `main` through pull requests; CI on `main` is green (Linux + Windows,
-   Python 3.10-3.13, lint, OpenAPI contract).
+   Python 3.12-3.14, lint, OpenAPI contract).
 2. Quality gates of the release train are met (see `docs/release-plan.md`, "Entry criteria").
 3. Prepare a **release commit** (`chore(release): 0.4.0-alpha.1`) via pull request that
    - sets `__version__ = "0.4.0a1"` in `permita38/__init__.py`,
    - turns `## [Unreleased]` entries into `## [0.4.0-alpha.1] - YYYY-MM-DD` (keep an empty `## [Unreleased]` above it)
      and fixes the compare links at the bottom,
    - regenerates `THIRD_PARTY_NOTICES.md` (`python scripts/generate_notices.py`) if dependencies changed,
+   - regenerates `api/openapi.json` (`make generate-openapi`): it contains the package version, so every version bump
+     makes `make check-openapi` and the freshness test fail until it is regenerated,
    - passes `make lint test test-release`.
    - Database migrations (`permita38/core/schema/migrations/`): a released migration is frozen (never edit it, never
      change its id). Check `permita38 migrate --status` lists a single linear chain whose head is the newest

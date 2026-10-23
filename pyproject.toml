@@ -8,7 +8,7 @@ dynamic = ["version"]  # single source: permita38/__init__.py (PEP 440); see REL
 description = "Time tracking, planning, offers, invoices and tax reserves for freelancers and small businesses in Germany."
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
@@ -22,6 +22,7 @@ dependencies = [
     "PyYAML>=6",
     "python-multipart>=0.0.9",
     "segno>=1.6",
+    "tzdata; sys_platform == 'win32'",   # zoneinfo has no system time zone database on Windows
 ]
 
 [project.optional-dependencies]
@@ -55,7 +56,7 @@ include = ["permita38*"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py312"
 exclude = [".git", ".venv*", "web", "build", "dist"]
 
 [tool.ruff.lint]
