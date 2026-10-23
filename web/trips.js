@@ -230,7 +230,7 @@ function checkItemHTML(it, trip, ro) {
   const label = { added: 'Added', open: 'Open', not_needed: 'Not needed' }[it.state] || it.state;
   const tone = { added: 'good', open: 'warn' }[it.state] || '';
   const cat = TRIP_CHECK_CATEGORY[it.id];
-  const add = !ro && it.state === 'open' && cat
+  const add = !ro && can('expenses', 'write') && it.state === 'open' && cat
     ? `<button type="button" class="ghost sm" data-a="editExpense" data-trip="${esc(trip.id)}" data-category="${esc(cat)}" data-project="${esc(trip.project_id || '')}">Add bill</button>` : '';
   const skip = it.id === 'allowance' ? '' : `<label class="check-skip"><input type="checkbox" data-not="${esc(it.id)}" id="t_not_${esc(it.id)}" ${it.state === 'not_needed' ? 'checked' : ''} ${ro ? 'disabled' : ''}> Not needed</label>`;
   return `<li class="check-item"><div><b>${esc(it.label)}</b> <span class="pill ${tone}">${esc(label)}</span></div>
@@ -258,7 +258,7 @@ function billsHTML(trip, ro) {
   return `<h3>Bills of this trip</h3>
     <p>${b.count} ${b.count === 1 ? 'bill' : 'bills'}: net ${esc(eur(b.net))}, VAT ${esc(eur(b.vat))}</p>
     ${bills.length ? `<table class="lines"><caption class="sr-only">Bills of this trip</caption><tr><th scope="col">Date</th><th scope="col">Vendor</th><th scope="col">Category</th><th scope="col" class="num">Net</th><th scope="col" class="num">VAT</th></tr>${bills.map(e => `<tr><td class="nowrap">${esc(fmtDate(e.date))}</td><td>${esc(e.vendor || '')}</td><td>${esc(e.category || '')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td></tr>`).join('')}</table>` : '<p class="small muted">No bills linked yet.</p>'}
-    ${ro ? '' : `<p><button type="button" class="ghost" data-a="editExpense" data-trip="${esc(trip.id)}" data-project="${esc(trip.project_id || '')}">Add bill to this trip</button></p>`}`;
+    ${ro || !can('expenses', 'write') ? '' : `<p><button type="button" class="ghost" data-a="editExpense" data-trip="${esc(trip.id)}" data-project="${esc(trip.project_id || '')}">Add bill to this trip</button></p>`}`;
 }
 
 /* ---------- dialog ---------- */

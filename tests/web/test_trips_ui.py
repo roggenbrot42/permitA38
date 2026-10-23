@@ -409,3 +409,21 @@ def test_accountant_reads_trips_read_only(browser):
     expect(pg.locator("#modal-root .modal")).to_have_count(0)
     assert problems == []
     ctx.close()
+
+
+def test_employee_without_expense_right_gets_no_add_bill_button(browser):
+    employee = {
+        "id": "u5e5e5e5e5",
+        "name": "Demo Employee",
+        "role": "employee",
+        "permissions": {"trips": {"read": "limited", "write": "limited"}, "projects": {"read": "limited", "write": "none"}},
+    }
+    api = FakeTripApi(employee, copy.deepcopy(CONTRACT_TRIP))
+    ctx, pg, problems = open_app(browser, api)
+    open_trips_page(pg)
+    pg.click("button[data-a=editTrip]")
+    pg.wait_for_selector("#t_checklist .trip-check")
+    expect(pg.locator("[data-a=tripSave]")).to_have_count(1)  # own trip: still editable
+    assert pg.locator("#modal-root [data-a=editExpense]").count() == 0
+    assert problems == []
+    ctx.close()

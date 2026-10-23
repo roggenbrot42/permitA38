@@ -79,7 +79,7 @@ def test_employee_nav_is_unchanged(browser, srv):
     ctx, pg, problems = open_as(browser, srv, "employee")
     pg.goto(srv.base + "/")
     labels = " ".join(nav(pg))
-    assert labels.split() == ["⏱", "Today", "🗓", "Timesheet", "🏖", "Time", "off"]
+    assert labels.split() == ["⏱", "Today", "🗓", "Timesheet", "🏖", "Time", "off", "🧳", "Business", "trips"]
     pg.goto(srv.base + "/#/customers")
     pg.wait_for_selector("#toast.on")
     assert "#/customers" not in pg.url
