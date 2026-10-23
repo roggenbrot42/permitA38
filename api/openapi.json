@@ -6,7 +6,7 @@
       "name": "GPL-3.0-or-later",
       "url": "https://www.gnu.org/licenses/gpl-3.0.html"
     },
-    "version": "0.4.0a1"
+    "version": "0.4.0a2"
   },
   "paths": {
     "/api/health": {
