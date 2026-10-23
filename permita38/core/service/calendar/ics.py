@@ -20,11 +20,10 @@ import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone, tzinfo
+from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from datetime import time as dtime
 from zoneinfo import ZoneInfo
 
-from permita38.core.compat import UTC
 from permita38.core.service.calendar.recurrence import (
     ExpansionLimit,
     RruleError,

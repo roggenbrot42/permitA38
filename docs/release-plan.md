@@ -68,7 +68,7 @@ workflow; the rest is a manual checklist recorded in the release pull request.
 
 | Gate | How |
 |---|---|
-| CI green on `main`: Linux and Windows, Python 3.10, 3.11, 3.12, 3.13 | `ci.yaml` |
+| CI green on `main`: Linux and Windows, Python 3.12, 3.13, 3.14 | `ci.yaml` |
 | Backend suite passes (no skips except documented); test count does not shrink versus the previous release | `pytest tests/backend` |
 | Randomized / monkey suites pass (`make test-random`, one `HYPOTHESIS_PROFILE=thorough` run, web e2e random simulations with a fixed seed list) | manual, results in the PR |
 | Coverage of `permita38/` at least 85 % (target 90 % before beta); no drop larger than 1 point | `pytest --cov` |

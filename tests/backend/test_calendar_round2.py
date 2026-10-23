@@ -1,12 +1,11 @@
 # ruff: noqa: F811
 """Second review round: long busy ranges, unsorted BYMONTH, floating UNTIL, update() races, re-upload advice, EXDATE."""
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 
-from permita38.core.compat import UTC
 from permita38.core.errors import ServiceError
 from permita38.core.service.calendar.busy_provider import CalendarBusyProvider
 from permita38.core.service.calendar.ics import parse_ics

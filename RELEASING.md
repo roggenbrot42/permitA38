@@ -18,7 +18,7 @@ edit only `permita38/__init__.py`; `pyproject.toml` reads it.
 ## Pre-flight checklist
 
 1. All work for the release is merged to `main` through pull requests; CI on `main` is green (Linux + Windows,
-   Python 3.10-3.13, lint, OpenAPI contract).
+   Python 3.12-3.14, lint, OpenAPI contract).
 2. Quality gates of the release train are met (see `docs/release-plan.md`, "Entry criteria").
 3. Prepare a **release commit** (`chore(release): 0.4.0-alpha.1`) via pull request that
    - sets `__version__ = "0.4.0a1"` in `permita38/__init__.py`,

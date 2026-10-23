@@ -3,7 +3,7 @@
 [![CI](https://github.com/roggenbrot42/permitA38/actions/workflows/ci.yaml/badge.svg)](https://github.com/roggenbrot42/permitA38/actions/workflows/ci.yaml)
 [![Release](https://img.shields.io/github/v/release/roggenbrot42/permitA38?include_prereleases&sort=semver)](https://github.com/roggenbrot42/permitA38/releases)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![Python 3.10-3.13](https://img.shields.io/badge/python-3.10%20%E2%80%93%203.13-blue.svg)](pyproject.toml)
+[![Python 3.12-3.14](https://img.shields.io/badge/python-3.12%20%E2%80%93%203.14-blue.svg)](pyproject.toml)
 
 **Time tracking, planning, offers, invoices and tax reserves for freelancers and small businesses in Germany.**
 One small app, one SQLite database in a folder you own, synced across all your devices with Syncthing.
@@ -17,7 +17,7 @@ permitA38 answers the questions a freelancer actually asks every day:
 - *What did I earn this month – and how much of it is **not** mine (VAT, income tax, trade tax)?*
 - *Which work have I done but not yet invoiced?*
 
-It runs on **Windows and Linux** (anything with Python 3.10+), needs **no database, no cloud and no account with anyone but yourself**. Your data stays in a folder you own.
+It runs on **Windows and Linux** (anything with Python 3.12+), needs **no database, no cloud and no account with anyone but yourself**. Your data stays in a folder you own.
 
 > New here? Read the **[Getting started guide](docs/getting-started.md)** – you'll be tracking time in 5 minutes.
 
@@ -57,7 +57,7 @@ It runs on **Windows and Linux** (anything with Python 3.10+), needs **no databa
 
 ## Quick start
 
-**Requirements:** Python 3.10 or newer. The launcher creates a virtual environment and installs the (few) dependencies on first run.
+**Requirements:** Python 3.12 or newer. The launcher creates a virtual environment and installs the (few) dependencies on first run.
 
 ```bash
 git clone https://github.com/roggenbrot42/permitA38.git
