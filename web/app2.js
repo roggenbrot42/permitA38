@@ -199,7 +199,7 @@ PAGES.doc = async (coll, id) => {
   if (id.startsWith('new')) {
     if (!DOC || DOC.__route !== route) {   // keep the in-progress draft across re-renders (add/delete line)
       DOC = { __route: route, coll, customer_id: id.slice(4) || '', date: todayISO(), status: 'draft', lines: [{ description: '', qty: 1, unit: 'h', price: s.default_rate || 0 }], template_id: s.default_template, vat_rate: s.vat_rate };
-      SUGGESTED_RATE = suggestedRate(DOC.customer_id, null); DOC.lines[0].price = SUGGESTED_RATE;
+      SUGGESTED_RATE = suggestedRate(DOC.customer_id, null); DOC.lines[0].price = SUGGESTED_RATE; AUTO_PRICED.add(DOC.lines[0]);
     }
   } else if (!DOC || DOC.id !== id || DOC.coll !== coll) {
     const rec = (S.d[coll] || []).find(x => x.id === id);
@@ -235,18 +235,19 @@ PAGES.doc = async (coll, id) => {
   ${isInv ? '' : `<div class="card"><h2>Planning (optional)</h2><div class="muted small" style="margin-bottom:8px">When should this work happen? While the offer is open, the Planning forecast shows it as tentative; once accepted it becomes a contract.</div><div class="row"><div><label>Start</label><input type="date" id="p_s" value="${esc(plan.start || '')}"></div><div><label>End</label><input type="date" id="p_e" value="${esc(plan.end || '')}"></div><div><label>Hours per week</label><input type="number" id="p_hpw" value="${esc(plan.hours_per_week ?? '')}"></div><div><label>or total hours</label><input type="number" id="p_tot" value="${esc(plan.total_hours ?? '')}"></div></div></div>`}`;
 };
 // Hourly rate for a new document: project > customer > your default (the same order the time entries use).
+const AUTO_PRICED = new WeakSet();   // lines whose price was set by us, not typed by hand
 let SUGGESTED_RATE = null;   // set only while editing a new, unsaved document; saved documents are never repriced
 function suggestedRate(customerId, projectId) {
-  const pick = x => (x?.rate === null || x?.rate === undefined || x?.rate === '' ? null : +x.rate);
-  return pick(S.d.projects.find(p => p.id === projectId)) ?? pick(S.d.customers.find(c => c.id === customerId))
-    ?? (S.me?.default_rate ? +S.me.default_rate : null) ?? S.settings.default_rate ?? 0;
+  const pick = x => (x === null || x === undefined || x === '' ? null : +x);
+  return pick(S.d.projects.find(p => p.id === projectId)?.rate) ?? pick(S.d.customers.find(c => c.id === customerId)?.rate)
+    ?? pick(S.me?.rate) ?? pick(S.me?.default_rate) ?? pick(S.settings.default_rate) ?? 0;
 }
 function repriceNewDoc() {
   if (!DOC || DOC.id || SUGGESTED_RATE === null) return;
   syncDoc();
   const rate = suggestedRate(DOC.customer_id, DOC.project_id);
-  let changed = false;   // only lines still carrying the old suggestion are touched, never a price typed by hand
-  DOC.lines.forEach(l => { if (+l.price === SUGGESTED_RATE && rate !== SUGGESTED_RATE) { l.price = rate; changed = true; } });
+  let changed = false;   // only lines we priced ourselves are touched, never a price typed by hand
+  DOC.lines.forEach(l => { if (AUTO_PRICED.has(l) && rate !== SUGGESTED_RATE) { l.price = rate; changed = true; } });
   SUGGESTED_RATE = rate; if (changed) render();
 }
 const _origDoc = PAGES.doc;
@@ -270,8 +271,17 @@ function recalcDoc() {
   const vat = Object.entries(t.vat).filter(([r]) => +r);
   $('#d_totals').innerHTML = `Net <b>${eur(Money.toNumber(t.net))}</b>${vat.map(([r, c]) => ` · VAT ${r}% ${eur(Money.toNumber(c))}`).join('')} · <span style="font-size:20px">Total <b>${eur(Money.toNumber(t.gross))}</b></span>${klein ? '<div class="small muted">Kleinunternehmer (§19 UStG): no VAT charged.</div>' : ''}`;
 }
-document.addEventListener('input', e => { if (e.target.closest('[data-l],#d_vat')) recalcDoc(); });
-A.addLine = () => { syncDoc(); DOC.lines.push({ description: '', qty: 1, unit: 'h', price: S.settings.default_rate || 0 }); render(); };
+document.addEventListener('input', e => {
+  if (!e.target.closest('[data-l],#d_vat')) return;
+  if (e.target.dataset?.k === 'price' && DOC?.lines) AUTO_PRICED.delete(DOC.lines[+e.target.dataset.l]);   // typed by hand
+  recalcDoc();
+});
+A.addLine = () => {
+  syncDoc();
+  const line = { description: '', qty: 1, unit: 'h', price: DOC.id ? S.settings.default_rate || 0 : suggestedRate(DOC.customer_id, DOC.project_id) };
+  if (!DOC.id) AUTO_PRICED.add(line);
+  DOC.lines.push(line); render();
+};
 A.delLine = el => { syncDoc(); DOC.lines.splice(+el.dataset.i, 1); render(); };
 async function persistDoc() {
   syncDoc(); const d = DOC;

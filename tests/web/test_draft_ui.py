@@ -73,6 +73,13 @@ def test_new_document_uses_project_then_customer_then_default_rate(browser, srv)
     # a price typed by hand is never overwritten
     pg.fill('[data-l="0"][data-k="price"]', "99")
     pg.select_option("#d_cust", with_rate["id"])
-    pg.wait_for_selector("#d_totals")
+    pg.wait_for_function("() => document.querySelector('#d_cust').value")
+    pg.wait_for_timeout(300)   # render() is async; give an (unwanted) reprice time to happen
     assert price() == 99
+    # a hand-typed price equal to the old suggestion is not overwritten either
+    pg.fill('[data-l="0"][data-k="price"]', str(int(default)))
+    pg.select_option("#d_cust", plain["id"])
+    pg.select_option("#d_cust", with_rate["id"])
+    pg.wait_for_timeout(300)
+    assert price() == default
     ctx.close()
