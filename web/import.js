@@ -49,7 +49,7 @@
     const rows = r.rows.map(row => {
       const [cls, text] = ACTION[row.action] || ['muted', row.action];
       const cust = row.customer ? `${row.customer.action === 'merge' ? 'merge into' : 'new customer'} ${esc(row.customer.name || '')}${row.customer.score != null && row.customer.action === 'merge' ? ` (${Math.round(row.customer.score * 100)} %)` : ''}` : '';
-      return `<tr><td>${row.row}</td><td><span class="${cls}">${esc(text)}</span></td><td>${esc(row.number || '')}</td><td class="small">${cust}</td><td class="small">${row.messages.map(esc).join('<br>')}</td></tr>`;
+      return `<tr><td>${esc(row.row)}</td><td><span class="${cls}">${esc(text)}</span></td><td>${esc(row.number || '')}</td><td class="small">${cust}</td><td class="small">${row.messages.map(esc).join('<br>')}</td></tr>`;
     });
     const canImport = c.error === 0 && c.create + c.overwrite > 0 && !imp().stale;
     return `<div class="card" data-import-report>
@@ -97,10 +97,12 @@
   A.impMapFile = async el => {
     const f = el.files[0]; if (!f) return;
     const text = await f.text();
-    JSON.parse(text);  // reject non-JSON before it is sent
+    try { JSON.parse(text); } catch { toast('The mapping file is not valid JSON'); return; }  // reject before it is sent
     imp().mapText = text;
     imp().mapping = null;
-    toast('Mapping file read. It is used on the next check.');
+    imp().stale = !!imp().report;
+    toast('Mapping file read. Check the file again to use it.');
+    render();
   };
   // any change after a check makes that check stale: the import is refused until the file is checked again
   A.impMap = el => { const st = imp(); st.mapping = { ...(st.mapping || {}), [el.dataset.f]: el.value }; st.stale = true; render(); };

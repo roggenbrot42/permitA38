@@ -14,7 +14,7 @@
   function guessFromLast(last) {
     const text = String(last || '').trim();
     const m = text.match(/^(.*?)(\d+)(\D*)$/);
-    if (!m) return null;
+    if (!m || m[2].length > 9) return null;
     let prefix = m[1], digits = m[2], suffix = m[3];
     const year = prefix.match(/\d{4}/);
     if (year) prefix = prefix.replace(year[0], '{year}');
