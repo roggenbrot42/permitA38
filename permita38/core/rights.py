@@ -48,13 +48,15 @@ AREAS: dict[str, str] = {
     "settings": "Business settings",
     "attachments": "Uploaded files (bills, logo)",
     "team": "Users, passwords and two-factor resets",
+    "team_timeline": "Team timeline (who is away, who works on what); the level is set in the settings",
 }
 
 N, L, A = Scope.NONE, Scope.LIMITED, Scope.ALL
 
 # role -> area -> (read scope, write scope)
 MATRIX: dict[str, dict[str, tuple[Scope, Scope]]] = {
-    BOSS: {area: (A, A) for area in AREAS},
+    # the timeline is read-only for everyone; the boss sees every level, the others get the level set in the settings
+    BOSS: {area: (A, N) if area == "team_timeline" else (A, A) for area in AREAS},
     EMPLOYEE: {
         "timer": (L, L),
         "time": (L, L),
@@ -72,6 +74,7 @@ MATRIX: dict[str, dict[str, tuple[Scope, Scope]]] = {
         "settings": (L, N),
         "attachments": (N, N),
         "team": (L, N),
+        "team_timeline": (L, N),
     },
     ACCOUNTANT: {
         "timer": (N, N),
@@ -90,6 +93,7 @@ MATRIX: dict[str, dict[str, tuple[Scope, Scope]]] = {
         "settings": (A, N),
         "attachments": (A, A),
         "team": (L, N),
+        "team_timeline": (L, N),
     },
 }
 

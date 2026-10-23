@@ -13,6 +13,7 @@ from permita38.api.server import all_routers
 from permita38.core import rights
 from permita38.core.database import list_migrations
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
+from permita38.core.service import team_timeline
 
 from .conftest import PASSWORD, _login
 
@@ -68,7 +69,11 @@ def test_matrix_is_complete_and_boss_can_do_everything():
     assert set(rights.MATRIX) == set(rights.ROLES)
     for role, table in rights.MATRIX.items():
         assert set(table) == set(rights.AREAS), role
-    assert all(sc == (rights.Scope.ALL,) * 2 for sc in rights.MATRIX["boss"].values())
+    boss = {a: sc for a, sc in rights.MATRIX["boss"].items() if a != "team_timeline"}
+    assert all(sc == (rights.Scope.ALL,) * 2 for sc in boss.values())
+    # the timeline is read-only for everybody, the boss included (its level is always "full")
+    assert rights.MATRIX["boss"]["team_timeline"] == (rights.Scope.ALL, rights.Scope.NONE)
+    assert all(rights.scope(r, "team_timeline", "write") == rights.Scope.NONE for r in rights.ROLES)
     for role in rights.ROLES:  # you cannot write what you cannot read
         for area, (rd, wr) in rights.MATRIX[role].items():
             assert not (rd == rights.Scope.NONE and wr != rights.Scope.NONE), (role, area)
@@ -153,6 +158,8 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("GET", "/api/finance"): ("finance", "read", False),
     ("GET", "/api/project-report"): ("finance", "read", False),
     ("GET", "/api/settings"): ("settings", "read", True),
+    # the team timeline: the matrix only decides access; the setting decides the level (service, 403 at `off`)
+    ("GET", "/api/team/timeline"): ("team_timeline", "read", False),
     ("PUT", "/api/settings"): ("settings", "write", False),
     # numbering and import management is boss-only: settings write at full scope
     ("GET", "/api/numbering/preview"): ("settings", "write", True),
@@ -247,9 +254,15 @@ def test_declared_rights_equal_the_hand_written_table(app):
     assert actual == EXPECTED
 
 
+# routes whose 403 also depends on data (the team timeline is 403 at level `off`): a valid query so that the
+# validation of the parameters does not answer first
+VALID_QUERY = {"/api/team/timeline": "?start=2026-11-02&end=2026-11-03"}
+
+
 def test_every_route_is_denied_exactly_where_the_matrix_says(app, clients):
     """All routes x all roles: 403 if and only if the role lacks the declared access; otherwise the request gets
-    past the permission check (whatever the handler then says about the dummy ids)."""
+    past the permission check (whatever the handler then says about the dummy ids). The timeline also answers 403
+    for a role whose level is `off` (docs/contracts/team-timeline.md)."""
     checked = 0
     for method, route, path in _routes(app):
         reqs = declared(route)
@@ -260,7 +273,13 @@ def test_every_route_is_denied_exactly_where_the_matrix_says(app, clients):
                 (s := rights.scope(role, a, op)) != rights.Scope.NONE and (not full or s == rights.Scope.ALL)
                 for a, op, full in reqs
             )
-            r = c.request(method, _url(path), json={} if method in ("POST", "PUT", "PATCH") else None)
+            if path == "/api/team/timeline":
+                should_pass = (
+                    should_pass and team_timeline.level_for(role, app.state.services.store.settings()) != "off"
+                )
+            r = c.request(
+                method, _url(path) + VALID_QUERY.get(path, ""), json={} if method in ("POST", "PUT", "PATCH") else None
+            )
             if method == "POST" and "attachments" in path:
                 r = c.post(_url(path), files={"file": ("a.txt", b"x")})
             assert (r.status_code != 403) == should_pass, (method, path, role, r.status_code)

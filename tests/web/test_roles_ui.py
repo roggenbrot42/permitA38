@@ -52,8 +52,11 @@ def test_accountant_nav_and_read_only_pages(browser, srv):
     joined = " ".join(labels)
     for shown in ("Customers", "Projects", "Offers & Invoices", "Expenses", "Money & Taxes", "Settings"):
         assert shown in joined, labels
-    for hidden in ("Today", "Timesheet", "Planning", "Team", "Time off"):
+    for hidden in ("Today", "Timesheet", "Planning", "Time off"):
         assert hidden not in joined, labels
+    # the Team page (user management) stays hidden; only the Team timeline entry is offered
+    assert any(x.endswith("Team timeline") for x in labels), labels
+    assert not any(x.endswith("Team") for x in labels), labels
     assert pg.url.endswith("#/customers")  # landing page = first allowed page
     assert pg.locator("button[data-a=editCustomer]").count() == 0  # read-only
     assert "Read-only" in pg.inner_text("#main")
@@ -64,6 +67,10 @@ def test_accountant_nav_and_read_only_pages(browser, srv):
     pg.goto(srv.base + "/#/team")
     pg.wait_for_selector("#toast.on")
     assert "#/team" not in pg.url
+    # the accountant's default level for the team timeline is "off": the page says so
+    pg.goto(srv.base + "/#/timeline")
+    pg.wait_for_selector("text=switched off for your role")
+    assert pg.url.endswith("#/timeline")
     # the invoice opens read-only
     pg.goto(srv.base + "/#/sales")
     pg.wait_for_selector("tr[data-href]")
@@ -79,7 +86,7 @@ def test_employee_nav_is_unchanged(browser, srv):
     ctx, pg, problems = open_as(browser, srv, "employee")
     pg.goto(srv.base + "/")
     labels = " ".join(nav(pg))
-    assert labels.split() == ["⏱", "Today", "🗓", "Timesheet", "🏖", "Time", "off", "🧳", "Business", "trips"]
+    assert labels.split() == ["⏱", "Today", "🗓", "Timesheet", "🏖", "Time", "off", "🧳", "Business", "trips", "📅", "Team", "timeline"]
     pg.goto(srv.base + "/#/customers")
     pg.wait_for_selector("#toast.on")
     assert "#/customers" not in pg.url

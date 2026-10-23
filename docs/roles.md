@@ -21,6 +21,22 @@ Per area there is a read scope and a write scope (`read / write`):
   tasks without rates (projects), business name and federal state only (settings), names and roles only (team; the web app needs the role),
 * `all` – full access.
 
+### Team timeline visibility
+
+The matrix only decides whether a role may open the team timeline at all. How much it shows is a **level** set by the
+boss under **Settings → Team visibility** (`team_timeline_visibility`, stored with the other settings). The server
+removes every detail the level does not allow; the boss always has `full` and cannot change it.
+
+| Level | Shows | Default |
+|---|---|---|
+| `off` | nothing (`403`) | accountant |
+| `away` | who is away and when, without the reason | employee |
+| `time-off` | as `away`, plus the kind and label of vacation and holiday entries | |
+| `full` | everything: sick days, labels, contracts and weekly hours | boss (fixed) |
+
+Everyone always sees their own time off in full. Contracts are shown at `full` only. Weekly hours are shown at `full`
+and on your own row.
+
 | Area | Covers | boss | employee | accountant |
 |---|---|---|---|---|
 | `timer` | Own timer and weekly dashboard | all / all | limited / limited | none / none |
@@ -39,6 +55,7 @@ Per area there is a read scope and a write scope (`read / write`):
 | `settings` | Business settings | all / all | limited / none | all / none |
 | `attachments` | Uploaded files (bills, logo) | all / all | none / none | all / all |
 | `team` | Users, passwords and two-factor resets | all / all | limited / none | limited / none |
+| `team_timeline` | Team timeline: who is away and when, contracts (`GET /api/team/timeline`) | all / none | limited / none | limited / none |
 
 Notes
 

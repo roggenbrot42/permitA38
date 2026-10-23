@@ -137,7 +137,7 @@ function entryForm(e = {}, after) {
 /* ---------- layout + router ---------- */
 /* nav: [route, icon, label, area needed to see it, 'write' if it needs write access (or 'all' when the read scope must be all, not a restricted view)] */
 const NAV = [['today', '⏱', 'Today', 'timer'], ['time', '🗓', 'Timesheet', 'time', 'write'], ['timeoff', '🏖', 'Time off', 'absences'], ['plan', '📈', 'Planning', 'planning'], ['customers', '👥', 'Customers', 'customers'], ['projects', '📁', 'Projects', 'projects', 'all'],
-  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['trips', '🧳', 'Business trips', 'trips'], ['money', '💶', 'Money & Taxes', 'finance'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['settings', '⚙️', 'Settings', 'settings', 'all']];
+  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['trips', '🧳', 'Business trips', 'trips'], ['money', '💶', 'Money & Taxes', 'finance'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['timeline', '📅', 'Team timeline', 'team_timeline'], ['settings', '⚙️', 'Settings', 'settings', 'all']];
 const navAllowed = ([, , , area, need]) => (need === 'write' ? can(area, 'write') : need === 'all' ? scopeOf(area) === 'all' : can(area));
 const navFor = () => NAV.filter(n => navAllowed(n) && !(n[0] === 'timeoff' && can('planning')));
 /* which area (and, for the read-only lock, which write area) a page belongs to */
@@ -185,7 +185,7 @@ async function render() {
     ${nav.map(([k, ic, l]) => `<a class="nav ${k === active ? 'on' : ''}" href="#/${k}"><span>${ic}</span>${l}</a>`).join('')}
     <div class="spacer"></div><div class="me"><b>${esc(S.me.name)}</b><br>${esc(ROLE_LABEL[S.me.role] || S.me.role)}</div>
     <a class="nav" data-a="changePassword">🔑 Change password</a><a class="nav" data-a="twoFactor">🛡 Two-factor authentication</a><a class="nav" data-a="logout">↩ Sign out</a></nav><main id="main">${S.conflicts?.length ? `<div class="banner">⚠ ${S.conflicts.length} sync conflict file(s) found in your data folder (e.g. <code>${esc(S.conflicts[0])}</code>). Compare and delete the copy you do not need.</div>` : ''}${html}</main></div>`;
-  if (area && can(area) && !can(area, 'write') && !(p === 'sales' && can('offers', 'write'))) lockPage($('#main'), p);
+  if (area && area !== 'team_timeline' && can(area) && !can(area, 'write') && !(p === 'sales' && can('offers', 'write'))) lockPage($('#main'), p);   // the timeline is read-only by design: no banner
   if (render.after) { const f = render.after; render.after = null; f(); }
 }
 window.addEventListener('hashchange', guard(render));
