@@ -62,6 +62,8 @@ def parse_date(value, date_order: str = "dmy") -> date | None:
                 day = _make(y, b, a)
         elif m := _DMY2.match(text):
             a, b, y = (int(x) for x in m.groups())
+            if y > 69:  # 70..99: 1970..1999, outside the supported range; do not guess a century
+                raise CellError("has a two-digit year that is ambiguous; use four digits")
             day = _make(2000 + y, b, a)
         else:
             raise CellError("is not a date (use YYYY-MM-DD or DD.MM.YYYY)")
@@ -86,7 +88,8 @@ def parse_amount(value, decimal: str = "auto") -> Decimal | None:
     if isinstance(value, float):
         if not math.isfinite(value):
             raise CellError("is not an amount")
-        text = repr(value)
+        # spreadsheets store 100.00 as 100.00000000000001 now and then: six decimals are float noise, not data
+        text = f"{round(value, 6):.6f}"
     elif isinstance(value, int):
         text = str(value)
     else:
@@ -99,9 +102,11 @@ def parse_amount(value, decimal: str = "auto") -> Decimal | None:
     sep = _decimal_separator(text, decimal)
     if sep:
         whole, _, frac = text.rpartition(sep)
-        whole = re.sub(r"[.,]", "", whole)
     else:
-        whole, frac = re.sub(r"[.,]", "", text), ""
+        whole, frac = text, ""
+    if re.search(r"[.,]", whole) and not re.fullmatch(r"\d{1,3}(?:[.,]\d{3})+", whole):
+        raise CellError("is not an amount (thousands groups must have exactly three digits)")
+    whole = re.sub(r"[.,]", "", whole)
     if len(frac) > 2 and not frac.endswith("0" * (len(frac) - 2)):
         raise CellError("has more than two decimal places")
     try:

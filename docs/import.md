@@ -66,12 +66,27 @@ shows each decision with its similarity score. A customer that is not matched is
 - `overwrite` replaces only documents that an earlier import created. A manually entered document with the same
   number is an error.
 - Importing the same file twice therefore creates nothing the second time.
+- The same number (or external ID) twice **inside one file** is an error for the second row. For expenses an
+  identical row is flagged as well; add an external ID column to tell genuinely identical rows apart.
+- With a shared number sequence, offer numbers are checked against invoice numbers and vice versa.
+- `overwrite` refuses a document that was edited after its import (status, notes, ...), so your changes are never lost;
+  it keeps the attached original PDF unless the new import brings another one.
 
 ## Original PDFs
 
 Pass a zip of PDF files. A file matches a document when its name, without extension, equals the document number
 (spaces, dashes and case are ignored). The original is stored with a SHA-256 checksum, and the invoice PDF endpoint
 serves it instead of a new rendering. Unmatched PDFs are listed in the report.
+
+## Limits and known simplifications
+
+- One VAT rate per document. A document with several rates is reported as a totals mismatch (the VAT does not match
+  any single rate); import it with the unverified option or split it.
+- Without a rate column the rate is taken from the VAT amount (the configured rate wins when several rates give the
+  same cents); a file with only gross amounts is computed at the configured rate.
+- Amounts: thousands groups must have exactly three digits (`1,234,56` is refused). Two-digit years are 20yy up to 69.
+- An imported number whose year or month differs from its document date does not move the counter (a note is shown).
+- XLSX: at most 50,000 rows and 512 columns; parts must be UTF-8 without DTD.
 
 ## Dry run, all-or-nothing and undo
 

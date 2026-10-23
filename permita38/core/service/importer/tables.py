@@ -64,7 +64,15 @@ def read_csv(data: bytes, delimiter: str | None = None) -> Table:
     text, encoding = decode_text(data)
     delim = delimiter or detect_delimiter(text)
     reader = csv.reader(io.StringIO(text, newline=""), delimiter=delim)
-    rows = [[c.strip() for c in r] for r in reader if any(c.strip() for c in r)]
+    rows = []
+    try:
+        for r in reader:
+            if any(c.strip() for c in r):
+                rows.append([c.strip() for c in r])
+            if len(rows) > MAX_ROWS + 1:
+                raise ServiceError(422, f"The file has more than {MAX_ROWS} rows")
+    except csv.Error as e:
+        raise ServiceError(400, f"The CSV file could not be read ({e})") from None
     if not rows:
         raise ServiceError(400, "The file is empty")
     headers, body = rows[0], rows[1:]
@@ -79,7 +87,7 @@ def read_json(data: bytes) -> Table:
     """A permitA38 JSON export: a list of records, or an object with one list per collection."""
     try:
         obj = json.loads(data.decode("utf-8-sig"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
         raise ServiceError(400, "The JSON file could not be read") from None
     if isinstance(obj, dict):
         lists = [v for v in obj.values() if isinstance(v, list)]
@@ -105,7 +113,7 @@ def read_table(data: bytes, filename: str, sheet: str | None = None, delimiter: 
         return read_json(data)
     if name.endswith((".xlsx", ".xlsm")) or data[:2] == b"PK":
         try:
-            sheet_name, rows = read_xlsx(data, sheet)
+            sheet_name, rows = read_xlsx(data, sheet, max_rows=MAX_ROWS + 2)
         except XlsxError as e:
             raise ServiceError(400, str(e)) from None
         if not rows:

@@ -30,7 +30,7 @@ MAX_LITERAL_LENGTH = 40
 MAX_NUMBER = 1_000_000_000
 _LITERAL_OK = re.compile(r"^[0-9A-Za-zÄÖÜäöüß \-_/.#]*$")
 _TOKEN_RE = re.compile(r"\{([^{}]*)\}")
-_TOKEN_BODY = re.compile(r"^(?:year|yy|month|n(?::0([1-9])d)?)$")
+_TOKEN_BODY = re.compile(r"^(?:year|yy|month|n(?::(?:0?([1-9]))?d)?)$")
 
 
 class PatternError(ValueError):
@@ -79,22 +79,33 @@ class Pattern:
         value = int(m.group("n"))
         return value if 0 < value <= MAX_NUMBER else None
 
+    def date_consistent(self, text: str, day: date) -> bool:
+        """False if a {year}/{yy}/{month} part of ``text`` differs from ``day`` (a number from another period)."""
+        m = self._regex().fullmatch(text)
+        if not m:
+            return True
+        want = {"year": f"{day.year:04d}", "yy": f"{day.year % 100:02d}", "month": f"{day.month:02d}"}
+        return all(m.group(name) == want[name.rstrip("0123456789")] for name in m.groupdict() if name != "n")
+
     def _regex(self) -> re.Pattern[str]:
         pieces = []
-        for p in self.parts:
+        for i, p in enumerate(self.parts):
             if isinstance(p, str):
                 pieces.append(re.escape(p))
-            elif p.kind == "year":
-                pieces.append(r"\d{4}")
-            elif p.kind in ("yy", "month"):
-                pieces.append(r"\d{2}")
+            elif p.kind in ("year", "yy", "month"):
+                pieces.append(rf"(?P<{p.kind}{i}>\d{{4}})" if p.kind == "year" else rf"(?P<{p.kind}{i}>\d{{2}})")
             else:
                 pieces.append(r"(?P<n>\d+)")
         return re.compile("".join(pieces))
 
 
-def parse_pattern(text: str) -> Pattern:
-    """Validate and parse a pattern; raises :class:`PatternError` with a user-facing message."""
+def parse_pattern(text: str, *, strict: bool = True) -> Pattern:
+    """Validate and parse a pattern; raises :class:`PatternError` with a user-facing message.
+
+    ``strict=False`` is for patterns that are already stored in the settings (possibly written by an older version
+    with free literal text such as ``RE+{year}({n:04d}``): the literal text may then contain any printable
+    characters except braces. New patterns typed by a user are always parsed strictly.
+    """
     if not isinstance(text, str) or not text:
         raise PatternError("The numbering pattern must not be empty.")
     if len(text) > MAX_PATTERN_LENGTH:
@@ -103,7 +114,7 @@ def parse_pattern(text: str) -> Pattern:
     pos = 0
     for m in _TOKEN_RE.finditer(text):
         literal = text[pos : m.start()]
-        _check_literal(literal)
+        _check_literal(literal, strict)
         if literal:
             parts.append(literal)
         body = m.group(1)
@@ -119,7 +130,7 @@ def parse_pattern(text: str) -> Pattern:
     tail = text[pos:]
     if "{" in tail or "}" in tail:
         raise PatternError("Braces must belong to a token such as {n} or {year}.")
-    _check_literal(tail)
+    _check_literal(tail, strict)
     if tail:
         parts.append(tail)
     numbers = [p for p in parts if isinstance(p, Token) and p.kind == "n"]
@@ -128,7 +139,11 @@ def parse_pattern(text: str) -> Pattern:
     return Pattern(text, tuple(parts))
 
 
-def _check_literal(literal: str) -> None:
+def _check_literal(literal: str, strict: bool = True) -> None:
+    if not strict:
+        if not literal.isprintable():
+            raise PatternError("The numbering pattern contains control characters.")
+        return
     if literal and not _LITERAL_OK.match(literal):
         raise PatternError("Only letters, digits, spaces and the characters - _ / . # may appear outside the tokens.")
     if len(literal) > MAX_LITERAL_LENGTH:
@@ -158,6 +173,8 @@ def sorting_warnings(pattern: Pattern, reset: str) -> list[str]:
         out.append("A date token comes after the number; sorting by number would not be chronological.")
     if reset != "never" and not pattern.has("year") and not pattern.has("yy"):
         out.append("The number restarts yearly or monthly but the pattern has no year: numbers would repeat.")
+    if reset == "monthly" and not pattern.has("month"):
+        out.append("The number restarts every month but the pattern has no {month}: numbers would repeat in the year.")
     return out
 
 

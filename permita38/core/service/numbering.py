@@ -6,7 +6,7 @@ run inside ``store.transaction()``: the SQLite backend holds its lock for the wh
 can never read the same counter, and a failed finalize rolls the counter back with the document (gapless).
 
 A counter that does not exist yet is *seeded* from the existing documents on first use (the highest number that the
-current pattern produces in that period, or the number of documents in that period if none matches). Patterns live
+current pattern produces in that period; 0 if none matches). Patterns live
 in the settings, which a SQL migration cannot read, so the seeding happens lazily instead of in the migration.
 """
 
@@ -85,10 +85,30 @@ class NumberingService:
     def _numbers_in_use(self) -> set[str]:
         return {d["number"] for c in _NUMBER_COLLECTIONS for d in self.store.list(c) if d.get("number")}
 
+    def _pattern(self, cfg: NumberConfig) -> Pattern:
+        """The stored pattern. Lenient: a pattern from an older version must not break finalize and previews."""
+        try:
+            return parse_pattern(cfg.pattern, strict=False)
+        except PatternError as e:
+            raise ServiceError(409, f"The stored numbering pattern is invalid ({e}); fix it under Numbering") from None
+
     def _seed(self, cfg: NumberConfig, pattern: Pattern, reset: str, period: str) -> int:
-        docs = [d for d in self._docs_in_scope(cfg, period, reset) if d.get("number")]
-        found = [n for n in (pattern.match(d["number"]) for d in docs) if n]
-        return max(found) if found else len(docs)
+        """The highest number the pattern produced in this period (0 if none). Numbers of other formats are ignored;
+        numbers that are already taken are skipped when allocating, so they cannot be handed out twice."""
+        return max(self._sequence_numbers(pattern, self._docs_in_scope(cfg, period, reset)), default=0)
+
+    @staticmethod
+    def _sequence_numbers(pattern: Pattern, docs: list[dict]) -> list[int]:
+        """Sequence numbers of the documents whose number the pattern produced for the document's own date."""
+        out = []
+        for d in docs:
+            number, day = d.get("number"), _parse_date(d.get("date"))
+            if not number or day is None:
+                continue
+            n = pattern.match(number)
+            if n and pattern.date_consistent(number, day):
+                out.append(n)
+        return out
 
     def _last(self, cfg: NumberConfig, pattern: Pattern, day: date) -> int:
         period = period_key(cfg.reset, day)
@@ -114,17 +134,15 @@ class NumberingService:
     # ------------------------------------------------------------------ public reads
     def preview(self, doc_type: str, count: int = PREVIEW_COUNT) -> list[str]:
         cfg = self.config(doc_type)
-        pattern = parse_pattern(cfg.pattern)
+        pattern = self._pattern(cfg)
         return [number for _, number in self._candidates(cfg, pattern, self.clock(), count)]
 
     def status(self, doc_type: str) -> dict:
         cfg = self.config(doc_type)
-        pattern = parse_pattern(cfg.pattern)
+        pattern = self._pattern(cfg)
         day = self.clock()
         period = period_key(cfg.reset, day)
-        found = [
-            n for n in (pattern.match(d.get("number") or "") for d in self._docs_in_scope(cfg, period, cfg.reset)) if n
-        ]
+        found = self._sequence_numbers(pattern, self._docs_in_scope(cfg, period, cfg.reset))
         return {
             "type": doc_type,
             "pattern": cfg.pattern,
@@ -146,7 +164,7 @@ class NumberingService:
     def allocate(self, coll: str, day: date) -> str:
         """Take the next number for a document of ``coll`` dated ``day``. Call inside ``store.transaction()``."""
         cfg = self.config(coll)
-        pattern = parse_pattern(cfg.pattern)
+        pattern = self._pattern(cfg)
         ((n, number),) = self._candidates(cfg, pattern, day, 1)
         self.store.save(
             "number_sequences",
@@ -159,29 +177,37 @@ class NumberingService:
         )
         return number
 
+    def imported_number_note(self, coll: str, number: str, day: date) -> str | None:
+        """A hint for the import report when an imported number does not move the counter of its document date."""
+        cfg = self.config(coll)
+        pattern = self._pattern(cfg)
+        if pattern.match(number) is not None and not pattern.date_consistent(number, day):
+            return "the date part of the number differs from the document date; the number counter is not moved"
+        return None
+
     def observe_imported(self, coll: str, number: str, day: date) -> bool:
         """An imported document carries its own number: move the counter so the next number follows it.
 
         Returns True if the counter moved. (No previews here: this runs once per imported row.)
         """
         cfg = self.config(coll)
-        pattern = parse_pattern(cfg.pattern)
+        pattern = self._pattern(cfg)
         n = pattern.match(number)
-        if n is None:
+        if n is None or not pattern.date_consistent(number, day):
+            return False  # not our format, or a number of another year/month: the counter of this period stays
+        period = period_key(cfg.reset, day)
+        row_id = self._row_id(self._group(cfg), period)
+        row = self.store.get("number_sequences", row_id)
+        current = int(row.get("last_value") or 0) if row is not None else self._seed(cfg, pattern, cfg.reset, period)
+        if row is not None and n <= current:
             return False
-        current = self._last(cfg, pattern, day)
-        if n <= current:
-            return False
+        # persist the counter even when the seed already covers n: the seed is computed from the documents, and
+        # would shrink again if an import is undone; a stored counter never moves back
         self.store.save(
             "number_sequences",
-            dict(
-                id=self._row_id(self._group(cfg), period_key(cfg.reset, day)),
-                doc_type=self._group(cfg),
-                period=period_key(cfg.reset, day),
-                last_value=n,
-            ),
+            dict(id=row_id, doc_type=self._group(cfg), period=period, last_value=max(n, current)),
         )
-        return True
+        return n > current
 
     # ------------------------------------------------------------------ guarded changes
     def check(
@@ -196,8 +222,8 @@ class NumberingService:
         cfg = self.config(doc_type)
         new_pattern_text = pattern if pattern is not None else cfg.pattern
         new_reset = reset if reset is not None else cfg.reset
-        try:
-            new_pattern = parse_pattern(new_pattern_text)
+        try:  # an unchanged stored pattern is parsed leniently, so the start number of a legacy pattern can be changed
+            new_pattern = parse_pattern(new_pattern_text, strict=new_pattern_text != cfg.pattern)
         except PatternError as e:
             raise ServiceError(400, str(e)) from None
         if next_number is not None and not 1 <= next_number <= MAX_NUMBER:
@@ -206,7 +232,7 @@ class NumberingService:
         new_cfg = NumberConfig(cfg.coll, new_pattern_text, new_reset, cfg.shared)
         period = period_key(new_reset, day)
         docs = self._docs_in_scope(new_cfg, period, new_reset)
-        found = [n for n in (new_pattern.match(d.get("number") or "") for d in docs) if n]
+        found = self._sequence_numbers(new_pattern, docs)
         highest = max(found, default=0)
         target = next_number if next_number is not None else self._last(new_cfg, new_pattern, day) + 1
 
@@ -231,7 +257,14 @@ class NumberingService:
         candidate = new_pattern.format(day, target)
         if candidate in self._numbers_in_use():
             warnings.append({"code": "duplicate", "message": f"{candidate} is already used by another document."})
-        preview = [new_pattern.format(day, target + i) for i in range(PREVIEW_COUNT)]
+        preview: list[str] = []
+        taken = self._numbers_in_use()
+        n = target
+        while len(preview) < PREVIEW_COUNT and n <= MAX_NUMBER:  # skip numbers in use, like the real allocation
+            number = new_pattern.format(day, n)
+            if number not in taken:
+                preview.append(number)
+            n += 1
         return {
             "type": doc_type,
             "pattern": new_pattern_text,
@@ -257,14 +290,18 @@ class NumberingService:
         The result has ``applied``; when it is False the caller must show the warnings and ask again with
         ``confirm=True``.
         """
-        result = self.check(doc_type, pattern=pattern, reset=reset, next_number=next_number)
-        if result["warnings"] and not confirm:
-            return {**result, "applied": False}
-        cfg = self.config(doc_type)
-        day = self.clock()
-        before = {"pattern": cfg.pattern, "reset": cfg.reset, "next": self.preview(doc_type, 1)[0]}
         changed = pattern is not None or reset is not None or next_number is not None
-        with self.store.transaction():
+        with self.store.transaction():  # check and write in one transaction: no finalize can slip in between
+            result = self.check(doc_type, pattern=pattern, reset=reset, next_number=next_number)
+            if result["warnings"] and not confirm:
+                return {**result, "applied": False}
+            cfg = self.config(doc_type)
+            day = self.clock()
+            try:
+                before_next = self.preview(doc_type, 1)[0]
+            except ServiceError:  # an invalid stored pattern is exactly what this change may be fixing
+                before_next = None
+            before = {"pattern": cfg.pattern, "reset": cfg.reset, "next": before_next}
             if pattern is not None or reset is not None:
                 st = self.store.settings()
                 key = "invoice" if cfg.coll == "invoices" else "offer"

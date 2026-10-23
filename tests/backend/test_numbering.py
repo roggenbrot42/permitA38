@@ -66,7 +66,6 @@ def test_format_and_match_examples():
         "{foo}{n}",
         "a{n}{n}",
         "RE-{year}",
-        "{n:5d}",
         "{n:0d}",
         "{n:10d}",
         "x{n}#<",
@@ -111,7 +110,8 @@ def test_format_then_match_round_trip(n, width, day, literal):
     token = "{n:0%dd}" % width if width else "{n}"
     p = parse_pattern(f"{literal}{{year}}{token}")
     text = p.format(day, n)
-    assert text.startswith(literal) and text.endswith(f"{day.year:04d}" + f"{n:0{width}d}" if width else str(n))
+    expected_tail = f"{day.year:04d}" + (f"{n:0{width}d}" if width else str(n))
+    assert text == literal + expected_tail
     assert p.match(text) == n
 
 
@@ -135,7 +135,7 @@ def test_monthly_and_never_reset(store):
     assert (a, b) == ("2603-001", "2604-001")
     store.save_settings({**store.settings(), "invoice_reset": "never", "invoice_pattern": "R{n:03d}"})
     c = sales.finalize("invoices", make_invoice(store, cust["id"], date(2026, 4, 3))["id"])["number"]
-    assert c == "R003"
+    assert c == "R001"  # numbers of the old format are ignored when seeding
 
 
 def test_seed_from_existing_documents(store):
@@ -148,12 +148,13 @@ def test_seed_from_existing_documents(store):
     assert sales.finalize("invoices", inv["id"])["number"] == "RE-2026-0043"
 
 
-def test_seed_falls_back_to_count_when_nothing_matches(store):
+def test_seed_ignores_numbers_of_other_formats(store):
+    # no count fallback: documents with a foreign format must not silently skip numbers
     sales, _ = make_sales(store, date(2026, 6, 1))
     cust = make_customer(store)
     make_invoice(store, cust["id"], date(2026, 2, 1), number="OLD/7", status="sent")
     make_invoice(store, cust["id"], date(2026, 3, 1), number="OLD/8", status="sent")
-    assert sales.numbering.preview("invoice", 1) == ["RE-2026-0003"]
+    assert sales.numbering.preview("invoice", 1) == ["RE-2026-0001"]
 
 
 def test_shared_sequence_between_invoices_and_offers(store):

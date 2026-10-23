@@ -10,6 +10,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import zipfile
+import zlib
 from dataclasses import dataclass, field
 from decimal import Decimal
 from difflib import SequenceMatcher
@@ -25,7 +27,7 @@ from permita38.core.settings import effective_settings
 from . import values as V
 from .mapping import auto_map, parse_mapping_file
 from .tables import Table, check_size, read_table
-from .xlsx_reader import open_guarded_zip
+from .xlsx_reader import XlsxError, open_guarded_zip
 
 KINDS = {"invoices": "invoices", "offers": "offers", "customers": "customers", "expenses": "expenses"}
 DOC_KINDS = ("invoices", "offers")
@@ -62,6 +64,7 @@ class _Outcome:
     pdf: str | None = None  # matched PDF entry name
     overwrite_id: str | None = None
     new_customer: dict | None = None  # record of a customer to create (run)
+    previous: dict | None = None  # the record an overwrite replaces
 
 
 @dataclass
@@ -114,6 +117,7 @@ class ImportService:
         batch_id = new_id()
         records: list[list[Any]] = []
         overwrites = 0
+        overwritten: list[list[Any]] = []
         next_before = self.numbering.preview(built.doc_type, 1)[0] if built.doc_type in DOC_KINDS else None
         with self.store.transaction():
             for c in built.new_customers:
@@ -131,7 +135,12 @@ class ImportService:
                 if o.action == "overwrite":
                     overwrites += 1
                     rec["id"] = o.overwrite_id
+                    prev = o.previous or {}
+                    for k in ("original_pdf", "original_pdf_sha256"):  # keep the legal original unless replaced
+                        if k not in rec and k in prev:
+                            rec[k] = prev[k]
                     saved = self.store.save(o.coll, {**rec, "import_batch": batch_id})
+                    overwritten.append([o.coll, saved["id"], _digest(saved)])
                 else:
                     saved = self.store.save(o.coll, {**rec, "import_batch": batch_id})
                     records.append([o.coll, saved["id"], _digest(saved)])
@@ -153,6 +162,7 @@ class ImportService:
                     finished=0,
                     records=records,
                     overwrites=overwrites,
+                    overwritten=overwritten,
                 ),
             )
         next_after = self.numbering.preview(built.doc_type, 1)[0] if built.doc_type in DOC_KINDS else None
@@ -178,32 +188,35 @@ class ImportService:
             raise ServiceError(409, "This import was already undone")
         if batch.get("overwrites"):
             raise ServiceError(409, "This import overwrote existing documents and cannot be undone automatically")
-        records = batch.get("records") or []
-        changed = []
-        for coll, rid, updated in records:
-            cur = self.store.get(coll, rid)
-            if cur is None or _digest(cur) != updated:
-                changed.append(f"{coll}/{rid}")
-        if changed:
-            raise ServiceError(
-                409, f"{len(changed)} imported record(s) were changed or deleted since the import; undo refused"
-            )
-        # a customer created by this batch must not be referenced by anything outside the batch
-        in_batch = {(coll, rid) for coll, rid, _ in records}
-        customer_ids = {rid for coll, rid, _ in records if coll == "customers"}
-        for coll in COLLECTIONS:
-            for rec in self.store.list(coll):
-                cid = rec.get("customer_id")
-                if cid in customer_ids and (coll, rec.get("id")) not in in_batch:
-                    raise ServiceError(
-                        409,
-                        f"An imported customer is still used by {coll} {rec.get('id')}; undo refused",
-                    )
-        with self.store.transaction():
-            for coll, rid, _ in batch.get("records") or []:
+        with self.store.transaction():  # checks and deletes in one transaction: nothing can change in between
+            batch = self.store.get("import_batches", batch_id)
+            if batch is None or batch.get("status") != "imported":
+                raise ServiceError(409, "This import was already undone")
+            records = batch.get("records") or []
+            changed = []
+            for coll, rid, updated in records:
+                cur = self.store.get(coll, rid)
+                if cur is None or _digest(cur) != updated:
+                    changed.append(f"{coll}/{rid}")
+            if changed:
+                raise ServiceError(
+                    409, f"{len(changed)} imported record(s) were changed or deleted since the import; undo refused"
+                )
+            # a customer created by this batch must not be referenced by anything outside the batch
+            in_batch = {(coll, rid) for coll, rid, _ in records}
+            customer_ids = {rid for coll, rid, _ in records if coll == "customers"}
+            for coll in COLLECTIONS:
+                for rec in self.store.list(coll):
+                    cid = rec.get("customer_id")
+                    if cid in customer_ids and (coll, rec.get("id")) not in in_batch:
+                        raise ServiceError(
+                            409,
+                            f"An imported customer is still used by {coll} {rec.get('id')}; undo refused",
+                        )
+            for coll, rid, _ in records:
                 self.store.delete(coll, rid)
             self.store.save("import_batches", {**batch, "status": "undone"})
-        return {"batch_id": batch_id, "removed": len(batch.get("records") or []), "applied": True}
+        return {"batch_id": batch_id, "removed": len(records), "applied": True}
 
     # ------------------------------------------------------------------ building the plan
     def _build(self, data, filename, doc_type, mapping_raw, options_raw, pdfs, sheet, delimiter) -> _Plan:
@@ -215,7 +228,7 @@ class ImportService:
         table = read_table(data, filename, sheet=sheet, delimiter=delimiter)
         try:
             mapping, file_options = parse_mapping_file(mapping_raw)
-        except ValueError:
+        except (ValueError, RecursionError):
             raise ServiceError(400, "The mapping file is not valid JSON") from None
         options = {
             "decimal": "auto",
@@ -298,14 +311,22 @@ class ImportService:
     def _plan_documents(self, doc_type, rows, index, options, pdf_entries):
         settings = effective_settings(self.store.settings())
         customers = _CustomerIndex(self.store.list("customers"), bool(options.get("merge_similar")))
-        existing_numbers = {}
+        existing_numbers: dict[str, dict] = {}
         existing_external = set()
         coll = doc_type
+        number_colls = (
+            ("invoices", "offers") if (doc_type in DOC_KINDS and settings.get("numbering_shared")) else (coll,)
+        )
+        for c in number_colls:
+            for d in self.store.list(c):
+                if d.get("number"):
+                    existing_numbers[d["number"]] = {**d, "_coll": c}
         for d in self.store.list(coll):
-            if d.get("number"):
-                existing_numbers[d["number"]] = d
             if d.get("external_id"):
                 existing_external.add(d["external_id"])
+        planned_numbers: set[str] = set()
+        planned_external: set[str] = set()
+        batch_digests = self._batch_digests()
         line_mode = "line_description" in index
         groups: list[tuple[int, list[_Row]]] = []
         if doc_type in DOC_KINDS and line_mode:
@@ -332,6 +353,11 @@ class ImportService:
                 continue
             out.customer = customer_info
             _note_similar(out)
+            doc_day = V.parse_date(record["date"]) if doc_type in DOC_KINDS else None
+            if doc_day is not None:
+                note = self.numbering.imported_number_note(doc_type, record["number"], doc_day)
+                if note:
+                    out.messages.append(note)
             out.totals = record.pop("_totals", None)
             out.messages.extend(record.pop("_messages", []))
             if doc_type == "expenses":
@@ -352,6 +378,16 @@ class ImportService:
                 )
                 record["external_id"] = ext
             record.pop("customer_key", None)
+            if (key_value is not None and key_value in planned_numbers) or ext in planned_external:
+                out.action = "error"
+                what = f"number {key_value}" if key_value is not None and key_value in planned_numbers else "row"
+                out.messages.append(
+                    f"duplicate {what} in this file (an earlier row has the same "
+                    f"{'number' if key_value is not None else 'content or external id'})"
+                    + ("" if key_value is not None else "; add an external ID column to tell identical rows apart")
+                )
+                outcomes.append(out)
+                continue
             if ext in existing_external:
                 out.action = "skip"
                 out.messages.append("already imported (same external id)")
@@ -359,10 +395,23 @@ class ImportService:
                 continue
             if key_value is not None and key_value in existing_numbers:
                 old = existing_numbers[key_value]
-                if options["on_duplicate"] == "overwrite" and old.get("imported"):
-                    out.action = "overwrite"
-                    out.overwrite_id = old["id"]
-                    out.messages.append("replaces the earlier import with this number")
+                if old["_coll"] != coll:
+                    out.action = "error"
+                    out.messages.append(
+                        f"{key_value} is already used by a document in {old['_coll']} (shared numbering)"
+                    )
+                elif options["on_duplicate"] == "overwrite" and old.get("imported"):
+                    clean = {k: v for k, v in old.items() if k != "_coll"}
+                    if batch_digests.get((old.get("import_batch"), old["id"])) != _digest(clean):
+                        out.action = "error"
+                        out.messages.append(
+                            f"{key_value} was changed since its import; overwrite refused to keep your edits"
+                        )
+                    else:
+                        out.action = "overwrite"
+                        out.overwrite_id = old["id"]
+                        out.previous = clean
+                        out.messages.append("replaces the earlier import with this number")
                 elif options["on_duplicate"] == "overwrite":
                     out.action = "error"
                     out.messages.append(f"{key_value} exists and was not imported; overwrite is only for imports")
@@ -371,6 +420,12 @@ class ImportService:
                     out.messages.append(f"{key_value} already exists; skipped")
                     outcomes.append(out)
                     continue
+            if out.action == "error":
+                outcomes.append(out)
+                continue
+            if key_value is not None:
+                planned_numbers.add(key_value)
+            planned_external.add(ext)
             out.record = record
             out.coll = coll
             if pdf_entries and key_value:
@@ -382,6 +437,16 @@ class ImportService:
             outcomes.append(out)
         pdf_unmatched = [n for n in pdf_entries if n not in pdf_used]
         return outcomes, new_customers, pdf_unmatched
+
+    def _batch_digests(self) -> dict[tuple[str | None, str], str]:
+        """(batch id, record id) -> digest of the record as the importer last wrote it (creates and overwrites)."""
+        out: dict[tuple[str | None, str], str] = {}
+        for b in self.store.list("import_batches"):
+            if b.get("status") != "imported":
+                continue
+            for _coll, rid, digest in list(b.get("records") or []) + list(b.get("overwritten") or []):
+                out[(b["id"], rid)] = digest
+        return out
 
     def _record(self, doc_type, members, options, settings, customers, new_customers):
         values = members[0].values
@@ -416,7 +481,12 @@ class ImportService:
         net_given = V.parse_amount(values.get("net"), options["decimal"])
         vat_given = V.parse_amount(values.get("vat"), options["decimal"])
         gross_given = V.parse_amount(values.get("gross"), options["decimal"])
-        lines, net_total = self._lines(values, members, options, net_given, gross_given, vat_given)
+        net_hint = net_given
+        if net_hint is None and vat_given is None and gross_given is not None and "line_description" not in values:
+            # gross-only file: net from gross at the stated (or default) rate; a mismatch is reported below
+            r = rate_given if rate_given is not None else dec(settings.get("vat_rate", 19))
+            net_hint = q2(gross_given / (1 + r / 100))
+        lines, net_total = self._lines(values, members, options, net_hint, gross_given, vat_given)
         rate = self._rate(rate_given, vat_given, net_total, settings)
         vat_total = vat_amount(net_total, rate)
         gross_total = net_total + vat_total
@@ -498,14 +568,18 @@ class ImportService:
         return [{"description": "Imported total", "qty": 1, "unit": None, "price": to_float(net)}], q2(net)
 
     def _rate(self, rate_given, vat_given, net_total, settings) -> Decimal:
-        allowed = set(V.ALLOWED_VAT_RATES) | {dec(settings.get("vat_rate", 19))}
+        allowed = {Decimal(str(a)) for a in V.ALLOWED_VAT_RATES} | {dec(settings.get("vat_rate", 19))}
         if rate_given is not None:
             rate = rate_given
         elif vat_given is not None and net_total:
-            rate = Decimal(round(vat_given / net_total * 100))
+            default = dec(settings.get("vat_rate", 19))
+            ordered = [default] + [Decimal(str(a)) for a in sorted(allowed, reverse=True) if Decimal(str(a)) != default]
+            # tiny amounts round the VAT to the same cent for several rates: take the rate that reproduces the cents
+            fits = [r for r in ordered if vat_amount(net_total, r) == vat_given]
+            rate = fits[0] if fits else Decimal(round(vat_given / net_total * 100))
         else:
             rate = dec(settings.get("vat_rate", 19))
-        if rate not in {Decimal(str(a)) for a in allowed}:
+        if rate not in allowed:
             raise V.CellError(f"VAT rate {rate} is not one of 0, 5, 7, 16, 19 or the configured rate")
         return rate
 
@@ -693,14 +767,22 @@ def _hash(*parts: Any) -> str:
 
 def _read_pdfs(blob: bytes) -> dict[str, bytes]:
     """PDF files from a zip, keyed by file name. Names are only used for matching, never as paths."""
-    zf = open_guarded_zip(blob)
+    try:
+        zf = open_guarded_zip(blob)
+    except XlsxError as e:
+        raise ServiceError(400, f"The PDF archive cannot be used: {e}") from None
     out: dict[str, bytes] = {}
     for info in zf.infolist():
         if info.is_dir() or not info.filename.lower().endswith(".pdf"):
             continue
         if info.file_size > MAX_PDF_BYTES:
             raise ServiceError(422, f"{info.filename.split('/')[-1]} is larger than 20 MB")
-        data = zf.read(info)
+        try:
+            data = zf.read(info)
+        except (zipfile.BadZipFile, RuntimeError, NotImplementedError, zlib.error, EOFError):
+            raise ServiceError(
+                400, f"{info.filename.split('/')[-1]} could not be unpacked (damaged or encrypted)"
+            ) from None
         if not data.startswith(b"%PDF-"):
             raise ServiceError(422, f"{info.filename.split('/')[-1]} is not a PDF file")
         out[info.filename.split("/")[-1]] = data

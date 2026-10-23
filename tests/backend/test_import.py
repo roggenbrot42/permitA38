@@ -493,6 +493,15 @@ def test_import_api_is_boss_only(member_client):
     assert r.status_code == 403
 
 
+def _count_invoices(data) -> int:
+    repo = SQLiteRepository(data)
+    repo.startup()
+    try:
+        return len(repo.list("invoices"))
+    finally:
+        repo.close()
+
+
 def test_cli_dry_run_and_import(tmp_path, capsys):
     from permita38.cli.main import main
 
@@ -502,9 +511,11 @@ def test_cli_dry_run_and_import(tmp_path, capsys):
     main(["--data", str(data), "import-documents", str(f), "--type", "invoices", "--dry-run"])
     out = capsys.readouterr().out
     assert "create 2" in out and "Dry run" in out
+    assert not (data / "permita38.sqlite3").exists() or _count_invoices(data) == 0  # dry run wrote nothing
     main(["--data", str(data), "import-documents", str(f), "--type", "invoices"])
     out = capsys.readouterr().out
     assert "Imported. Batch" in out
+    assert _count_invoices(data) == 2
 
 
 def test_accounting_hook_is_called_for_each_imported_document(store, svc, monkeypatch):
@@ -527,7 +538,8 @@ def test_editing_an_imported_invoice_keeps_the_importer_fields(boss_client):
     assert c.put(f"/api/invoices/{inv['id']}", json=body).status_code == 200
     after = c.get(f"/api/invoices/{inv['id']}").json()
     assert after["imported"] is True and after["original_number"] == "X-1" and after["external_id"]
-    assert cust["id"]
+    assert after["customer_id"] == cust["id"]  # matched by name, not duplicated
+    assert len(c.get("/api/customers").json()) == 1
 
 
 def test_legal_form_difference_is_similar_not_exact(store, svc):

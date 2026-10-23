@@ -78,10 +78,20 @@ be skipped), `duplicate` (the number is already used), `pattern_change` (existin
 ## Counters and existing documents
 
 The counter of a period is created on first use. If none exists, it is seeded from the existing documents: the
-highest number that the current pattern produces in that period, or the number of documents in that period if no
-number matches the pattern. Numbers in use are always skipped, so a finalize can never produce a duplicate.
+highest number that the current pattern produces for a document of that period (numbers of other formats, or with a
+year/month that differs from the document date, are ignored; there is no count fallback). Numbers in use are always skipped, so a finalize can never produce a duplicate.
 
 ## Concurrency
 
 Allocation runs inside the finalize transaction. The SQLite backend serialises transactions, so two parallel
 finalizes receive different numbers (covered by a test with 16 threads × 50 finalizes).
+
+**Other databases.** The guarantee above is verified for SQLite only. On PostgreSQL and MariaDB the counter row must be
+read with a row lock (`SELECT ... FOR UPDATE`) or protected by a unique index on the `number_sequences` key before
+those backends are used with several workers; this is not implemented yet and not tested (see the roadmap).
+
+## Patterns written by older versions
+
+A pattern that is already stored (for example `RE+{year}({n:04d}` or `{n:4d}`) keeps working: stored patterns are read
+leniently (free literal text; `{n:4d}` counts as zero-padded `0004`). New patterns you type are validated strictly.
+A stored pattern that cannot be read at all gives a clear error (409) and can be replaced on the Numbering page.
