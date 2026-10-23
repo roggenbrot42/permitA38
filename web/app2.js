@@ -306,7 +306,8 @@ A.editExpense = el => {
 
 /* ================= MONEY & TAXES ================= */
 PAGES.money = async (year) => {
-  year = +year || new Date().getFullYear();
+  // the API accepts 2000..2100 only: clamp a typed or stale route instead of showing a validation error
+  year = Math.min(2100, Math.max(2000, Math.trunc(+year) || new Date().getFullYear()));
   const f = await api('GET', 'finance?year=' + year), s = S.settings, m = new Date().getMonth(), cur = year === new Date().getFullYear() ? f.months[m] : null;
   const T = f.totals, ta = f.tax_actual, tp = f.tax_projected;
   const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -315,7 +316,7 @@ PAGES.money = async (year) => {
     ${f.months.map((x, i) => `<g><title>${MN[i]}: revenue ${eur(x.revenue)}, expenses ${eur(x.expenses)}, profit ${eur(x.profit)}</title><rect x="${i * bw + 8}" y="${H - Math.max(0, x.revenue) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, x.revenue) / mx * H}" fill="var(--accent)" rx="2"/><rect x="${i * bw + bw / 2}" y="${H - Math.max(0, x.expenses) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, x.expenses) / mx * H}" fill="var(--warn)" rx="2"/><text x="${i * bw + bw / 2}" y="${H + 16}" text-anchor="middle">${MN[i]}</text></g>`).join('')}</g></svg>`;
   const typeName = { freiberufler: 'Freiberufler (EÜR, no trade tax)', gewerbe: 'Gewerbetreibender / Einzelunternehmen', gmbh: 'UG / GmbH' }[f.company_type];
   return `<div class="head"><div><h1>Money & Taxes</h1><div class="muted">${esc(typeName)}${f.kleinunternehmer ? ' · Kleinunternehmer' : ''} · ${s.accounting === 'accrual' ? 'by invoice date' : 'by payment date (EÜR)'}</div></div>
-    <div class="row tight" style="flex:none;align-items:center"><button data-a="goto" data-to="money/${year - 1}">←</button><b>${year}</b><button data-a="goto" data-to="money/${year + 1}">→</button></div></div>
+    <div class="row tight" style="flex:none;align-items:center"><button data-a="goto" data-to="money/${year - 1}" ${year <= 2000 ? 'disabled' : ''}>←</button><b>${year}</b><button data-a="goto" data-to="money/${year + 1}" ${year >= 2100 ? 'disabled' : ''}>→</button></div></div>
   ${f.warnings.map(w => `<div class="banner">⚠ ${esc(w)}</div>`).join('')}
   ${cur ? `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">Tax reserve (${num(f.effective_rate * 100, 1)} %)</div><div style="font-size:22px;font-weight:700">${eur(cur.tax_set_aside)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div><div><div class="muted small">Social insurance</div><div style="font-size:22px;font-weight:700">${eur(cur.social)}</div></div></div>
     <div style="margin-top:10px">→ You can take home about <b class="${cur.take_home >= 0 ? 'free-good' : 'free-bad'}" style="font-size:20px">${eur(cur.take_home)}</b> this month.</div></div>` : ''}
