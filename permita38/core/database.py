@@ -66,7 +66,7 @@ def _parse(path: Path) -> Migration:
     m = _FILE_RE.match(path.name)
     if not m:
         raise ValueError(f"bad migration file name: {path} (expected 0001-name.sql)")
-    lines = path.read_text(encoding="utf-8").split("\n")[:2]
+    lines = path.read_text(encoding="utf-8").splitlines()[:2]
     idm = _ID_LINE.match(lines[0]) if len(lines) > 0 else None
     rqm = _REQ_LINE.match(lines[1]) if len(lines) > 1 else None
     if not idm or not rqm:

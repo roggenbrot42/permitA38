@@ -431,3 +431,23 @@ def test_create_migration_writes_header_and_requires_in_every_dialect(tmp_path):
     assert [m.name for m in validate_dialects(root)["sqlite"]] == ["initial", "add_fax_number", "again"]
     with pytest.raises(ValueError):
         create_migration("!!!", root)
+
+
+# ------------------------------------------------------------------ read-only paths
+def test_crlf_migration_files_parse_and_execute_without_carriage_returns(tmp_path):
+    root = tmp_path / "crlf"
+    body = b"CREATE TABLE crlf_probe (a INTEGER);\r\nCREATE TABLE crlf_probe2 (b INTEGER);\r\n"
+    for d in DIALECT_NAMES:
+        (root / d).mkdir(parents=True)
+        (root / d / "0001-first.sql").write_bytes(b"-- migration: 7ecb5a30\r\n-- requires: none\r\n" + body)
+    mig = list_migrations("sqlite", root)
+    assert [(m.id, m.requires, m.name) for m in mig] == [("7ecb5a30", None, "first")]
+    text = mig[0].sql()
+    assert "\r" not in text and text.splitlines()[0] == "-- migration: 7ecb5a30"
+    raw = sqlite3.connect(":memory:")
+    raw.executescript(text)
+    assert {r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type = 'table'")} == {
+        "crlf_probe",
+        "crlf_probe2",
+    }
+
