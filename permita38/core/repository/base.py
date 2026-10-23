@@ -102,6 +102,14 @@ class Repository(ABC):
     @abstractmethod
     def attachment_path(self, name: str) -> str | None: ...
 
+    def restore_attachment(self, name: str, blob: bytes) -> bool:
+        """Store a file under an EXACT name (data import / restore). Returns False if the name already exists."""
+        raise NotImplementedError(f"restore_attachment is not implemented for the {self.backend} backend")
+
+    def remove_attachment(self, name: str) -> bool:
+        """Delete a stored file (rolling back an import)."""
+        raise NotImplementedError(f"remove_attachment is not implemented for the {self.backend} backend")
+
     # ---- operations ----
     @abstractmethod
     def conflicts(self) -> StrList:

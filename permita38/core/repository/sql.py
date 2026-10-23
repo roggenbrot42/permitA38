@@ -314,6 +314,26 @@ class SQLRepository(Repository):
         p = self.data_dir / "attachments" / name
         return str(p) if p.is_file() else None
 
+    def restore_attachment(self, name: str, blob: bytes) -> bool:
+        if not re.match(r"^[0-9a-z]{6,32}\.[a-z0-9]{1,5}$", name):
+            raise ValueError("bad attachment name")
+        folder = self.data_dir / "attachments"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / name
+        if target.exists():
+            return False
+        tmp = folder / (name + ".tmp")
+        tmp.write_bytes(blob)
+        os.replace(tmp, target)
+        return True
+
+    def remove_attachment(self, name: str) -> bool:
+        path = self.attachment_path(name)
+        if not path:
+            return False
+        os.remove(path)
+        return True
+
     # ------------------------------------------------------------------ sync conflicts
     def conflicts(self) -> StrList:
         found: list[str] = []

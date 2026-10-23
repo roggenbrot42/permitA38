@@ -27,6 +27,16 @@ class FeaturesConfig(BaseModel):
     impressum_lookup: bool = True
 
 
+class ImportLimits(BaseModel):
+    """Upper bounds for data-import archives (zip bombs, runaway uploads)."""
+
+    max_archive_mb: int = Field(200, ge=1, le=10_000)
+    max_uncompressed_mb: int = Field(1000, ge=1, le=100_000)
+    max_ratio: int = Field(200, ge=2, le=10_000)  # uncompressed / compressed, per file
+    max_entries: int = Field(200_000, ge=1, le=5_000_000)
+    max_json_mb: int = Field(100, ge=1, le=2_000)  # a single JSON document
+
+
 class Config(BaseModel):
     data_dir: Path = Field(default_factory=lambda: Path.home() / "permitA38")
     secret_key: str
@@ -48,6 +58,7 @@ class Config(BaseModel):
     token_ttl_hours: int = 12
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
+    import_limits: ImportLimits = Field(default_factory=ImportLimits)
 
 
 def config_dir() -> Path:
