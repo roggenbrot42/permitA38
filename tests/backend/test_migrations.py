@@ -409,13 +409,13 @@ def test_old_binary_would_refuse_an_upgraded_database(tmp_path):
 def test_two_branches_adding_a_migration_on_the_same_head_is_reported_as_a_fork(tmp_path):
     root = real_chain_copy(tmp_path)
     for d in DIALECT_NAMES:
-        write_migration(root, "0004-calendars.sql", "aaaa0001", HEAD, dialects=(d,))
-        write_migration(root, "0004-numbering.sql", "bbbb0002", HEAD, dialects=(d,))
+        write_migration(root, "0005-branch_a.sql", "aaaa0001", HEAD, dialects=(d,))
+        write_migration(root, "0005-branch_b.sql", "bbbb0002", HEAD, dialects=(d,))
     with pytest.raises(ValueError, match="fork"):
         validate_dialects(root)
     # the fix named in the message: the second branch re-points its first migration onto the new head
     for d in DIALECT_NAMES:
-        write_migration(root, "0004-numbering.sql", "bbbb0002", "aaaa0001", dialects=(d,))
+        write_migration(root, "0005-branch_b.sql", "bbbb0002", "aaaa0001", dialects=(d,))
     chain = validate_dialects(root)["sqlite"]
     assert [m.id for m in chain][-2:] == ["aaaa0001", "bbbb0002"]
 

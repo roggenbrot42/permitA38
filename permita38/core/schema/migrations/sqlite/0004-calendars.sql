@@ -1,5 +1,5 @@
 -- migration: c41e7d90
--- requires: 00000003
+-- requires: ab46b196
 -- permitA38 migration 0004: calendars (ICS import / subscription) and per-user working hours (sqlite)
 -- calendar_sources.url is a SECRET (ICS share links are bearer URLs): it is never returned by the API.
 -- calendar_events holds the expanded busy time of the horizon; timed events are UTC ISO strings
