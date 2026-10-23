@@ -522,6 +522,7 @@ class CalendarOut(BaseModel):
     last_status: str | None = None
     last_error: str | None = None
     event_count: int = 0
+    last_warnings: list[str] = []  # notes from the last import (unsupported rules, unknown zones ...), no user data
 
 
 class CalendarEventOut(BaseModel):

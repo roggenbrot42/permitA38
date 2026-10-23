@@ -25,6 +25,8 @@ from permita38.core.netsafe import FetchedResource, FetchError, RequestBudget, p
 from permita38.core.repository import Repository
 from permita38.core.service.calendar.ics import MAX_INPUT_BYTES, IcsError, Occurrence, parse_ics
 
+MAX_WARNINGS = 20
+
 log = logging.getLogger("permita38.calendar")
 
 DEFAULT_TIMEZONE = "Europe/Berlin"
@@ -168,6 +170,7 @@ class CalendarService:
             "last_status": src.get("last_status"),
             "last_error": src.get("last_error"),
             "event_count": src.get("event_count") or 0,
+            "last_warnings": list(src.get("last_warnings") or [])[:MAX_WARNINGS],
         }
 
     def list_sources(self, user: dict) -> list[dict]:
@@ -181,20 +184,20 @@ class CalendarService:
         url = self._normalise_url(url)
         self._check_quota(user)
         now = self._clock()
-        events, etag, last_modified = self._download(url, user, options, conditional=None)
+        events, etag, last_modified, warnings = self._download(url, user, options, conditional=None)
         if events is None:  # cannot happen without validators; kept explicit for the type checker
             raise ServiceError(502, "The calendar could not be downloaded.")
         src = self._new_source(user, options, kind="ics_url", url=url, now=now)
         src.update(etag=etag, last_modified=last_modified, last_status="ok", last_error=None)
-        return self._view(self._store_import(src, events, now))
+        return self._view(self._store_import(src, events, now, warnings))
 
     def add_upload(self, user: dict, options: dict, data: bytes) -> dict:
         self._check_quota(user)
         now = self._clock()
-        events = self._parse(data, user, options)
+        events, warnings = self._parse(data, user, options)
         src = self._new_source(user, options, kind="ics_file", url=None, now=now)
         src.update(last_status="ok", last_error=None)
-        return self._view(self._store_import(src, events, now))
+        return self._view(self._store_import(src, events, now, warnings))
 
     def _check_quota(self, user: dict) -> None:
         if len(self.store.find("calendar_sources", user_id=user["id"])) >= MAX_SOURCES:
@@ -246,7 +249,7 @@ class CalendarService:
                 resync = True  # keywords are applied while importing
         if resync and src.get("kind") == "ics_url":
             self.store.save("calendar_sources", src)
-            return self.sync(user, source_id)
+            return self.sync(user, source_id, force=True)  # the stored events must be rebuilt: no 304 shortcut
         if resync:
             src.update(last_status="needs_upload", last_error="The filter changed: upload the calendar file again.")
         elif relabel:
@@ -277,14 +280,14 @@ class CalendarService:
                 self.store.delete("calendar_sources", src["id"])
 
     # ----------------------------------------------------------------------------- refresh
-    def sync(self, user: dict, source_id: str) -> dict:
+    def sync(self, user: dict, source_id: str, *, force: bool = False) -> dict:
         src = self._own(user, source_id)
         if src.get("kind") != "ics_url":
             raise ServiceError(409, "This calendar was imported from a file: upload the file again to refresh it.")
         if not self._begin(source_id):
             raise ServiceError(409, "This calendar is being refreshed already. Try again in a moment.")
         try:
-            self._refresh_source(src)
+            self._refresh_source(src, force=force)
         finally:
             self._end(source_id)
         return self._view(self._require(source_id))
@@ -351,33 +354,41 @@ class CalendarService:
         with self._lock:
             self._inflight.discard(source_id)
 
-    def _refresh_source(self, src: dict) -> None:
+    def _refresh_source(self, src: dict, *, force: bool = False) -> None:
         now = self._clock()
         owner = self.store.get("users", src["user_id"]) or {}
         # a "not modified" answer would keep a stored window that slides out of date: revalidate the full file regularly
         fresh = now - (src.get("imported_at") or 0) < FULL_REFETCH_SECONDS
-        conditional = {"etag": src.get("etag"), "last_modified": src.get("last_modified")} if fresh else None
+        use_validators = fresh and not force
+        conditional = {"etag": src.get("etag"), "last_modified": src.get("last_modified")} if use_validators else None
         try:
-            events, etag, last_modified = self._download(src["url"], owner, src, conditional=conditional)
+            events, etag, last_modified, warnings = self._download(src["url"], owner, src, conditional=conditional)
         except ServiceError as err:
-            self._record_failure(src, err.message, now)
+            self._patch_source(src["id"], last_status="error", last_error=err.message, last_fetched=int(now))
             return
         if events is None:  # 304: nothing changed on the server
-            src.update(last_status="not_modified", last_error=None, last_fetched=int(now))
-            self.store.save("calendar_sources", src)
+            self._patch_source(src["id"], last_status="not_modified", last_error=None, last_fetched=int(now))
             return
-        src.update(etag=etag, last_modified=last_modified, last_status="ok", last_error=None)
-        self._store_import(src, events, now)
+        self._store_import(
+            {**src, "etag": etag, "last_modified": last_modified, "last_status": "ok", "last_error": None},
+            events,
+            now,
+            warnings,
+        )
 
-    def _record_failure(self, src: dict, message: str, now: float) -> None:
-        # the previous events stay; only the status changes
-        src.update(last_status="error", last_error=message, last_fetched=int(now))
-        self.store.save("calendar_sources", src)
+    def _patch_source(self, source_id: str, **fields: object) -> dict | None:
+        """Change only ``fields`` of a source that still exists (a refresh must never resurrect a deleted calendar)."""
+        with self.store.transaction():
+            current = self.store.get("calendar_sources", source_id)
+            if current is None:
+                return None
+            current.update(fields)
+            return self.store.save("calendar_sources", current)
 
     # ----------------------------------------------------------------------------- download/parse
     def _download(
         self, url: str, owner: dict, options: dict, *, conditional: dict | None
-    ) -> tuple[list[Occurrence] | None, str | None, str | None]:
+    ) -> tuple[list[Occurrence] | None, str | None, str | None, list[str]]:
         try:
             res = self.fetcher.fetch_resource(
                 url,
@@ -390,11 +401,11 @@ class CalendarService:
         except FetchError as err:
             raise ServiceError(502, _FETCH_MESSAGES.get(err.code, "The calendar could not be downloaded.")) from None
         if res.status == 304:
-            return None, (conditional or {}).get("etag"), None
-        events = self._parse(res.body, owner, options)
-        return events, _validator(res.etag), _validator(res.last_modified)
+            return None, (conditional or {}).get("etag"), None, []
+        events, warnings = self._parse(res.body, owner, options)
+        return events, _validator(res.etag), _validator(res.last_modified), warnings
 
-    def _parse(self, data: bytes, owner: dict, options: dict) -> list[Occurrence]:
+    def _parse(self, data: bytes, owner: dict, options: dict) -> tuple[list[Occurrence], list[str]]:
         zone = user_zone(owner)
         start, end = stored_window(zone, datetime.fromtimestamp(self._clock(), UTC))
         try:
@@ -407,15 +418,25 @@ class CalendarService:
             )
         except IcsError as err:
             raise ServiceError(422, _ICS_MESSAGES.get(err.code, "The calendar could not be read.")) from None
-        return result.occurrences
+        return result.occurrences, list(result.warnings)[:MAX_WARNINGS]
 
-    def _store_import(self, src: dict, occurrences: list[Occurrence], now: float) -> dict:
-        """Replace the source's events atomically and save the source (no titles unless the policy allows)."""
+    def _store_import(self, src: dict, occurrences: list[Occurrence], now: float, warnings: list[str]) -> dict:
+        """Replace the source's events atomically and save the source (no titles unless the policy allows).
+
+        A refresh of a calendar that was deleted meanwhile stores nothing (the source is re-read inside the
+        transaction and only the fields that this import changes are written).
+        """
         policy = src.get("title_policy", "none")
         stamp = int(now)
         with self.store.transaction():
             if src.get("id") is None:
                 src = self.store.save("calendar_sources", src)
+            else:
+                current = self.store.get("calendar_sources", src["id"])
+                if current is None:
+                    return src
+                current.update({k: src.get(k) for k in ("etag", "last_modified", "last_status", "last_error")})
+                src = current
             self.store.delete_where("calendar_events", source_id=src["id"])
             rows = [
                 {
@@ -434,7 +455,12 @@ class CalendarService:
                 for occ in occurrences
             ]
             self.store.save_many("calendar_events", rows)
-            src.update(event_count=len(rows), last_fetched=stamp, imported_at=stamp)
+            src.update(
+                event_count=len(rows),
+                last_fetched=stamp,
+                imported_at=stamp,
+                last_warnings=list(warnings)[:MAX_WARNINGS],
+            )
             return self.store.save("calendar_sources", src)
 
     # ----------------------------------------------------------------------------- read models

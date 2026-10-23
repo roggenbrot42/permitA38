@@ -3,10 +3,11 @@
 from datetime import date
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, Response, UploadFile
+from pydantic import ValidationError
 
 from permita38.api.deps import CurrentUser, ServicesDep
-from permita38.core.models import CalendarEventOut, CalendarIn, CalendarOut, CalendarPatchIn
+from permita38.core.models import CalendarEventOut, CalendarIn, CalendarOut, CalendarPatchIn, CalendarTitlePolicy
 from permita38.core.service.calendar.rights import may_manage_own
 
 router = APIRouter(prefix="/calendars", tags=["calendars"])
@@ -48,26 +49,35 @@ def add_calendar(body: CalendarIn, user: CalendarUser, services: ServicesDep):
 
 @router.post("/upload", response_model=CalendarOut, summary="connect a calendar from an uploaded .ics file")
 def upload_calendar(
+    request: Request,
     user: CalendarUser,
     services: ServicesDep,
     file: UploadFile,
     name: Annotated[str, Form(max_length=200)],
-    title_policy: Annotated[str, Form()] = "none",
-    refresh_minutes: Annotated[int, Form()] = 360,
+    title_policy: Annotated[CalendarTitlePolicy, Form()] = "none",
+    refresh_minutes: Annotated[int, Form(ge=15, le=10080)] = 360,
     all_day_blocks: Annotated[str, Form(max_length=5)] = "false",  # "true" / "false" (absent = default)
     busy_default: Annotated[str, Form(max_length=5)] = "true",
     include_keywords: Annotated[str, Form(max_length=2000)] = "",
     exclude_keywords: Annotated[str, Form(max_length=2000)] = "",
 ):
-    options = CalendarIn(
-        name=name,
-        title_policy=title_policy,  # type: ignore[arg-type]
-        refresh_minutes=refresh_minutes,
-        all_day_blocks=_flag(all_day_blocks, False),
-        busy_default=_flag(busy_default, True),
-        include_keywords=[k for k in include_keywords.split(",") if k.strip()][:20],
-        exclude_keywords=[k for k in exclude_keywords.split(",") if k.strip()][:20],
-    ).model_dump(exclude={"url"})
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_UPLOAD + 65536:  # refuse before the body is spooled to disk
+        raise HTTPException(413, "The calendar file is too large (max 5 MB).")
+    try:
+        options = CalendarIn(
+            name=name,
+            title_policy=title_policy,
+            refresh_minutes=refresh_minutes,
+            all_day_blocks=_flag(all_day_blocks, False),
+            busy_default=_flag(busy_default, True),
+            include_keywords=[k.strip() for k in include_keywords.split(",") if k.strip()][:20],
+            exclude_keywords=[k.strip() for k in exclude_keywords.split(",") if k.strip()][:20],
+        ).model_dump(exclude={"url"})
+    except ValidationError as err:  # built by hand from form fields: report it like any other invalid input
+        raise HTTPException(
+            422, "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in err.errors())
+        ) from None
     blob = file.file.read(MAX_UPLOAD + 1)
     if len(blob) > MAX_UPLOAD:
         raise HTTPException(413, "The calendar file is too large (max 5 MB).")
