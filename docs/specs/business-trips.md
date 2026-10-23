@@ -133,18 +133,37 @@ Worked examples (domestic 2026 values, to be used as tests):
   table, mileage table, linked bills with category/net/VAT, totals, the rules version and the signature line.
   Same PDF module as invoices, same fonts, escaped text; tested like the other PDFs.
 * `GET /api/expenses` and the expense form accept `trip_id`.
-* Rights: new area `trips` in `core/rights.py` – boss all/all, accountant read-only, employee none (their own travel
-  costs come with the team features). Matrix doc and the every-route-as-every-role test updated.
+* Rights (decided by the maintainer: configurable per role): new area `trips` in `core/rights.py` with the usual
+  read/write scopes. Defaults: **boss** all/all; **employee** limited/limited (their own trips: create, edit, delete
+  and see only those); **accountant** all/none (reads every trip and the statements). The boss can change the
+  scope per role under *Settings → Roles* (the same mechanism as the team timeline visibility, see
+  `specs/team-timeline.md`); the server enforces it on every route, and the matrix doc and the every-route-as-every-
+  role test are updated. An employee's trip creates bills only under their own name.
 * Services in `core/service/trips.py`; the router is thin; no SQL outside the repository.
 
 ## UI
 
-* Expenses page: tabs **Bills** and **Business trips**. The trip list shows period, destination, purpose, allowance,
+* A separate **Business trips** page (own entry in the menu, next to Expenses; also reachable from the Expenses page). The trip list shows period, destination, purpose, allowance,
   mileage, bills total.
 * Trip dialog: title, purpose, customer/project, start and end, a destination row per day (country select with search,
   city), a day grid with the three meal-provided checkboxes, the km table, and a live **breakdown panel** (from
   `/trips/preview`) that explains every figure in words: "Tue 12.11.: 24 h in Germany: 28,00 € − breakfast provided
   5,60 € = 22,40 €". Notes (country fallback, three-month limit) are visible, not tooltips.
+* **Reminder checklist** ("Usual expenses of a trip") shown in the dialog and on the trip page, one line per item
+  with a state of *Added* (count and sum), *Open*, or *Not needed* (a checkbox, remembered on the trip):
+  1. **Daily allowance** – computed from the trip itself; the line shows the amount, or "no days over 8 hours".
+  2. **Hotel / accommodation** – bills in the category *Accommodation*; hint: itemise the breakfast and city tax.
+  3. **Transportation** – train, flight, taxi, parking, tolls (receipts) and the **mileage** table (private car).
+  4. **Food** – meals while travelling are covered by the allowance; entertaining a business partner is *Business
+     meals* (70 % rule, with participants and occasion). The line explains this instead of asking for receipts.
+  5. **Material** – equipment, printing, samples bought for the trip.
+  6. **Cost centre / project** – a required decision: pick the customer/project the trip is charged to, or choose
+     "general" explicitly. The checklist stays *Open* until one is chosen.
+  Each *Open* line has an "Add" button that opens the bill dialog with the category, the trip and the project
+  preselected (the allowance and mileage lines open the trip's own sections). A trip cannot be finalized while a
+  line is *Open* unless it is marked *Not needed* (the user can override with a confirm). The checklist items are a
+  list in the trip rules file, so the maintainer can add categories (for example *Visa*, *Conference fee*)
+  without code changes. Expense categories gain *Accommodation*, *Transportation*, *Material* if missing.
 * "Add bill to this trip" opens the normal bill dialog with the trip preselected; the hotel bill uses itemised lines
   (room 7 %, breakfast part, city tax 0 %). A bill belongs to one trip.
 * Finalize locks the figures; the statement button appears. A final trip shows "Reopen" for the boss.
@@ -184,7 +203,7 @@ automatically.
 
 ## Open decisions for the maintainer
 
-* Should the trip be limited to the owner and boss now (as proposed) or also available to accountants for entry?
+* Should the checklist block finalizing (as proposed) or only warn?
 * Is a 90-day limit per trip right, or should long projects be modelled as several trips?
 * Does the maintainer's tax adviser confirm the three-month rule for self-employed people, the 0,30 € mileage rate
   (and not 0,38 €), and the treatment of foreign VAT?
