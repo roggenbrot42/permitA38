@@ -259,4 +259,6 @@ def test_upper_case_extensions_with_correct_magic_numbers_are_accepted_and_serve
 
 def test_download_filename_is_a_quoted_string(boss_client):
     name = stored(boss_client, "x.html", HTML, "text/html")
-    assert boss_client.get(f"/api/attachments/{name}").headers["content-disposition"] == f'attachment; filename="{name}"'
+    assert (
+        boss_client.get(f"/api/attachments/{name}").headers["content-disposition"] == f'attachment; filename="{name}"'
+    )
