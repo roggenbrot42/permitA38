@@ -109,6 +109,15 @@ readable and unchanged. The backup module (alpha.4) keeps yearly archives protec
   *verify*) is written off over several years; a simple asset register would produce the booking entries (proposed).
 - **Trade tax return**, **annual accounts / e-balance sheet (*E-Bilanz*)** for GmbH/UG: out of scope for now (research).
 - **Entertainment costs** (70 % deductible) are supported: choose the category *Business meals* (it proposes 70 % and reclaims the input VAT in full) or set the *deductible %* field yourself (then the input VAT follows that share).
+- **Business trips** *(verify)*: self-employed people may claim a flat meal allowance per trip day (domestic 14 € for
+  more than 8 hours or on arrival/departure days, 28 € for 24 hours; meals provided reduce it by 20 % / 40 % of the
+  full-day rate; abroad per-country amounts from the yearly BMF letter, 2026: 5 December 2025), mileage with a private
+  car (0,30 € per km on business trips), and actual receipted costs for accommodation and transport. Specified in
+  [`specs/business-trips.md`](specs/business-trips.md); not implemented yet.
+- **Business meals with business partners** *(verify)*: 70 % of the cost is deductible as an expense, input VAT is
+  reclaimed in full for appropriate, documented costs (§ 15 Abs. 1a UStG); employees-only events are 100 %. The app
+  reclaims the input VAT of the category *Business meals* in full (`vat_deductible`); for other categories the input VAT
+  follows the deductible share.
 
 ## 7. People who work for you
 
