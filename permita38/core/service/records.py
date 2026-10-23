@@ -15,6 +15,18 @@ MEMBER_READ = {"projects", "tasks", "entries", "absences", "users"}
 MEMBER_WRITE_OWN = {"entries", "absences"}
 
 
+_IMPORT_FIELDS = (
+    "imported",
+    "original_number",
+    "external_id",
+    "import_batch",
+    "totals_unverified",
+    "original_pdf",
+    "original_pdf_sha256",
+    "given_totals",
+)
+
+
 class RecordService:
     def __init__(self, store: Repository):
         self.store = store
@@ -140,8 +152,14 @@ class RecordService:
 
     def prepare_document(self, doc: dict, old: dict | None) -> dict:
         st = effective_settings(self.store.settings())
+        for k in _IMPORT_FIELDS:  # owned by the importer: a client can neither forge nor drop them
+            doc.pop(k, None)
         if old:
             doc["number"] = old.get("number")  # numbers are only assigned via finalize
+            for k in _IMPORT_FIELDS:
+                if k in old:
+                    doc[k] = old[k]
+            doc["date"] = doc.get("date") or old.get("date") or _today()  # a document never loses its date
         else:
             doc["status"] = "draft"
             doc.pop("number", None)
@@ -156,6 +174,10 @@ class RecordService:
         old = self.store.get(coll, rid) if _valid_id(rid) else None
         if not old:
             return
+        if coll == "invoices" and old.get("number"):  # gapless numbering: a numbered invoice is cancelled, not deleted
+            raise ServiceError(
+                409, "A numbered invoice cannot be deleted; cancel it instead (keeps the numbers gapless)"
+            )
         if me["role"] != "boss":
             own = coll in MEMBER_WRITE_OWN and old.get("user_id") == me["id"] and not old.get("invoice_id")
             if not own:

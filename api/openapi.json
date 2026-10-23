@@ -2326,6 +2326,441 @@
         }
       }
     },
+    "/api/numbering/preview": {
+      "get": {
+        "tags": [
+          "numbering"
+        ],
+        "summary": "the next numbers for a document type",
+        "operationId": "preview_api_numbering_preview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "invoice",
+                "offer"
+              ],
+              "type": "string",
+              "default": "invoice",
+              "title": "Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Preview Api Numbering Preview Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/numbering/status": {
+      "get": {
+        "tags": [
+          "numbering"
+        ],
+        "summary": "pattern, reset scope, next number and warnings for a document type",
+        "operationId": "status_api_numbering_status_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "invoice",
+                "offer"
+              ],
+              "type": "string",
+              "default": "invoice",
+              "title": "Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Status Api Numbering Status Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/numbering/check": {
+      "post": {
+        "tags": [
+          "numbering"
+        ],
+        "summary": "dry run of a change: warnings and preview, nothing is written",
+        "operationId": "check_api_numbering_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NumberingCheck"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Check Api Numbering Check Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/numbering": {
+      "put": {
+        "tags": [
+          "numbering"
+        ],
+        "summary": "change pattern, reset scope or next number; risky changes need confirm=true (409 otherwise)",
+        "operationId": "update_api_numbering_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NumberingChange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/numbering/log": {
+      "get": {
+        "tags": [
+          "numbering"
+        ],
+        "summary": "audit trail of numbering changes",
+        "operationId": "log_api_numbering_log_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "invoice",
+                    "offer"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response Log Api Numbering Log Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/import/preview": {
+      "post": {
+        "tags": [
+          "import"
+        ],
+        "summary": "dry run: validate a file and report what an import would do",
+        "operationId": "preview_api_import_preview_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_preview_api_import_preview_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Preview Api Import Preview Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/import/run": {
+      "post": {
+        "tags": [
+          "import"
+        ],
+        "summary": "import; all-or-nothing: any error row (HTTP 422) writes nothing",
+        "operationId": "run_api_import_run_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_run_api_import_run_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/import/batches": {
+      "get": {
+        "tags": [
+          "import"
+        ],
+        "summary": "import runs, newest first",
+        "operationId": "batches_api_import_batches_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Batches Api Import Batches Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/import/batches/{rid}/undo": {
+      "post": {
+        "tags": [
+          "import"
+        ],
+        "summary": "remove the records of an import run (only if unchanged since)",
+        "operationId": "undo_api_import_batches__rid__undo_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Undo Api Import Batches  Rid  Undo Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/customers/lookup-impressum": {
       "post": {
         "tags": [
@@ -4771,6 +5206,240 @@
         ],
         "title": "AuthStatus"
       },
+      "Body_preview_api_import_preview_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "invoices",
+              "offers",
+              "customers",
+              "expenses"
+            ],
+            "title": "Type"
+          },
+          "mapping": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping"
+          },
+          "on_duplicate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "skip",
+                  "overwrite"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Duplicate"
+          },
+          "accept_unverified": {
+            "type": "boolean",
+            "title": "Accept Unverified",
+            "default": false
+          },
+          "merge_similar": {
+            "type": "boolean",
+            "title": "Merge Similar",
+            "default": false
+          },
+          "decimal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "comma",
+                  "point"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decimal"
+          },
+          "date_order": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dmy",
+                  "mdy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Order"
+          },
+          "sheet": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sheet"
+          },
+          "pdfs": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pdfs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "type"
+        ],
+        "title": "Body_preview_api_import_preview_post"
+      },
+      "Body_run_api_import_run_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "invoices",
+              "offers",
+              "customers",
+              "expenses"
+            ],
+            "title": "Type"
+          },
+          "mapping": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping"
+          },
+          "on_duplicate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "skip",
+                  "overwrite"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "On Duplicate"
+          },
+          "accept_unverified": {
+            "type": "boolean",
+            "title": "Accept Unverified",
+            "default": false
+          },
+          "merge_similar": {
+            "type": "boolean",
+            "title": "Merge Similar",
+            "default": false
+          },
+          "decimal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "comma",
+                  "point"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decimal"
+          },
+          "date_order": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "dmy",
+                  "mdy"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Order"
+          },
+          "sheet": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sheet"
+          },
+          "pdfs": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pdfs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "type"
+        ],
+        "title": "Body_run_api_import_run_post"
+      },
       "Body_upload_api_attachments_post": {
         "properties": {
           "file": {
@@ -5359,6 +6028,28 @@
               }
             ],
             "title": "Rate"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "import_batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Batch"
           }
         },
         "additionalProperties": true,
@@ -5819,6 +6510,72 @@
               }
             ],
             "title": "Offer Id"
+          },
+          "imported": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported"
+          },
+          "original_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Number"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "import_batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Batch"
+          },
+          "totals_unverified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totals Unverified"
+          },
+          "original_pdf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Pdf"
           }
         },
         "additionalProperties": true,
@@ -6337,6 +7094,72 @@
             ],
             "title": "Offer Id"
           },
+          "imported": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported"
+          },
+          "original_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Number"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "import_batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Batch"
+          },
+          "totals_unverified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totals Unverified"
+          },
+          "original_pdf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Pdf"
+          },
           "planning_warnings": {
             "anyOf": [
               {
@@ -6775,6 +7598,28 @@
               }
             ],
             "title": "Attachment"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "import_batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Batch"
           }
         },
         "additionalProperties": true,
@@ -7292,6 +8137,135 @@
           "plan"
         ],
         "title": "MoveCheckIn"
+      },
+      "NumberingChange": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "invoice",
+              "offer"
+            ],
+            "title": "Type"
+          },
+          "pattern": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pattern"
+          },
+          "reset": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "never",
+                  "yearly",
+                  "monthly"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "title": "Reason",
+            "default": ""
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "NumberingChange"
+      },
+      "NumberingCheck": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "invoice",
+              "offer"
+            ],
+            "title": "Type"
+          },
+          "pattern": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pattern"
+          },
+          "reset": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "never",
+                  "yearly",
+                  "monthly"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "NumberingCheck"
       },
       "PasswordPayload": {
         "properties": {
@@ -8017,6 +8991,21 @@
             "title": "Offer Pattern",
             "default": "AN-{year}-{n:04d}"
           },
+          "invoice_reset": {
+            "type": "string",
+            "title": "Invoice Reset",
+            "default": "yearly"
+          },
+          "offer_reset": {
+            "type": "string",
+            "title": "Offer Reset",
+            "default": "yearly"
+          },
+          "numbering_shared": {
+            "type": "boolean",
+            "title": "Numbering Shared",
+            "default": false
+          },
           "social_monthly": {
             "type": "number",
             "title": "Social Monthly",
@@ -8230,6 +9219,31 @@
             "maxLength": 100,
             "title": "Offer Pattern",
             "default": "AN-{year}-{n:04d}"
+          },
+          "invoice_reset": {
+            "type": "string",
+            "enum": [
+              "never",
+              "yearly",
+              "monthly"
+            ],
+            "title": "Invoice Reset",
+            "default": "yearly"
+          },
+          "offer_reset": {
+            "type": "string",
+            "enum": [
+              "never",
+              "yearly",
+              "monthly"
+            ],
+            "title": "Offer Reset",
+            "default": "yearly"
+          },
+          "numbering_shared": {
+            "type": "boolean",
+            "title": "Numbering Shared",
+            "default": false
           },
           "social_monthly": {
             "type": "number",
@@ -9888,6 +10902,72 @@
             ],
             "title": "Offer Id"
           },
+          "imported": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported"
+          },
+          "original_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Number"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "import_batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Batch"
+          },
+          "totals_unverified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totals Unverified"
+          },
+          "original_pdf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Pdf"
+          },
           "planning_warnings": {
             "anyOf": [
               {
@@ -10163,6 +11243,72 @@
               }
             ],
             "title": "Offer Id"
+          },
+          "imported": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imported"
+          },
+          "original_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Number"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "import_batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Batch"
+          },
+          "totals_unverified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Totals Unverified"
+          },
+          "original_pdf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Pdf"
           },
           "planning_warnings": {
             "anyOf": [

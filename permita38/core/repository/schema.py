@@ -60,7 +60,9 @@ _EXTRA = ""  # the `extra` JSON column is added implicitly (Table.extra_column)
 _DOCUMENT = (
     "number:str customer_id:id project_id:id status:str date:str due_date:str valid_until:str paid_date:str "
     "service_from:str service_to:str title:str reference:str template_id:str language:str intro:text outro:text "
-    "notes:text vat_rate:float lines:json plan:json offer_id:id"
+    "notes:text vat_rate:float lines:json plan:json offer_id:id "
+    # set by the document importer (core/service/importer): the legal original is the imported PDF
+    "imported:bool original_number:str external_id:str import_batch:str totals_unverified:bool original_pdf:str"
 )
 
 
@@ -82,7 +84,7 @@ TABLES: dict[str, Table] = {
             "customers",
             _cols(
                 _BASE + "name:str customer_no:str street:str zip:str city:str country:str tax_number:str vat_id:str "
-                "contact:str email:str phone:str notes:text rate:float" + _EXTRA
+                "contact:str email:str phone:str notes:text rate:float external_id:str import_batch:str" + _EXTRA
             ),
         ),
         Table(
@@ -133,7 +135,8 @@ TABLES: dict[str, Table] = {
             "expenses",
             _cols(
                 _BASE + "date:str net:float vat:float vat_rate:float vendor:str description:text category:str "
-                "project_id:id deductible:float attachment:str vat_deductible:float" + _EXTRA
+                "project_id:id deductible:float attachment:str vat_deductible:float external_id:str import_batch:str"
+                + _EXTRA
             ),
             (Index("idx_expenses_date", ("date",)), Index("idx_expenses_project", ("project_id",))),
         ),
@@ -157,11 +160,27 @@ TABLES: dict[str, Table] = {
             "timers",
             _cols(_BASE + "running:bool started:int project_id:id task_id:id note:text" + _EXTRA),
         ),
+        # document number counters: one row per document type (or 'shared') and period (see core/numbering.py)
+        Table(
+            "number_sequences",
+            _cols(_BASE + "doc_type:str period:str last_value:int" + _EXTRA),
+            (Index("idx_number_sequences_key", ("doc_type", "period"), unique=True),),
+        ),
+        # audit trail of changes to the numbering (start number, pattern, reset scope)
+        Table(
+            "numbering_log",
+            _cols(_BASE + "doc_type:str action:str before:json after:json warnings:json reason:text" + _EXTRA),
+        ),
+        # one row per import run; records carry the batch id so a run can be undone
+        Table(
+            "import_batches",
+            _cols(_BASE + "kind:str filename:str status:str counts:json mapping:json finished:int" + _EXTRA),
+        ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
 }
 
 # internal per-user collections that are not exposed through the CRUD API
-INTERNAL_COLLECTIONS = ["timers", "plan_scenarios"]
+INTERNAL_COLLECTIONS = ["timers", "number_sequences", "numbering_log", "import_batches", "plan_scenarios"]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]

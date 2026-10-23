@@ -15,6 +15,16 @@ All notable changes to this project are documented here. The format is based on
   ←/→ (move), PageUp/PageDown (a week), Shift+←/→ (end), Ctrl+←/→ (start).
 
 ### Added
+- **Document numbering with sequences**: per-type counters for invoices and offers, patterns with `{year}`, `{yy}`,
+  `{month}`, `{n}` / `{n:05d}`, reset scope never / yearly / monthly, optional shared sequence, adjustable next
+  number with a preview, safety warnings (backwards, gap, duplicate, unsortable) that need confirmation, and an audit
+  log (`/api/numbering`). Numbers are allocated atomically in the finalize transaction. See `docs/numbering.md`.
+- **Import of existing documents**: invoices, offers, customers and expenses from CSV, XLSX or permitA38 JSON, with
+  detected columns (German and English), totals checked to the cent, customer matching, duplicate handling, original
+  PDFs attached by number, dry run, all-or-nothing runs and undo (`permita38 import-documents`,
+  `/api/import/*`). See `docs/import.md`.
+- **Adoption guide** `docs/adopting.md`: what to change when you start using permitA38.
+
 - **Planning and vacation planner** (`docs/planning.md`): per-day capacity (weekly hours, holidays, absences, busy
   time from `services.busy`) against confirmed contracts and open offers in the worst case; offer feasibility with
   exact weeks, causes and options; numbers that do not add up on offers and invoices; project periods with manual
@@ -30,6 +40,9 @@ All notable changes to this project are documented here. The format is based on
   prints ids and `migrate --status` lists the chain.
 
 ### Changed
+- Numbered invoices can no longer be deleted (cancel them instead) so that the numbers stay gapless.
+- Numbering, import columns and counters come with migration `0005-numbering`. Back up before upgrading; the app does
+  this automatically.
 - `/api/health`: `revision` and `current_revision` are migration ids (`revision` is `null` for an empty database);
   new field `applied`. `CURRENT_REVISION` is gone. Pre-migration backups are named
   `pre-migration-<timestamp>-before-<head id>.sqlite3`.

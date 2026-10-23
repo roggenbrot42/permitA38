@@ -1,13 +1,13 @@
 """Typed records. `extra="allow"` keeps unknown fields so files written by newer versions or
 other devices survive a round-trip through this version."""
 
-import re
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from . import validation as v
 from .holidays import STATES
+from .numbering import PatternError, parse_pattern
 
 
 class Record(BaseModel):
@@ -31,6 +31,8 @@ class Customer(Record):
     phone: str | None = None
     notes: str | None = None
     rate: float | None = None
+    external_id: str | None = None
+    import_batch: str | None = None
 
 
 class Project(Record):
@@ -103,6 +105,8 @@ class Expense(Record):
     deductible: float = 100
     vat_deductible: float | None = None  # share of the input VAT that is reclaimed; None = same as `deductible`
     attachment: str | None = None
+    external_id: str | None = None
+    import_batch: str | None = None
 
 
 class Line(BaseModel):
@@ -150,6 +154,13 @@ class Document(Record):
     lines: list[Line] = []
     plan: Plan | None = None
     offer_id: str | None = None
+    # set only by the document importer
+    imported: bool | None = None
+    original_number: str | None = None
+    external_id: str | None = None
+    import_batch: str | None = None
+    totals_unverified: bool | None = None
+    original_pdf: str | None = None
 
 
 class Template(Record):
@@ -233,6 +244,9 @@ class Settings(BaseModel):
     default_template: str = "classic"
     invoice_pattern: str = "RE-{year}-{n:04d}"
     offer_pattern: str = "AN-{year}-{n:04d}"
+    invoice_reset: str = "yearly"  # never | yearly | monthly (see core/numbering.py)
+    offer_reset: str = "yearly"
+    numbering_shared: bool = False  # invoices and offers share one sequence
     social_monthly: float = 0
     church_tax: float = 0
     splitting: bool = False
@@ -247,7 +261,6 @@ class Settings(BaseModel):
 # (a record stored by an older version or another device must never turn a *response* into an error).
 # ======================================================================================================
 DOC_STATUS = Literal["draft", "sent", "accepted", "rejected", "paid", "cancelled"]
-_PATTERN_OK = re.compile(r"^(?:[^{}]|\{year\}|\{n(?::0?\d{1,2}d)?\})*$")
 
 
 class CustomerIn(v.StrictRecord):
@@ -451,6 +464,9 @@ class SettingsIn(v.StrictRecord):
     default_template: v.Id = "classic"
     invoice_pattern: Annotated[str, StringConstraints(max_length=100)] = "RE-{year}-{n:04d}"
     offer_pattern: Annotated[str, StringConstraints(max_length=100)] = "AN-{year}-{n:04d}"
+    invoice_reset: Literal["never", "yearly", "monthly"] = "yearly"
+    offer_reset: Literal["never", "yearly", "monthly"] = "yearly"
+    numbering_shared: bool = False
     social_monthly: v.NonNegAmount = 0
     church_tax: Annotated[float, Field(ge=0, le=15, allow_inf_nan=False)] = 0
     splitting: bool = False
@@ -469,8 +485,10 @@ class SettingsIn(v.StrictRecord):
     @field_validator("invoice_pattern", "offer_pattern")
     @classmethod
     def _numbering_pattern(cls, value: str) -> str:
-        if not _PATTERN_OK.match(value) or "{n" not in value:
-            raise ValueError("may only use {year} and {n} / {n:04d} and must contain {n}")
+        try:
+            parse_pattern(value, strict=False)  # stored legacy patterns must still round-trip
+        except PatternError as e:
+            raise ValueError(str(e)) from None
         return value
 
 
