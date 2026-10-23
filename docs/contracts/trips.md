@@ -279,6 +279,8 @@ state is computed on every read:
 ]
 ```
 
+The bills behind the example are two Transportation bills: 120,00 net with 22,80 VAT, and 60,00 net with VAT 0 (so bills net 180,00, VAT 22,80; the transportation line counts both bills and the 288,5 km mileage, 266,55 = 180,00 + 86,55).
+
 `state` is one of `"added"`, `"open"`, `"not_needed"`; `count` integer; `sum` money. Rules (first match wins):
 
 | Line id | `not_needed` in `not_needed[]` wins | `added` when | `count` / `sum` |
