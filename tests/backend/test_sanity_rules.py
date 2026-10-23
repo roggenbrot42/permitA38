@@ -382,3 +382,23 @@ def test_net_of_ignores_garbage():
     assert r.net_of({"lines": [None, {"qty": "abc", "price": 5}, {"qty": 0.5, "price": 0.01}]}) == Decimal(
         "0.01"
     )  # 0.005 -> 0.01
+
+
+HOTEL_LINES = [
+    {"description": "Room", "gross": 160, "vat_rate": 7},
+    {"description": "Breakfast", "gross": 30, "vat_rate": 19},
+    {"description": "City tax", "gross": 6, "vat_rate": 0},
+]
+
+
+def test_itemised_expense_skips_the_single_rate_vat_checks_but_keeps_duplicate_and_outlier():
+    hotel = exp(net=180.74, vat=15.26, vat_rate=None, lines=HOTEL_LINES, vendor="Hotel Demo")
+    assert codes(check_exp(hotel)) == []
+    # the same sums as a classic expense still warn (implied rate 8.4 % is not a usual rate)
+    classic = {k: v for k, v in hotel.items() if k != "lines"}
+    assert codes(check_exp(classic)) == ["expense.vat_rate_implausible"]
+    assert codes(check_exp({**classic, "vat_rate": 19})) == ["expense.vat_mismatch"]
+    assert codes(check_exp({**hotel, "vat": 300})) == []  # no per-rate check on the sums of a bill with lines
+    # duplicate detection keeps using the summed top-level fields
+    other = exp(id="x0", net=180.74, vat=15.26, vendor="hotel demo ")
+    assert codes(check_exp(hotel, others=[other])) == ["expense.possible_duplicate"]

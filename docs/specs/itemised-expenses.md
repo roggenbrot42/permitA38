@@ -45,9 +45,13 @@ Everything in `core/money.py` (exact `Decimal`, half-up cents), never floats.
 1. **VAT is computed per rate group, not per line**, as a printed bill does it: for each distinct `vat_rate` `r`
    take `G = sum(gross_i)` over the lines with that rate; `vat_group = q2(G * r / (100 + r))`;
    `net_group = G - vat_group`.
-2. Line values are derived from the group: each line gets `vat_i = q2(gross_i * r / (100 + r))`, except the **last
-   line of the group**, which gets `group_vat - sum(previous vat_i)` so the lines add up to the group exactly;
-   `net_i = gross_i - vat_i`.
+2. Line values are derived from the group with the **largest-remainder method** (decided by the architect, replacing
+   the earlier "last line takes the remainder" rule, which could give a negative VAT on tiny amounts): each line has
+   the exact share `e_i = gross_i * r / (100 + r)`; its VAT starts at `floor(e_i)` to whole cents; the missing cents
+   `rest = group_vat - sum(floor)` (an integer with `0 <= rest <= lines with a fraction`) go one each to the `rest`
+   lines with the largest fractional remainder `e_i - floor(e_i)`; ties go to the **later** line. So every
+   `vat_i` is `floor(e_i)` or `floor(e_i) + 0,01`, the lines add up to the group VAT exactly and `net_i = gross_i -
+   vat_i` is never negative. Implemented as `money.split_gross`.
 3. Kleinunternehmer (small-business) mode: the user still enters the printed gross; VAT is stored but, as today, the
    gross amount is the cost and no input VAT is reclaimed.
 4. Tax figures (`calc.py` finance/yearly: `expenses`, `vat_in`, category breakdown) iterate over the **effective
@@ -62,9 +66,11 @@ Everything in `core/money.py` (exact `Decimal`, half-up cents), never floats.
 Hotel bill: room 160,00 @7 %, breakfast 30,00 @19 %, city tax 6,00 @0 %, all 100 % deductible.
 7 %: `160 * 7/107 = 10.4673` -> VAT 10,47, net 149,53. 19 %: `30 * 19/119 = 4.7899` -> VAT 4,79, net 25,21.
 0 %: VAT 0,00, net 6,00. Totals: gross 196,00, net 180,74, VAT 15,26.
-Rounding by group vs by line: two lines of 0,50 @7 %: group VAT `q2(1.00*7/107)` = 0,07 (net 0,93); line 1 VAT 0,03,
-line 2 VAT 0,04 (remainder), whereas rounding per line would give 0,03 + 0,03 = 0,06 (this is the case the tests
-must pin down). Business lunch 100,00 @19 % with 70 % deductible: VAT 15,97, net 84,03; cost `q2(84.03*0.7)` =
+Rounding by group vs by line: two lines of 0,50 @7 %: group VAT `q2(1.00*7/107)` = 0,07 (net 0,93); both exact shares
+are 0,0327, so each starts at 0,03; the one missing cent goes to the later line (ties): line 1 VAT 0,03, line 2 VAT
+0,04, whereas rounding per line would give 0,03 + 0,03 = 0,06 (this is the case the tests must pin down).
+Five lines of 0,04 @19 %: group VAT 0,03; the shares are all 0,0064, so the three later lines get one cent each
+(0,00 / 0,00 / 0,01 / 0,01 / 0,01), never a negative VAT. Business lunch 100,00 @19 % with 70 % deductible: VAT 15,97, net 84,03; cost `q2(84.03*0.7)` =
 58,82, input VAT **15,97 in full** when the line is a business meal (`vat_deductible` 100); a line with `deductible` 70 and no `vat_deductible` gives `q2(15.97*0.7)` = 11,18 (klein mode: cost `q2(100*0.7)` = 70,00).
 
 ## API

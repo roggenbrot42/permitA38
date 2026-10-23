@@ -34,6 +34,7 @@ Where warnings appear: `POST`/`PUT` of `entries`, `offers`, `invoices`, `expense
 | `*.total_outlier`, `expense.amount_outlier` | documents, expenses | amount of at least 500 that is more than 20 times the median of at least 5 earlier ones (same category for expenses) |
 | `invoice.seller_tax_id_missing` | finalize invoice | neither tax number nor VAT id in the settings (§14 UStG) |
 | `expense.date.far_future` / `far_past` | expenses | after today / more than 366 days ago |
+| (itemised bills) | expenses with `lines` | `expense.vat_mismatch`, `expense.vat_rate_implausible` and `expense.vat_exceeds_net` are skipped (mixed rates); outlier and duplicate use the summed fields |
 | `expense.vat_mismatch` | expenses with a VAT rate | VAT differs from net x rate (half-up cents) by more than 1 cent |
 | `expense.vat_rate_implausible` (info) | expenses without a rate, net at least 10 | VAT/net is not within 0.5 points of 0, 5, 7, 16, 19 or your configured rate |
 | `expense.vat_exceeds_net` | expenses | VAT larger than net |

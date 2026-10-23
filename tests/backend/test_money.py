@@ -1,6 +1,7 @@
 """Exact-cent money arithmetic: rounding rule table, API behaviour and a property test against an independent
 implementation (exact rational numbers, no Decimal and no floats)."""
 
+from decimal import Decimal
 from fractions import Fraction
 from math import floor
 
@@ -9,7 +10,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from permita38.core import calc
-from permita38.core.money import dec, hours_from_minutes, line_amount, q2, to_float
+from permita38.core.money import dec, hours_from_minutes, line_amount, q2, split_gross, to_float
 
 
 def half_up_cents(x: Fraction) -> Fraction:
@@ -170,3 +171,76 @@ def test_api_from_time_quantity_is_half_up(boss_client):
     c.post("/api/entries", json={"user_id": me["id"], "date": "2026-03-02", "minutes": 100, "project_id": proj["id"]})
     inv = c.post("/api/invoices/from-time", json={"customer_id": cust["id"]}).json()
     assert inv["lines"][0]["qty"] == 1.67 and inv["lines"][0]["amount"] == 167.0
+
+
+# ------------------------------------------------------------------ split_gross (largest remainder, itemised bills)
+D = Decimal
+
+
+def _exact(gross, rate):
+    return gross * rate / (100 + rate)
+
+
+def test_split_two_halves_at_7_percent_tie_goes_to_the_later_line():
+    assert split_gross([(D("0.50"), D(7)), (D("0.50"), D(7))]) == [(D("0.47"), D("0.03")), (D("0.46"), D("0.04"))]
+
+
+def test_five_lines_of_004_at_19_percent_never_go_negative():
+    out = split_gross([(D("0.04"), D(19))] * 5)
+    assert [v for _, v in out] == [D("0.00"), D("0.00"), D("0.01"), D("0.01"), D("0.01")]
+    assert sum((v for _, v in out), D(0)) == q2(D("0.20") * 19 / 119) == D("0.03")
+    assert all(n >= 0 and v >= 0 for n, v in out)
+
+
+def test_tiny_line_next_to_a_rounding_up_pair_keeps_non_negative_vat():
+    out = split_gross([(D("0.01"), D(7)), (D("2.52"), D(7)), (D("0.00"), D(7))])
+    assert out == [(D("0.01"), D("0.00")), (D("2.35"), D("0.17")), (D("0.00"), D("0.00"))]
+
+
+def test_zero_gross_line_has_zero_vat_and_zero_net():
+    out = split_gross([(D("0"), D(19)), (D("6.00"), D(0))])
+    assert out == [(D("0"), D("0")), (D("6.00"), D("0"))]
+
+
+def test_rest_zero_when_every_share_is_exact_or_below_the_group_rounding():
+    # one line: group VAT == floor share, nothing to hand out
+    assert split_gross([(D("119.00"), D(19))]) == [(D("100.00"), D("19.00"))]
+
+
+def test_exact_tie_between_unequal_grosses_goes_to_the_later_line():
+    # 28.53 and 116.59 at 19 %: both cent remainders are exactly 62/119 (a true tie). Decimal division used to break it
+    # by rounding noise; the later line (116.59) must get the extra cent.
+    out = split_gross([(D("28.53"), D(19)), (D("116.59"), D(19))])
+    assert out == [(D("23.98"), D("4.55")), (D("97.97"), D("18.62"))]
+
+
+def test_hotel_bill_literals_are_unchanged():
+    out = split_gross([(D("160.00"), D(7)), (D("30.00"), D(19)), (D("6.00"), D(0))])
+    assert out == [(D("149.53"), D("10.47")), (D("25.21"), D("4.79")), (D("6.00"), D("0.00"))]
+
+
+def test_extra_cent_goes_to_the_larger_fraction_among_several_lines():
+    # group 7: VAT 0.07; floors 0.00 + 0.03 + 0.03 -> one extra cent; the two 0.50 lines tie, the later one gets it
+    out = split_gross([(D("0.01"), D(7)), (D("0.50"), D(7)), (D("0.50"), D(7))])
+    assert sum((v for _, v in out), D(0)) == q2(D("1.01") * 7 / 107)
+    assert all(n >= 0 and v >= 0 for n, v in out)
+
+
+@settings(max_examples=300, deadline=None)
+@given(
+    lines=st.lists(
+        st.tuples(st.integers(min_value=0, max_value=50_000), st.sampled_from([0, 7, 19])),
+        min_size=1,
+        max_size=15,
+    )
+)
+def test_split_properties_hold_for_any_lines(lines):
+    gl = [(D(g) / 100, D(r)) for g, r in lines]
+    out = split_gross(gl)
+    for (g, r), (n, v) in zip(gl, out, strict=True):
+        assert n >= 0 and v >= 0
+        assert n + v == g
+        assert abs(v - _exact(g, r)) < D("0.01")
+    for r in {r for _, r in gl}:
+        group = sum((g for g, rr in gl if rr == r), D(0))
+        assert sum((v for (_, v), (_, rr) in zip(out, gl, strict=True) if rr == r), D(0)) == q2(_exact(group, r))

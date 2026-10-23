@@ -312,37 +312,293 @@ PAGES.expenses = async () => {
   const y = new Date().getFullYear(), list = S.d.expenses.sort((a, b) => a.date < b.date ? 1 : -1), yr = list.filter(e => (e.date || '').startsWith(y));
   return `<div class="head"><div><h1>Expenses</h1><div class="muted">Bills you pay – general or tied to a project.</div></div><button class="primary" data-a="editExpense">+ Add bill</button></div>
   <div class="grid g3"><div class="card kpi"><div class="l">${y} net expenses</div><div class="v">${eur(yr.reduce((a, e) => a + (e.net || 0) * (e.deductible ?? 100) / 100, 0))}</div></div><div class="card kpi"><div class="l">Input VAT ${y}</div><div class="v">${S.settings.kleinunternehmer ? '–' : eur(yr.reduce((a, e) => a + (e.vat || 0) * (e.vat_deductible ?? e.deductible ?? 100) / 100, 0))}</div></div></div>
-  <div class="card">${list.length ? `<table><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Project</th><th class="num">Net</th><th class="num">VAT</th><th></th></tr>${list.map(e => `<tr class="click" data-a="editExpense" data-id="${e.id}"><td class="nowrap">${fmtDate(e.date)}</td><td><b>${esc(e.vendor || '')}</b><div class="small muted">${esc(e.description || '')}</div></td><td>${esc(e.category || '')}</td><td>${esc(nameOf('projects', e.project_id) || 'General')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td><td>${e.attachment ? `<a href="${api.url('attachments/' + e.attachment)}" target="_blank" data-stop>📎</a>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses yet.</div>'}</div>`;
+  <div class="card">${list.length ? `<table><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Project</th><th class="num">Net</th><th class="num">VAT</th><th></th></tr>${list.map(e => `<tr class="click" data-a="editExpense" data-id="${e.id}"><td class="nowrap">${fmtDate(e.date)}</td><td><b>${esc(e.vendor || '')}</b><div class="small muted">${esc(e.description || '')}</div>${e.lines?.length ? `<div class="small muted">${e.lines.length === 1 ? '1 item' : e.lines.length + ' items'}</div>` : ''}</td><td>${esc(e.category || '')}</td><td>${esc(nameOf('projects', e.project_id) || 'General')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td><td>${e.attachment ? `<a href="${api.url('attachments/' + e.attachment)}" target="_blank" data-stop>📎</a>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses yet.</div>'}</div>`;
 };
+/* ----- itemised bills: lines table, live totals, bill preview (docs/specs/itemised-expenses.md) ----- */
+const LINE_RATES = [19, 7, 0], MAX_LINES = 50;
+const PREVIEW_IMAGE = ['png', 'jpg', 'jpeg', 'webp', 'gif'];
+let LN = [];   // lines of the open dialog, as typed: {description, gross, vat_rate, deductible, vat_deductible, extra}
+let PV = null; // bill preview of the open dialog: {kind, name, src, own, zoom, fit, nw}
+let DRAG = null;
+let PV_GEN = 0;  // bumped when the dialog closes or the chosen file changes: a late load of a stored bill then does nothing
+const kindOf = name => { const ext = String(name).split('.').pop().toLowerCase(); return ext === 'pdf' ? 'pdf' : PREVIEW_IMAGE.includes(ext) ? 'image' : 'other'; };
+const toNum = x => { const t = String(x ?? '').trim().replace(',', '.'); return t === '' ? NaN : Number(t); };
+const lineHTML = (l, i) => `<tr data-line="${i}">
+  <td><input data-f="description" value="${esc(l.description)}" maxlength="200" aria-label="Line ${i + 1}: description"></td>
+  <td><input data-f="gross" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(l.gross)}" aria-label="Line ${i + 1}: amount on the bill, gross EUR"></td>
+  <td><select data-f="vat_rate" aria-label="Line ${i + 1}: VAT rate">${LINE_RATES.map(r => `<option value="${r}" ${String(r) === String(l.vat_rate) ? 'selected' : ''}>${r} %</option>`).join('')}</select></td>
+  <td><input data-f="deductible" type="number" step="any" min="0" max="100" inputmode="decimal" value="${esc(l.deductible)}" aria-label="Line ${i + 1}: deductible %"></td>
+  <td><button type="button" class="ghost sm" data-a="removeLine" data-i="${i}" aria-label="Remove line ${i + 1}" ${LN.length < 2 ? 'disabled' : ''}>✕</button></td></tr>`;
+function renderLines() {
+  $('#e_lines').innerHTML = LN.map(lineHTML).join('');
+  $('#e_addline').disabled = LN.length >= MAX_LINES;
+  refreshLineTotals();
+}
+/** Totals and the switch rule. The arithmetic is the server's (money.js mirrors money.split_gross); the server recomputes on save. */
+function refreshLineTotals() {
+  const many = LN.length > 1;
+  $('#e_itemise_hint').hidden = !many;
+  $('#f_itemise').disabled = many;
+  const t = Money.lineTotals(LN.map(l => [l.gross || 0, l.vat_rate]));
+  $('#e_tot_gross').textContent = eur(t.gross);
+  $('#e_tot_net').textContent = eur(t.net);
+  $('#e_tot_vat').textContent = eur(t.vat);
+  $('#e_tot_rates').innerHTML = Object.entries(t.byRate).map(([k, v]) => `<tr><th scope="row">VAT ${esc(k)} %</th><td data-tot-vat="${esc(k)}">${eur(v)}</td></tr>`).join('');
+}
+function setItemised(on) {
+  $('#e_itemised').hidden = !on;
+  for (const k of ['gross', 'vat_rate', 'deductible']) $('#f_' + k).closest('.field').hidden = on;
+  $('#modal-root .modal').classList.toggle('exp-two', on);
+  $('#e_body').classList.toggle('two', on);
+  if (on) renderLines();
+}
+function addLine() {
+  if (LN.length >= MAX_LINES) return toast(`At most ${MAX_LINES} lines per bill`, true);
+  const cat = $('#f_category')?.value;
+  LN.push({ description: '', gross: '', vat_rate: '19', deductible: cat === 'Business meals' ? '70' : '100', vat_deductible: null, extra: {} });
+  renderLines();
+  $('#e_lines tr[data-line="' + (LN.length - 1) + '"] [data-f=description]').focus();
+}
+function removeLine(i) {
+  if (LN.length < 2) return;
+  LN.splice(i, 1);
+  renderLines();
+  $('#e_addline').focus();
+}
+/** Preview of the chosen or stored bill. A chosen file is shown through a blob: URL that is revoked when replaced. */
+function pvRelease() {
+  if (PV && PV.own) URL.revokeObjectURL(PV.src);
+  PV = null; DRAG = null;
+}
+/** Shows a bill. src: the object URL (blob:) of the chosen or loaded file; href: the link to open (default src). */
+function pvSet(kind, name, src, own, href = src, note = '') {
+  pvRelease();
+  const box = $('#e_preview');
+  if (!kind) { box.hidden = true; box.innerHTML = ''; return; }
+  PV = { kind, name, src, own, zoom: 100, fit: kind === 'image', nw: 0, nh: 0 };
+  box.hidden = false;
+  box.dataset.kind = kind;
+  box.dataset.zoom = '100';
+  const link = kind === 'other'
+    ? `<a id="e_preview_open" href="${esc(href)}" download="${esc(name)}">Download ${esc(name)}</a>`
+    : `<a id="e_preview_open" href="${esc(href)}" target="_blank" rel="noopener">Open in a new tab</a>`;
+  if (kind === 'image') {
+    box.innerHTML = `<div class="exp-zoombar" role="group" aria-label="Zoom">
+        <button type="button" data-a="zoomOut" aria-label="Zoom out">−</button>
+        <button type="button" data-a="zoomIn" aria-label="Zoom in">+</button>
+        <button type="button" data-a="zoomFit" aria-label="Fit the bill into the pane">Fit</button>
+        <button type="button" data-a="zoom100" aria-label="Zoom to 100 %">100 %</button>
+        <span id="e_zoom_label" class="small muted" aria-live="polite"></span>${link}</div>
+      <div id="e_stage" class="exp-stage"><img id="e_img" alt="${esc(name)}" src="${esc(src)}" draggable="false"></div>`;
+    const img = $('#e_img');
+    img.addEventListener('load', () => { if (!PV || PV.src !== src) return; PV.nw = img.naturalWidth; PV.nh = img.naturalHeight; if (PV.fit) pvZoomTo(fitZoom(), null, true); else pvApply(); });
+  } else if (kind === 'pdf') {
+    box.innerHTML = `<div class="exp-zoombar">${link}</div>
+      <iframe id="e_pdf" class="exp-pdf" src="${esc(src)}" title="Bill preview: ${esc(name)}"></iframe>
+      <p id="e_preview_fallback" class="small muted">If the preview stays blank, this browser cannot show PDFs here. Use “Open in a new tab”.</p>`;
+  } else {
+    box.innerHTML = `<div class="exp-zoombar">${link}</div><p class="small muted">${esc(note || 'No preview for this file type.')}</p>`;
+  }
+}
+/** The stored bill, fetched with the token (an img or iframe cannot send it) and shown from a blob: URL. */
+async function pvStored(name) {
+  const gen = PV_GEN, kind = kindOf(name), link = api.url('attachments/' + name);
+  if (kind === 'other') return pvSet('other', name, null, false, link);
+  let src;
+  try {
+    const t = api.token.get();
+    const r = await fetch(link, { headers: t ? { Authorization: 'Bearer ' + t } : {}, credentials: 'include' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    src = URL.createObjectURL(await r.blob());
+  } catch {
+    if (gen === PV_GEN) pvSet('other', name, null, false, link, 'The preview could not be loaded. Use the link to open the bill.');
+    return;
+  }
+  if (gen !== PV_GEN) return URL.revokeObjectURL(src);
+  pvSet(kind, name, src, true, link);
+}
+function fitZoom() {
+  const stage = $('#e_stage'), img = $('#e_img');
+  if (!stage || !img || !PV.nw) return 100;
+  return Math.min(100, 100 * Math.min(stage.clientWidth / PV.nw, stage.clientHeight / (PV.nh || 1)));
+}
+/** Sets the zoom (clamped to 25..800 %) and keeps the point under the pointer (or the centre) where it is. */
+function pvZoomTo(z, anchor, fit = false) {
+  const box = $('#e_preview'), stage = $('#e_stage'), img = $('#e_img');
+  if (!PV || PV.kind !== 'image') return;
+  const old = PV.zoom, next = Math.min(800, Math.max(25, z));
+  PV.zoom = Math.round(next * 100) / 100;
+  PV.fit = fit;
+  box.dataset.zoom = String(PV.zoom);
+  $('#e_zoom_label').textContent = PV.zoom + ' %';
+  if (!img || !PV.nw) return;
+  img.style.width = (PV.nw * PV.zoom / 100) + 'px';
+  if (stage) {
+    // keep the image point under the anchor where it was; a narrower image is centred by its margins (auto)
+    const ax = anchor ? anchor.x : stage.clientWidth / 2, ay = anchor ? anchor.y : stage.clientHeight / 2;
+    const offset = (w) => Math.max(0, (stage.clientWidth - w) / 2);
+    const ow = PV.nw * old / 100, nw = PV.nw * PV.zoom / 100;
+    const fx = (stage.scrollLeft + ax - offset(ow)) / ow, fy = (stage.scrollTop + ay) / (PV.nh * old / 100);
+    stage.scrollLeft = fx * nw + offset(nw) - ax;
+    stage.scrollTop = fy * (PV.nh * PV.zoom / 100) - ay;
+  }
+}
+function pvApply() { if (PV && PV.kind === 'image') pvZoomTo(PV.zoom, null); }
+function pvKey(e) {
+  if (!PV || PV.kind !== 'image') return;
+  const stage = $('#e_stage');
+  const step = { '+': () => pvZoomTo(PV.zoom * 1.25), '=': () => pvZoomTo(PV.zoom * 1.25), '-': () => pvZoomTo(PV.zoom / 1.25),
+    '0': () => pvZoomTo(fitZoom(), null, true), ArrowLeft: () => stage.scrollBy(-40, 0), ArrowRight: () => stage.scrollBy(40, 0),
+    ArrowUp: () => stage.scrollBy(0, -40), ArrowDown: () => stage.scrollBy(0, 40) }[e.key];
+  if (step) { e.preventDefault(); step(); }
+}
+function bindPreview(box) {
+  box.addEventListener('keydown', pvKey);
+  box.addEventListener('wheel', e => {
+    if (!PV || PV.kind !== 'image') return;
+    e.preventDefault();
+    // proportional to the wheel distance (x1.25 per 100 px, at most 300 px per event); up zooms in, down zooms out
+    const dy = Math.max(-300, Math.min(300, e.deltaY * (e.deltaMode === 1 ? 33 : 1)));
+    const r = $('#e_stage').getBoundingClientRect();
+    pvZoomTo(PV.zoom * Math.pow(1.25, -dy / 100), { x: e.clientX - r.left, y: e.clientY - r.top });
+  }, { passive: false });
+  // drag to pan (the stage scrolls); pointer events cover mouse, pen and touch
+  box.addEventListener('pointerdown', e => {
+    const stage = $('#e_stage');
+    if (!stage || e.button !== 0 || !stage.contains(e.target)) return;
+    DRAG = { id: e.pointerId, x: e.clientX, y: e.clientY, l: stage.scrollLeft, t: stage.scrollTop };
+    stage.setPointerCapture(e.pointerId);
+  });
+  box.addEventListener('pointermove', e => {
+    if (!DRAG || DRAG.id !== e.pointerId) return;
+    const stage = $('#e_stage');
+    stage.scrollLeft = DRAG.l - (e.clientX - DRAG.x);
+    stage.scrollTop = DRAG.t - (e.clientY - DRAG.y);
+  });
+  const end = e => { if (DRAG && DRAG.id === e.pointerId) DRAG = null; };
+  box.addEventListener('pointerup', end);
+  box.addEventListener('pointercancel', end);
+}
+/** Buttons of the lines table and of the preview. Handled here so the page-wide [data-a] actions (A.addLine works on offers) never see them. */
+function bindExpenseDialog(modalEl) {
+  const typed = e => {
+    const tr = e.target.closest('#e_lines tr[data-line]'); if (!tr || !e.target.dataset.f) return;
+    LN[+tr.dataset.line][e.target.dataset.f] = e.target.value; refreshLineTotals();
+  };
+  modalEl.addEventListener('input', typed);
+  modalEl.addEventListener('change', typed);
+  modalEl.addEventListener('click', e => {
+    const b = e.target.closest('[data-a]'); if (!b || !modalEl.contains(b)) return;
+    const act = b.dataset.a;
+    const zoomNow = {
+      addLine: () => addLine(), removeLine: () => removeLine(+b.dataset.i),
+      zoomIn: () => pvZoomTo(PV.zoom * 1.25), zoomOut: () => pvZoomTo(PV.zoom / 1.25),
+      zoomFit: () => pvZoomTo(fitZoom(), null, true), zoom100: () => pvZoomTo(100),
+    }[act];
+    if (!zoomNow || (act.startsWith('zoom') && !PV)) return;
+    e.stopPropagation(); e.preventDefault();
+    zoomNow();
+  });
+}
+function lineError(l, i) {
+  const n = i + 1, g = toNum(l.gross), d = toNum(l.deductible);
+  if (Number.isNaN(g)) return `Line ${n}: enter the amount on the bill`;
+  if (g < 0) return `Line ${n}: the amount must not be negative (book refunds as a credit-note invoice)`;
+  if (Number.isNaN(d) || d < 0 || d > 100) return `Line ${n}: the deductible share must be between 0 and 100 %`;
+  return null;
+}
 A.editExpense = el => {
   const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: EXP_CATS[0] };
   const cats = e.category && !EXP_CATS.includes(e.category) ? [...EXP_CATS, e.category] : EXP_CATS;   // keep a category entered elsewhere
-  const v0 = { ...e, gross: e.net != null ? Math.round((e.net + (e.vat || 0)) * 100) / 100 : '', vat_rate: e.vat_rate ?? 19 };
+  const stored = Array.isArray(e.lines) ? e.lines : [];
+  // a stored line keeps the fields this dialog does not show (line category, unknown fields); net/vat are derived
+  LN = stored.map(l => {
+    const { description, gross, vat_rate, deductible, vat_deductible, net, vat, ...extra } = l;
+    return { description: description ?? '', gross: String(gross ?? ''), vat_rate: String(vat_rate ?? 19), deductible: String(deductible ?? 100), vat_deductible: vat_deductible ?? null, extra };
+  });
+  const v0 = { ...e, gross: e.net != null && !stored.length ? Math.round((e.net + (e.vat || 0)) * 100) / 100 : '', vat_rate: e.vat_rate ?? 19, itemise: stored.length > 0 };
   openForm({
-    title: e.id ? 'Edit bill' : 'Add bill', vals: v0,
+    title: e.id ? 'Edit bill' : 'Add bill', vals: v0, wide: true,
     fields: [{ k: 'date', l: 'Paid on', t: 'date', row: 1 }, { k: 'vendor', l: 'Vendor', row: 1 }, { k: 'description', l: 'Description' },
-      { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: [19, 7, 0], row: 2 },
+      { k: 'itemise', l: 'Itemise this bill (several lines, e.g. a hotel invoice with different VAT rates)', t: 'check' },
+      { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: LINE_RATES, row: 2 },
       { k: 'category', l: 'Category', t: 'select', o: cats, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
       { k: 'deductible', l: 'Deductible %', t: 'number', h: '100 normally; 70 for business meals with business partners (set automatically with that category). Input VAT of business meals is reclaimed in full.' }],
-    extra: `<div class="field"><label>Attach the bill (PDF / photo)</label><input type="file" id="e_file">${e.attachment ? `<div class="small"><a href="${api.url('attachments/' + e.attachment)}" target="_blank">Current attachment</a></div>` : ''}</div>`,
+    extra: `<div id="e_body" class="exp-body">
+      <div id="e_itemised" class="exp-itemised" hidden>
+        <div id="e_itemise_hint" class="muted small" hidden>Several lines: remove lines until one is left to switch itemising off.</div>
+        <div class="exp-table-wrap"><table class="exp-lines">
+          <thead><tr><th scope="col">Description</th><th scope="col">Gross €</th><th scope="col">VAT</th><th scope="col">Deductible</th><th scope="col"><span class="sr-only">Remove</span></th></tr></thead>
+          <tbody id="e_lines"></tbody></table></div>
+        <div class="exp-addrow"><button type="button" class="ghost sm" data-a="addLine" id="e_addline">+ Add line</button></div>
+        <table class="exp-totals" aria-label="Totals of the bill"><tbody>
+          <tr><th scope="row">Gross</th><td id="e_tot_gross"></td></tr>
+          <tr><th scope="row">Net</th><td id="e_tot_net"></td></tr>
+          <tr><th scope="row">VAT</th><td id="e_tot_vat"></td></tr></tbody>
+          <tbody id="e_tot_rates"></tbody></table>
+      </div>
+      <div class="exp-side">
+        <div class="field"><label for="e_file">Attach the bill (PDF / photo)</label><input type="file" id="e_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif">${e.attachment ? `<div class="small"><a href="${api.url('attachments/' + esc(e.attachment))}" target="_blank" rel="noopener">Current attachment</a></div>` : ''}</div>
+        <div id="e_preview" class="exp-preview" tabindex="0" aria-label="Bill preview" hidden></div>
+      </div></div>`,
     save: async v => {
-      if (!v.gross) throw new Error('Enter the amount'); const r = +v.vat_rate || 0;
-      if (v.gross < 0) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
-      if (!v.date) throw new Error('Pick the date you paid');
-      Object.assign(v, Money.splitGross(v.gross, r)); v.vat_rate = r; delete v.gross; v.project_id = v.project_id || null;
-      v.vat_deductible = v.category === 'Business meals' ? 100 : null;   // the 30 % that is not deductible does not touch the input VAT
+      const itemised = !!v.itemise, gross = v.gross;
+      delete v.itemise; delete v.gross;
+      const bmeal = v.category === 'Business meals';
+      v.project_id = v.project_id || null;
+      v.vat_deductible = bmeal ? 100 : null;   // the 30 % that is not deductible does not touch the input VAT
+      if (itemised) {
+        if (!LN.length) throw new Error('Add at least one line');
+        const bad = LN.map(lineError).find(Boolean); if (bad) throw new Error(bad);
+        if (!v.date) throw new Error('Pick the date you paid');
+        v.lines = LN.map(l => ({ ...l.extra, description: l.description, gross: toNum(l.gross), vat_rate: Number(l.vat_rate),
+          deductible: toNum(l.deductible), vat_deductible: l.vat_deductible ?? (bmeal ? 100 : null) }));
+        delete v.net; delete v.vat; delete v.vat_rate;   // derived by the server from the lines
+      } else {
+        delete v.lines;
+        if (!gross) throw new Error('Enter the amount');
+        const r = +v.vat_rate || 0;
+        if (gross < 0) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
+        if (!v.date) throw new Error('Pick the date you paid');
+        Object.assign(v, Money.splitGross(gross, r)); v.vat_rate = r;
+      }
       const f = $('#e_file').files[0];
       if (f) v.attachment = (await api.upload(f)).name;
       await save('expenses', v); render();
     },
     del: e.id ? async () => { await api('DELETE', 'expenses/' + e.id); await loadAll(['expenses']); render(); } : null
   });
+  const modalEl = $('#modal-root .modal');
+  closeModal.onClose = () => { PV_GEN++; pvRelease(); LN = []; };
+  bindExpenseDialog(modalEl);
+  bindPreview($('#e_preview'));
   // Business meals are 70 % deductible: choosing the category proposes that, leaving it restores 100 (a hand-typed value stays)
   $('#f_category')?.addEventListener('change', ev => {
     const ded = $('#f_deductible'); if (!ded) return;
     if (ev.target.value === 'Business meals' && +ded.value === 100) ded.value = 70;
     else if (ev.target.value !== 'Business meals' && +ded.value === 70) ded.value = 100;
   });
+  $('#f_itemise').addEventListener('change', ev => {
+    if (ev.target.checked) {
+      LN = [{ description: $('#f_description').value, gross: $('#f_gross').value, vat_rate: $('#f_vat_rate').value,
+        deductible: $('#f_deductible').value || '100', vat_deductible: null, extra: {} }];
+    } else {
+      if (LN.length !== 1) { ev.target.checked = true; return; }
+      const l = LN[0];
+      $('#f_gross').value = l.gross; $('#f_vat_rate').value = l.vat_rate; $('#f_deductible').value = l.deductible;
+      if (l.description) $('#f_description').value = l.description;
+      LN = [];
+    }
+    setItemised(ev.target.checked);
+  });
+  $('#e_file').addEventListener('change', ev => {
+    PV_GEN++;
+    const f = ev.target.files[0];
+    if (f) return pvSet(kindOf(f.name), f.name, URL.createObjectURL(f), true);
+    if (e.attachment) pvStored(e.attachment); else pvSet(null);
+  });
+  if (stored.length) setItemised(true);
+  if (e.attachment) pvStored(e.attachment);
 };
 
 /* ================= MONEY & TAXES ================= */

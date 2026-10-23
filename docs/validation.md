@@ -35,6 +35,7 @@ nesting depth).
 | Amounts, prices | finite, \|value\| ≤ 1 000 000 000 (credit-note lines may be negative) |
 | Quantities | finite, \|value\| ≤ 10 000 000 |
 | Expense net / VAT | 0 … 1 000 000 000 (refunds are credit-note invoices, not negative expenses); deductible 0–100 %, optional `vat_deductible` 0–100 % (share of the input VAT; empty = same as deductible) |
+| Expense lines (itemised bill) | ≤ 50 lines per bill; each line: `gross` 0 … 1 000 000 000 (as printed, incl. VAT), `vat_rate` 0–100 and on write one of the allowed rates, `deductible` 0–100 % (default 100), optional `vat_deductible` 0–100 %, description ≤ 2000 chars. Errors name the line index (`loc` contains `lines`, the index and the field). `net` is only optional when `lines` are present |
 | Hourly rates | 0 … 10 000 |
 | Hours per week | 0 … 168; total hours / budget 0 … 100 000 |
 | VAT rates | 0 … 100, and on write one of 0, 5, 7, 16, 19 or the rate configured in the settings |
@@ -46,6 +47,10 @@ nesting depth).
 | Ids | 6–32 characters `0-9a-z`; attachment names `<id>.<ext>` |
 | Settings | company type, accounting method, federal state code, Hebesatz 0–1000, payment/offer days 0–365, church tax 0–15 %; numbering patterns may only contain `{year}` and `{n}` / `{n:04d}` and must contain `{n}` |
 | Query `year` | 2000 … 2100 |
+
+Attachments: uploads are at most 15 MB. A PDF or image (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`) whose first
+bytes do not match its extension is refused with **HTTP 415** and nothing is stored. Only those types are served
+inline; every other attachment is served as a download (`application/octet-stream`, `Content-Disposition: attachment`).
 
 Only *hard* limits live here – values that can never be right. "Suspicious but possible" input (an amount 100× your
 usual one, a date far in the future) is for the advisory warnings of [`sanity-checks.md`](sanity-checks.md), which never block saving.

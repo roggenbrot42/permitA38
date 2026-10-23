@@ -210,3 +210,22 @@ def test_warning_fields_in_a_settings_put_are_never_stored(app, boss_client):
     again = boss_client.put("/api/settings", json={"company_name": "Demo 2"})
     _no_warning_keys(app.state.services.store.settings())
     assert "stale.warning" not in [w["code"] for w in again.json().get("sanity_warnings") or []]
+
+
+def test_itemised_expense_has_no_vat_warnings_and_stores_none(boss_client):
+    body = {
+        "date": day(0),
+        "vendor": "Hotel Demo",
+        "lines": [
+            {"description": "Room", "gross": 160, "vat_rate": 7},
+            {"description": "Breakfast", "gross": 30, "vat_rate": 19},
+            {"description": "City tax", "gross": 6, "vat_rate": 0},
+        ],
+    }
+    r = boss_client.post("/api/expenses", json=body)
+    assert r.status_code == 200, r.text
+    saved = r.json()
+    assert saved["vat_rate"] is None and saved["lines"] and codes(saved) == []
+    fetched = boss_client.get(f"/api/expenses/{saved['id']}").json()
+    assert "sanity_warnings" not in fetched
+    assert all("sanity_warnings" not in e for e in boss_client.get("/api/expenses").json())

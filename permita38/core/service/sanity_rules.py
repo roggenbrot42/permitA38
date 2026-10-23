@@ -378,40 +378,42 @@ def check_expense(rec: dict, *, old: dict | None, settings: dict, others: list[d
     if _changed(old, rec, "date"):
         out += _date_age("expense.date", "The expense date", rec.get("date"), today, EXPENSE_FUTURE_DAYS)
     net, vat = dec(rec.get("net")), dec(rec.get("vat"))
-    if net > 0 and vat > net:
-        out.append(
-            _w(
-                "expense.vat_exceeds_net",
-                "warning",
-                "vat",
-                f"The VAT {vat:,.2f} is larger than the net amount {net:,.2f}.",
-            )
-        )
-    rate = rec.get("vat_rate")
-    if rate not in (None, "") and net > 0:
-        expected = vat_amount(net, rate)
-        if abs(vat - expected) > VAT_TOLERANCE:
+    # an itemised bill (several VAT rates) has no single rate: the per-rate checks do not apply to its sums
+    if not rec.get("lines"):
+        if net > 0 and vat > net:
             out.append(
                 _w(
-                    "expense.vat_mismatch",
+                    "expense.vat_exceeds_net",
                     "warning",
                     "vat",
-                    f"{dec(rate):g} % of {net:,.2f} is {expected:,.2f}, but the VAT is {vat:,.2f}.",
-                    {"expected": float(expected), "entered": float(vat)},
+                    f"The VAT {vat:,.2f} is larger than the net amount {net:,.2f}.",
                 )
             )
-    elif net >= 10 and vat > 0 and vat <= net:
-        allowed = {Decimal(r) for r in ALLOWED_VAT_RATES} | {dec(settings.get("vat_rate", 19))}
-        implied = vat / net * 100
-        if min(abs(implied - r) for r in allowed) > Decimal("0.5"):
-            out.append(
-                _w(
-                    "expense.vat_rate_implausible",
-                    "info",
-                    "vat",
-                    f"VAT {vat:,.2f} on {net:,.2f} is {implied:.1f} %, which is not a usual rate.",
+        rate = rec.get("vat_rate")
+        if rate not in (None, "") and net > 0:
+            expected = vat_amount(net, rate)
+            if abs(vat - expected) > VAT_TOLERANCE:
+                out.append(
+                    _w(
+                        "expense.vat_mismatch",
+                        "warning",
+                        "vat",
+                        f"{dec(rate):g} % of {net:,.2f} is {expected:,.2f}, but the VAT is {vat:,.2f}.",
+                        {"expected": float(expected), "entered": float(vat)},
+                    )
                 )
-            )
+        elif net >= 10 and vat > 0 and vat <= net:
+            allowed = {Decimal(r) for r in ALLOWED_VAT_RATES} | {dec(settings.get("vat_rate", 19))}
+            implied = vat / net * 100
+            if min(abs(implied - r) for r in allowed) > Decimal("0.5"):
+                out.append(
+                    _w(
+                        "expense.vat_rate_implausible",
+                        "info",
+                        "vat",
+                        f"VAT {vat:,.2f} on {net:,.2f} is {implied:.1f} %, which is not a usual rate.",
+                    )
+                )
 
     gross = q2(net + vat)
     cat = rec.get("category")

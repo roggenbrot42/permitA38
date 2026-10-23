@@ -135,7 +135,7 @@ TABLES: dict[str, Table] = {
             "expenses",
             _cols(
                 _BASE + "date:str net:float vat:float vat_rate:float vendor:str description:text category:str "
-                "project_id:id deductible:float attachment:str vat_deductible:float external_id:str import_batch:str"
+                "project_id:id deductible:float attachment:str vat_deductible:float external_id:str import_batch:str lines:json"
                 + _EXTRA
             ),
             (Index("idx_expenses_date", ("date",)), Index("idx_expenses_project", ("project_id",))),

@@ -8507,6 +8507,20 @@
               }
             ],
             "title": "Import Batch"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ExpenseLine"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines"
           }
         },
         "additionalProperties": true,
@@ -8524,9 +8538,16 @@
             "title": "Date"
           },
           "net": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Net"
           },
           "vat": {
@@ -8628,15 +8649,175 @@
               }
             ],
             "title": "Attachment"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ExpenseLineIn"
+                },
+                "type": "array",
+                "maxItems": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines"
           }
         },
         "additionalProperties": true,
         "type": "object",
         "required": [
-          "date",
-          "net"
+          "date"
         ],
         "title": "ExpenseIn"
+      },
+      "ExpenseLine": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "gross": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Gross"
+          },
+          "vat_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Rate"
+          },
+          "net": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net"
+          },
+          "vat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat"
+          },
+          "deductible": {
+            "type": "number",
+            "title": "Deductible",
+            "default": 100
+          },
+          "vat_deductible": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Deductible"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "ExpenseLine",
+        "description": "One line of an itemised bill (docs/specs/itemised-expenses.md). net/vat are derived by the server."
+      },
+      "ExpenseLineIn": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Description",
+            "default": ""
+          },
+          "gross": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Gross"
+          },
+          "vat_rate": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Vat Rate"
+          },
+          "deductible": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Deductible",
+            "default": 100
+          },
+          "vat_deductible": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Deductible"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "gross",
+          "vat_rate"
+        ],
+        "title": "ExpenseLineIn",
+        "description": "One line of an itemised bill. ``net`` and ``vat`` sent by a client are ignored (derived by the server)."
       },
       "ExtendIn": {
         "properties": {
@@ -13135,6 +13316,20 @@
               }
             ],
             "title": "Import Batch"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ExpenseLine"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines"
           },
           "planning_warnings": {
             "anyOf": [

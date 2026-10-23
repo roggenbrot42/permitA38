@@ -32,7 +32,11 @@ from .routers import (
     users,
 )
 
-CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'"
+# blob: is only used by the expense dialog to preview a bill before it is uploaded (see docs/specs/itemised-expenses.md)
+CSP = (
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; object-src 'none'; "
+    "frame-ancestors 'none'; frame-src 'self' blob:"
+)
 
 
 def all_routers() -> list:

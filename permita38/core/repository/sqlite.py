@@ -39,6 +39,10 @@ class SQLiteRepository(SQLRepository):
         self._conn: sqlite3.Connection | None = None
 
     # ---- driver hooks ----
+    def _live_columns(self, table: str) -> set[str] | None:
+        rows = self._rows(f"PRAGMA table_info({self.dialect.quote(table)})")
+        return {r[1] for r in rows} or None
+
     def _open(self) -> None:
         if self._conn is not None:
             return
