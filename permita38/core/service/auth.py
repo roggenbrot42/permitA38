@@ -8,11 +8,15 @@ import re
 import secrets
 import time
 
+from permita38.core.config import SessionsConfig, ThrottleConfig
 from permita38.core.errors import ServiceError
+from permita38.core.netinfo import ClientInfo
 from permita38.core.repository import Repository
 from permita38.core.settings import DEFAULT_SETTINGS
 
-from .throttle import AttemptThrottle
+from .clientctx import get_client
+from .sessions import TOKEN_PREFIX, AuthContext, SessionService
+from .throttle import AttemptThrottle, RateLimiter
 
 PBKDF2_ITERATIONS = 200_000
 USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
@@ -70,39 +74,102 @@ def normalize_username(username: str) -> str:
 
 
 class AuthService:
-    def __init__(self, store: Repository, secret_key: str, token_ttl_hours: int = 12):
+    def __init__(
+        self,
+        store: Repository,
+        secret_key: str,
+        token_ttl_hours: int = 12,
+        sessions_config: SessionsConfig | None = None,
+        throttle_config: ThrottleConfig | None = None,
+    ):
         self.store = store
         self.secret = secret_key.encode()
         self.ttl = token_ttl_hours * 3600
-        self.throttle = AttemptThrottle()
+        tc = throttle_config or ThrottleConfig()
+        self.throttle = AttemptThrottle(tc.account_max_failures, tc.account_window_seconds)  # per account
+        self.ip_throttle = AttemptThrottle(  # per client address (IPv6: /64), exponential back-off on repeated bursts
+            tc.ip_max_failures, tc.ip_window_seconds, backoff=True, max_lock=tc.ip_backoff_max_seconds
+        )
+        self.unauth_limiter = RateLimiter(tc.unauth_requests_per_minute)  # request rate on the sign-in endpoints
+        self.token_limiter = RateLimiter(tc.api_token_requests_per_minute)  # request rate per API token
+        self.sessions = SessionService(store, sessions_config, self.ttl)
+
+    # ---------- throttling (account keys plus the client address of the current request)
+    def guard(self, *keys: str) -> None:
+        """Refuse (429 + Retry-After) while any account key or the caller's address is locked out."""
+        self.throttle.check(*keys)
+        client = get_client()
+        if client:
+            self.ip_throttle.check(client.ip_key)
+
+    def record_failure(self, *keys: str) -> None:
+        self.throttle.fail(*keys)
+        client = get_client()
+        if client:
+            self.ip_throttle.fail(client.ip_key)
+
+    def record_success(self, *keys: str) -> None:
+        """Forgive the account keys. The address keeps its failures (an attacker must not reset them by logging in)."""
+        self.throttle.clear(*keys)
 
     # ---------- tokens ----------
     def _sign(self, signing_input: str) -> str:
         return _b64(hmac.new(self.secret, signing_input.encode(), hashlib.sha256).digest())
 
-    def create_token(self, user: dict) -> str:
-        now = int(time.time())
+    def create_token(self, user: dict, client: ClientInfo | None = None) -> str:
+        """A new session for ``user``: a row in the sessions table plus the signed token that points at it."""
+        session = self.sessions.create(user, client or get_client())
+        now = int(session["created"])
         head = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}).encode())
         claims = {
             "sub": user["id"],
             "iat": now,
-            "exp": now + self.ttl,
+            "exp": int(session["expires"]),
             "use": "session",
             "pwv": int(user.get("pw_changed") or 0),
+            "jti": session["id"],
         }
         body = _b64(json.dumps(claims).encode())
         return f"{head}.{body}.{self._sign(head + '.' + body)}"
 
-    def user_from_token(self, token: str | None) -> dict | None:
+    def _claims(self, token: str) -> dict | None:
+        """Signature-checked claims of a session token (expiry NOT checked), or None."""
         try:
-            head, body, sig = (token or "").split(".")
+            head, body, sig = token.split(".")
             if not hmac.compare_digest(sig, self._sign(f"{head}.{body}")):
                 return None
             claims = json.loads(_unb64(body))
-            if claims["exp"] < time.time() or claims.get("use", "session") != "session":
+            return claims if isinstance(claims, dict) else None
+        except (ValueError, TypeError):
+            return None
+
+    def authenticate(self, token: str | None, *, allow_api: bool = True) -> AuthContext | None:
+        """Who is behind this credential? A session token (signed, not revoked, not expired) or an API token."""
+        if not token:
+            return None
+        if token.startswith(TOKEN_PREFIX):
+            if not allow_api:
+                return None
+            rec = self.sessions.authenticate_api_token(token)
+            user = self.store.get("users", rec["user_id"]) if rec else None
+            if not rec or not user or not user.get("active", True):
+                return None
+            return AuthContext(user, "api", rec["id"], list(rec.get("scopes") or []), rec.get("name"))
+        claims = self._claims(token)
+        try:
+            if not claims or claims["exp"] < time.time() or claims.get("use", "session") != "session":
                 return None  # expired, or not a session token (e.g. the two-factor challenge)
             user = self.store.get("users", claims["sub"])
-        except (ValueError, KeyError, TypeError):
+            jti = claims.get("jti")
+            legacy = jti is None
+            if legacy:  # issued by alpha.1, before server-side sessions existed
+                if not self.sessions.legacy_token_ok(int(claims["iat"])):
+                    return None
+            else:
+                row = self.sessions.get_live(jti) if isinstance(jti, str) else None
+                if row is None or row.get("user_id") != claims["sub"]:
+                    return None  # unknown, revoked, expired or idle
+        except (KeyError, TypeError, ValueError):
             return None
         if not user or not user.get("active", True):
             return None
@@ -111,7 +178,18 @@ class AuthService:
                 return None  # password / 2FA changed after this token was issued
         elif claims["iat"] < int(user.get("pw_changed") or 0):
             return None  # token without a version claim (older release)
-        return user
+        return AuthContext(user, "session", None if legacy else jti, legacy=legacy)
+
+    def user_from_token(self, token: str | None) -> dict | None:
+        ctx = self.authenticate(token)
+        return ctx.user if ctx else None
+
+    def logout(self, token: str | None) -> None:
+        """Revoke the session behind ``token`` (best effort: unknown or foreign tokens are ignored)."""
+        claims = self._claims(token or "")
+        jti = claims.get("jti") if claims else None
+        if isinstance(jti, str) and claims and claims.get("use", "session") == "session":
+            self.sessions.revoke(jti)
 
     # ---------- login ----------
     def needs_setup(self) -> bool:
@@ -120,14 +198,14 @@ class AuthService:
     def check_credentials(self, username: str, password: str) -> dict:
         """First factor: username + password, throttled. Returns the user record or raises 401/429."""
         key = (username or "").strip().lower()
-        self.throttle.check(key)
+        self.guard(key)
         user = next((u for u in self.store.list("users") if u.get("username") == key), None)
         stored = user.get("password_hash") if user else None
         ok = verify_password(password, stored or hash_password("x", "00" * 16))  # constant-ish time
         if not (user and stored and ok and user.get("active", True)):
-            self.throttle.fail(key)
+            self.record_failure(key)
             raise ServiceError(401, "Wrong username or password")
-        self.throttle.clear(key)
+        self.record_success(key)
         return user
 
     def login(self, username: str, password: str) -> tuple[str, dict]:
@@ -194,7 +272,12 @@ class AuthService:
         if old and old["role"] == "boss" and (rec["role"] != "boss" or not rec.get("active", True)):
             if self._boss_count(excluding=old["id"]) == 0:
                 raise ServiceError(400, "There must be at least one active boss")
-        return public_user(self.store.save("users", rec))
+        saved = self.store.save("users", rec)
+        if old:  # access changed: end the sessions that were issued under the old settings
+            deactivated = old.get("active", True) and not rec.get("active", True)
+            if password or deactivated or old.get("role") != rec.get("role"):
+                self.sessions.revoke_user(saved["id"], include_api=deactivated)
+        return public_user(saved)
 
     def delete_user(self, user_id: str, actor: dict):
         old = self.store.get("users", user_id)
@@ -204,15 +287,21 @@ class AuthService:
             raise ServiceError(400, "You cannot delete yourself")
         if old["role"] == "boss" and self._boss_count(excluding=user_id) == 0:
             raise ServiceError(400, "Cannot delete the only boss")
+        self.sessions.revoke_user(user_id, include_api=True)
         self.store.delete("users", user_id)
 
     def change_password(self, user: dict, old_password: str, new_password: str) -> str:
+        key = f"pw:{user['id']}"
+        self.guard(key)  # the current password is guessable with a stolen session: throttle it like a login
         if not verify_password(old_password, user.get("password_hash")):
+            self.record_failure(key)
             raise ServiceError(400, "Current password is wrong")
+        self.record_success(key)
         validate_password(new_password)
         rec = {**user, "password_hash": hash_password(new_password), "pw_changed": next_session_version(user)}
         saved = self.store.save("users", rec)
-        return self.create_token(saved)  # other sessions are invalidated, this one continues
+        self.sessions.revoke_user(saved["id"])  # every sign-in ends (API tokens are kept) ...
+        return self.create_token(saved)  # ... and this one continues with a fresh session
 
     def set_password(self, username: str, new_password: str):
         """Recovery path used by the CLI (`permita38 set-password`)."""
@@ -223,3 +312,4 @@ class AuthService:
         self.store.save(
             "users", {**user, "password_hash": hash_password(new_password), "pw_changed": next_session_version(user)}
         )
+        self.sessions.revoke_user(user["id"])

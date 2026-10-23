@@ -27,6 +27,31 @@ class FeaturesConfig(BaseModel):
     impressum_lookup: bool = True
 
 
+class SessionsConfig(BaseModel):
+    """Server-side sessions (see docs/api-tokens.md and SECURITY.md)."""
+
+    # sign out after this many idle minutes; None = no idle timeout (the absolute lifetime is token_ttl_hours)
+    idle_timeout_minutes: int | None = Field(default=None, ge=1, le=60 * 24 * 30)
+    # keep the (truncated) client IP of a session for the "Sessions & devices" page: /24 (IPv4) or /48 (IPv6)
+    # when False; the full address when True
+    store_ip: bool = False
+    max_per_user: int = Field(default=50, ge=1, le=1000)  # oldest sessions are revoked beyond this
+    api_token_max_days: int = Field(default=365, ge=1, le=3650)
+    api_token_default_days: int = Field(default=90, ge=1, le=3650)
+
+
+class ThrottleConfig(BaseModel):
+    """Limits for failed attempts and request rates. State is in memory, per process."""
+
+    account_max_failures: int = Field(default=5, ge=1)  # failed logins / codes per account
+    account_window_seconds: int = Field(default=300, ge=10)
+    ip_max_failures: int = Field(default=20, ge=1)  # failed attempts per client address (IPv6: per /64)
+    ip_window_seconds: int = Field(default=300, ge=10)
+    ip_backoff_max_seconds: int = Field(default=3600, ge=10)  # cap of the exponential lock-out after repeated bursts
+    unauth_requests_per_minute: int = Field(default=120, ge=1)  # /auth/status, /auth/setup, /auth/login... per address
+    api_token_requests_per_minute: int = Field(default=600, ge=1)  # per API token
+
+
 class Config(BaseModel):
     data_dir: Path = Field(default_factory=lambda: Path.home() / "permitA38")
     secret_key: str
@@ -48,6 +73,8 @@ class Config(BaseModel):
     token_ttl_hours: int = 12
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
+    sessions: SessionsConfig = Field(default_factory=SessionsConfig)
+    throttle: ThrottleConfig = Field(default_factory=ThrottleConfig)
 
 
 def config_dir() -> Path:
@@ -117,6 +144,20 @@ def apply_env(raw: dict) -> dict:
         b = _env_bool(name)
         if b is not None:
             raw[key] = b
+    for name, section, key, cast in (
+        ("PERMITA38_SESSION_IDLE_TIMEOUT_MINUTES", "sessions", "idle_timeout_minutes", int),
+        ("PERMITA38_SESSION_STORE_IP", "sessions", "store_ip", None),
+        ("PERMITA38_THROTTLE_IP_MAX_FAILURES", "throttle", "ip_max_failures", int),
+        ("PERMITA38_THROTTLE_ACCOUNT_MAX_FAILURES", "throttle", "account_max_failures", int),
+        ("PERMITA38_THROTTLE_UNAUTH_PER_MINUTE", "throttle", "unauth_requests_per_minute", int),
+    ):
+        v = _env_bool(name) if cast is None else _env(name)
+        if v is not None:
+            try:
+                v = v if cast is None else cast(v)
+            except ValueError:
+                raise ValueError(f"{name}: invalid value {v!r}") from None
+            raw[section] = {**(raw.get(section) or {}), key: v}
     lookup = _env_bool("PERMITA38_FEATURE_IMPRESSUM_LOOKUP")
     if lookup is not None:
         raw["features"] = {**(raw.get("features") or {}), "impressum_lookup": lookup}

@@ -152,11 +152,20 @@ TABLES: dict[str, Table] = {
             "timers",
             _cols(_BASE + "running:bool started:int project_id:id task_id:id note:text" + _EXTRA),
         ),
+        # server-side sessions and API tokens (kind 'session' | 'api'; one 'marker' row records when sessions began)
+        Table(
+            "sessions",
+            _cols(
+                _BASE + "user_id:id kind:str name:str user_agent:str ip_hint:str expires:int last_seen:int "
+                "revoked_at:int token_hash:str scopes:json" + _EXTRA
+            ),
+            (Index("idx_sessions_user", ("user_id",)), Index("idx_sessions_expires", ("expires",))),
+        ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
 }
 
 # internal per-user collections that are not exposed through the CRUD API
-INTERNAL_COLLECTIONS = ["timers"]
+INTERNAL_COLLECTIONS = ["timers", "sessions"]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]

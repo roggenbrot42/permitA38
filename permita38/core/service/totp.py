@@ -150,30 +150,32 @@ class TotpService:
 
     def _require_password(self, user: dict, password: str):
         keys = (self._pwkey(user),)
-        self.auth.throttle.check(*keys)
+        self.auth.guard(*keys)
         if not verify_password(password or "", user.get("password_hash")):
-            self.auth.throttle.fail(*keys)
+            self.auth.record_failure(*keys)
             raise ServiceError(401, "Wrong password")
-        self.auth.throttle.clear(*keys)
+        self.auth.record_success(*keys)
 
     def _save(self, user: dict, **changes) -> dict:
         return self.store.save("users", {**user, **changes})
 
     def _bump(self, user: dict, **changes) -> dict:
         """Save and invalidate every session issued before now (like a password change)."""
-        return self._save(user, pw_changed=next_session_version(user), **changes)
+        saved = self._save(user, pw_changed=next_session_version(user), **changes)
+        self.auth.sessions.revoke_user(saved["id"])
+        return saved
 
     def _check_code(self, user: dict, code: str | None, recovery_code: str | None, *, allow_recovery: bool) -> str:
         """Verify a TOTP or recovery code. Returns 'totp' or 'recovery'. Persists replay state. Throttled."""
         key = self._ukey(user)
         with self._lock:
-            self.auth.throttle.check(key)
+            self.auth.guard(key)
             fresh = self._user(user["id"])  # re-read inside the lock: replay state must be current
             if code and fresh.get("totp_secret"):
                 step = match_step(fresh["totp_secret"], code, time.time(), fresh.get("totp_last_step"))
                 if step is not None:
                     self._save(fresh, totp_last_step=step)
-                    self.auth.throttle.clear(key)
+                    self.auth.record_success(key)
                     return "totp"
             if allow_recovery and recovery_code:
                 hashes = list(fresh.get("totp_recovery") or [])
@@ -181,10 +183,10 @@ class TotpService:
                 if idx is not None:
                     del hashes[idx]
                     self._save(fresh, totp_recovery=hashes)
-                    self.auth.throttle.clear(key)
+                    self.auth.record_success(key)
                     audit.warning("recovery code used for user %s (%d left)", fresh["username"], len(hashes))
                     return "recovery"
-            self.auth.throttle.fail(key)
+            self.auth.record_failure(key)
         raise ServiceError(401, "Wrong or expired code")
 
     # ---------- status / enrolment
@@ -216,7 +218,7 @@ class TotpService:
     def enable(self, user: dict, code: str) -> tuple[str, list[str]]:
         key = self._ukey(user)
         with self._lock:
-            self.auth.throttle.check(key)
+            self.auth.guard(key)
             u = self._user(user["id"])
             if u.get("totp_enabled"):
                 raise ServiceError(400, "Two-factor authentication is already enabled")
@@ -224,9 +226,9 @@ class TotpService:
                 raise ServiceError(400, "Start the setup first")
             step = match_step(u["totp_secret"], code or "", time.time(), None)
             if step is None:
-                self.auth.throttle.fail(key)
+                self.auth.record_failure(key)
                 raise ServiceError(400, "That code is not correct. Check the clock of your phone and try again.")
-            self.auth.throttle.clear(key)
+            self.auth.record_success(key)
             codes = [new_recovery_code() for _ in range(RECOVERY_CODE_COUNT)]
             saved = self._bump(
                 u, totp_enabled=True, totp_last_step=step, totp_recovery=[hash_recovery_code(c) for c in codes]
