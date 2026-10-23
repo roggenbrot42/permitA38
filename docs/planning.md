@@ -95,7 +95,7 @@ Open **Planning → Plan & vacation**. The timeline shows, per week and per day:
 holidays, time off, every contract and every open offer.
 
 - **Vacation**: drag on the *Time off* row across the days you want. Drag a bar to move it, drag its edges to change
-  its start or end. Press Delete on a time-off bar to remove it.
+  its start or end. Press Delete (or Backspace) on a time-off bar to remove it.
 - **Contracts and offers**: drag to shift them, drag the edges to change their duration, and use the hours field to
   change hours per week (or total hours).
 - **Draft**: every change is a *draft*. Nothing is written until you press **Apply** and confirm. **Discard** drops
@@ -109,8 +109,11 @@ holidays, time off, every contract and every open offer.
   - *What must move?*: for a selected offer, the smallest move of another open offer that makes it fit, or the
     largest amount that fits.
 
-**Keyboard**: focus a bar and press ←/→ to move it one day (Shift: one week); Alt+←/→ changes its end. Forms
-for vacation and the suggestions work without the mouse. **Touch**: dragging works with a finger on the bars and the
+**Keyboard**: click a bar (it is outlined and focused) or Tab to it, then ←/→ moves it one day and
+PageUp/PageDown one week; Shift+←/→ changes its end, Ctrl+←/→ its start (Alt is not used: browsers take Alt+←/→ for
+Back/Forward). Esc discards the change of that one item, Delete or Backspace removes a time-off entry (a real entry is only
+marked for deletion until you press Apply). Every draft change is also listed under the draft bar with its own
+**Discard** button. Forms for vacation and the suggestions work without the mouse. **Touch**: dragging works with a finger on the bars and the
 time-off row.
 
 ## Vacation entitlement

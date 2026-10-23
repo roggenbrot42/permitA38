@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- Planner: after the first keyboard move the bar lost keyboard focus (the page redrew), so it could not be moved or
+  resized again. Focus now survives redraws, Ctrl+←/→ resizes the start, and each draft change has its own Discard
+  button (and Esc on a focused bar).
+- Planner: bars could not be dragged at all (the pointer sat on the bar, so no day was found under it); a clicked bar
+  was neither focused nor visibly selected (Firefox hides `:focus-visible` after a click); Alt+←/→ was taken by the
+  browser's Back/Forward. Dragging now measures the distance, clicking selects and outlines the bar, and the keys are
+  ←/→ (move), PageUp/PageDown (a week), Shift+←/→ (end), Ctrl+←/→ (start).
+
 ### Added
 - **Planning and vacation planner** (`docs/planning.md`): per-day capacity (weekly hours, holidays, absences, busy
   time from `services.busy`) against confirmed contracts and open offers in the worst case; offer feasibility with

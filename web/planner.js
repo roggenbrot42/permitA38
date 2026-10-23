@@ -182,8 +182,27 @@
   function paint() {
     const el = document.getElementById('pln');
     if (!el) return;
+    const act = document.activeElement, focused = act && act.closest && act.closest('.pln-bar');
+    const focusKey = focused && el.contains(focused) ? focused.dataset.key : null;   // a redraw must not drop keyboard focus
+    const wasDiscard = !!(act && act.closest && act.closest('.pln-draftlist') && el.contains(act));
     el.innerHTML = view();
     bindPlanner();
+    if (wasDiscard) (el.querySelector('.pln-draftlist button') || el.querySelector('.pln-bar'))?.focus();   // the clicked button is gone
+    if (P.sel) document.querySelector(`#pln .pln-bar[data-key="${CSS.escape(P.sel)}"]`)?.classList.add('sel');
+    if (focusKey) { const again = document.querySelector(`.pln-bar[data-key="${CSS.escape(focusKey)}"]`); if (again) again.focus(); }
+  }
+  // One line per draft change, each with its own "Discard", so single items can be dropped without losing the rest.
+  function draftList() {
+    const items = [];
+    for (const [key, a] of Object.entries(P.abs)) {
+      const what = a.delete ? `Remove time off ${fmtDate(a.start || (realAbs(a.id) || {}).start)}` : key.startsWith('n:') ? `New ${KINDS[a.kind] || a.kind}: ${fmtDate(a.start)} – ${fmtDate(a.end)}` : `Move ${KINDS[a.kind] || a.kind}: ${fmtDate(a.start)} – ${fmtDate(a.end)}`;
+      items.push({ store: 'abs', key, what });
+    }
+    for (const [key, c] of Object.entries(P.com)) {
+      items.push({ store: 'com', key, what: `${key.startsWith('offer') ? 'Offer' : 'Contract'}: ${fmtDate(c.start)} – ${fmtDate(c.end)}` });
+    }
+    if (!items.length) return '';
+    return `<ul class="pln-draftlist">${items.map(i => `<li><span>${esc(i.what)}</span> <button type="button" class="ghost sm" data-a="plnDiscardOne" data-store="${i.store}" data-key="${esc(i.key)}">Discard</button></li>`).join('')}</ul>`;
   }
   function view() {
     const W = weekRows();
@@ -200,7 +219,8 @@
       <span>${n ? `${n} draft change${n === 1 ? '' : 's'} – nothing is saved yet.` : 'No draft changes. Drag on the time-off row to add vacation; drag bars to move or resize them.'}</span>
       <span class="right auto"><button type="button" class="ghost" data-a="plnDiscard" ${n ? '' : 'disabled'}>Discard</button> <button type="button" class="primary" data-a="plnApply" ${n ? '' : 'disabled'}>Apply</button></span>
     </div>
-    <div class="pln-help small muted">Keyboard: focus a bar, then ←/→ moves it one day (Shift: one week); Alt+←/→ changes its end. Touch: drag bars and the time-off row.</div>
+    ${draftList()}
+    <div class="pln-help small muted">Keyboard: click or Tab to a bar, then ←/→ moves it one day (PageUp/PageDown: one week); Shift+←/→ changes its end, Ctrl+←/→ its start; Esc discards this item's change; Delete or Backspace removes a time-off entry. Touch: drag bars and the time-off row.</div>
     <div class="pln-wrap" id="plnWrap" aria-label="Timeline">
       <div class="pln-grid">
         ${headerRow()}
@@ -262,46 +282,72 @@
     }
     schedule();
   }
+  function selectBar(bar) {   // a clicked bar is selected and focused, so the keyboard works right after the click
+    P.sel = bar.dataset.key;
+    document.querySelectorAll('#pln .pln-bar.sel').forEach(b => b.classList.remove('sel'));
+    bar.classList.add('sel');
+    bar.focus({ preventScroll: true });
+  }
   function onDown(e) {
     const bar = e.target.closest('.pln-bar');
     const lane = e.target.closest('[data-lane="time"]');
     if (bar && e.button === 0) {
       const mode = (e.target.dataset && e.target.dataset.mode) || 'move';
-      drag = { kind: bar.dataset.kind, key: bar.dataset.key, id: bar.dataset.id, mode, x0: e.clientX, el: bar, startDay: null };
-      drag.startDay = dayFromPoint(e.clientX, e.clientY);
-      P.sel = bar.dataset.kind === 'com' ? bar.dataset.key : P.sel;
+      drag = { kind: bar.dataset.kind, key: bar.dataset.key, id: bar.dataset.id, mode, x0: e.clientX, el: bar, delta: 0,
+        left: parseFloat(bar.style.left) || 0, width: parseFloat(bar.style.width) || DW };
+      selectBar(bar);
       bar.setPointerCapture && bar.setPointerCapture(e.pointerId);
     } else if (lane && e.target.closest('[data-day]') && e.button === 0 && !bar) {
       const d = e.target.closest('[data-day]').dataset.day;
-      drag = { kind: 'create', mode: 'create', startDay: d, curDay: d, el: null };
-      showRange(d, d);
+      drag = { kind: 'create', mode: 'create', startDay: d, curDay: d, el: null, lane };
+      showRange(d, d, e);
     } else { return; }
-    e.preventDefault();
+    e.preventDefault();   // no text selection / native drag; focus is set by selectBar()
+    document.getElementById('plnWrap')?.classList.add('dragging');
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp, { once: true });
   }
-  function showRange(a, b) {
+  // Live feedback while dragging: a ghost bar in the lane (create) and a label that follows the pointer.
+  function hint(text, e) {
     const box = document.getElementById('plnDrag');
     if (!box) return;
-    const [s, t] = a <= b ? [a, b] : [b, a];
     box.hidden = false;
-    box.textContent = `Vacation ${fmtDate(s)} – ${fmtDate(t)}: release to add`;
+    box.textContent = text;
+    if (e) { box.style.left = Math.min(e.clientX + 14, window.innerWidth - 240) + 'px'; box.style.top = (e.clientY + 18) + 'px'; }
   }
+  function showRange(a, b, e) {
+    const [s, t] = a <= b ? [a, b] : [b, a];
+    if (drag && drag.lane) {
+      let g = drag.lane.querySelector('.pln-ghost');
+      if (!g) { g = document.createElement('div'); g.className = 'pln-ghost'; g.setAttribute('aria-hidden', 'true'); drag.lane.appendChild(g); }
+      g.style.cssText = barStyle(s, t);
+    }
+    hint(`Vacation ${fmtDate(s)} – ${fmtDate(t)}: release to add`, e);
+  }
+  function plural(n, w) { return `${n} ${w}${Math.abs(n) === 1 ? '' : 's'}`; }
   function onMove(e) {
     if (!drag) return;
     const d = dayFromPoint(e.clientX, e.clientY);
-    if (drag.mode === 'create') { if (d) { drag.curDay = d; showRange(drag.startDay, d); } return; }
-    if (drag.el && d && drag.startDay) {
-      const delta = dayIdx(d) - dayIdx(drag.startDay);
+    if (drag.mode === 'create') { if (d) { drag.curDay = d; showRange(drag.startDay, d, e); } return; }
+    if (drag.el) {   // the bar itself is under the pointer, so measure distance instead of hit-testing a day cell
+      let delta = Math.round((e.clientX - drag.x0) / DW);
+      if (drag.mode === 'start') delta = Math.min(delta, Math.round((drag.width + 2) / DW) - 1);   // never past the end
+      if (drag.mode === 'end') delta = Math.max(delta, 1 - Math.round((drag.width + 2) / DW));     // never before the start
       drag.delta = delta;
-      drag.el.style.transform = `translateX(${delta * DW}px)`;
+      const st = drag.el.style;
+      if (drag.mode === 'move') st.transform = `translateX(${delta * DW}px)`;
+      else if (drag.mode === 'start') { st.left = drag.left + delta * DW + 'px'; st.width = drag.width - delta * DW + 'px'; }
+      else { st.width = drag.width + delta * DW + 'px'; }
+      hint(`${{ move: 'Move', start: 'Start', end: 'End' }[drag.mode]} ${delta > 0 ? '+' : ''}${plural(delta, 'day')}: release to apply`, e);
     }
   }
   function onUp(e) {
     window.removeEventListener('pointermove', onMove);
+    document.getElementById('plnWrap')?.classList.remove('dragging');
     const cur = drag; drag = null;
     if (!cur) return;
     const box = document.getElementById('plnDrag'); if (box) box.hidden = true;
+    cur.lane?.querySelector('.pln-ghost')?.remove();
     if (cur.mode === 'create') {
       const d = dayFromPoint(e.clientX, e.clientY) || cur.curDay;
       if (!d) return;
@@ -311,11 +357,8 @@
       schedule();
       return;
     }
-    if (cur.el) cur.el.style.transform = '';
-    const d = dayFromPoint(e.clientX, e.clientY);
-    if (!d || !cur.startDay) return;
-    const delta = dayIdx(d) - dayIdx(cur.startDay);
-    applyBarDelta(cur.kind, cur.key, cur.id, cur.mode, delta);
+    if (cur.el) { cur.el.style.transform = ''; cur.el.style.left = cur.left + 'px'; cur.el.style.width = cur.width + 'px'; }   // the redraw shows the result
+    applyBarDelta(cur.kind, cur.key, cur.id, cur.mode, Math.round((e.clientX - cur.x0) / DW));
   }
   function onKey(e) {
     const bar = e.target.closest && e.target.closest('.pln-bar');
@@ -328,11 +371,23 @@
       schedule();
       return;
     }
+    if (e.key === 'Escape') {   // drop just this item's draft change
+      const store = bar.dataset.kind === 'abs' ? P.abs : P.com;
+      if (!store[bar.dataset.key]) return;
+      e.preventDefault();
+      delete store[bar.dataset.key];
+      schedule();
+      return;
+    }
+    if (e.key === 'PageUp' || e.key === 'PageDown') {   // a week at a time (Shift: the end)
+      e.preventDefault();
+      applyBarDelta(bar.dataset.kind, bar.dataset.key, bar.dataset.id, e.shiftKey ? 'end' : e.ctrlKey || e.metaKey ? 'start' : 'move', e.key === 'PageDown' ? 7 : -7);
+      return;
+    }
     if (!['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
     e.preventDefault();
-    const step = (e.key === 'ArrowRight' ? 1 : -1) * (e.shiftKey ? 7 : 1);
-    applyBarDelta(bar.dataset.kind, bar.dataset.key, bar.dataset.id, e.altKey ? 'end' : 'move', step);
-    setTimeout(() => { const again = document.querySelector(`.pln-bar[data-key="${CSS.escape(bar.dataset.key)}"]`); if (again) again.focus(); }, 0);
+    const step = e.key === 'ArrowRight' ? 1 : -1;
+    applyBarDelta(bar.dataset.kind, bar.dataset.key, bar.dataset.id, e.shiftKey ? 'end' : e.ctrlKey || e.metaKey ? 'start' : 'move', step);
   }
 
   function bindPlanner() {
@@ -345,6 +400,7 @@
   /* ---------- actions ---------- */
   A.plnSelect = el => { P.sel = el.dataset.key; paint(); };
   A.plnWhy = el => toast(explain(weekRows()[+el.dataset.i]));
+  A.plnDiscardOne = el => { delete (el.dataset.store === 'abs' ? P.abs : P.com)[el.dataset.key]; schedule(); };
   A.plnDiscard = () => { P.abs = {}; P.com = {}; P.sugg = null; schedule(); };
   A.plnAddVac = () => {
     const s = document.getElementById('plnFrom').value, t = document.getElementById('plnTo').value;
