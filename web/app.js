@@ -36,8 +36,11 @@ async function bootstrap() {
 }
 
 /* ---------- modal + forms ---------- */
-function closeModal() { $('#modal-root').innerHTML = ''; }
+function closeModal() { runCloseHook(); $('#modal-root').innerHTML = ''; }
+/** A dialog can register cleanup (e.g. revoking object URLs) that runs once when it closes. */
+function runCloseHook() { const h = closeModal.onClose; closeModal.onClose = null; if (h) h(); }
 function modal(html, wide) {
+  runCloseHook();
   $('#modal-root').innerHTML = `<div class="modal-bg"><div class="modal ${wide ? 'wide' : ''}">${html}</div></div>`;
   const first = $('#modal-root input:not([type=hidden]), #modal-root select'); if (first) first.focus();
 }

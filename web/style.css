@@ -89,3 +89,32 @@ button:disabled { opacity: .6; cursor: progress; }
 .imp-out { margin-top: 8px; font-size: 13px; }
 .imp-list { margin: 6px 0 0; padding-left: 18px; } .imp-list li { margin: 3px 0; }
 .imp-warn { color: var(--warn); } .imp-error { color: var(--bad); font-weight: 600; } .imp-summary { font-weight: 600; }
+
+/* ---- expense dialog: itemised lines and bill preview (docs/specs/itemised-expenses.md) ---- */
+[hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.modal.exp-two { max-width: 1120px; }
+.exp-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.exp-body > *, .exp-side { min-width: 0; }
+@media (min-width: 900px) { .exp-body.two { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-items: start; } }
+.exp-table-wrap { overflow-x: auto; }
+.exp-lines input, .exp-lines select { width: 100%; min-width: 0; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); }
+.exp-lines td { padding: 4px 6px; vertical-align: middle; }
+.exp-lines td:nth-child(1) { width: 100%; }
+.exp-lines td:nth-child(2) input { min-width: 96px; }
+.exp-lines td:nth-child(3) select { min-width: 74px; }
+.exp-lines td:nth-child(4) input { min-width: 84px; }
+.exp-addrow { margin: 8px 0; }
+.exp-totals { margin-top: 6px; width: auto; min-width: 260px; margin-left: auto; }
+.exp-totals th { border: 0; text-transform: none; letter-spacing: 0; font-size: 14px; color: var(--ink); padding: 3px 10px; }
+.exp-totals td { text-align: right; padding: 3px 10px; font-variant-numeric: tabular-nums; }
+.exp-preview { border: 1px solid var(--line); border-radius: 10px; padding: 8px; background: var(--bg); min-width: 0; }
+.exp-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.exp-zoombar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+.exp-zoombar button { padding: 4px 10px; font-size: 13px; }
+.exp-zoombar a { margin-left: auto; font-size: 13px; }
+.exp-stage { height: 360px; max-width: 100%; overflow: auto; background: #6b6f7a; border-radius: 6px; position: relative; touch-action: none; }
+.exp-stage { cursor: grab; }
+.exp-stage img { display: block; max-width: none; margin: auto; user-select: none; -webkit-user-drag: none; }
+.exp-pdf { width: 100%; height: 420px; border: 0; border-radius: 6px; background: #fff; }
+
