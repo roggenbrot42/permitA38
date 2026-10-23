@@ -87,6 +87,41 @@ must pin down). Business lunch 100,00 @19 % with 70 % deductible: VAT 15,97, net
 * Sanity layer: the expense VAT check (`net x rate` to the cent) must be skipped for itemised bills or run per
   group; coordinate with `feat/sanity-v2` when it merges (note in the report).
 
+## Bill preview in the expense dialog (same release)
+
+The user wants to see the uploaded bill (PDF or image) next to the lines and zoom into individual items.
+
+* The "Add bill" / "Edit bill" dialog gets a preview pane beside the lines table (stacked below it on narrow
+  screens). It shows the file chosen in the file input immediately (before saving) and the stored attachment when
+  editing. Vanilla JS, no new libraries, no build step.
+* **Images** (png, jpg, webp, gif): an `<img>` in a pan/zoom container: buttons "+", "-", "Fit", "100 %", mouse
+  wheel zoom (Ctrl+wheel or plain wheel inside the pane, centred on the pointer), drag to pan, pinch zoom on touch
+  (`touch-action: none`, pointer events), keyboard: `+`/`-`/`0` when the pane is focused, arrow keys pan. Zoom range
+  25 %..800 %. Alt text = the file name through `esc()`.
+* **PDF**: use the browser's built-in viewer in an `<iframe>` (it brings its own zoom, search and page navigation);
+  no PDF.js. If the browser cannot render it inline (no viewer, mobile Safari), show a clear fallback text with
+  "Open in a new tab". A new-tab link is always shown.
+* **Other file types** (anything not on the allow-list): no preview, only the download link.
+* While the file is not yet uploaded the preview uses a `blob:` URL created with `URL.createObjectURL` and revoked
+  when the dialog closes or the file changes. Therefore the CSP in `permita38/api/server.py` gets exactly these
+  additions and nothing else: `img-src 'self' data: blob:` and `frame-src 'self' blob:` (keep `object-src 'none'`).
+  A test asserts the final CSP string.
+* **Serving attachments safely (required, security):** today `GET /api/attachments/{name}` serves any file with a
+  guessed content type from the same origin, so an uploaded `.html`/`.svg` would run as a page. Change it to an
+  allow-list: `application/pdf`, `image/png`, `image/jpeg`, `image/webp`, `image/gif` are served inline with their
+  type; **every other type is served as `application/octet-stream` with `Content-Disposition: attachment`**. All
+  attachment responses carry `X-Content-Type-Options: nosniff` (already global) and
+  `Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'unsafe-inline'` (no `sandbox`, it
+  disables the PDF viewer) and may be framed by the same origin only. Upload keeps its 15 MB limit; additionally
+  reject a PDF/image upload whose first bytes do not match its extension (magic-number check: `%PDF-`, PNG, JPEG,
+  RIFF....WEBP, GIF8) with 415. Tests for each.
+* Not in scope: reading amounts out of the bill (separate roadmap item "bill extraction"), rotating/cropping.
+* Tests: browser test uploads a generated PNG (draw a known pattern with Pillow or a tiny hand-made PNG) and a
+  one-page PDF, checks that the pane shows them, that zoom buttons change the displayed scale (assert on the
+  computed transform / a `data-zoom` attribute), that Fit/100 % work, that the blob URL is revoked on close
+  (spy on `URL.revokeObjectURL`), that a hostile file name is escaped; API tests for the allow-list, the
+  `Content-Disposition`, the CSP header and the magic-number check, including an HTML file renamed `.pdf`.
+
 ## Tests (must exist)
 
 1. Money unit tests for the rules and the worked example above, including group-vs-line rounding, the 0 % line,
