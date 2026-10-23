@@ -1,6 +1,7 @@
 """Typed records. `extra="allow"` keeps unknown fields so files written by newer versions or
 other devices survive a round-trip through this version."""
 
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
@@ -386,6 +387,14 @@ class ExpenseLineIn(v.StrictRecord):
     deductible: v.Percent = 100
     vat_deductible: v.Percent | None = None
     category: v.Short | None = None
+
+    @field_validator("gross")
+    @classmethod
+    def _whole_cents(cls, value: float) -> float:
+        # decimal representation of the float (repr), never float arithmetic
+        if Decimal(repr(value)) % Decimal("0.01") != 0:
+            raise ValueError("must be a whole number of cents (a multiple of 0.01)")
+        return value
 
 
 class ExpenseIn(v.StrictRecord):

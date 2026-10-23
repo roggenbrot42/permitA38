@@ -129,7 +129,7 @@ def test_vat_is_rounded_per_rate_group_not_per_line(boss_client):
     assert got["vat_rate"] == 7  # all lines share one rate -> the common rate
 
 
-def test_last_line_of_a_group_takes_the_remainder_even_when_groups_are_interleaved(boss_client):
+def test_largest_remainder_gives_extra_cents_to_largest_fractions_across_interleaved_groups(boss_client):
     lines = [L(0.50, 7, "a"), L(10.00, 19, "b"), L(0.50, 7, "c"), L(0.50, 7, "d")]
     got = book(boss_client, lines)
     derived, summary = derive([(ln["gross"], ln["vat_rate"]) for ln in lines])
@@ -360,6 +360,21 @@ def test_at_most_50_lines(boss_client):
 def test_invalid_line_values_are_rejected_and_the_message_names_the_line(boss_client, bad, field):
     r = boss_client.post("/api/expenses", json={"date": "2026-03-10", "net": 0, "lines": [L(5, 19), bad]})
     lines_422(r, 1, field)
+
+
+@pytest.mark.parametrize("gross", [0.0099, 0.001, 10.005])
+def test_sub_cent_line_amounts_are_rejected_with_the_cents_rule(boss_client, gross):
+    r = boss_client.post("/api/expenses", json={"date": "2026-03-10", "net": 0, "lines": [L(5, 19), L(gross, 19)]})
+    lines_422(r, 1, "gross")
+    msg = next(e["msg"] for e in r.json()["detail"] if e["loc"][-1] == "gross")
+    assert "cent" in msg
+    assert boss_client.get("/api/expenses").json() == []
+
+
+@pytest.mark.parametrize("gross", [0.01, 2.52, 1234.56])
+def test_whole_cent_line_amounts_are_accepted(boss_client, gross):
+    got = book(boss_client, [L(gross, 19), L(1, 7)])
+    assert dd(got["lines"][0]["net"]) + dd(got["lines"][0]["vat"]) == dd(gross)
 
 
 def test_a_line_must_state_gross_and_vat_rate(boss_client):
