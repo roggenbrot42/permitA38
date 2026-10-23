@@ -1,6 +1,7 @@
 -- permitA38 migration 0004: double-entry accounting (mariadb)
--- accounts (chart of accounts), journal_entries + journal_lines (immutable once posted, integer cents),
--- period_locks (closed months/years). Generated from permita38/core/repository/schema.py.
+-- accounts (chart of accounts), journal_entries + journal_lines (immutable once posted, integer cents; the tax_*
+-- columns carry the VAT base/amount of a line for the VAT return), period_locks (closed months/years).
+-- Generated from permita38/core/repository/schema.py.
 
 CREATE TABLE `accounts` (
     `id` VARCHAR(32) PRIMARY KEY,
@@ -62,6 +63,7 @@ CREATE TABLE `journal_lines` (
     `debit_cents` BIGINT,
     `credit_cents` BIGINT,
     `tax_code` VARCHAR(255),
+    `tax_base_cents` BIGINT,
     `tax_amount_cents` BIGINT,
     `memo` LONGTEXT,
     `extra` LONGTEXT

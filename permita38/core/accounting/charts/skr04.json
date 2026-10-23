@@ -1,0 +1,280 @@
+{
+ "chart": "skr04",
+ "title": "SKR 04 (Abschlussgliederung), Auswahl",
+ "valid_for_year": 2026,
+ "reviewed_on": null,
+ "verified": false,
+ "note": "Pragmatic subset for freelancers and small businesses, assembled from public descriptions of the DATEV standard chart of accounts. It has NOT been reviewed by a Steuerberater: check every account number and name against your DATEV/Steuerberater chart before relying on it. You can deactivate accounts and add your own; an account's `role` tells the automatic postings which account to use.",
+ "accounts": [
+  {
+   "number": "0650",
+   "name": "Büroeinrichtung",
+   "type": "asset",
+   "side": "debit",
+   "role": "asset_equipment"
+  },
+  {
+   "number": "0670",
+   "name": "Geringwertige Wirtschaftsgüter (GWG)",
+   "type": "asset",
+   "side": "debit"
+  },
+  {
+   "number": "1200",
+   "name": "Forderungen aus Lieferungen und Leistungen",
+   "type": "asset",
+   "side": "debit",
+   "role": "receivables"
+  },
+  {
+   "number": "1400",
+   "name": "Abziehbare Vorsteuer",
+   "type": "asset",
+   "side": "debit"
+  },
+  {
+   "number": "1401",
+   "name": "Abziehbare Vorsteuer 7 %",
+   "type": "asset",
+   "side": "debit",
+   "role": "vat_in_7"
+  },
+  {
+   "number": "1406",
+   "name": "Abziehbare Vorsteuer 19 %",
+   "type": "asset",
+   "side": "debit",
+   "role": "vat_in_19"
+  },
+  {
+   "number": "1600",
+   "name": "Kasse",
+   "type": "asset",
+   "side": "debit",
+   "role": "cash"
+  },
+  {
+   "number": "1800",
+   "name": "Bank",
+   "type": "asset",
+   "side": "debit",
+   "role": "bank"
+  },
+  {
+   "number": "2000",
+   "name": "Eigenkapital (Einzelunternehmen)",
+   "type": "equity",
+   "side": "credit",
+   "role": "equity_capital"
+  },
+  {
+   "number": "2100",
+   "name": "Privatentnahmen allgemein",
+   "type": "equity",
+   "side": "credit",
+   "role": "private_withdrawal"
+  },
+  {
+   "number": "2180",
+   "name": "Privateinlagen",
+   "type": "equity",
+   "side": "credit",
+   "role": "private_deposit"
+  },
+  {
+   "number": "3300",
+   "name": "Verbindlichkeiten aus Lieferungen und Leistungen",
+   "type": "liability",
+   "side": "credit",
+   "role": "payables"
+  },
+  {
+   "number": "3800",
+   "name": "Umsatzsteuer",
+   "type": "liability",
+   "side": "credit"
+  },
+  {
+   "number": "3801",
+   "name": "Umsatzsteuer 7 %",
+   "type": "liability",
+   "side": "credit",
+   "role": "vat_out_7"
+  },
+  {
+   "number": "3806",
+   "name": "Umsatzsteuer 19 %",
+   "type": "liability",
+   "side": "credit",
+   "role": "vat_out_19"
+  },
+  {
+   "number": "3811",
+   "name": "Umsatzsteuer nicht fällig 7 %",
+   "type": "liability",
+   "side": "credit",
+   "role": "vat_out_7_pending"
+  },
+  {
+   "number": "3816",
+   "name": "Umsatzsteuer nicht fällig 19 %",
+   "type": "liability",
+   "side": "credit",
+   "role": "vat_out_19_pending"
+  },
+  {
+   "number": "3820",
+   "name": "Umsatzsteuer-Vorauszahlungen",
+   "type": "liability",
+   "side": "credit",
+   "role": "vat_prepayment"
+  },
+  {
+   "number": "4120",
+   "name": "Steuerfreie / nicht steuerbare Umsätze (0 %)",
+   "type": "income",
+   "side": "credit",
+   "role": "revenue_0"
+  },
+  {
+   "number": "4180",
+   "name": "Erlöse bei Anwendung der Kleinunternehmerregelung § 19 UStG",
+   "type": "income",
+   "side": "credit",
+   "role": "revenue_klein"
+  },
+  {
+   "number": "4300",
+   "name": "Erlöse 7 % USt",
+   "type": "income",
+   "side": "credit",
+   "role": "revenue_7"
+  },
+  {
+   "number": "4400",
+   "name": "Erlöse 19 % USt",
+   "type": "income",
+   "side": "credit",
+   "role": "revenue_19"
+  },
+  {
+   "number": "4830",
+   "name": "Sonstige betriebliche Erträge",
+   "type": "income",
+   "side": "credit",
+   "role": "income_other"
+  },
+  {
+   "number": "5900",
+   "name": "Fremdleistungen",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_subcontractors"
+  },
+  {
+   "number": "6220",
+   "name": "Abschreibungen auf Sachanlagen",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_depreciation"
+  },
+  {
+   "number": "6260",
+   "name": "Sofortabschreibung geringwertiger Wirtschaftsgüter",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_hardware"
+  },
+  {
+   "number": "6300",
+   "name": "Sonstige betriebliche Aufwendungen",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_other"
+  },
+  {
+   "number": "6310",
+   "name": "Miete / Coworking",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_office"
+  },
+  {
+   "number": "6400",
+   "name": "Versicherungen",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_insurance"
+  },
+  {
+   "number": "6600",
+   "name": "Werbekosten",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_marketing"
+  },
+  {
+   "number": "6640",
+   "name": "Bewirtungskosten",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_meals"
+  },
+  {
+   "number": "6644",
+   "name": "Nicht abzugsfähige Betriebsausgaben / Bewirtungskosten",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_nondeductible"
+  },
+  {
+   "number": "6670",
+   "name": "Reisekosten Unternehmer",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_travel"
+  },
+  {
+   "number": "6805",
+   "name": "Telefon und Internet",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_phone"
+  },
+  {
+   "number": "6821",
+   "name": "Fortbildungskosten",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_training"
+  },
+  {
+   "number": "6837",
+   "name": "Software und Lizenzen (befristete Überlassung von Rechten)",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_software"
+  },
+  {
+   "number": "6855",
+   "name": "Nebenkosten des Geldverkehrs",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_fees"
+  },
+  {
+   "number": "7610",
+   "name": "Gewerbesteuer",
+   "type": "expense",
+   "side": "debit",
+   "role": "expense_trade_tax"
+  },
+  {
+   "number": "9000",
+   "name": "Saldenvorträge Sachkonten (Eröffnungsbilanzkonto)",
+   "type": "equity",
+   "side": "credit",
+   "role": "opening_balance"
+  }
+ ]
+}

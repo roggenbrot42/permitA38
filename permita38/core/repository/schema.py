@@ -177,7 +177,7 @@ TABLES: dict[str, Table] = {
             "journal_lines",
             _cols(
                 _BASE + "entry_id:id line_no:int account:str debit_cents:int credit_cents:int tax_code:str "
-                "tax_amount_cents:int memo:text" + _EXTRA
+                "tax_base_cents:int tax_amount_cents:int memo:text" + _EXTRA
             ),
             (Index("idx_journal_lines_entry", ("entry_id",)), Index("idx_journal_lines_account", ("account",))),
         ),

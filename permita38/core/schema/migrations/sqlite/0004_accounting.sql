@@ -1,6 +1,7 @@
 -- permitA38 migration 0004: double-entry accounting (sqlite)
--- accounts (chart of accounts), journal_entries + journal_lines (immutable once posted, integer cents),
--- period_locks (closed months/years). Generated from permita38/core/repository/schema.py.
+-- accounts (chart of accounts), journal_entries + journal_lines (immutable once posted, integer cents; the tax_*
+-- columns carry the VAT base/amount of a line for the VAT return), period_locks (closed months/years).
+-- Generated from permita38/core/repository/schema.py.
 
 CREATE TABLE "accounts" (
     "id" TEXT PRIMARY KEY,
@@ -62,6 +63,7 @@ CREATE TABLE "journal_lines" (
     "debit_cents" INTEGER,
     "credit_cents" INTEGER,
     "tax_code" TEXT,
+    "tax_base_cents" INTEGER,
     "tax_amount_cents" INTEGER,
     "memo" TEXT,
     "extra" TEXT
