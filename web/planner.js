@@ -293,34 +293,52 @@
     const lane = e.target.closest('[data-lane="time"]');
     if (bar && e.button === 0) {
       const mode = (e.target.dataset && e.target.dataset.mode) || 'move';
-      drag = { kind: bar.dataset.kind, key: bar.dataset.key, id: bar.dataset.id, mode, x0: e.clientX, el: bar, delta: 0 };
+      drag = { kind: bar.dataset.kind, key: bar.dataset.key, id: bar.dataset.id, mode, x0: e.clientX, el: bar, delta: 0,
+        left: parseFloat(bar.style.left) || 0, width: parseFloat(bar.style.width) || DW };
       selectBar(bar);
       bar.setPointerCapture && bar.setPointerCapture(e.pointerId);
     } else if (lane && e.target.closest('[data-day]') && e.button === 0 && !bar) {
       const d = e.target.closest('[data-day]').dataset.day;
-      drag = { kind: 'create', mode: 'create', startDay: d, curDay: d, el: null };
-      showRange(d, d);
+      drag = { kind: 'create', mode: 'create', startDay: d, curDay: d, el: null, lane };
+      showRange(d, d, e);
     } else { return; }
     e.preventDefault();   // no text selection / native drag; focus is set by selectBar()
     document.getElementById('plnWrap')?.classList.add('dragging');
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp, { once: true });
   }
-  function showRange(a, b) {
+  // Live feedback while dragging: a ghost bar in the lane (create) and a label that follows the pointer.
+  function hint(text, e) {
     const box = document.getElementById('plnDrag');
     if (!box) return;
-    const [s, t] = a <= b ? [a, b] : [b, a];
     box.hidden = false;
-    box.textContent = `Vacation ${fmtDate(s)} – ${fmtDate(t)}: release to add`;
+    box.textContent = text;
+    if (e) { box.style.left = Math.min(e.clientX + 14, window.innerWidth - 240) + 'px'; box.style.top = (e.clientY + 18) + 'px'; }
   }
+  function showRange(a, b, e) {
+    const [s, t] = a <= b ? [a, b] : [b, a];
+    if (drag && drag.lane) {
+      let g = drag.lane.querySelector('.pln-ghost');
+      if (!g) { g = document.createElement('div'); g.className = 'pln-ghost'; g.setAttribute('aria-hidden', 'true'); drag.lane.appendChild(g); }
+      g.style.cssText = barStyle(s, t);
+    }
+    hint(`Vacation ${fmtDate(s)} – ${fmtDate(t)}: release to add`, e);
+  }
+  function plural(n, w) { return `${n} ${w}${Math.abs(n) === 1 ? '' : 's'}`; }
   function onMove(e) {
     if (!drag) return;
     const d = dayFromPoint(e.clientX, e.clientY);
-    if (drag.mode === 'create') { if (d) { drag.curDay = d; showRange(drag.startDay, d); } return; }
+    if (drag.mode === 'create') { if (d) { drag.curDay = d; showRange(drag.startDay, d, e); } return; }
     if (drag.el) {   // the bar itself is under the pointer, so measure distance instead of hit-testing a day cell
-      const delta = Math.round((e.clientX - drag.x0) / DW);
+      let delta = Math.round((e.clientX - drag.x0) / DW);
+      if (drag.mode === 'start') delta = Math.min(delta, Math.round((drag.width + 2) / DW) - 1);   // never past the end
+      if (drag.mode === 'end') delta = Math.max(delta, 1 - Math.round((drag.width + 2) / DW));     // never before the start
       drag.delta = delta;
-      drag.el.style.transform = drag.mode === 'move' ? `translateX(${delta * DW}px)` : '';
+      const st = drag.el.style;
+      if (drag.mode === 'move') st.transform = `translateX(${delta * DW}px)`;
+      else if (drag.mode === 'start') { st.left = drag.left + delta * DW + 'px'; st.width = drag.width - delta * DW + 'px'; }
+      else { st.width = drag.width + delta * DW + 'px'; }
+      hint(`${{ move: 'Move', start: 'Start', end: 'End' }[drag.mode]} ${delta > 0 ? '+' : ''}${plural(delta, 'day')}: release to apply`, e);
     }
   }
   function onUp(e) {
@@ -329,6 +347,7 @@
     const cur = drag; drag = null;
     if (!cur) return;
     const box = document.getElementById('plnDrag'); if (box) box.hidden = true;
+    cur.lane?.querySelector('.pln-ghost')?.remove();
     if (cur.mode === 'create') {
       const d = dayFromPoint(e.clientX, e.clientY) || cur.curDay;
       if (!d) return;
@@ -338,7 +357,7 @@
       schedule();
       return;
     }
-    if (cur.el) cur.el.style.transform = '';
+    if (cur.el) { cur.el.style.transform = ''; cur.el.style.left = cur.left + 'px'; cur.el.style.width = cur.width + 'px'; }   // the redraw shows the result
     applyBarDelta(cur.kind, cur.key, cur.id, cur.mode, Math.round((e.clientX - cur.x0) / DW));
   }
   function onKey(e) {

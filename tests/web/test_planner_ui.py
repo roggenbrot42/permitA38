@@ -256,3 +256,29 @@ def test_dragging_a_bar_moves_it_and_its_edge_resizes_it(srv, ui, seeded):
     ui.wait_for_function("(b) => document.querySelector('.pln-bar.abs').getAttribute('aria-label') !== b", arg=moved)
     assert (w2 + timedelta(days=6)).strftime("%d.%m.") in abs_range(ui)
     assert "1 draft change" in ui.inner_text(".pln-draftbar")
+
+
+def test_creating_and_resizing_show_live_feedback_while_the_mouse_is_down(srv, ui, seeded):
+    w2 = seeded["week2"]
+    x1, y1 = cell_center(ui, w2.isoformat())
+    x2, _ = cell_center(ui, (w2 + timedelta(days=3)).isoformat())
+    ui.mouse.move(x1, y1)
+    ui.mouse.down()
+    ui.mouse.move(x2, y1, steps=6)
+    ghost = ui.locator(".pln-ghost")
+    assert ghost.count() == 1 and ghost.bounding_box()["width"] > 30  # a visible bar grows under the pointer
+    assert ui.locator("#plnDrag").is_visible() and "release to add" in ui.inner_text("#plnDrag")
+    ui.mouse.up()
+    ui.wait_for_selector(".pln-bar.abs.draft")
+    assert ui.locator(".pln-ghost").count() == 0 and not ui.locator("#plnDrag").is_visible()
+
+    box = ui.locator(".pln-bar.abs.draft").first.bounding_box()
+    hx, y = box["x"] + box["width"] - 3, box["y"] + box["height"] / 2
+    ui.mouse.move(hx, y)
+    ui.mouse.down()
+    ui.mouse.move(hx + 3 * 12, y, steps=6)
+    grown = ui.locator(".pln-bar.abs.draft").first.bounding_box()["width"]
+    assert grown > box["width"] + 20  # the bar follows the edge while dragging
+    assert "End +3 days" in ui.inner_text("#plnDrag")
+    ui.mouse.up()
+    ui.wait_for_function("() => !document.querySelector('#plnDrag').offsetParent")

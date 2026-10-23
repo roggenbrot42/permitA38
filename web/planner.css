@@ -39,7 +39,8 @@
 #plnWrap.dragging .pln-bar:not(.sel) { pointer-events: none; }
 .pln-bar .h { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
 .pln-bar .h.l { left: 0; } .pln-bar .h.r { right: 0; }
-.pln-drag { position: sticky; left: 200px; margin: 6px 0; font-size: 13px; background: var(--accent-soft); border-radius: 8px; padding: 6px 10px; width: max-content; }
+.pln-drag { position: fixed; z-index: 50; pointer-events: none; font-size: 13px; background: var(--ink); color: var(--bg); border-radius: 8px; padding: 6px 10px; width: max-content; box-shadow: 0 2px 8px rgba(0,0,0,.3); }
+.pln-ghost { position: absolute; top: 4px; height: 26px; border-radius: 7px; background: var(--good); opacity: .65; outline: 2px dashed var(--warn); pointer-events: none; }
 .pln-form { margin: 0 0 12px; }
 .pln-form h3 { margin-top: 10px; }
 .pln-page .pln-panels { margin-top: 16px; }
