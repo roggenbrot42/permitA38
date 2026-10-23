@@ -9,7 +9,7 @@ Migrations are numbered SQL files, one folder per supported SQL dialect::
 Rules (enforced by tests):
 
 * every migration exists for every dialect folder, with the same number and name,
-* numbers are contiguous, starting at 1,
+* numbers are contiguous, starting at 1 (relaxed to "strictly increasing" on branch feat/backup, see below),
 * ``CURRENT_REVISION`` equals the highest migration number.
 
 Add a migration with ``permita38 create-migration <name>`` (creates the next file in every dialect
@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 #: Revision of the schema this version of the app expects. Bump together with a new migration file.
-CURRENT_REVISION = 2
+CURRENT_REVISION = 6
 
 MIGRATIONS_DIR = Path(__file__).parent / "schema" / "migrations"
 DIALECT_NAMES = ("sqlite", "postgresql", "mariadb")
@@ -46,9 +46,13 @@ def list_migrations(dialect: str, directory: Path | None = None) -> list[Migrati
         if not m:
             raise ValueError(f"bad migration file name: {p} (expected 0001_name.sql)")
         found.append(Migration(int(m.group(1)), m.group(2), p))
-    for i, mig in enumerate(found, start=1):
-        if mig.version != i:
-            raise ValueError(f"migrations in {folder} must be numbered 1..n without gaps (found {mig.path.name})")
+    # TEMPORARY (branch feat/backup): migrations 0003-0005 are being written on sibling branches, so this branch only
+    # requires strictly increasing numbers. The merge into main restores the "contiguous, starting at 1" rule.
+    previous = 0
+    for mig in found:
+        if mig.version <= previous:
+            raise ValueError(f"migrations in {folder} must have strictly increasing numbers (found {mig.path.name})")
+        previous = mig.version
     return found
 
 

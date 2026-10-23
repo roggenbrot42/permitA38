@@ -12,6 +12,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from permita38.core.database import CURRENT_REVISION
+
 from .base import Record
 from .dialect import SQLiteDialect
 from .sql import SQLRepository
@@ -110,6 +112,73 @@ class SQLiteRepository(SQLRepository):
                 out.close()
         os.replace(tmp, dest)
         return dest
+
+    def file_root(self) -> Path:
+        return self.data_dir
+
+    @property
+    def snapshot_name(self) -> str:
+        return DB_FILENAME
+
+    @staticmethod
+    def _open_readonly(path: Path) -> sqlite3.Connection:
+        uri = "file:" + Path(path).resolve().as_posix().replace("?", "%3f").replace("#", "%23") + "?mode=ro"
+        return sqlite3.connect(uri, uri=True, timeout=5)
+
+    def verify_snapshot(self, path: Path) -> list[str]:
+        problems: list[str] = []
+        try:
+            conn = self._open_readonly(path)
+        except sqlite3.Error as e:
+            return [f"cannot open the database snapshot: {e}"]
+        try:
+            rows = [r[0] for r in conn.execute("PRAGMA integrity_check").fetchall()]
+            if rows != ["ok"]:
+                problems.append("integrity_check failed: " + "; ".join(rows[:5]))
+            rev = int(conn.execute("PRAGMA user_version").fetchone()[0])
+            if rev > CURRENT_REVISION:
+                problems.append(f"the snapshot has schema revision {rev}, newer than this version ({CURRENT_REVISION})")
+        except sqlite3.Error as e:
+            problems.append(f"the snapshot is not a readable database: {e}")
+        finally:
+            conn.close()
+        return problems
+
+    def snapshot_counts(self, path: Path) -> dict[str, int]:
+        conn = self._open_readonly(path)
+        try:
+            names = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+            ]
+            return {
+                n: int(conn.execute('SELECT COUNT(*) FROM "%s"' % n.replace('"', '""')).fetchone()[0]) for n in names
+            }
+        finally:
+            conn.close()
+
+    def snapshot_invariants(self, path: Path) -> list[str]:
+        """If the accounting tables exist, every journal entry must balance (debit == credit, in cents)."""
+        conn = self._open_readonly(path)
+        problems: list[str] = []
+        try:
+            tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+            if "journal_lines" in tables:
+                cols = {r[1] for r in conn.execute('PRAGMA table_info("journal_lines")')}
+                if {"entry_id", "debit", "credit"} <= cols:
+                    bad = conn.execute(
+                        "SELECT entry_id FROM journal_lines GROUP BY entry_id "
+                        "HAVING ABS(COALESCE(SUM(debit), 0) - COALESCE(SUM(credit), 0)) > 0.004 LIMIT 5"
+                    ).fetchall()
+                    if bad:
+                        problems.append("unbalanced journal entries: " + ", ".join(str(r[0]) for r in bad))
+        except sqlite3.Error as e:
+            problems.append(f"invariant check failed: {e}")
+        finally:
+            conn.close()
+        return problems
 
     def health(self) -> Record:
         h = super().health()

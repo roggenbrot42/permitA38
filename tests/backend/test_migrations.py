@@ -162,11 +162,15 @@ def test_create_migration_numbers_files_in_every_dialect(tmp_path):
         create_migration("!!!", root)
 
 
-def test_list_migrations_rejects_gaps_and_bad_names(tmp_path):
+def test_list_migrations_rejects_duplicates_and_bad_names(tmp_path):
+    # NOTE (branch feat/backup): contiguity ("no gaps") is relaxed to "strictly increasing" here because migrations
+    # 0003-0005 live on sibling branches; the merge into main restores the original gap test.
     (tmp_path / "sqlite").mkdir()
-    (tmp_path / "sqlite" / "0002_gap.sql").write_text("")
-    with pytest.raises(ValueError, match="without gaps"):
+    (tmp_path / "sqlite" / "0002_a.sql").write_text("")
+    (tmp_path / "sqlite" / "0002_b.sql").write_text("")
+    with pytest.raises(ValueError, match="strictly increasing"):
         list_migrations("sqlite", tmp_path)
-    (tmp_path / "sqlite" / "0002_gap.sql").rename(tmp_path / "sqlite" / "weird.sql")
+    (tmp_path / "sqlite" / "0002_b.sql").unlink()
+    (tmp_path / "sqlite" / "0002_a.sql").rename(tmp_path / "sqlite" / "weird.sql")
     with pytest.raises(ValueError, match="bad migration file name"):
         list_migrations("sqlite", tmp_path)

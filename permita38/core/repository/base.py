@@ -115,6 +115,28 @@ class Repository(ABC):
         """Where automatic backups go, or None if the backend does not do file backups."""
         return None
 
+    # ---- legal-retention backups (see permita38/core/backup) ----
+    def file_root(self) -> Path | None:
+        """Folder for files that belong to the data (attachments, issued documents), if the backend keeps them locally."""
+        return None
+
+    @property
+    def snapshot_name(self) -> str | None:
+        """File name of a database snapshot inside a backup archive (None: the backend has no file snapshots)."""
+        return None
+
+    def verify_snapshot(self, path: Path) -> StrList:
+        """Open a snapshot file read-only and return a list of problems (empty = consistent)."""
+        raise NotImplementedError(f"snapshots are not supported by the {self.backend} backend")
+
+    def snapshot_counts(self, path: Path) -> dict[str, int]:
+        """Number of rows per table in a snapshot file (read-only)."""
+        raise NotImplementedError(f"snapshots are not supported by the {self.backend} backend")
+
+    def snapshot_invariants(self, path: Path) -> StrList:
+        """Business invariants that must hold in a snapshot (e.g. the journal balances); empty list = fine."""
+        return []
+
 
 def check_collection(coll: str) -> None:
     if coll not in COLLECTIONS and coll not in INTERNAL_COLLECTIONS:

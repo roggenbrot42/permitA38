@@ -152,11 +152,31 @@ TABLES: dict[str, Table] = {
             "timers",
             _cols(_BASE + "running:bool started:int project_id:id task_id:id note:text" + _EXTRA),
         ),
+        Table(
+            "issued_documents",  # immutable copies of finalized offers/invoices (migration 0006)
+            _cols(
+                _BASE + "kind:str document_id:id number:str sha256:str size:int path:str issued_on:str "
+                "retention_class:str retention_until:str" + _EXTRA
+            ),
+            (
+                Index("idx_issued_document", ("kind", "document_id"), unique=True),
+                Index("idx_issued_number", ("number",)),
+            ),
+        ),
+        Table(
+            "backup_runs",  # one row per archive written to a target (migration 0006)
+            _cols(
+                _BASE + "started:int finished:int kind:str status:str target:str path:str filename:str size:int "
+                "sha256:str manifest_sha256:str prev_manifest_sha256:str verified:bool encrypted:bool protected:bool "
+                "retention_until:str error:text" + _EXTRA
+            ),
+            (Index("idx_backup_runs_started", ("started",)), Index("idx_backup_runs_kind", ("kind", "status"))),
+        ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
 }
 
 # internal per-user collections that are not exposed through the CRUD API
-INTERNAL_COLLECTIONS = ["timers"]
+INTERNAL_COLLECTIONS = ["timers", "issued_documents", "backup_runs"]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]

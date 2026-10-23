@@ -27,6 +27,33 @@ class FeaturesConfig(BaseModel):
     impressum_lookup: bool = True
 
 
+class BackupTargetConfig(BaseModel):
+    type: Literal["local", "s3", "sftp", "webdav"] = "local"
+    path: Path | None = None  # local: an absolute folder (USB drive, NAS share, ...)
+    name: str | None = Field(default=None, max_length=60)
+
+
+class BackupConfig(BaseModel):
+    """Per-device backup settings (the data folder is synced, this is not)."""
+
+    enabled: bool = True
+    daily_at: str = Field(default="02:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")  # local time
+    weekly_day: int = Field(default=6, ge=0, le=6)  # 0 = Monday ... 6 = Sunday
+    monthly_day: int = Field(default=1, ge=1, le=28)
+    yearly: bool = True  # closing archive for the previous year after 1 January
+    keep_daily: int = Field(default=14, ge=1, le=3650)
+    keep_weekly: int = Field(default=8, ge=1, le=520)
+    keep_monthly: int = Field(default=24, ge=1, le=240)
+    keep_manual: int = Field(default=20, ge=1, le=1000)
+    # empty = one folder inside the data folder (a convenience copy, NOT an independent backup)
+    targets: list[BackupTargetConfig] = Field(default_factory=list, max_length=8)
+    encrypt: bool = False
+    passphrase_env: str = "PERMITA38_BACKUP_PASSPHRASE"
+    passphrase_file: Path | None = None
+    jitter_seconds: int = Field(default=60, ge=0, le=3600)
+    test_restore_days: int = Field(default=30, ge=1, le=366)
+
+
 class Config(BaseModel):
     data_dir: Path = Field(default_factory=lambda: Path.home() / "permitA38")
     secret_key: str
@@ -48,6 +75,9 @@ class Config(BaseModel):
     token_ttl_hours: int = 12
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
+    backup: BackupConfig = Field(default_factory=BackupConfig)
+    # where settings saved from the web UI go (default: next to config.yaml, or inside the data volume in a container)
+    backup_settings_file: Path | None = None
 
 
 def config_dir() -> Path:

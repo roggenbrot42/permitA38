@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "valid_for": "2025-01-01",
+  "reviewed_on": "2026-10-22",
+  "next_review_due": "2027-01-22",
+  "verified_against_official_source": false,
+  "note": "Planning aid, not legal advice. These periods were entered from the statutes as the maintainers understand them after the Bürokratieentlastungsgesetz IV (BEG IV, vouchers 8 instead of 10 years since 2025) and have not yet been confirmed by the quarterly review. Verify with your Steuerberater before you delete anything.",
+  "period_starts": "End of the calendar year in which the document was created or the last booking was made (§147 Abs. 4 AO).",
+  "sources": [
+    {"title": "§147 AO Ordnungsvorschriften für die Aufbewahrung von Unterlagen", "url": "https://www.gesetze-im-internet.de/ao_1977/__147.html"},
+    {"title": "§257 HGB Aufbewahrung von Unterlagen", "url": "https://www.gesetze-im-internet.de/hgb/__257.html"},
+    {"title": "Bürokratieentlastungsgesetz IV (BEG IV)", "url": "https://www.bundesfinanzministerium.de/Content/DE/Gesetzestexte/Gesetze_Gesetzesvorhaben/Abteilungen/Abteilung_IV/20_Legislaturperiode/2024-10-30-BEG-IV/0-Gesetz.html"}
+  ],
+  "classes": {
+    "books": {
+      "years": 10,
+      "label": "Books, records, annual accounts, inventories (Bücher, Aufzeichnungen, Jahresabschlüsse, Inventare)",
+      "applies_to": "database snapshot, journal and ledger exports"
+    },
+    "vouchers": {
+      "years": 8,
+      "label": "Accounting vouchers (Buchungsbelege): invoices you issued and received, receipts",
+      "applies_to": "issued invoice PDFs, expense receipts (attachments), invoice and expense exports"
+    },
+    "letters": {
+      "years": 6,
+      "label": "Business letters (Handels- und Geschäftsbriefe): offers, correspondence",
+      "applies_to": "issued offer PDFs, customer exports"
+    },
+    "operational": {
+      "years": 0,
+      "label": "Operational data without a statutory period",
+      "applies_to": "manifests, restore instructions"
+    }
+  }
+}
