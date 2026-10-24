@@ -119,6 +119,9 @@ def test_employee_nav_is_unchanged(browser, srv):
         "📅",
         "Team",
         "timeline",
+        "🔑",
+        "API",
+        "tokens",
     ]
     pg.goto(srv.base + "/#/customers")
     pg.wait_for_selector("#toast.on")

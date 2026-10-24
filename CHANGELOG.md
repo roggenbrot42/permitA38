@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format is based on
   spread over the available days (workdays that are neither a holiday nor time off); `docs/planning.md` has the rule.
 - Bill preview: a PDF or image that the browser downloads or shows blank now has a visible "Not showing? Open or download the bill" line.
 ### Added
+- **API tokens in the web UI** (`#/tokens`, and a card on the Settings page for the boss): list with status and last use,
+  create dialog that shows the token exactly once (copy button, "I have saved it" before closing), revoke, revoke all,
+  activity log per token, boss view of all users. Needs the API token routes of `docs/contracts/api-tokens.md`.
 - **API tokens (backend)**: signed-in users create personal tokens (`POST /api/tokens`; the secret is shown once and
   only its SHA-256 is stored) and use them as `Authorization: Bearer pat_...`. A token has the rights of its owner,
   optionally read-only, expires after 1-365 days (default 90), can be revoked at once, and at most 20 are active per
