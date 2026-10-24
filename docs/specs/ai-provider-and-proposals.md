@@ -175,10 +175,18 @@ unless the host is loopback; remote without `allow_remote` -> the AI layer stays
 class ModelProvider(Protocol):
     host_kind: Literal["local", "remote"]
     model: str
+
     def complete(self, system: str, user: str, *, json_schema: dict | None, max_tokens: int) -> ModelResult: ...
+
+
 @dataclass
-class ModelResult: text: str; input_tokens: int | None; output_tokens: int | None
-class ProviderError(Exception): ...        # message safe to show; never contains the key or the prompt
+class ModelResult:
+    text: str
+    input_tokens: int | None
+    output_tokens: int | None
+
+
+class ProviderError(Exception): ...  # message safe to show; never contains the key or the prompt
 ```
 
 `OpenAICompatProvider` (httpx): `POST {base_url}/chat/completions` with `messages` (system + one user message),
