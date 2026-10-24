@@ -9,7 +9,7 @@ values are left to a later soft-warning layer.
 import math
 import re
 from collections.abc import Mapping
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated, Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -28,6 +28,7 @@ ALLOWED_VAT_RATES = (0, 5, 7, 16, 19)
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_LOCAL_DT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d$")
 _COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 _INT64 = 2**63
 
@@ -48,6 +49,17 @@ def _iso_date(value: str) -> str:
         raise ValueError("is not a real calendar date") from None
     if not DATE_MIN <= parsed <= DATE_MAX:
         raise ValueError(f"must be between {DATE_MIN} and {DATE_MAX}")
+    return value
+
+
+def _local_datetime(value: str) -> str:
+    """``YYYY-MM-DDTHH:MM`` in local time (business trips); a real calendar date and time of day."""
+    if not _LOCAL_DT_RE.match(value):
+        raise ValueError("must be a local date and time like 2026-11-09T08:30")
+    try:
+        datetime.strptime(value, "%Y-%m-%dT%H:%M")
+    except ValueError:
+        raise ValueError("is not a real date and time") from None
     return value
 
 
@@ -85,6 +97,7 @@ def _optional(fn: Callable[[str], str]) -> Callable[[str | None], str | None]:
 
 
 ISODate = Annotated[str, AfterValidator(_iso_date)]
+LocalDateTime = Annotated[str, AfterValidator(_local_datetime)]
 OptDate = Annotated[str | None, BeforeValidator(blank_to_none), AfterValidator(_optional(_iso_date))]
 OptTime = Annotated[str | None, BeforeValidator(blank_to_none), AfterValidator(_optional(_clock_time))]
 OptTimeZone = Annotated[str | None, BeforeValidator(blank_to_none), AfterValidator(_optional(_timezone))]

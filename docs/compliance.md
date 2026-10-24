@@ -155,6 +155,39 @@ If you add team members (employees, not just freelancers) a few more rules apply
 | **Security baseline** | OWASP ASVS level 2 is a recognised yardstick. | Self-assessment checklist before beta. |
 | **Cash registers (KassenSichV/TSE)** | Only if you take cash with an electronic till. | Out of scope; a simple cash book may come later. |
 
+## 10. Business trips
+
+Rules as implemented for the meal allowance, mileage and trip statement (`docs/specs/business-trips.md`; the 2026
+country table is a placeholder until the BMF table is imported). Everything marked *(verify)* needs your tax adviser.
+
+- **Meal allowance (*Verpflegungsmehraufwand*), domestic 2026:** 14 € for more than 8 hours absence on a one-day trip,
+  and on the arrival and departure day of a trip with an overnight stay; 28 € for a full day in between. No receipts.
+  Records: date, destination, purpose, start and end time.
+- **Reductions when a meal is provided:** 20 % of the full-day rate for breakfast, 40 % for lunch and for dinner,
+  rounded to cents; the allowance never goes below 0. Own meals are not deducted at cost on a trip.
+- **Abroad:** a flat rate per country (two levels, as above), published yearly in a BMF letter (2026 letter dated
+  5 December 2025, GZ IV C 5 - S 2353/00094/007/012). The day takes the rate of the place reached by 24:00; a country
+  not in the table uses the Luxembourg rate and says so on the statement. *(verify)*
+- **Three-month limit:** at the same place of activity the allowance is paid for the first three months; an
+  interruption of four weeks or more starts a new period. *(verify, especially for self-employed people who return to
+  the same client regularly)*
+- **Mileage with a private car:** 0,30 € per km, covering all vehicle costs (those must not also be claimed). The
+  0,38 € figure for 2026 is the commuting allowance and does not apply to business trips. *(verify)*
+- **Accommodation** is deductible at the actual, receipted cost only for self-employed people; the flat overnight
+  amounts exist only for tax-free employer reimbursements. *(verify)*
+- **Other travel costs** (train, flight, taxi, parking, tolls): actual cost against receipt.
+- **Input VAT:** German VAT on receipts is input VAT; foreign VAT is recorded with VAT 0 in this version. The flat
+  allowance and the mileage carry no VAT. *(verify)*
+- **In the books:** allowance and mileage count as deductible expenses at 100 % without VAT, shown as their own lines
+  ("Meal allowance", "Mileage") in the finance report and the tax estimate. Only final trips count; mileage is booked
+  at the trip start date with the start year's rate.
+- **Three-month limit, scope (verify):** the limit applies within one trip only (a new trip starts a new count). The
+  last paid day is start + 3 months - 1 day, or the last day of the end month if the start day does not exist there
+  (for example 31 Jan pays up to 30 Apr). The count is kept per country and city of the trip.
+- **Days of a DST change (verify):** absence is counted as elapsed time in Berlin time, so 25 October 2026 from
+  00:00 to 07:30 is 8.5 hours and pays the one-day allowance.
+- **Midnight end (verify):** a trip that ends at exactly 00:00 is counted to the previous day's 24:00.
+
 ## Where this goes next
 
 The release assignment of every item is in the [roadmap](roadmap.md). The maintainer decides what goes into which

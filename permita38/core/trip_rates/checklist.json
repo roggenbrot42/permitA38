@@ -1,0 +1,8 @@
+[
+  {"id": "allowance", "label": "Daily allowance", "hint": "Computed from the trip itself; no receipts needed."},
+  {"id": "accommodation", "label": "Hotel / accommodation", "hint": "Bills in the category Accommodation. Itemise the breakfast and the city tax."},
+  {"id": "transportation", "label": "Transportation", "hint": "Train, flight, taxi, parking and tolls (receipts) and the mileage table for a private car."},
+  {"id": "food", "label": "Food", "hint": "Meals while travelling are covered by the allowance. Entertaining a business partner is Business meals (70 % rule) with participants and occasion."},
+  {"id": "material", "label": "Material", "hint": "Equipment, printing and samples bought for the trip."},
+  {"id": "cost_centre", "label": "Cost centre / project", "hint": "Choose the customer or project the trip is charged to, or choose general explicitly."}
+]

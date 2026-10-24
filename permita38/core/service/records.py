@@ -119,6 +119,14 @@ class RecordService:
             data = self.prepare_document(data, old)
             self._check_document_amounts(data)
         elif coll == "expenses":
+            if data.get("trip_id"):  # a bill belongs to a trip the user may see (rights of the trips area)
+                trip = self.store.get("trips", data["trip_id"])
+                tsc = rights.scope(me.get("role"), "trips", "read")
+                visible = trip is not None and (
+                    tsc == Scope.ALL or (tsc == Scope.LIMITED and trip.get("user_id") == me["id"])
+                )
+                if not visible:
+                    raise ServiceError(422, "Unknown trip")
             if data.get("lines"):
                 self._check_vat_rates(*(ln.get("vat_rate") for ln in data["lines"]))
                 data = calc.itemise_expense(data)  # server derives net/vat per line and overwrites the top level
