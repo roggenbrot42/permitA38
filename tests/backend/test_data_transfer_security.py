@@ -8,6 +8,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from permita38.core.errors import ServiceError
 from permita38.core.service.transfer import limits
@@ -279,9 +280,16 @@ def test_only_the_boss_may_use_the_routes(method, path, app, boss_client, member
     assert resp.status_code != 403
 
 
-@pytest.mark.skip(reason="TODO(api-tokens): add the five routes to the session-only list and assert 403 for a token")
-def test_routes_are_session_only_for_api_tokens():
-    raise AssertionError("pending PR #16 (SessionOnly)")
+@pytest.mark.parametrize("method,path", ROUTES)
+def test_routes_are_session_only_for_api_tokens(method, path, app, boss_client):
+    made = boss_client.post("/api/tokens", json={"label": "script", "read_only": False})
+    assert made.status_code == 201, made.text
+    secret = made.json()["token"]
+    kwargs = {"files": {"file": ("a.zip", b"x")}} if "import" in path else {}
+    with TestClient(app) as c:
+        c.headers["Authorization"] = f"Bearer {secret}"
+        r = c.request(method, path, **kwargs)
+    assert r.status_code == 403 and r.json() == {"detail": "This route cannot be used with an API token"}
 
 
 def test_export_response_headers_and_body_validation(boss_client):

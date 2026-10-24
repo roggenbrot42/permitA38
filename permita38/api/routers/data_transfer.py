@@ -10,14 +10,14 @@ from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from permita38.api.deps import Needs, ServicesDep
+from permita38.api.deps import Needs, ServicesDep, SessionOnly
 from permita38.core.errors import ServiceError
 from permita38.core.models import ExportRequest
 from permita38.core.service.transfer import limits
 from permita38.core.service.transfer.export import ExportOptions
 from permita38.core.service.transfer.service import ImportRefused
 
-router = APIRouter(tags=["data transfer"])
+router = APIRouter(tags=["data transfer"], dependencies=[SessionOnly])  # never usable with an API token
 routers = [router]
 
 Boss = Annotated[dict, Needs("settings", "write", full=True)]

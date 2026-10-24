@@ -7,7 +7,7 @@ from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, Up
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 
-from permita38.api.deps import Needs, ServicesDep
+from permita38.api.deps import Needs, ServicesDep, SessionOnly
 from permita38.api.forms import check_form
 from permita38.core.models import CalendarEventOut, CalendarIn, CalendarOut, CalendarPatchIn, CalendarTitlePolicy
 
@@ -36,14 +36,21 @@ def list_calendars(user: CalendarUser, services: ServicesDep):
     return services.calendar.list_sources(user)
 
 
-@router.post("", response_model=CalendarOut, summary="connect a calendar by its ICS link (https)")
+@router.post(
+    "", response_model=CalendarOut, summary="connect a calendar by its ICS link (https)", dependencies=[SessionOnly]
+)
 def add_calendar(body: CalendarIn, user: CalendarUser, services: ServicesDep):
     if not body.url:
         raise HTTPException(422, "Enter the calendar link, or upload a .ics file instead.")
     return services.calendar.add_url(user, body.model_dump(exclude={"url"}), body.url)
 
 
-@router.post("/upload", response_model=CalendarOut, summary="connect a calendar from an uploaded .ics file")
+@router.post(
+    "/upload",
+    response_model=CalendarOut,
+    summary="connect a calendar from an uploaded .ics file",
+    dependencies=[SessionOnly],
+)
 def upload_calendar(
     request: Request,
     user: CalendarUser,
@@ -88,19 +95,32 @@ def upload_calendar(
 
 
 @router.put(
-    "/{source_id}", response_model=CalendarOut, summary="change name, filters, title policy or refresh interval"
+    "/{source_id}",
+    response_model=CalendarOut,
+    summary="change name, filters, title policy or refresh interval",
+    dependencies=[SessionOnly],
 )
 def update_calendar(source_id: str, body: CalendarPatchIn, user: CalendarUser, services: ServicesDep):
     return services.calendar.update(user, source_id, body.model_dump(exclude_unset=True))
 
 
-@router.delete("/{source_id}", status_code=204, summary="disconnect a calendar and delete its stored events")
+@router.delete(
+    "/{source_id}",
+    status_code=204,
+    summary="disconnect a calendar and delete its stored events",
+    dependencies=[SessionOnly],
+)
 def delete_calendar(source_id: str, user: CalendarUser, services: ServicesDep):
     services.calendar.delete(user, source_id)
     return Response(status_code=204)
 
 
-@router.post("/{source_id}/refresh", response_model=CalendarOut, summary="download the calendar now")
+@router.post(
+    "/{source_id}/refresh",
+    response_model=CalendarOut,
+    summary="download the calendar now",
+    dependencies=[SessionOnly],
+)
 def refresh_calendar(source_id: str, user: CalendarUser, services: ServicesDep):
     return services.calendar.sync(user, source_id)
 

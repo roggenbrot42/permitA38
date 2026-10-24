@@ -10,8 +10,8 @@ Times are epoch seconds (integers). Review tier: **Full**.
 ## Rights
 
 Every route: **boss only**, **session only** (`Needs("settings", "write", full=True)`, like the document importer).
-Employee and accountant: 403. No session: 401. When scoped API tokens exist, all routes below answer 403 to a token
-whatever its scope (add them to the session-only list and test it).
+Employee and accountant: 403. No session: 401. All routes below carry `SessionOnly`: an API token gets 403 whatever its scope (tested in
+`tests/backend/test_data_transfer_security.py` and listed in `SESSION_ONLY` of `tests/backend/test_rbac.py`).
 
 Only one export or import runs at a time; a second request answers `409 {"detail": "Another export or import is running."}`.
 

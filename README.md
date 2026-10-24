@@ -135,7 +135,7 @@ permitA38 has no cloud. **The data folder holds the database** (one SQLite file 
 | Settings, templates | ✅ | – | ✅ read |
 | Manage team, edit others' time, create/change documents | ✅ | – | – |
 
-Everything is enforced by the server; details and the full per-area matrix: [docs/roles.md](docs/roles.md).
+Everything is enforced by the server; details and the full per-area matrix: [docs/roles.md](docs/roles.md). Programs and AI assistants can use [API tokens](docs/api-tokens.md).
 
 ---|:---:|:---:|
 | Track own time, own time off | ✅ | ✅ |
