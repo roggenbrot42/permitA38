@@ -5,7 +5,18 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StringConstraints,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from . import validation as v
 from .holidays import STATES
@@ -194,6 +205,20 @@ class Template(Record):
     closing: str | None = None
 
 
+class AuthInfo(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    @model_serializer(mode="wrap")
+    def _without_nulls(self, handler):
+        return {k: val for k, val in handler(self).items() if val is not None}
+
+    kind: Literal["session", "token"]
+    token_id: str | None = Field(None, max_length=32)
+    label: str | None = Field(None, max_length=80)
+    read_only: bool | None = None
+    expires_at: int | None = Field(None, ge=0, le=4_102_444_800 * 2)
+
+
 class UserOut(Record):
     username: str | None = None
     name: str | None = None
@@ -213,6 +238,9 @@ class UserOut(Record):
     work_start: str | None = None
     work_end: str | None = None
     timezone: str | None = None
+    auth: AuthInfo | None = Field(
+        None, description="how this request was authenticated (GET /auth/me only): a session or an API token"
+    )
 
 
 class UserIn(v.CheckedBody):
@@ -896,3 +924,74 @@ class TripIn(v.StrictRecord):
         if self.cost_centre == "project" and not (self.project_id or self.customer_id):
             raise ValueError("Choose a customer or project, or general")
         return self
+
+
+# ---------------------------------------------------------------- API tokens (docs/contracts/api-tokens.md)
+API_TOKEN_MAX_ACTIVE = 20
+API_TOKEN_LABEL_MAX = 80
+API_TOKEN_MAX_DAYS = 365
+API_TOKEN_DEFAULT_DAYS = 90
+EPOCH_MAX = 4_102_444_800  # 2100-01-01
+
+
+def _token_label(value: str) -> str:
+    value = value.strip()
+    if not value:
+        raise ValueError("must not be empty")
+    if len(value) > API_TOKEN_LABEL_MAX:
+        raise ValueError(f"must be at most {API_TOKEN_LABEL_MAX} characters")
+    if any(ord(c) < 32 or ord(c) == 127 or 0x80 <= ord(c) < 0xA0 for c in value):
+        raise ValueError("must not contain control characters")
+    return value
+
+
+class ApiTokenCreateIn(v.CheckedBody):
+    """Create an API token for the signed-in user (the secret is in the response, once)."""
+
+    model_config = ConfigDict(extra="forbid")
+    label: Annotated[str, Field(max_length=400), AfterValidator(_token_label)]
+    expires_in_days: Annotated[StrictInt, Field(ge=1, le=API_TOKEN_MAX_DAYS)] = API_TOKEN_DEFAULT_DAYS
+    read_only: StrictBool = True
+
+
+class ApiTokenOut(BaseModel):
+    """A token as listed: never the secret and never the hash."""
+
+    model_config = ConfigDict(extra="allow")
+    id: str = Field(max_length=32)
+    user_id: str = Field(max_length=32)
+    label: str = Field(max_length=400)
+    hint: str = Field(max_length=16)
+    read_only: bool
+    created: int
+    expires_at: int
+    last_used_at: int | None = None
+    revoked_at: int | None = None
+    status: Literal["active", "expired", "revoked"]
+    owner_name: str | None = Field(None, max_length=400, description="only with ?all=true")
+
+
+class ApiTokenCreated(BaseModel):
+    token: str = Field(description="the secret, shown only in this response", max_length=64)
+    item: ApiTokenOut
+
+
+class RevokeAllResult(BaseModel):
+    revoked: int
+
+
+class AuditEntryOut(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str = Field(max_length=32)
+    at: int
+    token_id: str = Field(max_length=32)
+    user_id: str = Field(max_length=32)
+    method: str = Field(max_length=16)
+    route: str = Field(max_length=255)
+    status: int
+
+
+class AuditPage(BaseModel):
+    items: list[AuditEntryOut]
+    next: int | None = Field(None, description="`before` value for the next page, null at the end")
+    next_id: str | None = Field(None, description="`before_id` value for the next page (with `next`), null at the end")

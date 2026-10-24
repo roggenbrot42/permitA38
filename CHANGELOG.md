@@ -11,6 +11,14 @@ All notable changes to this project are documented here. The format is based on
   spread over the available days (workdays that are neither a holiday nor time off); `docs/planning.md` has the rule.
 - Bill preview: a PDF or image that the browser downloads or shows blank now has a visible "Not showing? Open or download the bill" line.
 ### Added
+- **API tokens (backend)**: signed-in users create personal tokens (`POST /api/tokens`; the secret is shown once and
+  only its SHA-256 is stored) and use them as `Authorization: Bearer pat_...`. A token has the rights of its owner,
+  optionally read-only, expires after 1-365 days (default 90), can be revoked at once, and at most 20 are active per
+  user. Token routes: `GET /api/tokens`, `POST /api/tokens/{id}/revoke`, `POST /api/tokens/revoke-all`,
+  `GET /api/tokens/{id}/audit`. A token can never manage tokens, passwords, two-factor authentication or users, and
+  can not write settings. Every request made with a token is logged (method, route template, status; 365 days).
+  Invalid tokens are throttled per client IP; `429` answers (login too) now carry `Retry-After`. Migration
+  `0010-api_tokens`. See `docs/contracts/api-tokens.md`.
 - **Team timeline API** (`GET /api/team/timeline`): who is away and when, public holidays and contracts for a window of
   at most 365 days. What a viewer gets depends on a level per role that the boss sets with
   `team_timeline_visibility` in the settings (`off`, `away`, `time-off`, `full`; defaults: employee `away`, accountant

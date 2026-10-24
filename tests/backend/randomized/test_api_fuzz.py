@@ -42,7 +42,8 @@ TRAVERSAL = ["../../etc/passwd", "..%2f..%2fsecret.txt", "..\\..\\secret.txt", "
              "....//....//secret.txt", "/etc/passwd", "secret.txt%00.png", "a/../../secret.txt"]  # fmt: skip
 PUBLIC = {("get", "/api/health"), ("get", "/api/auth/status"), ("post", "/api/auth/setup"),
                  ("post", "/api/auth/login"), ("post", "/api/auth/logout")}  # fmt: skip
-MEMBER_WRITE_TABLES = {"entries", "absences", "timers"}  # the only tables a member may write to
+# the only tables a member may write to (api_tokens: their own credentials, any signed-in user may create them)
+MEMBER_WRITE_TABLES = {"entries", "absences", "timers", "api_tokens"}
 
 
 class World:

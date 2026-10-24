@@ -10,6 +10,7 @@ To add a backend, register a factory here (name -> callable(tmp_path) -> Reposit
 """
 
 import os
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 
@@ -17,6 +18,7 @@ import pytest
 
 from permita38.core.config import Config, DatabaseConfig
 from permita38.core.repository import Repository, create_repository
+from permita38.core.repository.sqlite import SQLiteRepository
 
 
 def make_sqlite(tmp_path: Path) -> Repository:
@@ -53,3 +55,10 @@ def registry_params():
             marks.append(pytest.mark.skip(reason=f"set {env} to run the contract suite against {name}"))
         params.append(pytest.param(name, id=name, marks=marks))
     return params
+
+
+def integrity_error(repo: Repository) -> type[Exception]:
+    """The exception a backend raises for a violated unique index (add the driver's error with a new backend)."""
+    if isinstance(repo, SQLiteRepository):
+        return sqlite3.IntegrityError
+    raise NotImplementedError(f"register the integrity error of {type(repo).__name__}")
