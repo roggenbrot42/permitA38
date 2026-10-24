@@ -84,7 +84,9 @@ class _Sink:
 
 
 def _json_chunks(coll: str, records: list[dict]) -> Iterator[bytes]:
-    yield b'{"collection": ' + json.dumps(coll).encode() + b', "count": ' + str(len(records)).encode() + b', "records": ['
+    yield (
+        b'{"collection": ' + json.dumps(coll).encode() + b', "count": ' + str(len(records)).encode() + b', "records": ['
+    )
     for i, r in enumerate(records):
         text = json.dumps(r, ensure_ascii=False, sort_keys=True)
         yield (b",\n" if i else b"\n") + text.encode("utf-8")

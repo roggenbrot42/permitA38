@@ -8,7 +8,6 @@ import json
 import re
 import stat
 import zipfile
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -119,7 +118,9 @@ class ArchiveReader:
                     if self.total_read > limits.MAX_TOTAL:
                         raise ArchiveError("limit_exceeded", "The archive is larger than 2 GiB uncompressed.", name)
                     if n > limits.RATIO_EXEMPT and n > limits.MAX_RATIO * max(info.compress_size, 1):
-                        raise ArchiveError("limit_exceeded", f"{_show(name)!r} has a suspicious compression ratio.", name)
+                        raise ArchiveError(
+                            "limit_exceeded", f"{_show(name)!r} has a suspicious compression ratio.", name
+                        )
                     yield chunk
         except (zipfile.BadZipFile, EOFError, OSError, ValueError, RuntimeError) as e:
             raise ArchiveError("not_a_zip", f"{_show(name)!r} is damaged or truncated.", name) from e

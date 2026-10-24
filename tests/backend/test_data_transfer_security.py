@@ -170,7 +170,10 @@ def test_a_lying_declared_size_aborts_at_the_limit(tmp_path, monkeypatch):
     monkeypatch.setattr(limits, "MAX_ATTACHMENT", 1000)
     with pytest.raises(ArchiveError) as e2:
         reader.read("attachments/abcdef12.png")
-    assert e2.value.code in {"limit_exceeded", "not_a_zip"}  # never reads past the declared data, and a CRC mismatch fails
+    assert e2.value.code in {
+        "limit_exceeded",
+        "not_a_zip",
+    }  # never reads past the declared data, and a CRC mismatch fails
     reader.close()
 
 

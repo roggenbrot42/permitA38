@@ -100,9 +100,7 @@ def _export_archive(services, args) -> None:
             sys.exit("Cancelled.")
     services.store.startup()
     transfer = TransferService(services.store, services.config.data_dir / "tmp", allow_no_users=True)
-    opts = ExportOptions(
-        "master_data" if args.master_data else "full", args.include_accounts, not args.no_attachments
-    )
+    opts = ExportOptions("master_data" if args.master_data else "full", args.include_accounts, not args.no_attachments)
     try:
         result = transfer.export(None, opts)
     except ServiceError as e:

@@ -42,7 +42,7 @@ def seed(store, *, extras: bool = True) -> dict:
         {"user_id": boss["id"], "date": "2026-03-02", "minutes": 90, "project_id": proj["id"], "task_id": task["id"]},
     )
     att = store.save_attachment("bill.pdf", b"%PDF-1.4 demo bill")
-    store.save("expenses", {"date": "2026-03-03", "net": 10.0, "vat": 1.9, "vendor": "=Shop;\"x\"", "attachment": att})
+    store.save("expenses", {"date": "2026-03-03", "net": 10.0, "vat": 1.9, "vendor": '=Shop;"x"', "attachment": att})
     store.save(
         "invoices",
         {
@@ -53,7 +53,15 @@ def seed(store, *, extras: bool = True) -> dict:
             "lines": [{"description": "Work", "quantity": 1, "unit_price": 100}],
         },
     )
-    store.save("number_sequences", {"id": "n" + hashlib.sha256(b"invoices|2026").hexdigest()[:20], "doc_type": "invoices", "period": "2026", "last_value": 7})
+    store.save(
+        "number_sequences",
+        {
+            "id": "n" + hashlib.sha256(b"invoices|2026").hexdigest()[:20],
+            "doc_type": "invoices",
+            "period": "2026",
+            "last_value": 7,
+        },
+    )
     store.save(
         "calendar_sources",
         {"user_id": boss["id"], "name": "Cal", "kind": "ics", "url": "https://example.invalid/secret-feed-token"},
@@ -73,7 +81,9 @@ def build_zip(files: dict[str, bytes], path: Path, manifest_patch: dict | None =
     files = dict(files)
     man = json.loads(files.get("manifest.json", b"{}") or b"{}")
     if rehash and man:
-        man["files"] = {n: {"bytes": len(b), "sha256": sha256(b).hexdigest()} for n, b in files.items() if n != "manifest.json"}
+        man["files"] = {
+            n: {"bytes": len(b), "sha256": sha256(b).hexdigest()} for n, b in files.items() if n != "manifest.json"
+        }
     if manifest_patch:
         man.update(manifest_patch)
     if man:

@@ -68,5 +68,9 @@ def columns_for(coll: str, include_accounts: bool) -> list[str]:
     """Columns of the CSV: those of schema.py minus secret ones."""
     cols = TABLES[coll].column_names
     if coll == "users":
-        cols = [c for c in cols if not c.startswith("totp") and (include_accounts or c not in ("password_hash", "pw_changed"))]
+        cols = [
+            c
+            for c in cols
+            if not c.startswith("totp") and (include_accounts or c not in ("password_hash", "pw_changed"))
+        ]
     return cols

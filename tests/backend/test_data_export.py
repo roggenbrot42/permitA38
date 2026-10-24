@@ -122,8 +122,7 @@ def test_csv_golden_bytes():
         {"id": "e5f6a7b8", "created": 2, "name": 'say "hi"\nthere', "rate": -12.5, "flag": False},
     ]
     expected = (
-        "﻿id;created;name;rate;flag;x_note\r\n"
-        "a1b2c3d4;1;'=1+1;95.0;true;a;b\r\n".replace("a;b", '"a;b"')
+        "﻿id;created;name;rate;flag;x_note\r\na1b2c3d4;1;'=1+1;95.0;true;a;b\r\n".replace("a;b", '"a;b"')
         + 'e5f6a7b8;2;"say ""hi""\nthere";-12.5;false;\r\n'
     )
     assert csvout.csv_bytes(cols, recs) == expected.encode("utf-8")

@@ -452,7 +452,7 @@ class SQLRepository(Repository):
         p = self.data_dir / "attachments" / name
         return str(p) if p.is_file() else None
 
-    def list_attachments(self) -> list[str]:
+    def list_attachments(self) -> StrList:
         folder = self.data_dir / "attachments"
         if not folder.is_dir():
             return []

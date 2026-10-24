@@ -46,7 +46,9 @@ class TransferService:
         self.allow_no_users = allow_no_users
 
     # ------------------------------------------------------------------ log
-    def _log(self, user_id: str | None, action: str, ok: bool, include_accounts: bool | None, counts: dict, sha: str | None) -> None:
+    def _log(
+        self, user_id: str | None, action: str, ok: bool, include_accounts: bool | None, counts: dict, sha: str | None
+    ) -> None:
         entry = {
             "at": int(time.time()),
             "user_id": user_id,

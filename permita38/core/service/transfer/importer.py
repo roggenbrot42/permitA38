@@ -232,16 +232,19 @@ def _check_references(plan: Plan) -> None:
     if total > shown:
         plan.warn("dangling_reference", f"{total - shown} more dangling references.", None)
     missing_files = 0
-    for coll, col in ATTACHMENT_COLUMNS:
+    for coll, attach_col in ATTACHMENT_COLUMNS:
         for rec in plan.records.get(coll, []):
-            name = rec.get(col)
+            name = rec.get(attach_col)
             if isinstance(name, str) and name and name not in plan.attachments:
                 missing_files += 1
     logo = plan.settings.get("logo")
     if isinstance(logo, str) and logo and logo not in plan.attachments:
         missing_files += 1
     if missing_files and plan.manifest and not plan.manifest.get("include_attachments", True):
-        plan.warn("attachments_not_included", f"The archive has no attachments; {missing_files} files are referenced and will be missing.")
+        plan.warn(
+            "attachments_not_included",
+            f"The archive has no attachments; {missing_files} files are referenced and will be missing.",
+        )
     elif missing_files:
         plan.warn("dangling_reference", f"{missing_files} referenced attachment files are not in the archive.")
 
@@ -258,20 +261,34 @@ def _user_plan(plan: Plan, local_users: list[dict]) -> None:
             replaces = local.get("username")
         else:
             kept = local.get("username")
-            plan.warn("setup_user_kept", f"No user in the archive is called {kept!r}; the setup account is kept next to the imported users.")
+            plan.warn(
+                "setup_user_kept",
+                f"No user in the archive is called {kept!r}; the setup account is kept next to the imported users.",
+            )
         clash = next((u for u in archive if u["id"] == local["id"] and u is not match), None)
         if clash is not None:
-            plan.error("duplicate_id", "A user in the archive has the id of the setup account but another username.", "data/users.json")
+            plan.error(
+                "duplicate_id",
+                "A user in the archive has the id of the setup account but another username.",
+                "data/users.json",
+            )
     for u in archive:
         if u is not match and not u.get("password_hash"):
             without.append(str(u.get("username")))
     if without:
-        plan.warn("users_without_password", f"{len(without)} users have no password and are inactive until you set one: {', '.join(without)}.")
+        plan.warn(
+            "users_without_password",
+            f"{len(without)} users have no password and are inactive until you set one: {', '.join(without)}.",
+        )
     plan.users = {"replaces_setup_user": replaces, "kept_setup_user": kept, "without_password": without}
 
 
 def _numbering(plan: Plan, today: date) -> None:
-    st = effective_settings({k: v for k, v in plan.settings.items()}) if _settings_ok(plan.settings) else effective_settings({})
+    st = (
+        effective_settings({k: v for k, v in plan.settings.items()})
+        if _settings_ok(plan.settings)
+        else effective_settings({})
+    )
     shared = bool(st.get("numbering_shared"))
     sequences = plan.records.get("number_sequences", [])
     out: dict = {}
@@ -307,7 +324,10 @@ def _numbering(plan: Plan, today: date) -> None:
         for r in rows:
             p = str(r.get("period"))
             if by_period.get(p, 0) > int(r.get("last_value") or 0):
-                plan.warn("numbering_counter_low", f"The {short} counter for {p} ({r.get('last_value')}) is lower than the highest imported number ({by_period[p]}).")
+                plan.warn(
+                    "numbering_counter_low",
+                    f"The {short} counter for {p} ({r.get('last_value')}) is lower than the highest imported number ({by_period[p]}).",
+                )
         out[key] = {
             "highest_imported": best[1] if best else None,
             "counter_period": row.get("period") if row else None,
@@ -361,7 +381,9 @@ def _validate(plan: Plan, reader: ArchiveReader, store: Repository, today: date)
     if not isinstance(version, int) or isinstance(version, bool) or version < 1:
         raise ArchiveError("manifest_invalid", "manifest.json has no valid format_version.", "manifest.json")
     if version > manifest.FORMAT_VERSION:
-        raise ArchiveError("format_too_new", "The archive was made by a newer permitA38. Update first.", "manifest.json")
+        raise ArchiveError(
+            "format_too_new", "The archive was made by a newer permitA38. Update first.", "manifest.json"
+        )
     chain = [m.id for m in list_migrations("sqlite")]
     head = man.get("schema_head")
     if not isinstance(head, str) or head not in chain:
@@ -431,7 +453,9 @@ def _validate(plan: Plan, reader: ArchiveReader, store: Repository, today: date)
         plan.settings = manifest.exportable_settings(plan.settings)
     if plan.records.get("calendar_sources"):
         n = len(plan.records["calendar_sources"])
-        plan.warn("calendar_url_removed", f"Calendar links are not exported; reconnect {n} calendar sources after the import.")
+        plan.warn(
+            "calendar_url_removed", f"Calendar links are not exported; reconnect {n} calendar sources after the import."
+        )
     _check_references(plan)
     _user_plan(plan, store.list("users"))
     _numbering(plan, today)
@@ -482,7 +506,8 @@ def _write_users(store: Repository, plan: Plan, local: dict | None) -> bool:
             rec["password_hash"] = local.get("password_hash")
             rec["pw_changed"] = local.get("pw_changed", 0)
             rec["role"] = "boss"
-            rec["active"] = True
+            if rec.get("active") is False:
+                rec["active"] = True
             relogin = rec["id"] != local["id"]
         elif not rec.get("password_hash"):
             rec.pop("password_hash", None)

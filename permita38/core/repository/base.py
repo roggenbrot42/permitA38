@@ -129,7 +129,7 @@ class Repository(ABC):
     def attachment_path(self, name: str) -> str | None: ...
 
     @abstractmethod
-    def list_attachments(self) -> list[str]:
+    def list_attachments(self) -> StrList:
         """Names of the stored attachment files (only names that match the attachment name pattern), sorted."""
 
     @abstractmethod
