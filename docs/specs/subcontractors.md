@@ -33,6 +33,7 @@ conversion (EUR only), a supplier portal.
 | subcontractor | A supplier of kind `person-capacity`: a person who sells hours (a freelancer). Not a user. |
 | incoming offer | A document **received** from a supplier. Distinct from `offers`, the offers *we issue* to customers. |
 | allocation | The accepted, bookable result of an incoming offer: hours of one subcontractor in a period. |
+| ring fence | Decided 2026-10-24 (product owner). An allocation's capacity is usable only by contracts of its own project (and of its contract, if set). Unused capacity is not moved to other projects. Demand that the project's own allocations do not cover is a gap for that project. |
 | commitment | The planned net cost of an allocation. Derived, not an expense, never part of the VAT return. |
 
 ## Design decisions (made by the architect)
@@ -57,6 +58,23 @@ conversion (EUR only), a supplier portal.
 8. **Money** is computed with `core/money.py` only (exact decimals, half-up cents), as everywhere.
 9. **Warnings never block** (they are `planning_warnings`-style `{code, severity, field, message, details,
    confirmable}`), except the hard rules listed per route, which answer 409.
+
+## Product owner decisions
+
+**Ring fence (decided 2026-10-24, decided by the product owner).** Capacity is allocated to projects, because not every
+freelancer or worker can work on every task.
+
+1. An allocation belongs to one project (and optionally one contract). Only contracts of that same project may draw on it.
+2. An unused allocation is not moved to other projects.
+3. Demand of a project that its own allocations do not cover is shown as a gap for that project, not silently filled by
+   other projects' capacity.
+4. The planner day table and the what-if drafts are per project.
+
+5. The ring fence also applies to internal employees (open question 12, decided 2026-10-24, decided by the product owner):
+   employee and subcontractor allocations are both ring-fenced to projects, and the planner's team capacity is per
+   project, not one pool.
+
+The former "shared pool" option is dropped (open question 3 records the decision).
 
 ## Suppliers
 
@@ -136,7 +154,7 @@ New collection **`incoming_offers`** (strict `IncomingOfferIn`, lenient `Incomin
 | `lines` | list (1-50) of `{description, quantity, unit, unit_price}` | `unit` is `h` or `flat`; amounts are `quantity x unit_price`, net, rounded per line half-up |
 | `net_total`, `vat`, `gross_total` | computed, response only | `vat = round(net_total x vat_rate)`; `vat_rate` and `vat_mode` default from the supplier, overridable on the offer |
 | `plan` | optional `{start, end, hours_per_week?, total_hours?}` | the period and the hours. Exactly one of `hours_per_week`, `total_hours` (as for contracts). Required to accept when the supplier is `person-capacity` |
-| `project_id`, `customer_id` | optional | what the capacity is bought for; `customer_id` is derived from the project when omitted |
+| `project_id`, `contract_id`, `customer_id` | `project_id` required for a `person-capacity` supplier (the ring-fence owner); `contract_id` optional, must be a contract of that project (422 otherwise); `customer_id` derived from the project when omitted |
 | `attachment` | stored file name | the supplier's **original PDF** via the existing attachments upload (`POST /api/attachments`); stored and served unchanged, never regenerated (GoBD, *(verify)* retention) |
 | `status` | `received` / `under_review` / `accepted` / `rejected` | stored. `expired` is derived (`effective_status`) |
 | `status_changed_at`, `decided_by`, `decision_note` | | set by the status routes, not by PUT |
@@ -168,7 +186,7 @@ Editing (`PUT`) is free while `received`/`under_review`/`rejected`. When `accept
 
 1. Check status is `received`/`under_review` (else 409). If `effective_status` is `expired`, require
    `confirm_expired: true` (else 409 "offer expired on <date>"); a supplier may still honour it.
-2. For a `person-capacity` supplier: require a `plan` and a `project_id` **or** `customer_id` (422), the supplier
+2. For a `person-capacity` supplier: require a `plan` and a `project_id` (422; the ring fence needs an owner), the supplier
    `active`, `plan.end >= plan.start`. For a plain supplier (company, person) accepting creates **no allocation**:
    the offer becomes `accepted` (a record that the quote was agreed) and the commitment is `net_total` as a **flat
    commitment** without a period (shown in finance only, not in the planner). This keeps "accept a supplier's offer"
@@ -176,7 +194,7 @@ Editing (`PUT`) is free while `received`/`under_review`/`rejected`. When `accept
 3. Run the checks, collect warnings (below). Warnings with `confirmable: true` need their code listed in
    `confirm_warnings`, as the rest of the app does; the rest are returned with the 200.
 4. Create the allocation (copy of the plan, `rate` = the weighted net rate of the `h` lines, `incoming_offer_id`,
-   `supplier_id`, project/customer), set the offer `accepted`, `allocation_id`, `status_changed_at`, `decided_by`.
+   `supplier_id`, `project_id`, `contract_id`, `customer_id`), set the offer `accepted`, `allocation_id`, `status_changed_at`, `decided_by`.
 
 Warnings at acceptance (none block):
 
@@ -185,7 +203,7 @@ Warnings at acceptance (none block):
 | `allocation.exceeds_weekly_hours` | warning, confirmable | allocated hours in any week exceed the supplier's `weekly_hours` (summed over all active allocations of that supplier, so overlapping allocations are caught) |
 | `allocation.outside_availability` | warning | the window overlaps a `unavailable` window; the hours on those days are dropped from the allocation, the warning says how many |
 | `allocation.cost_differs_from_offer` | info | planned cost (planner days, holidays removed) differs from `net_total` by more than 0.01 |
-| `allocation.no_demand` | info | no contract is assigned to the subcontractor in the window (bought capacity that nobody uses yet) |
+| `allocation.no_demand` | info | no contract of the allocation's project is assigned to the subcontractor in the window (bought capacity that no contract of its project uses yet) |
 | `supplier.dependency_hint` | info | see "Hints" |
 | `incoming_offer.hours_mismatch` | warning | see above |
 
@@ -208,7 +226,7 @@ New collection **`allocations`** (response model only; there is no `*In` body, r
 | Field | Notes |
 |---|---|
 | `id`, `supplier_id`, `incoming_offer_id` | |
-| `project_id`, `customer_id` | informational plus cost attribution; **not** a ring fence (open question 3) |
+| `project_id`, `contract_id`, `customer_id` | ring fence: only contracts of `project_id` (and `contract_id`, if set) may draw on this allocation; unused capacity is not moved (decided, open question 3) |
 | `start`, `end`, `hours_per_week` or `total_hours` | copied from the plan |
 | `rate` | net hourly rate, exact decimal string in the API (stored as float like every rate, computed through `money.py`) |
 | `status` | `active` / `cancelled` |
@@ -241,14 +259,20 @@ For one allocation and the subcontractor `S` with `workdays`:
 `"external"`, never persisted, never in `team` lists). Rules:
 
 * `day_table` **skips external members in the base-capacity loop** (their capacity is not `weekly_hours / workdays`).
-  Instead, for each active allocation it adds the per-day hours above to `Day.cap` and to a new `Day.external_cap`.
+  Instead, for each active allocation it adds the per-day hours above to `Day.cap` (team total) and to `Day.external_cap[project]`
+  of the allocation's project only. No other project's row ever receives these hours.
 * `S.unavailable` windows are registered as days off in `calc.Capacity.absences` for the synthetic member (kind
   "other"), so that contracts assigned to `S` spread around them exactly as for an employee on leave.
 * A contract may list a subcontractor id in `user_ids`. `ContractIn` validation accepts ids of users **or of active
   subcontractor suppliers**; the planner's existing `make()` filter (`if x in users`) then works unchanged. A
   contract whose assignees are all unknown still falls back to the boss.
 * Demand assigned to an external member goes into the existing `confirmed`/`binding` buckets (so utilisation counts it)
-  and additionally into `Day.external_assigned`.
+  and additionally into `Day.external_assigned[project]`, where `project` is the project of the contract that holds the demand.
+* **Ring fence (decided 2026-10-24).** A contract draws on external capacity only if its project equals the allocation's
+  project (and its `contract_id`, when set, equals the contract). Per project and day:
+  `external_gap = max(0, external_assigned - external_cap)`. The gap stays on that project's row: the planner never moves
+  the excess to another assignee or another project's allocation, and the team total does not cancel it. Demand of a
+  contract with no matching allocation is therefore a gap in full.
 * Time entries are not affected (subcontractors do not track time in v1).
 
 ### Weekly rows and the flag
@@ -262,12 +286,15 @@ Each row gains, always (zero when none):
 {
   "external_capacity": 20.0,
   "external_assigned": 25.0,
-  "external_cost": 1600.0
+  "external_gap": 5.0,
+  "external_cost": 1600.0,
+  "external_by_project": [{"project_id": "a1b2c3d4", "external_capacity": 20.0, "external_assigned": 25.0, "external_gap": 5.0, "external_cost": 1600.0}]
 }
 ```
 
 `capacity` includes `external_capacity` when the flag is on; `confirmed`/`binding_offers` include external-assigned
-demand. `contributions[]` entries get `"external": true` when every assignee is external. The forecast totals gain
+demand. `contributions[]` entries get `"external": true` when every assignee is external. What-if drafts (`/simulate`, scenario comparison) use the same per-project rules: their
+day table, weekly rows and gaps are per project, and a moved contract changes only the rows of its own project. The forecast totals gain
 `external_capacity`, `external_cost` and `margin` (`revenue - external_cost`). The "intended" revenue (capacity x default
 rate) includes external capacity when the flag is on (open question 4).
 
@@ -281,8 +308,8 @@ rate) includes external capacity when the flag is on (open question 4).
 
 ### Day table
 
-`/api/planning/day-table` (or whichever route exposes it) returns per day `external_cap` and `external_assigned`; the
-UI draws external hours in a different pattern.
+`/api/planning/day-table` (or whichever route exposes it) returns per day and per project `external_cap`, `external_assigned` and `external_gap`; the
+UI draws external hours in a different pattern and shows each project's gap on that project's row, never summed away.
 
 ## Finance and forecast
 
@@ -401,9 +428,9 @@ suppliers       id name supplier_no kind active street zip city country vat_id t
                 iban bic bank_name payment_terms_days payment_terms_note tags:json
                 weekly_hours workdays:json rate unavailable:json login_user_id external_id import_batch   + base + extra
 incoming_offers id supplier_id reference title received_on valid_until lines:json net_total vat vat_rate vat_mode
-                gross_total plan:json project_id customer_id attachment status status_changed_at decided_by
+                gross_total plan:json project_id contract_id customer_id attachment status status_changed_at decided_by
                 decision_note allocation_id notes external_id import_batch                                + base + extra
-allocations     id supplier_id incoming_offer_id project_id customer_id start end hours_per_week total_hours rate
+allocations     id supplier_id incoming_offer_id project_id contract_id customer_id start end hours_per_week total_hours rate
                 status cancelled_from cancel_reason                                                         + base + extra
 expenses        + supplier_id:id  + allocation_id:id  + reverse_charge:bool
 indexes         suppliers(name), suppliers(external_id), incoming_offers(supplier_id), incoming_offers(status),
@@ -416,8 +443,8 @@ indexes         suppliers(name), suppliers(external_id), incoming_offers(supplie
 * Pydantic: `SupplierIn`, `IncomingOfferIn` (strict) with the lenient `Supplier`, `IncomingOffer`, `Allocation`; every
   new field in both, with a hard bound. `reverse_charge` and the two new expense links go into `ExpenseIn`/`Expense`.
 * Cascade: deleting a supplier is 409 while any incoming offer, allocation or expense references it (archive with
-  `active: false`). Deleting an `accepted` incoming offer is 409. Deleting a project or customer that an active
-  allocation references follows the existing project/customer rule (409 while referenced).
+  `active: false`). Deleting an `accepted` incoming offer is 409. Deleting a project, contract or customer that an active
+  allocation references follows the existing rule (409 while referenced).
 * The synthetic planner members never touch the `users` table.
 
 ## API contract (sketch; the binding version is `docs/contracts/subcontractors.md`, written first, see work packages)
@@ -548,11 +575,11 @@ Incoming offers                             [+ Record offer]
  tabs: [Open] [Accepted] [Rejected] [Expired]
  row: ANG-2026-117 | Example Freelance Studio | 80 h | 6.400,00 net | valid to 01.03.2026 | under review
  detail: lines, plan, attached PDF (preview), warnings, buttons [Review] [Accept...] [Reject...]
- Accept dialog: project/customer, period (from plan), shows planned hours and cost, per-week free capacity chart before/after,
+ Accept dialog: project (required for capacity), contract (optional), period (from plan), shows planned hours and cost, per-week free capacity chart before/after,
                 warnings with checkboxes for confirmable ones, [Accept] (boss only; other roles do not see the buttons)
 
 Planner (existing): row group "External" under the team; switch [x include subcontractors];
- external hours drawn hatched; week tooltip: capacity 60 h (of which external 20 h), planned external cost 1.600,00 EUR
+ external hours drawn hatched, one external row per project, a gap drawn on the project's row; week tooltip: capacity 60 h (of which external 20 h), planned external cost 1.600,00 EUR
 Finance: block "Open supplier commitments" with the table of allocations.
 ```
 
@@ -579,7 +606,7 @@ Mon-Fri. Subcontractor S: `workdays` Mon-Thu, `weekly_hours` 24, rate 80.00 unle
 | W1 | `hours_per_week` 20, 2026-03-02 to 2026-03-27 | 20 / 4 workdays = 5 h per day; 4 weeks x 4 days = 16 days | 80 h, `planned_net` 6.400,00; every week 20 h, 1.600,00 |
 | W2 | same, window 2026-04-06 to 2026-04-17 (Easter Monday in week 1) | week 1: Tue, Wed, Thu = 3 x 5 = 15 h; week 2: 4 x 5 = 20 h | 35 h; 1.200,00 + 1.600,00 = 2.800,00 |
 | W3 | `total_hours` 100, S Mon-Fri, rate 75.00, 2026-03-02 to 2026-03-20, unavailable 2026-03-09 to 2026-03-11 | 15 weekdays - 3 = 12 available days; 100 / 12 = 8,3333 h per day; week 1: 5 days = 41,6667 h; week 2: Thu, Fri = 16,6667 h; week 3: 41,6667 h | `planned_net` 7.500,00; weekly cost 3.125,00 / 1.250,00 / 3.125,00 |
-| W4 | capacity before and after: contract 50 h/week, 2026-03-02 to 2026-03-27, `user_ids` [boss]; W1's allocation accepted; then the contract's `user_ids` become [boss, S] | before: capacity 40, confirmed 50, utilisation 1,25 `over`. After, week of 2026-03-02: capacity 40 + 20 = 60; the contract splits 25 h each; confirmed 50; free after confirmed 10; utilisation 50 / 60 = 0,8333 `ok`. S alone: capacity 20, assigned 25 (6,25 h per day vs 5 h), utilisation 1,25 `over` | as stated; `external_capacity` 20, `external_assigned` 25, `external_cost` 1.600,00 |
+| W4 | capacity before and after, ring fence: contract C of project P, 50 h/week, 2026-03-02 to 2026-03-27, `user_ids` [boss]; the boss's 40 h weekly capacity is planned to project P (employee allocation, ring-fenced); W1's allocation (project P) accepted; then C's `user_ids` become [boss, S] | before: capacity 40, confirmed 50, utilisation 1,25 `over`. After, week of 2026-03-02, team total: capacity 40 + 20 = 60; C splits 25 h each; confirmed 50; free after confirmed 10; utilisation 50 / 60 = 0,8333 `ok`. Project P only: external capacity 20, external assigned 25 (6,25 h per day vs 5 h), **external gap 5 h** (utilisation 1,25 `over`). The team total does not cancel the gap: the 5 h stay on P, they are not moved to the boss or to another project | as stated; `external_capacity` 20, `external_assigned` 25, `external_gap` 5 (project P), `external_cost` 1.600,00 |
 | W5 | W4 with `include_external=false` | S dropped, contract falls back to boss: capacity 40, confirmed 50, utilisation 1,25 `over`, `external_*` all 0 | identical to the database without any supplier |
 | W6 | states with no effect | incoming offer for W1 in `received`, `under_review`, `rejected`, and with `valid_until` 2026-03-01 (derived `expired`): forecast rows and commitments | identical to W5 for all four; after accept: W4; accept of the expired one without `confirm_expired` is 409 and leaves rows unchanged; `valid_until` = 2026-03-02 (today) is **not** expired |
 | W7 | rounding of an offer | 37,5 h x 82,45 = 3.091,875 -> 3.091,88; VAT 19 % of 3.091,88 = 587,4572 -> 587,46; gross | `net_total` 3.091,88; `vat` 587,46; `gross_total` 3.679,34 |
@@ -589,12 +616,12 @@ Mon-Fri. Subcontractor S: `workdays` Mon-Thu, `weekly_hours` 24, rate 80.00 unle
 | W11 | weekly-hours check | S `weekly_hours` 24; allocation A 20 h/week and allocation B 8 h/week overlapping in week 2026-03-02 | 28 h in the week, warning `allocation.exceeds_weekly_hours`, over by 4 h; single allocation of 25 h/week: over by 1 h |
 | W12 | dependency hint | S Mon-Fri, `hours_per_week` 30, 2026-06-08 to 2026-08-28 (12 full weeks, no national holiday): average 30,0 | hint raised; with 29,9 h/week none; with the window one week shorter none |
 | W13 | customer dominance | trailing 12 months net revenue 60.000,00, customer A 49.800,00 = 83,0 % | hint raised; 49.799,99 (82,99998 %) none |
-| W14 | cost of unassigned bought capacity | W1 accepted, no contract assigned | team capacity +20 per week, `external_assigned` 0, info `allocation.no_demand`, cost still 1.600,00 per week |
+| W14 | cost of unassigned bought capacity, ring fence | W1 accepted (project P), no contract of P assigned to S. Variant: contract D of project Q, 10 h per week, `user_ids` [S], no allocation of Q | P: external capacity 20 per week, `external_assigned` 0, `external_gap` 0, info `allocation.no_demand`, cost still 1.600,00 per week; the 20 h are **not** offered to Q. Variant: Q `external_capacity` 0, `external_assigned` 10, `external_gap` 10 h per week; P's 20 h stay unused |
 
 Further tests: unaccept allowed before start with no expense, 409 once an expense is linked or the allocation started;
 `PUT` of a locked field on an accepted offer is 409; a plain-supplier acceptance creates no allocation and no planner
 effect, only a flat commitment of `net_total`; `include_external` default is true; scenario simulate with a draft that
-moves a contract assigned to S behaves like for an employee; vendor adoption dry run vs real run counts equal, `vendor`
+moves a contract assigned to S behaves like for an employee, per project (a draft moving contract C of project P leaves project Q's rows and gap unchanged); ring fence: a contract of another project never draws on an allocation, and unused capacity stays unused (W14); vendor adoption dry run vs real run counts equal, `vendor`
 text unchanged; employee `limited` supplier view has no IBAN field; sanity duplicate rule with and without
 `supplier_id`.
 
@@ -638,16 +665,17 @@ A, B, C, D, E, F; `make test lint` after each; the full browser and randomized s
 * A **subcontractor login**: a limited `external` role (own allocations, own time entries, no rates of others, no
   customer data beyond assigned projects), time tracking against allocations, and reconciliation of tracked hours with
   supplier invoices. Needs its own rights spec and two-factor policy.
-* Supplier-invoice matching (e-invoice import), agency suppliers with several people, a ring-fenced allocation per
-  project, a certificate attachment (§48b), purchase-order PDFs, VIES lookup, per-supplier state for holidays.
+* Supplier-invoice matching (e-invoice import), agency suppliers with several people, a certificate attachment (§48b), purchase-order PDFs, VIES lookup, per-supplier state for holidays.
 
 ## Open questions
 
 1. **Login for subcontractors:** confirm "no login in v1". If wanted early, how limited is the role and does it log time?
 2. **Does an accepted incoming offer for a non-capacity supplier (hardware, licences) create anything beyond a flat
    commitment?** For example a planned expense on a date, so cash-flow forecasts include it.
-3. **Ring fence:** is capacity from an allocation usable by any contract (v1: yes, the pool) or only by contracts of the
-   allocation's project? A ring fence is more exact but complicates the day table and the what-if drafts.
+3. **Ring fence (DECIDED 2026-10-24, decided by the product owner):** capacity from an allocation is usable only by
+   contracts of the allocation's project (and contract, if set); unused capacity is not moved to other projects; demand
+   the project's own allocations do not cover is a gap for that project. The shared-pool option is dropped. See
+   "Product owner decisions".
 4. **Assumed ("intended") revenue:** should external capacity raise the assumed revenue (capacity x default rate)? v1 says
    yes with the cost shown beside it and a margin line; the alternative is to exclude external hours from "intended".
 5. **Unavailability and holidays:** is the business state's holiday calendar right for freelancers in other states, and
@@ -660,6 +688,10 @@ A, B, C, D, E, F; `make test lint` after each; the full browser and randomized s
 9. **Tax-adviser answers** to the seven questions above, notably reverse charge boxes and the dependency thresholds.
 10. **Numbering:** `supplier_no` as free text (v1) or a counter in the numbering service like invoice numbers?
 11. **Retention of the supplier PDF** and whether accepting should store a signed copy of our acceptance (v1: no).
+12. **Ring fence for internal team members (DECIDED 2026-10-24, decided by the product owner):** the same project ring
+    fence applies to INTERNAL team members (employees with a planner allocation). Employee and subcontractor allocations
+    are both ring-fenced to projects; the planner's team capacity is also per project; unused hours are not moved to
+    other projects; uncovered demand is a gap for that project.
 
 ## Open design decisions (for the implementer's report)
 
