@@ -99,7 +99,7 @@ No tool changes a business record. The only write tools create **pending proposa
 third spec); a human approves, edits or rejects them in the web app. They need a **read-write token** (a read-only token is denied every non-safe method, `POST /api/proposals`
 included) and the owner's `proposals` write right plus write on the target area (so a token cannot propose what its
 owner could not do). Decided: proposals need a read-write token in this version (api-tokens decision 11). A read-write
-token can also call every other write route of its owner (settings writes excepted, they are session-only); a
+token can also call every other write route of its owner (settings writes, numbering, import and calendar writes excepted, they are session-only); a
 `proposals-only` token mode would remove that and is a listed follow-up of the token contract, not in this version.
 
 | Tool | Creates a proposal of kind | Input (strict, extra keys rejected) |

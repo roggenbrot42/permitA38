@@ -32,6 +32,8 @@
     if (!r.ok) {
       const err = new Error(detailText(data.detail, r.statusText || 'Request failed'));
       err.status = r.status;
+      err.data = data;   // the whole error body (e.g. the item list of a refused import)
+      err.retryAfter = r.headers.get('Retry-After');
       throw err;
     }
     if (data && typeof api.onWarnings === 'function') {

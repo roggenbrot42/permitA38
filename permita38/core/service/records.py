@@ -121,7 +121,7 @@ class RecordService:
         elif coll == "expenses":
             if data.get("trip_id"):  # a bill belongs to a trip the user may see (rights of the trips area)
                 trip = self.store.get("trips", data["trip_id"])
-                tsc = rights.scope(me.get("role"), "trips", "read")
+                tsc = rights.scope_for(me, "trips", "read")
                 visible = trip is not None and (
                     tsc == Scope.ALL or (tsc == Scope.LIMITED and trip.get("user_id") == me["id"])
                 )
@@ -228,7 +228,7 @@ class RecordService:
 
     def list_users(self, me: dict) -> list[dict]:
         users = self.store.list("users")
-        if rights.scope(me.get("role"), "team") == Scope.ALL:
+        if rights.scope_for(me, "team") == Scope.ALL:
             return [public_user(u) for u in users]
         return [{"id": u["id"], "name": u.get("name"), "role": rights.normalize_role(u.get("role"))} for u in users]
 
@@ -238,7 +238,7 @@ _MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "persona
 
 
 def _scope(me: dict, coll: str, op: rights.Op) -> Scope:
-    return rights.scope(me.get("role"), rights.COLLECTION_AREA[coll], op)
+    return rights.scope_for(me, rights.COLLECTION_AREA[coll], op)
 
 
 def _expense_view(expense: dict) -> dict:

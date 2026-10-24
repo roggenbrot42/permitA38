@@ -28,7 +28,7 @@ def _result(model: type[models.Record]) -> type[models.Record]:
 
 def _with_warnings(services, coll: str, rec: dict, user: dict, old: dict | None = None) -> dict:
     out = rec
-    if coll in WARNED and rights.scope(user["role"], "planning") == rights.Scope.ALL:
+    if coll in WARNED and rights.scope_for(user, "planning") == rights.Scope.ALL:
         out = {**out, "planning_warnings": services.planning.warnings_for(coll, rec)}
     if coll in CHECKED:
         out = {**out, "sanity_warnings": services.sanity.check(coll, rec, old)}

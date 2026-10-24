@@ -91,7 +91,7 @@ class TripService:
     # -- visibility -------------------------------------------------------------------------------------------
     @staticmethod
     def _scope(me: dict, op: rights.Op) -> Scope:
-        return rights.scope(me.get("role"), "trips", op)
+        return rights.scope_for(me, "trips", op)
 
     def _visible(self, me: dict, trip: dict, op: rights.Op = "read") -> bool:
         sc = self._scope(me, op)

@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import ConfigDict, Field, StringConstraints
 
-from permita38.api.deps import Needs, ServicesDep
+from permita38.api.deps import Needs, ServicesDep, SessionOnly
 from permita38.core import validation as v
 from permita38.core.numbering import MAX_NUMBER
 
@@ -59,6 +59,7 @@ def check(
 @router.put(
     "/numbering",
     summary="change pattern, reset scope or next number; risky changes need confirm=true (409 otherwise)",
+    dependencies=[SessionOnly],
 )
 def update(body: NumberingChange, _: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep):
     result = services.sales.numbering.update(

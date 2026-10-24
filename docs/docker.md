@@ -59,7 +59,7 @@ file > default. In a container no YAML file is needed or written.
 | `PERMITA38_DATA` | `/data` | Data folder inside the container. |
 | `PERMITA38_HOST` / `PERMITA38_PORT` | `0.0.0.0` / `8765` | Listen address. Changing the port also changes the health check. |
 | `PERMITA38_TOKEN_TTL_HOURS` | `12` | Lifetime of a login. |
-| `PERMITA38_TRUST_PROXY` | `false` | Honour `X-Forwarded-*` from a reverse proxy. **Only enable if the app can be reached only through that proxy.** |
+| `PERMITA38_TRUST_PROXY` | `false` | Honour `X-Forwarded-*` from a reverse proxy. **Only enable if the app can be reached only through that proxy**, and only with exactly one proxy that overwrites `X-Forwarded-For` (the throttle for invalid API tokens keys on its last entry). |
 | `PERMITA38_FORWARDED_ALLOW_IPS` | `*` | Which proxy addresses are trusted when `TRUST_PROXY` is on. |
 | `PERMITA38_COOKIE_SECURE` | auto | `true`/`false` forces the `Secure` flag on the login cookie. Automatic = on for https requests (or `X-Forwarded-Proto: https` with `TRUST_PROXY`). |
 | `PERMITA38_CORS_ORIGINS` | – | Comma-separated origins allowed to call the API (only needed when the frontend is hosted elsewhere). |

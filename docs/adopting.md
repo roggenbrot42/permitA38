@@ -15,6 +15,7 @@ pages).
 
 - [ ] Invoice and offer patterns (for example `RE-{year}-{n:04d}`), see [numbering](numbering.md)
 - [ ] Reset scope (yearly by default)
+- [ ] Moving from another permitA38 instance: restore a full export archive into the empty new instance (`permita38 import`, see the [data export guide](data-export.md)); numbers and counters are kept, then check the next number
 - [ ] Next number: if you switch from another tool, enter its last number (`PUT /api/numbering`, see numbering)
 
 ## 3. Money rules

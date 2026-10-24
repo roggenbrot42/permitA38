@@ -8,7 +8,7 @@ import pytest
 from permita38.core.repository import COLLECTIONS, INTERNAL_COLLECTIONS, TABLES, DatabaseRevisionError, Repository
 from permita38.core.repository.schema import Table
 
-from .repository_registry import REGISTRY, registry_params
+from .repository_registry import REGISTRY, integrity_error, registry_params
 
 ALL = [*COLLECTIONS, *INTERNAL_COLLECTIONS]
 
@@ -286,3 +286,76 @@ def test_save_many_is_all_or_nothing(repo):
     assert [r["id"] for r in repo.list("calendar_events")] == ["survivor1"]
     saved = repo.save_many("calendar_events", [{"id": "batchbb02", "source_id": "srcx0003"}])
     assert saved[0]["id"] == "batchbb02" and repo.get("calendar_events", "batchbb02")
+
+
+def test_restore_list_and_delete_attachments(repo):
+    assert repo.list_attachments() == []
+    repo.restore_attachment("abc123def4.pdf", b"one")
+    repo.restore_attachment("abc123def4.pdf", b"one")  # same content again is fine
+    with pytest.raises(FileExistsError):
+        repo.restore_attachment("abc123def4.pdf", b"other")
+    for bad in ("../x.pdf", "A1B2C3D4.pdf", "nodot", "a/b.pdf", ".pdf", ""):
+        with pytest.raises(ValueError):
+            repo.restore_attachment(bad, b"x")
+    saved = repo.save_attachment("r.png", b"png")
+    assert repo.list_attachments() == sorted(["abc123def4.pdf", saved])
+    path = repo.attachment_path("abc123def4.pdf")
+    assert path is not None
+    with open(path, "rb") as f:
+        assert f.read() == b"one"
+    assert repo.delete_attachment("abc123def4.pdf") is True
+    assert repo.delete_attachment("abc123def4.pdf") is False
+    assert repo.delete_attachment("../x.pdf") is False
+    assert repo.list_attachments() == [saved]
+
+
+def test_attachment_staging_is_invisible_until_committed(repo):
+    stage = repo.new_stage()
+    repo.stage_attachment(stage, "abc123def4.pdf", [b"on", b"e"])
+    assert repo.list_attachments() == [] and repo.attachment_path("abc123def4.pdf") is None
+    with pytest.raises(ValueError):
+        repo.stage_attachment(stage, "../x.pdf", [b"x"])
+    with pytest.raises(ValueError):
+        repo.stage_attachment("../../etc", "abc123def4.pdf", [b"x"])
+    assert repo.commit_stage(stage) == ["abc123def4.pdf"]
+    assert repo.list_attachments() == ["abc123def4.pdf"]
+    repo.discard_stage(stage)  # idempotent: the stage is gone already
+    other = repo.new_stage()
+    repo.stage_attachment(other, "zzz999aaa1.pdf", [b"x"])
+    repo.discard_stage(other)
+    assert repo.list_attachments() == ["abc123def4.pdf"]
+    stale = repo.new_stage()
+    assert repo.discard_stale_stages(3600) == 0
+    assert repo.discard_stale_stages(-1) >= 1
+    with pytest.raises(OSError):
+        repo.stage_attachment(stale, "abc123def5.pdf", [b"x"])
+
+
+# ------------------------------------------------------------------ API tokens and the audit log
+def test_api_token_hash_is_unique_and_findable(repo):
+    a = repo.save("api_tokens", {"user_id": "u1", "label": "a", "token_hash": "h" * 64, "expires_at": 10})
+    assert repo.find("api_tokens", token_hash="h" * 64) == [a]
+    assert repo.find("api_tokens", token_hash="x" * 64) == []
+    with pytest.raises(integrity_error(repo)):  # unique index idx_api_tokens_hash
+        repo.save("api_tokens", {"user_id": "u2", "label": "b", "token_hash": "h" * 64, "expires_at": 10})
+    assert len(repo.list("api_tokens")) == 1
+
+
+def test_api_tokens_keep_unknown_fields_and_false_booleans(repo):
+    a = repo.save(
+        "api_tokens",
+        {"user_id": "u1", "token_hash": "a" * 64, "read_only": False, "revoked_at": None, "future": {"k": [1, 2]}},
+    )
+    got = repo.get("api_tokens", a["id"])
+    assert got["read_only"] is False and got["future"] == {"k": [1, 2]} and "revoked_at" not in got
+
+
+def test_audit_log_keeps_unknown_fields_and_filters_by_token_and_user(repo):
+    base = {"at": 5, "method": "GET", "route": "/api/x", "status": 200}
+    repo.save("audit_log", {**base, "token_id": "t1", "user_id": "u1", "later": "kept"})
+    repo.save("audit_log", {**base, "token_id": "t2", "user_id": "u1"})
+    repo.save("audit_log", {**base, "token_id": "t3", "user_id": "u2"})
+    assert [r["later"] for r in repo.find("audit_log", token_id="t1")] == ["kept"]
+    assert repo.delete_where("audit_log", user_id="u1") == 2
+    assert [r["token_id"] for r in repo.list("audit_log")] == ["t3"]
+    assert repo.delete_where("api_tokens", user_id="nobody") == 0

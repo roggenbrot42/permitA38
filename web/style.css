@@ -131,3 +131,10 @@ button:disabled { opacity: .6; cursor: progress; }
 .trip-explain { padding-left: 20px; margin: 0 0 12px; } .trip-explain li { margin-bottom: 6px; }
 .trip-table input[type=number] { width: 6em; }
 .trip-table input[type=date] { width: 9.5em; }
+
+/* data export and import */
+.dx-spin { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; vertical-align: -2px; animation: dx-rot .8s linear infinite; }
+@keyframes dx-rot { to { transform: rotate(360deg); } }
+.banner.bad { background: var(--bad-soft); color: var(--bad); }
+.dx-counts { max-width: 420px; margin-bottom: 12px; } .dx-warn ul, .banner.bad ul { margin: 6px 0 0 18px; padding: 0; }
+@media (prefers-reduced-motion: reduce) { .dx-spin { animation: none; } }

@@ -187,7 +187,7 @@ def test_models_are_covered_by_the_schema():
         missing = set(model.model_fields) - cols
         assert not missing, f"{coll}: model fields without a column: {sorted(missing)}"
     user_cols = set(TABLES["users"].column_names)
-    assert set(models.UserOut.model_fields) - {"has_password", "permissions"} <= user_cols
+    assert set(models.UserOut.model_fields) - {"has_password", "permissions", "auth"} <= user_cols
     assert {"password_hash", "pw_changed"} <= user_cols
 
 
@@ -484,3 +484,26 @@ def test_read_only_calls_leave_an_alpha1_database_byte_for_byte_unchanged(tmp_pa
     finally:
         raw.close()
     assert "schema_migrations" not in tables
+
+
+def test_api_tokens_migration_creates_both_tables_with_the_unique_hash_index(tmp_path):
+    repo = SQLiteRepository(tmp_path / "data")
+    repo.startup()
+    repo.close()
+    raw = sqlite3.connect(tmp_path / "data" / DB_FILENAME)
+    try:
+        cols = {t: [r[1] for r in raw.execute(f'PRAGMA table_info("{t}")')] for t in ("api_tokens", "audit_log")}
+        assert cols["api_tokens"] == TABLES["api_tokens"].column_names + ["extra"]
+        assert cols["audit_log"] == TABLES["audit_log"].column_names + ["extra"]
+        unique = {r[1]: r[2] for r in raw.execute('PRAGMA index_list("api_tokens")')}
+        assert unique["idx_api_tokens_hash"] == 1 and unique["idx_api_tokens_user"] == 0
+        assert {r[1] for r in raw.execute('PRAGMA index_list("audit_log")')} >= {
+            "idx_audit_log_token",
+            "idx_audit_log_at",
+        }
+        assert [m.name for m in database.list_migrations("sqlite")][-1] == "api_tokens"
+        # the same migration exists in every dialect with the same id
+        ids = {d: database.list_migrations(d)[-1].id for d in ("sqlite", "postgresql", "mariadb")}
+        assert len(set(ids.values())) == 1
+    finally:
+        raw.close()

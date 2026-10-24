@@ -200,7 +200,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Me",
+        "summary": "the signed-in user (also usable with an API token)",
         "operationId": "me_api_auth_me_get",
         "responses": {
           "200": {
@@ -217,6 +217,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -723,6 +726,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -771,6 +777,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -819,6 +828,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -833,6 +845,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -889,6 +904,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -1001,6 +1019,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -1015,6 +1036,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -1119,6 +1143,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -1167,6 +1194,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -1215,6 +1245,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -1229,6 +1262,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -1323,6 +1359,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -1354,6 +1393,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -1400,6 +1442,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -1414,6 +1459,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -1471,6 +1519,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -1511,6 +1562,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -1570,6 +1624,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -1629,6 +1686,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -1678,6 +1738,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -1738,6 +1801,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -1810,6 +1876,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -1838,6 +1907,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -1864,6 +1936,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -1922,6 +1997,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2010,6 +2088,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -2024,6 +2105,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2102,6 +2186,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -2116,6 +2203,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2163,6 +2253,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2206,6 +2299,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2253,6 +2349,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2296,6 +2395,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2345,6 +2447,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2392,6 +2497,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2446,6 +2554,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2534,6 +2645,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -2592,6 +2706,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2689,6 +2806,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -2764,6 +2884,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -2859,6 +2982,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -2889,6 +3015,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -2933,6 +3062,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -2947,6 +3079,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -2992,6 +3127,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3047,6 +3185,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3103,6 +3244,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -3147,6 +3291,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -3161,6 +3308,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3206,6 +3356,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3261,6 +3414,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3317,6 +3473,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -3361,6 +3520,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -3375,6 +3537,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3420,6 +3585,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3475,6 +3643,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3531,6 +3702,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -3575,6 +3749,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -3589,6 +3766,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3634,6 +3814,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3689,6 +3872,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3745,6 +3931,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -3789,6 +3978,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -3803,6 +3995,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3848,6 +4043,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3903,6 +4101,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -3959,6 +4160,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -4003,6 +4207,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -4017,6 +4224,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4062,6 +4272,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4117,6 +4330,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4173,6 +4389,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -4217,6 +4436,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -4231,6 +4453,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4276,6 +4501,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4331,6 +4559,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4387,6 +4618,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -4431,6 +4665,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -4445,6 +4682,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4490,6 +4730,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4545,6 +4788,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4601,6 +4847,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -4645,6 +4894,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -4659,6 +4911,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4704,6 +4959,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4759,6 +5017,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4815,6 +5076,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -4859,6 +5123,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -4873,6 +5140,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4918,6 +5188,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -4973,6 +5246,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5029,6 +5305,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       },
@@ -5275,6 +5554,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5363,6 +5645,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -5377,6 +5662,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5440,6 +5728,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "responses": {
@@ -5468,6 +5759,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5559,6 +5853,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ]
       }
@@ -5573,6 +5870,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5618,6 +5918,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5683,6 +5986,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5724,6 +6030,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5771,6 +6080,9 @@
         "security": [
           {
             "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5789,6 +6101,559 @@
             "description": "Successful Response",
             "content": {
               "application/pdf": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/data/export/info": {
+      "get": {
+        "tags": [
+          "data transfer"
+        ],
+        "summary": "what an export would contain and whether an import is possible",
+        "operationId": "export_info_api_data_export_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Export Info Api Data Export Info Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/data/export": {
+      "post": {
+        "tags": [
+          "data transfer"
+        ],
+        "summary": "build and download the export archive (ZIP)",
+        "operationId": "export_archive_api_data_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ExportRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/data/import/preview": {
+      "post": {
+        "tags": [
+          "data transfer"
+        ],
+        "summary": "dry run: validate an archive, write nothing",
+        "operationId": "import_preview_api_data_import_preview_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_preview_api_data_import_preview_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Import Preview Api Data Import Preview Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/data/import/run": {
+      "post": {
+        "tags": [
+          "data transfer"
+        ],
+        "summary": "import an archive into the empty instance (all or nothing)",
+        "operationId": "import_run_api_data_import_run_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_run_api_data_import_run_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/data/transfers": {
+      "get": {
+        "tags": [
+          "data transfer"
+        ],
+        "summary": "the transfer log (last 50)",
+        "operationId": "transfers_api_data_transfers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Transfers Api Data Transfers Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/tokens/{token_id}": {
+      "patch": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "not supported: tokens are immutable (always 405)",
+        "description": "Label, expiry and access are immutable (docs/contracts/api-tokens.md, decision 17): revoke and create anew.",
+        "operationId": "no_patch_api_tokens__token_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}$",
+              "description": "8 hex characters",
+              "title": "Token Id"
+            },
+            "description": "8 hex characters"
+          }
+        ],
+        "responses": {
+          "405": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens": {
+      "post": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "create a token (the secret is shown once)",
+        "operationId": "create_token_api_tokens_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiTokenCreateIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiTokenCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "own tokens (boss: all=true lists everyone's)",
+        "operationId": "list_tokens_api_tokens_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "all",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "All"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApiTokenOut"
+                  },
+                  "title": "Response List Tokens Api Tokens Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/revoke-all": {
+      "post": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "revoke all active tokens of a user",
+        "operationId": "revoke_all_api_tokens_revoke_all_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-z]{6,32}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "boss only",
+              "title": "User Id"
+            },
+            "description": "boss only"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevokeAllResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/{token_id}/revoke": {
+      "post": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "revoke a token (idempotent)",
+        "operationId": "revoke_token_api_tokens__token_id__revoke_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}$",
+              "description": "8 hex characters",
+              "title": "Token Id"
+            },
+            "description": "8 hex characters"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiTokenOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tokens/{token_id}/audit": {
+      "get": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "requests made with a token, newest first",
+        "operationId": "token_audit_api_tokens__token_id__audit_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}$",
+              "description": "8 hex characters",
+              "title": "Token Id"
+            },
+            "description": "8 hex characters"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 4102444800,
+                  "minimum": 0
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-z]{6,32}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "with `before`: the id of the last row",
+              "title": "Before Id"
+            },
+            "description": "with `before`: the id of the last row"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
             }
           },
           "422": {
@@ -6022,6 +6887,147 @@
         ],
         "title": "AbsenceIn"
       },
+      "ApiTokenCreateIn": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "Label"
+          },
+          "expires_in_days": {
+            "type": "integer",
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Expires In Days",
+            "default": 90
+          },
+          "read_only": {
+            "type": "boolean",
+            "title": "Read Only",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label"
+        ],
+        "title": "ApiTokenCreateIn",
+        "description": "Create an API token for the signed-in user (the secret is in the response, once)."
+      },
+      "ApiTokenCreated": {
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Token",
+            "description": "the secret, shown only in this response"
+          },
+          "item": {
+            "$ref": "#/components/schemas/ApiTokenOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "token",
+          "item"
+        ],
+        "title": "ApiTokenCreated"
+      },
+      "ApiTokenOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "User Id"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 400,
+            "title": "Label"
+          },
+          "hint": {
+            "type": "string",
+            "maxLength": 16,
+            "title": "Hint"
+          },
+          "read_only": {
+            "type": "boolean",
+            "title": "Read Only"
+          },
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "expires_at": {
+            "type": "integer",
+            "title": "Expires At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "expired",
+              "revoked"
+            ],
+            "title": "Status"
+          },
+          "owner_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 400
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Name",
+            "description": "only with ?all=true"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "label",
+          "hint",
+          "read_only",
+          "created",
+          "expires_at",
+          "status"
+        ],
+        "title": "ApiTokenOut",
+        "description": "A token as listed: never the secret and never the hash."
+      },
       "ApplyIn": {
         "properties": {
           "changes": {
@@ -6039,6 +7045,161 @@
         },
         "type": "object",
         "title": "ApplyIn"
+      },
+      "AuditEntryOut": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Id"
+          },
+          "at": {
+            "type": "integer",
+            "title": "At"
+          },
+          "token_id": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "Token Id"
+          },
+          "user_id": {
+            "type": "string",
+            "maxLength": 32,
+            "title": "User Id"
+          },
+          "method": {
+            "type": "string",
+            "maxLength": 16,
+            "title": "Method"
+          },
+          "route": {
+            "type": "string",
+            "maxLength": 255,
+            "title": "Route"
+          },
+          "status": {
+            "type": "integer",
+            "title": "Status"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "at",
+          "token_id",
+          "user_id",
+          "method",
+          "route",
+          "status"
+        ],
+        "title": "AuditEntryOut"
+      },
+      "AuditPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditEntryOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next",
+            "description": "`before` value for the next page, null at the end"
+          },
+          "next_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Id",
+            "description": "`before_id` value for the next page (with `next`), null at the end"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "AuditPage"
+      },
+      "AuthInfo": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "session",
+              "token"
+            ],
+            "title": "Kind"
+          },
+          "token_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "read_only": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read Only"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 8204889600.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "AuthInfo"
       },
       "AuthStatus": {
         "properties": {
@@ -6062,6 +7223,39 @@
           "version"
         ],
         "title": "AuthStatus"
+      },
+      "Body_import_preview_api_data_import_preview_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_preview_api_data_import_preview_post"
+      },
+      "Body_import_run_api_data_import_run_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_run_api_data_import_run_post"
       },
       "Body_preview_api_import_preview_post": {
         "properties": {
@@ -9278,6 +10472,33 @@
         "title": "ExpenseLineIn",
         "description": "One line of an itemised bill. ``net`` and ``vat`` sent by a client are ignored (derived by the server)."
       },
+      "ExportRequest": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "full",
+              "master_data"
+            ],
+            "title": "Scope",
+            "default": "full"
+          },
+          "include_accounts": {
+            "type": "boolean",
+            "title": "Include Accounts",
+            "default": false
+          },
+          "include_attachments": {
+            "type": "boolean",
+            "title": "Include Attachments",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ExportRequest",
+        "description": "Options of POST /api/data/export (docs/contracts/data-export.md). Unknown fields are refused."
+      },
       "ExtendIn": {
         "properties": {
           "new_end": {
@@ -10337,6 +11558,19 @@
           "password"
         ],
         "title": "ResetPayload"
+      },
+      "RevokeAllResult": {
+        "properties": {
+          "revoked": {
+            "type": "integer",
+            "title": "Revoked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "revoked"
+        ],
+        "title": "RevokeAllResult"
       },
       "ScenarioChanges": {
         "properties": {
@@ -13173,6 +14407,17 @@
               }
             ],
             "title": "Timezone"
+          },
+          "auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AuthInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "how this request was authenticated (GET /auth/me only): a session or an API token"
           }
         },
         "additionalProperties": true,
@@ -14925,6 +16170,12 @@
         "type": "http",
         "description": "Token from POST /api/auth/login",
         "scheme": "bearer"
+      },
+      "ApiToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "pat_",
+        "description": "API token (`Authorization: Bearer pat_...`), created in the settings. It has the rights of its owner, optionally read-only, and can never use the session-only routes."
       }
     }
   }
