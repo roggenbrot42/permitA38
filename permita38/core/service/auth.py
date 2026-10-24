@@ -14,6 +14,7 @@ from permita38.core.repository import Repository
 from permita38.core.settings import DEFAULT_SETTINGS
 
 from .throttle import AttemptThrottle
+from .tokens import revoke_user_tokens
 
 PBKDF2_ITERATIONS = 200_000
 USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{1,31}$")
@@ -47,9 +48,9 @@ def _unb64(s: str) -> bytes:
 
 
 def public_user(u: dict) -> dict:
-    out = {k: v for k, v in u.items() if k not in _PRIVATE}
+    out = {k: v for k, v in u.items() if k not in _PRIVATE and k != "_auth"}  # `_auth` never leaves the server
     out["role"] = rights.normalize_role(u.get("role"))
-    out["permissions"] = rights.permissions(out["role"])
+    out["permissions"] = rights.permissions_for({**u, "role": out["role"]})
     out["has_password"] = bool(u.get("password_hash"))
     out["totp_enabled"] = bool(u.get("totp_enabled"))
     return out
@@ -208,7 +209,10 @@ class AuthService:
             ):
                 if self._boss_count(excluding=old["id"]) == 0:
                     raise ServiceError(400, "There must be at least one active boss")
-            return public_user(self.store.save("users", rec))
+            saved = self.store.save("users", rec)
+            if old and old.get("active", True) and not rec.get("active", True):
+                revoke_user_tokens(self.store, saved["id"])  # a revoked token stays revoked after reactivation
+            return public_user(saved)
 
     def delete_user(self, user_id: str, actor: dict):
         old = self.store.get("users", user_id)
@@ -218,7 +222,10 @@ class AuthService:
             raise ServiceError(400, "You cannot delete yourself")
         if rights.normalize_role(old.get("role")) == rights.BOSS and self._boss_count(excluding=user_id) == 0:
             raise ServiceError(400, "Cannot delete the only boss")
-        self.store.delete("users", user_id)
+        with self.store.transaction():
+            self.store.delete_where("api_tokens", user_id=user_id)
+            self.store.delete_where("audit_log", user_id=user_id)
+            self.store.delete("users", user_id)
 
     def change_password(self, user: dict, old_password: str, new_password: str) -> str:
         if not verify_password(old_password, user.get("password_hash")):

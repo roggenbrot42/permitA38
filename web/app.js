@@ -39,13 +39,14 @@ async function bootstrap() {
 }
 
 /* ---------- modal + forms ---------- */
-function closeModal() { runCloseHook(); $('#modal-root').innerHTML = ''; }
+function closeModal() { runCloseHook(); $('#modal-root').onkeydown = null; $('#modal-root').innerHTML = ''; }
 /** A dialog can register cleanup (e.g. revoking object URLs) that runs once when it closes. */
 function runCloseHook() { const h = closeModal.onClose; closeModal.onClose = null; if (h) h(); }
 let MODAL_SEQ = 0;  // bumped every time a dialog opens: a save that finishes after its dialog was cancelled must not close another one
 function modal(html, wide) {
   runCloseHook();
   MODAL_SEQ++;
+  $('#modal-root').onkeydown = null;   // a dialog's key handler must not outlive it
   $('#modal-root').innerHTML = `<div class="modal-bg"><div class="modal ${wide ? 'wide' : ''}">${html}</div></div>`;
   const first = $('#modal-root input:not([type=hidden]), #modal-root select'); if (first) first.focus();
 }
@@ -137,8 +138,8 @@ function entryForm(e = {}, after) {
 /* ---------- layout + router ---------- */
 /* nav: [route, icon, label, area needed to see it, 'write' if it needs write access (or 'all' when the read scope must be all, not a restricted view)] */
 const NAV = [['today', '⏱', 'Today', 'timer'], ['time', '🗓', 'Timesheet', 'time', 'write'], ['timeoff', '🏖', 'Time off', 'absences'], ['plan', '📈', 'Planning', 'planning'], ['customers', '👥', 'Customers', 'customers'], ['projects', '📁', 'Projects', 'projects', 'all'],
-  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['trips', '🧳', 'Business trips', 'trips'], ['money', '💶', 'Money & Taxes', 'finance'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['timeline', '📅', 'Team timeline', 'team_timeline'], ['settings', '⚙️', 'Settings', 'settings', 'all']];
-const navAllowed = ([, , , area, need]) => (need === 'write' ? can(area, 'write') : need === 'all' ? scopeOf(area) === 'all' : can(area));
+  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['trips', '🧳', 'Business trips', 'trips'], ['money', '💶', 'Money & Taxes', 'finance'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['timeline', '📅', 'Team timeline', 'team_timeline'], ['settings', '⚙️', 'Settings', 'settings', 'all'], ['tokens', '🔑', 'API tokens', '*']];
+const navAllowed = ([, , , area, need]) => (area === '*' ? true : need === 'write' ? can(area, 'write') : need === 'all' ? scopeOf(area) === 'all' : can(area));
 const navFor = () => NAV.filter(n => navAllowed(n) && !(n[0] === 'timeoff' && can('planning')));
 /* which area (and, for the read-only lock, which write area) a page belongs to */
 function pageArea(p, args) {

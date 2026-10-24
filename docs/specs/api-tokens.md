@@ -58,7 +58,8 @@ Decided by the architect (see the contract for the full list and the decisions t
 11. **Last used**: `last_used_at` is updated at most once per 60 seconds per token.
 12. **Limits**: at most 20 active tokens per user (`409` on the 21st). Invalid bearer tokens (unknown, revoked, expired,
     owner missing or inactive, malformed) are counted per client IP with the existing login throttle (same limits as
-    failed logins); a locked-out client gets `429` with `Retry-After`. No other rate limit in this version.
+    failed logins); a locked-out client gets `429` with `Retry-After` only for an invalid token; a valid token is never refused by the
+    throttle. No other rate limit in this version.
 13. **Audit**: every token-authenticated request writes one `audit_log` row: token id, owner, method, route template,
     status, time. Never bodies, tokens or query strings. Append-only, 365 days retention, pruned at startup. A failed
     audit write is logged and does not change the response.

@@ -132,3 +132,36 @@ def allowed(role: object, area: str, op: Op = "read") -> bool:
 def permissions(role: object) -> dict[str, dict[str, str]]:
     """The table the web app gets: ``{area: {"read": scope, "write": scope}}``."""
     return {a: {"read": scope(role, a).value, "write": scope(role, a, "write").value} for a in AREAS}
+
+
+def is_token(principal: dict) -> bool:
+    """True when the request was authenticated by an API token (docs/contracts/api-tokens.md)."""
+    return (principal.get("_auth") or {}).get("kind") == "token"
+
+
+def scope_for(principal: dict, area: str, op: Op = "read") -> Scope:
+    """Effective scope of the signed-in principal (user session or API token).
+
+    The only function request paths use for the current user: the owner's role decides, and a read-only API token
+    never writes (the write clamp applies to unsafe requests; a safe request, GET/HEAD/OPTIONS, gets the owner's
+    scope, because it cannot change anything and some read-only views are declared with a write area). A token
+    therefore never exceeds the rights of its owner."""
+    base = scope(principal.get("role"), area, op)
+    auth = principal.get("_auth")
+    if auth and auth.get("kind") == "token" and auth.get("read_only") and op == "write":
+        if auth.get("safe_request"):
+            return base  # a GET/HEAD/OPTIONS view declared with a write area: exactly what the owner's session gets
+        return Scope.NONE
+    return base
+
+
+def allowed_for(principal: dict, area: str, op: Op = "read") -> bool:
+    return scope_for(principal, area, op) != Scope.NONE
+
+
+def permissions_for(principal: dict) -> dict[str, dict[str, str]]:
+    """`permissions` of a principal: the owner's table, with every write entry ``none`` for a read-only token (whatever
+    the method of the request that asks: this is what the token may *do*)."""
+    auth = principal.get("_auth")
+    clamped = principal if not auth else {**principal, "_auth": {**auth, "safe_request": False}}
+    return {a: {"read": scope_for(clamped, a).value, "write": scope_for(clamped, a, "write").value} for a in AREAS}

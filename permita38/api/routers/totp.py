@@ -5,13 +5,13 @@ from typing import Annotated
 from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 
-from permita38.api.deps import CurrentUser, Needs, ServicesDep
+from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.api.routers.auth import LoginResult, TokenResult, _set_cookie, cookie_secure
 from permita38.core import validation as v
 from permita38.core.models import UserOut
 
 router = APIRouter(prefix="/auth", tags=["two-factor"])
-admin_router = APIRouter(prefix="/users", tags=["two-factor"])
+admin_router = APIRouter(prefix="/users", tags=["two-factor"], dependencies=[SessionOnly])
 routers = [router, admin_router]
 
 
@@ -76,24 +76,39 @@ def login_totp(payload: TotpLoginPayload, request: Request, response: Response, 
     return {"token": token, "user": user, "recovery_codes_left": left}
 
 
-@router.get("/totp/status", response_model=TotpStatus)
+@router.get("/totp/status", response_model=TotpStatus, dependencies=[SessionOnly])
 def totp_status(user: CurrentUser, services: ServicesDep):
     return services.totp.status(user)
 
 
-@router.post("/totp/setup", response_model=TotpSetupResult, summary="start enrolment (needs the current password)")
+@router.post(
+    "/totp/setup",
+    response_model=TotpSetupResult,
+    summary="start enrolment (needs the current password)",
+    dependencies=[SessionOnly],
+)
 def totp_setup(payload: PasswordPayload, user: CurrentUser, services: ServicesDep):
     return services.totp.begin_setup(user, payload.password)
 
 
-@router.post("/totp/enable", response_model=EnableResult, summary="confirm enrolment with a first code")
+@router.post(
+    "/totp/enable",
+    response_model=EnableResult,
+    summary="confirm enrolment with a first code",
+    dependencies=[SessionOnly],
+)
 def totp_enable(payload: CodePayload, request: Request, user: CurrentUser, response: Response, services: ServicesDep):
     token, codes = services.totp.enable(user, payload.code)
     _set_cookie(response, token, services.auth.ttl, cookie_secure(request, services.config))
     return {"token": token, "recovery_codes": codes}
 
 
-@router.post("/totp/disable", response_model=TokenResult, summary="turn two-factor authentication off")
+@router.post(
+    "/totp/disable",
+    response_model=TokenResult,
+    summary="turn two-factor authentication off",
+    dependencies=[SessionOnly],
+)
 def totp_disable(
     payload: DisablePayload, request: Request, user: CurrentUser, response: Response, services: ServicesDep
 ):
@@ -106,6 +121,7 @@ def totp_disable(
     "/totp/recovery-codes/regenerate",
     response_model=RecoveryCodesResult,
     summary="replace all recovery codes (old ones stop working)",
+    dependencies=[SessionOnly],
 )
 def totp_regenerate(payload: RegeneratePayload, user: CurrentUser, services: ServicesDep):
     return {"recovery_codes": services.totp.regenerate_recovery_codes(user, payload.password, payload.code)}

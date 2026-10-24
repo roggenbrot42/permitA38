@@ -695,6 +695,7 @@ PAGES.settings = async () => {
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Document templates</h2><div class="right auto"><button data-a="editTemplate">+ New template</button></div></div><table>${S.templates.map(t => `<tr><td><b>${esc(t.name)}</b> <span class="muted small">${esc(t.layout)} · ${esc(t.language)}</span></td><td><span class="dot" style="background:${esc(t.accent)}"></span></td><td class="right"><button class="sm" data-a="editTemplate" data-id="${t.id}">${tpls.find(x => x.id === t.id) ? 'Edit' : 'Copy & customise'}</button></td></tr>`).join('')}</table></div>
   ${teamVisibilityCard()}
   ${await calendarsCard()}
+  ${await tokensCard()}
   <div class="card"><h2>Data & sync</h2><p>Data folder on this device:<br><code>${esc(S.data_dir || '')}</code></p><p class="muted small">Put this folder inside a Syncthing-shared folder and start permitA38 with <code>permita38 --data &lt;that folder&gt;</code> on each device. See the README for details.</p></div>`;
 };
 A.saveSettings = async () => {
