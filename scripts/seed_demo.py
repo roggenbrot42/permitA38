@@ -203,6 +203,31 @@ def main() -> None:
                     "category": cat,
                 },
             )
+        # a domestic business trip (fake) with two meals provided on day two and one linked hotel bill
+        trip = post(
+            "/api/trips",
+            {
+                "title": "Demo-Kundenbesuch",
+                "purpose": "Workshop beim Demo-Kunden",
+                "start": "2026-09-14T08:00",
+                "end": "2026-09-16T18:00",
+                "places": [{"from_date": "2026-09-14", "country": "DE", "city": "Musterstadt"}],
+                "meals_provided": [{"date": "2026-09-15", "breakfast": True, "lunch": True}],
+                "cost_centre": "general",
+            },
+        )
+        post(
+            "/api/expenses",
+            {
+                "date": "2026-09-14",
+                "net": 95.0,
+                "vat": round(95.0 * 0.07, 2),
+                "vat_rate": 7,
+                "vendor": "Beispiel Hotel",
+                "category": "Reise",
+                "trip_id": trip["id"],
+            },
+        )
         post(
             "/api/absences",
             {
