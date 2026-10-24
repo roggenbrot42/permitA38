@@ -171,6 +171,12 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("POST", "/api/import/run"): ("settings", "write", True),
     ("GET", "/api/import/batches"): ("settings", "write", True),
     ("POST", "/api/import/batches/{rid}/undo"): ("settings", "write", True),
+    # full data export/import: boss only (session only once API tokens exist, see test_data_transfer_security.py)
+    ("GET", "/api/data/export/info"): ("settings", "write", True),
+    ("POST", "/api/data/export"): ("settings", "write", True),
+    ("POST", "/api/data/import/preview"): ("settings", "write", True),
+    ("POST", "/api/data/import/run"): ("settings", "write", True),
+    ("GET", "/api/data/transfers"): ("settings", "write", True),
     ("POST", "/api/attachments"): ("attachments", "write", False),
     ("GET", "/api/attachments/{name}"): ("attachments", "read", False),
     ("POST", "/api/invoices/from-time"): ("invoices", "write", False),
