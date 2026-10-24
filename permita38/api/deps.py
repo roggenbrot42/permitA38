@@ -112,7 +112,8 @@ AUDIT_SCOPE_KEY = "permita38.audit"  # request.scope: (token id, owner id) of a 
 
 def client_ip(request: Request, config: Config) -> str:
     """Client address for the invalid-token throttle. Behind a trusted proxy the last ``X-Forwarded-For`` entry (the
-    one the proxy itself appended) is used, never an entry the client could have chosen."""
+    one the proxy itself appended) is used, never an entry the client could have chosen. Correct only behind exactly
+    one proxy that overwrites ``X-Forwarded-For`` (docs/api-tokens.md)."""
     if config.trust_proxy:
         forwarded = request.headers.get("x-forwarded-for", "").split(",")[-1].strip()
         if forwarded:
@@ -130,14 +131,17 @@ def _route_is_session_only(request: Request) -> bool:
 
 
 def _token_principal(request: Request, services: "Services", bearer: str) -> dict:
-    throttle = services.auth.throttle
-    key = f"ip:{client_ip(request, services.config)}"
-    throttle.check(key)  # 429 + Retry-After, before any lookup
     principal = services.tokens.authenticate(bearer)
     if principal is None:
-        throttle.fail(key)
+        throttle = services.auth.throttle
+        key = f"ip:{client_ip(request, services.config)}"
+        try:
+            throttle.check(key)  # a locked-out client gets 429 + Retry-After instead of the 401 ...
+        finally:
+            throttle.fail(key)  # ... and the failure is counted either way
         raise _unauthenticated()
     auth = principal["_auth"]
+    auth["safe_request"] = request.method in SAFE_METHODS
     request.scope[AUDIT_SCOPE_KEY] = (auth["token_id"], principal["id"])
     if _route_is_session_only(request):
         raise HTTPException(403, SESSION_ONLY_MESSAGE)
@@ -195,7 +199,7 @@ def Needs(area: str, op: rights.Op = "read", *, full: bool = False) -> Any:
     """Route dependency: the signed-in user's role must have some access (any scope) to `area` for `op`, else 403.
 
     The requirement is stored on the dependency (``.rbac``) so tests can enumerate it for every route. Routes whose
-    scope matters (own records only, restricted views) get the user and ask `rights.scope` in the service.
+    scope matters (own records only, restricted views) get the user and ask `rights.scope_for` in the service.
     `full=True` additionally demands the ``all`` scope (for endpoints that have no restricted view).
     """
     if area not in rights.AREAS:

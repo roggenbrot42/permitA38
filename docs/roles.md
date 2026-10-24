@@ -67,7 +67,8 @@ Notes
 * **API tokens** (`Authorization: Bearer pat_...`, see `contracts/api-tokens.md`) are the owner's own credentials and
   not part of this table: a token has the rights of its owner (evaluated on every request, so a demotion applies at
   once), optionally read-only, and never more. A token can never manage tokens, passwords, two-factor authentication
-  or users, and can never write the settings (those routes answer `403` for a token). Every request made with a
+  or users, and can never write the settings, change the numbering, run or undo an import or change a calendar
+  (those routes answer `403` for a token, read-write or not). A read-only token reads exactly what its owner reads. Every request made with a
   token is written to an audit log.
 * The table lives in `permita38/core/rights.py` and is the single source of truth; a test checks this page against it
   and another test calls every API route as every role and expects `403` exactly where the table says so.

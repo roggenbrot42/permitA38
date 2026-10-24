@@ -54,15 +54,15 @@ def view(row: dict, now: int) -> dict:
 
 
 def revoke_user_tokens(store: Repository, user_id: str, now: int | None = None) -> int:
-    """Revoke every active token of a user (deactivation, revoke-all); returns how many were active."""
+    """Revoke every active token of a user (deactivation, revoke-all); returns how many were active. Expired tokens
+    are left alone: they stay ``expired``."""
     now = int(now if now is not None else time.time())
     count = 0
     with store.transaction():
         for row in store.find("api_tokens", user_id=user_id):
-            if not row.get("revoked_at"):
+            if status_of(row, now) == "active":
                 store.save("api_tokens", {**row, "revoked_at": now})
-                if int(row.get("expires_at") or 0) > now:
-                    count += 1
+                count += 1
     return count
 
 

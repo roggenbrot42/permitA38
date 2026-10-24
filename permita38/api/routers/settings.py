@@ -14,7 +14,8 @@ routers = [router]
 def bootstrap(user: CurrentUser, services: ServicesDep) -> dict:
     out = services.settings.bootstrap(user, services.time.get_timer(user))
     out["features"] = {"impressum_lookup": services.config.features.impressum_lookup}
-    if rights.scope_for(user, "settings", "write") == rights.Scope.ALL:  # the server's folder path is not for everyone
+    # the server's folder path is for a boss signed in with a password, never for an API token
+    if not rights.is_token(user) and rights.scope_for(user, "settings", "write") == rights.Scope.ALL:
         out["data_dir"] = str(services.config.data_dir)
     return out
 

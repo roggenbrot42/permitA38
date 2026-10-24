@@ -8,10 +8,15 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
-from permita38.api.deps import declared, is_session_only
+from permita38.api.deps import CurrentUser, client_ip, declared, is_session_only
+from permita38.api.server import get_app
 from permita38.core import rights
-from permita38.core.service.audit import RETENTION_DAYS, AuditService
+from permita38.core.errors import ServiceError
+from permita38.core.models import AuditEntryOut
+from permita38.core.service.audit import METHOD_MAX, RETENTION_DAYS, ROUTE_MAX, AuditService
+from permita38.core.service.throttle import MAX_KEYS, AttemptThrottle
 from permita38.core.service.tokens import TOKEN_RE
 
 from .conftest import PASSWORD, _login
@@ -151,7 +156,7 @@ def test_create_bounds_are_accepted_at_the_edge(boss_client):
 @pytest.mark.parametrize("role", ["boss", "employee", "accountant"])
 def test_every_role_creates_tokens_for_itself_only(sessions, role):
     made = new_token(sessions[role])
-    assert made["item"]["user_id"] == (sessions[role].user_id if role != "boss" else made["item"]["user_id"])
+    assert made["item"]["user_id"] == sessions[role].get("/api/auth/me").json()["id"]
     assert sessions[role].get("/api/tokens").json()[0]["id"] == made["item"]["id"]
     assert "user_id" not in sessions[role].post("/api/tokens", json={"label": "a", "user_id": "x"}).json()  # 422
 
@@ -171,7 +176,6 @@ def test_twenty_active_tokens_are_allowed_the_21st_is_a_409(boss_client, clock):
     boss_client.post(f"/api/tokens/{items[0]['id']}/revoke")  # revoked tokens do not count
     assert boss_client.post("/api/tokens", json={"label": "fits again"}).status_code == 201
     assert boss_client.post("/api/tokens", json={"label": "full again"}).status_code == 409
-    clock.now += 100 * 86400  # all expired; expired tokens do not count either (session left valid by re-login)
 
 
 def test_the_limit_is_per_user_and_expired_tokens_do_not_count(app, sessions, store, clock):
@@ -209,10 +213,26 @@ def test_a_read_write_token_has_the_owners_rights(app, boss_client):
     assert [c["name"] for c in boss_client.get("/api/customers").json()] == ["Demo GmbH"]
 
 
-def test_the_read_only_guard_covers_every_unsafe_method_even_for_posts_that_only_compute(app, boss_client):
+@pytest.mark.parametrize("method", ["POST", "PUT", "DELETE", "PATCH"])
+def test_the_read_only_guard_does_not_depend_on_the_routes_own_declaration(app, boss_client, method):
+    """A route that forgets ``Needs(..., "write")`` (it only asks who is signed in) is still closed to a read-only token."""
+
+    def probe(user: CurrentUser) -> dict:
+        return {"id": user["id"]}
+
+    app.add_api_route("/api/_probe", probe, methods=[method])
+    ro = bearer(app, new_token(boss_client)["token"])
+    rw = bearer(app, new_token(boss_client, read_only=False)["token"])
+    r = ro.request(method, "/api/_probe")
+    assert r.status_code == 403 and r.json() == {"detail": "Forbidden"}
+    assert rw.request(method, "/api/_probe").status_code == 200
+    assert boss_client.request(method, "/api/_probe").status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/api/plan/simulate", "/api/timer/start", "/api/anything"])
+def test_the_read_only_guard_covers_posts_that_only_compute(app, boss_client, path):
     t = bearer(app, new_token(boss_client)["token"])
-    for method, path in (("POST", "/api/plan/simulate"), ("POST", "/api/timer/start"), ("POST", "/api/anything")):
-        assert t.request(method, path, json={}).status_code in (403, 404), path
+    assert t.post(path, json={}).status_code in (403, 404)
     assert t.post("/api/plan/simulate", json={}).json() == {"detail": "Forbidden"}
 
 
@@ -272,11 +292,7 @@ def test_a_token_gets_what_its_owners_session_gets_on_every_route(app, sessions,
         got_ro = ro.request(method, url, **kw)
         assert got_rw.status_code != 401, (method, path)
         assert (got_rw.status_code == 403) == (expected.status_code == 403), (role, method, path)
-        needs_write = any(op == "write" for _, op, _ in declared(route))  # e.g. the boss-only numbering views
-        if method in ("GET", "HEAD") and needs_write:
-            assert got_rw.status_code == expected.status_code, (role, method, path)
-            assert got_ro.status_code == 403, (role, method, path)  # read-only never holds a write right
-        elif method in ("GET", "HEAD"):
+        if method in ("GET", "HEAD"):  # safe methods: exactly the owner's session, also for views declared "write"
             assert got_rw.status_code == expected.status_code, (role, method, path)
             assert got_ro.status_code == expected.status_code, (role, method, path)
         else:
@@ -298,6 +314,47 @@ def test_scope_for_is_the_owners_scope_clamped_to_read_for_read_only_tokens(role
     assert rights.allowed_for(principal, "customers", "read") == (role != "employee")
     assert rights.allowed_for(principal, "customers", "write") == (role == "boss" and not read_only)
     assert rights.scope_for({"role": "root", "_auth": {"kind": "token", "read_only": False}}, "time") == "none"
+
+
+@pytest.mark.parametrize("role", ["boss", "employee", "accountant"])
+def test_a_safe_request_gets_the_owners_scope_even_for_a_read_only_token(role):
+    safe = {"role": role, "_auth": {"kind": "token", "read_only": True, "safe_request": True}}
+    unsafe = {"role": role, "_auth": {"kind": "token", "read_only": True, "safe_request": False}}
+    for area in rights.AREAS:
+        assert rights.scope_for(safe, area, "write") == rights.scope(role, area, "write"), (role, area)
+        assert rights.scope_for(unsafe, area, "write") == rights.Scope.NONE, (role, area)
+        assert rights.scope_for(safe, area, "read") == rights.scope(role, area, "read")
+    # what the token may DO (the table in /api/auth/me) never depends on the request
+    assert all(p["write"] == "none" for p in rights.permissions_for(safe).values())
+
+
+# (role, area, op, read_only, safe_request) -> scope, written out by hand from docs/roles.md
+LITERAL_SCOPES = [
+    ("employee", "time", "write", False, False, "limited"),
+    ("employee", "time", "write", True, False, "none"),
+    ("employee", "time", "read", True, False, "limited"),
+    ("employee", "customers", "read", False, False, "none"),
+    ("employee", "projects", "write", False, False, "none"),
+    ("accountant", "expenses", "write", False, False, "all"),
+    ("accountant", "expenses", "write", True, False, "none"),
+    ("accountant", "expenses", "write", True, True, "all"),
+    ("accountant", "invoices", "read", True, False, "all"),
+    ("accountant", "invoices", "write", False, False, "none"),
+    ("accountant", "invoices", "write", True, True, "none"),
+    ("accountant", "planning", "read", False, False, "none"),
+    ("boss", "team_timeline", "write", False, False, "none"),
+    ("boss", "team_timeline", "read", True, False, "all"),
+    ("boss", "settings", "write", False, False, "all"),
+    ("boss", "settings", "write", True, False, "none"),
+    ("boss", "settings", "write", True, True, "all"),
+    ("member", "time", "write", False, False, "limited"),  # the legacy role name
+]
+
+
+@pytest.mark.parametrize(("role", "area", "op", "read_only", "safe", "want"), LITERAL_SCOPES)
+def test_scope_for_literal_rows(role, area, op, read_only, safe, want):
+    auth = {"kind": "token", "token_id": "x", "read_only": read_only, "safe_request": safe}
+    assert rights.scope_for({"role": role, "_auth": auth}, area, op) == want
 
 
 def test_rights_are_literal_for_the_three_roles():
@@ -381,7 +438,7 @@ def _fill(path: str) -> str:
 @pytest.mark.parametrize("read_only", [True, False])
 def test_session_only_routes_refuse_every_token_with_the_exact_body(app, boss_client, read_only):
     t = bearer(app, new_token(boss_client, read_only=read_only)["token"])
-    assert len(SESSION_ONLY) == 18
+    assert len(SESSION_ONLY) == 26
     for method, path in sorted(SESSION_ONLY):
         r = t.request(method, _fill(path), json={} if method in ("POST", "PUT") else None)
         assert r.status_code == 403 and r.json() == SESSION_ONLY_BODY, (method, path, r.status_code, r.text)
@@ -457,7 +514,7 @@ def test_expiry_boundary(app, boss_client, clock):
 
 
 def test_status_of_listed_tokens(app, boss_client, store, clock):
-    active = new_token(boss_client, label="a")["item"]
+    new_token(boss_client, label="a")
     expired = new_token(boss_client, label="e")["item"]
     both = new_token(boss_client, label="r")["item"]
     for tid in (expired["id"], both["id"]):
@@ -465,7 +522,6 @@ def test_status_of_listed_tokens(app, boss_client, store, clock):
     boss_client.post(f"/api/tokens/{both['id']}/revoke")
     status = {row["label"]: row["status"] for row in boss_client.get("/api/tokens").json()}
     assert status == {"a": "active", "e": "expired", "r": "revoked"}  # revoked wins over expired
-    assert active["id"]
 
 
 def test_listing_is_own_tokens_newest_first_and_all_is_for_the_boss(app, sessions, clock):
@@ -520,6 +576,29 @@ def test_revoke_all(app, sessions):
     assert boss.post(f"/api/tokens/revoke-all?user_id={acc.user_id}").json() == {"revoked": 1}
     assert [x["status"] for x in boss.get("/api/tokens").json()] == ["active"]
     assert boss.post("/api/tokens/revoke-all?user_id=!").status_code == 422
+
+
+def test_revoke_all_counts_only_active_tokens_and_leaves_expired_ones_expired(app, sessions, store, clock):
+    emp, boss = sessions["employee"], sessions["boss"]
+    live = new_token(emp, label="live")["item"]
+    old = new_token(emp, label="old")["item"]
+    store.save("api_tokens", {**store.get("api_tokens", old["id"]), "expires_at": int(clock.now) - 1})
+    assert emp.post("/api/tokens/revoke-all").json() == {"revoked": 1}
+    status = {
+        t["label"]: t["status"] for t in boss.get("/api/tokens?all=true").json() if t["id"] in (live["id"], old["id"])
+    }
+    assert status == {"live": "revoked", "old": "expired"}
+    assert store.get("api_tokens", old["id"]).get("revoked_at") is None
+    assert emp.post("/api/tokens/revoke-all").json() == {"revoked": 0}
+
+
+def test_deactivating_does_not_stamp_expired_tokens(app, sessions, store, clock):
+    boss, emp = sessions["boss"], sessions["employee"]
+    old = new_token(emp)["item"]
+    store.save("api_tokens", {**store.get("api_tokens", old["id"]), "expires_at": int(clock.now) - 1})
+    body = {"username": "empx", "name": "Employee", "role": "employee", "active": False}
+    assert boss.put(f"/api/users/{emp.user_id}", json=body).status_code == 200
+    assert store.get("api_tokens", old["id"]).get("revoked_at") is None
 
 
 def test_there_is_no_patch_route(boss_client):
@@ -605,26 +684,29 @@ def test_invalid_tokens_lock_the_client_ip_out_with_retry_after(app, boss_client
     good = new_token(boss_client)["token"]
     for _ in range(5):
         assert bearer(app, FAKE_SECRET).get("/api/customers").status_code == 401
-    r = bearer(app, good).get("/api/customers")  # a VALID token from the locked-out address
+    # a locked-out address still gets in with a VALID token (it must not lock out its own owner) ...
+    assert bearer(app, good).get("/api/customers").status_code == 200
+    # ... and gets 429 with Retry-After on every INVALID attempt (also malformed values), which are still counted
+    r = bearer(app, FAKE_SECRET).get("/api/customers")
     assert r.status_code == 429 and r.json() == LOCKED
     assert 1 <= int(r.headers["retry-after"]) <= 300
-    # another address is not affected
-    assert bearer(app, good, ip="198.51.100.7").get("/api/customers").status_code == 200
-    # the lock-out also holds for the session-only routes and for malformed values
-    assert bearer(app, good).post("/api/tokens", json={"label": "a"}).status_code == 429
     assert bearer(app, "pat_x").get("/api/customers").status_code == 429
+    # another address is not affected
+    assert bearer(app, FAKE_SECRET, ip="198.51.100.7").get("/api/customers").status_code == 401
 
 
-def test_the_lockout_check_runs_before_any_lookup(app, boss_client, monkeypatch):
+def test_a_valid_token_is_served_while_the_address_is_locked_out_without_checking_the_throttle(
+    app, boss_client, monkeypatch
+):
     good = new_token(boss_client)["token"]
     for _ in range(5):
         bearer(app, FAKE_SECRET).get("/api/customers")
 
     def boom(*_a, **_k):
-        raise AssertionError("looked up while locked out")
+        raise AssertionError("asked the throttle for a valid token")
 
-    monkeypatch.setattr(app.state.services.tokens, "authenticate", boom)
-    assert bearer(app, good).get("/api/customers").status_code == 429
+    monkeypatch.setattr(app.state.services.auth.throttle, "check", boom)
+    assert bearer(app, good).get("/api/customers").status_code == 200
 
 
 def test_malformed_values_count_and_valid_requests_do_not(app, boss_client):
@@ -634,19 +716,19 @@ def test_malformed_values_count_and_valid_requests_do_not(app, boss_client):
         assert t.get("/api/customers").status_code == 200  # valid requests never count
     for i in range(5):
         assert bearer(app, f"pat_bad{i}").get("/api/customers").status_code == 401
-    assert t.get("/api/customers").status_code == 429
+    assert t.get("/api/customers").status_code == 200  # valid requests still pass
+    assert bearer(app, FAKE_SECRET).get("/api/customers").status_code == 429  # the sixth invalid one is refused
 
 
 def test_retry_after_shrinks_as_the_window_passes(app, boss_client, clock):
-    good = new_token(boss_client)["token"]
     for _ in range(5):
         bearer(app, FAKE_SECRET).get("/api/customers")
-    first = int(bearer(app, good).get("/api/customers").headers["retry-after"])
+    first = int(bearer(app, FAKE_SECRET).get("/api/customers").headers["retry-after"])
     assert first == 300
     clock.now += 100
-    assert int(bearer(app, good).get("/api/customers").headers["retry-after"]) == 200
-    clock.now += 201
-    assert bearer(app, good).get("/api/customers").status_code == 200
+    assert int(bearer(app, FAKE_SECRET).get("/api/customers").headers["retry-after"]) == 200
+    clock.now += 201  # the failures have left the window
+    assert bearer(app, FAKE_SECRET).get("/api/customers").status_code == 401
 
 
 def test_the_login_route_sends_retry_after_too(app, client):
@@ -654,6 +736,69 @@ def test_the_login_route_sends_retry_after_too(app, client):
         assert client.post("/api/auth/login", json={"username": "nobody", "password": "x"}).status_code == 401
     r = client.post("/api/auth/login", json={"username": "nobody", "password": "x"})
     assert r.status_code == 429 and r.json() == LOCKED and 1 <= int(r.headers["retry-after"]) <= 300
+
+
+def _forwarded(app, forwarded: str, peer: str = "203.0.113.50") -> TestClient:
+    c = TestClient(app, client=(peer, 50000))
+    c.headers["Authorization"] = f"Bearer {FAKE_SECRET}"
+    c.headers["X-Forwarded-For"] = forwarded
+    return c
+
+
+@pytest.mark.parametrize("trust", [False, True])
+def test_the_client_ip_is_the_last_forwarded_entry_only_behind_a_trusted_proxy(app, trust):
+    config = app.state.services.config
+    config.trust_proxy = trust
+
+    class Req:
+        client = type("Peer", (), {"host": "10.0.0.1"})()
+        headers = {"x-forwarded-for": "1.2.3.4, 5.6.7.8"}
+
+    assert client_ip(Req(), config) == ("5.6.7.8" if trust else "10.0.0.1")  # type: ignore[arg-type]
+
+
+def test_rotating_the_first_forwarded_entry_does_not_dodge_the_lockout_behind_a_trusted_proxy(app):
+    app.state.services.config.trust_proxy = True
+    for i in range(5):
+        assert _forwarded(app, f"198.51.100.{i}, 192.0.2.77").get("/api/customers").status_code == 401
+    assert _forwarded(app, "198.51.100.99, 192.0.2.77").get("/api/customers").status_code == 429  # same last entry
+    assert _forwarded(app, "198.51.100.99, 192.0.2.78").get("/api/customers").status_code == 401  # other client
+    # the entry a client writes itself is not the key: a peer that claims to be the locked address is not locked
+    assert _forwarded(app, "192.0.2.77, 192.0.2.79").get("/api/customers").status_code == 401
+
+
+def test_an_untrusted_forwarded_header_is_ignored(app):
+    assert app.state.services.config.trust_proxy is False
+    for i in range(5):
+        assert _forwarded(app, f"192.0.2.{i}").get("/api/customers").status_code == 401
+    assert _forwarded(app, "192.0.2.200").get("/api/customers").status_code == 429  # same peer, header does not matter
+    assert _forwarded(app, "203.0.113.50", peer="203.0.113.51").get("/api/customers").status_code == 401
+
+
+def test_the_failure_dict_is_capped_and_windows_expire():
+    throttle = AttemptThrottle(max_failures=2, window=10)
+    now = time.time()
+    throttle.fail("a")
+    throttle.fail("a")
+    with pytest.raises(ServiceError) as err:
+        throttle.check("a")
+    assert err.value.status == 429 and err.value.headers["Retry-After"] == "10"
+    # the window passes: the lock-out ends and the key is forgotten
+    old = [now - 11, now - 12]
+    throttle._failures["a"] = old
+    throttle.check("a")
+    assert "a" not in throttle._failures
+    # a flood of distinct keys stays bounded; expired windows are swept first
+    for i in range(MAX_KEYS + 50):
+        throttle.fail(f"ip:{i}")
+    assert len(throttle._failures) <= MAX_KEYS
+    stale = {k: [now - 100] for k in list(throttle._failures)}
+    throttle._failures.update(stale)
+    for i in range(MAX_KEYS):
+        throttle.fail(f"new:{i}")
+    assert len(throttle._failures) <= MAX_KEYS
+    assert not any(k.startswith("ip:") for k in throttle._failures)  # the expired ones went first
+    assert "new:%d" % (MAX_KEYS - 1) in throttle._failures
 
 
 # ------------------------------------------------------------------ audit log
@@ -726,6 +871,41 @@ def test_audit_log_paging(app, boss_client, clock):
         assert boss_client.get(f"/api/tokens/{made['item']['id']}/audit", params=bad).status_code == 422
 
 
+def test_audit_paging_with_many_rows_in_one_second_returns_every_row_once(app, boss_client, clock):
+    made = new_token(boss_client)
+    t = bearer(app, made["token"])
+    for _ in range(7):
+        assert t.get("/api/customers").status_code == 200  # the clock is frozen: one second
+    seen: list[dict] = []
+    query: dict = {"limit": 2}
+    for _ in range(10):
+        page = audit(boss_client, made["item"]["id"], **query)
+        seen += page["items"]
+        if page["next"] is None:
+            assert page["next_id"] is None
+            break
+        assert page["next"] == page["items"][-1]["at"] and page["next_id"] == page["items"][-1]["id"]
+        query = {"limit": 2, "before": page["next"], "before_id": page["next_id"]}
+    ids = [r["id"] for r in seen]
+    assert len(ids) == 7 and len(set(ids)) == 7
+    assert len({r["at"] for r in seen}) == 1
+    assert ids == sorted(ids, reverse=True)  # (at desc, id desc), deterministic
+    assert ids == [r["id"] for r in audit(boss_client, made["item"]["id"])["items"]]
+    # `before` alone keeps its meaning: rows strictly before that second
+    assert audit(boss_client, made["item"]["id"], before=seen[0]["at"])["items"] == []
+    assert boss_client.get(f"/api/tokens/{made['item']['id']}/audit", params={"before_id": "!"}).status_code == 422
+
+
+def test_route_and_method_are_truncated_consistently(store):
+    svc = AuditService(store)
+    svc.append("abcdef12", "u1", "M" * 40, "/" + "r" * 400, 200)
+    (row,) = svc.list("abcdef12")
+    assert len(row["method"]) == METHOD_MAX == 16 and len(row["route"]) == ROUTE_MAX == 255
+    AuditEntryOut(**row)  # the response model accepts exactly what the service writes
+    with pytest.raises(ValidationError):
+        AuditEntryOut(**{**row, "route": "r" * (ROUTE_MAX + 1)})
+
+
 def test_audit_rows_exist_for_revoked_and_expired_tokens_and_only_the_owner_or_boss_reads_them(app, sessions):
     boss, emp, acc = sessions["boss"], sessions["employee"], sessions["accountant"]
     made = new_token(emp)
@@ -746,25 +926,30 @@ def test_the_audit_service_is_append_only(store):
     assert not any(hasattr(svc, n) for n in ("update", "save", "delete", "remove", "clear"))
 
 
-def test_prune_removes_rows_older_than_365_days_at_startup(config, store, app):
+def _audit_row(at: int) -> dict:
+    return {"at": at, "token_id": "abcdef12", "user_id": "u1", "method": "GET", "route": "/r", "status": 200}
+
+
+def test_prune_removes_rows_older_than_365_days(store):
     now = int(time.time())
-    svc = AuditService(store)
     day = 86400
     for age_days in (RETENTION_DAYS + 1, RETENTION_DAYS - 1, 1000, 0):
-        store.save(
-            "audit_log",
-            {"at": now - age_days * day, "token_id": "abcdef12", "user_id": "u1", "method": "GET", "route": "/r",
-             "status": 200},
-        )  # fmt: skip
-    assert svc.prune() == 2
+        store.save("audit_log", _audit_row(now - age_days * day))
+    assert AuditService(store).prune() == 2
     assert sorted((now - r["at"]) // day for r in store.list("audit_log")) == [0, RETENTION_DAYS - 1]
-    # and it really runs when the app starts
-    store.save("audit_log", {"at": now - 400 * day, "token_id": "abcdef12", "user_id": "u1", "method": "GET",
-                             "route": "/r", "status": 200})  # fmt: skip
-    from permita38.api.deps import startup_services
 
-    startup_services(app.state.services)
-    assert all(r["at"] > now - RETENTION_DAYS * day for r in store.list("audit_log"))
+
+def test_the_prune_runs_when_the_app_starts(config):
+    """Through the real lifespan (``with TestClient``), not by calling the prune by hand."""
+    now = int(time.time())
+    first = get_app(config)
+    with TestClient(first):  # creates the database
+        first.state.services.store.save("audit_log", _audit_row(now - 400 * 86400))
+        first.state.services.store.save("audit_log", _audit_row(now - 5 * 86400))
+    second = get_app(config)
+    with TestClient(second):
+        left = second.state.services.store.list("audit_log")
+    assert [r["at"] for r in left] == [now - 5 * 86400]
 
 
 def test_a_failing_audit_write_is_logged_and_the_response_is_unchanged(app, boss_client, monkeypatch, caplog):
@@ -808,15 +993,126 @@ def test_credentials_are_not_part_of_exports(app, boss_client):
 
 
 # ------------------------------------------------------------------ source scan
-def test_request_paths_never_ask_the_role_based_check_for_the_current_principal():
+def test_request_paths_never_use_the_role_based_check_or_the_matrix_for_the_current_principal():
     """`rights.scope(role, ...)` is for roles of OTHER users and for the table itself; the signed-in principal is
-    always checked with `scope_for` / `allowed_for`, otherwise a read-only token would slip through."""
+    always checked with `scope_for` / `allowed_for`, otherwise a read-only token would slip through. The matrix itself
+    is read only in `core/rights.py`. Importing the helpers by name or under an alias would hide the call."""
     root = Path(__file__).parents[2] / "permita38"
-    pattern = re.compile(r"rights\.(scope|allowed)\(")
+    call = re.compile(r"\brights\.(scope|allowed|MATRIX)\b")
+    alias = re.compile(r"\brights\s+as\s+\w+")
+    from_import = re.compile(r"from\s+[\w.]*\brights\s+import\s+(\([^)]*\)|[^\n]*)")
+    allowed_names = {"Scope", "Op", "BOSS", "EMPLOYEE", "ACCOUNTANT", "ROLES", "AREAS", "COLLECTION_AREA"}  # no check
     offenders = []
     for folder in ("api", "core/service"):
         for path in sorted((root / folder).rglob("*.py")):
-            for n, line in enumerate(path.read_text().splitlines(), 1):
-                if pattern.search(line):
-                    offenders.append(f"{path.relative_to(root)}:{n}: {line.strip()}")
+            text = path.read_text()
+            rel = path.relative_to(root)
+            for n, line in enumerate(text.splitlines(), 1):
+                if call.search(line) or alias.search(line):
+                    offenders.append(f"{rel}:{n}: {line.strip()}")
+            for m in from_import.finditer(text):
+                names = {piece.split()[0] for piece in re.split(r"[,()]", m.group(1)) if piece.split()}
+                bad = {x for x in names if x not in allowed_names and x not in ("scope_for", "allowed_for")}
+                if bad:
+                    offenders.append(f"{rel}: from ...rights import {sorted(bad)}")
     assert offenders == []
+
+
+def test_the_source_scan_catches_what_it_is_meant_to_catch(tmp_path):
+    """The patterns are not vacuous: the forbidden spellings are matched, the legitimate ones are not."""
+    call = re.compile(r"\brights\.(scope|allowed|MATRIX)\b")
+    assert call.search('rights.scope(user["role"], "x")') and call.search("rights.allowed(r, a)")
+    assert call.search("rights.MATRIX[role]")
+    assert not call.search("rights.scope_for(user, a)") and not call.search("rights.allowed_for(u, a)")
+    assert not call.search("rights.Scope.ALL")
+
+
+# ------------------------------------------------------------------ session-only boss writes, safe views, logout
+BOSS_WRITES = [
+    ("PUT", "/api/numbering"),
+    ("POST", "/api/import/run"),
+    ("POST", "/api/import/batches/abcdef12/undo"),
+    ("POST", "/api/calendars"),
+    ("POST", "/api/calendars/upload"),
+    ("PUT", "/api/calendars/abcdef12"),
+    ("DELETE", "/api/calendars/abcdef12"),
+    ("POST", "/api/calendars/abcdef12/refresh"),
+]
+BOSS_READS = [
+    "/api/calendars",
+    "/api/numbering/status",
+    "/api/numbering/preview",
+    "/api/numbering/log",
+    "/api/import/batches",
+    "/api/calendars/suggestions",
+]
+
+
+@pytest.mark.parametrize(("method", "path"), BOSS_WRITES)
+@pytest.mark.parametrize("read_only", [True, False])
+def test_boss_only_high_impact_writes_are_session_only(app, boss_client, method, path, read_only):
+    t = bearer(app, new_token(boss_client, read_only=read_only)["token"])
+    r = t.request(method, path, json={})
+    if read_only:
+        assert r.status_code == 403  # the read-only guard or session-only, either way closed
+    else:
+        assert r.status_code == 403 and r.json() == SESSION_ONLY_BODY
+    # the session of the same boss is not refused for that reason
+    assert boss_client.request(method, path, json={}).json() != SESSION_ONLY_BODY
+
+
+def test_the_session_only_writes_are_exactly_the_documented_ones():
+    documented = {(m, re.sub(r"abcdef12", lambda _: "{x}", p)) for m, p in BOSS_WRITES}
+    in_table = {
+        (m, re.sub(r"\{[^}]+\}", "{x}", p))
+        for m, p in SESSION_ONLY
+        if p.startswith(("/api/numbering", "/api/import", "/api/calendars"))
+    }
+    assert documented == in_table
+
+
+def test_a_read_only_boss_token_reads_the_views_and_is_refused_every_unsafe_method(app, boss_client):
+    ro = bearer(app, new_token(boss_client)["token"])
+    for path in BOSS_READS:
+        assert ro.get(path).status_code == boss_client.get(path).status_code == 200, path
+    assert ro.get("/api/numbering/status").json() == boss_client.get("/api/numbering/status").json()
+    unsafe = [
+        (m, p)
+        for m, route, p in _routes(app)
+        if m not in ("GET", "HEAD", "OPTIONS") and (declared(route) or is_session_only(route))
+    ]
+    assert len(unsafe) > 40
+    for method, path in unsafe:
+        r = ro.request(method, _url(path), json={})
+        assert r.status_code == 403, (method, path, r.status_code)
+
+
+def test_a_read_write_boss_token_cannot_change_numbering_or_import_but_reads_them(app, boss_client):
+    rw = bearer(app, new_token(boss_client, read_only=False)["token"])
+    assert rw.put("/api/numbering", json={"type": "invoice", "next": 50, "confirm": True}).json() == SESSION_ONLY_BODY
+    assert (
+        rw.post("/api/import/run", data={"type": "customers"}, files={"file": ("a.csv", b"name\nA\n")}).json()
+        == SESSION_ONLY_BODY
+    )
+    assert rw.get("/api/numbering/status").status_code == 200
+    assert rw.post("/api/numbering/check", json={"type": "invoice"}).status_code == 200  # a dry run changes nothing
+    assert boss_client.get("/api/numbering/status").json()["next"] != 50
+
+
+def test_the_api_server_path_is_not_in_bootstrap_for_a_token(app, boss_client, config):
+    assert boss_client.get("/api/bootstrap").json()["data_dir"] == str(config.data_dir)
+    for read_only in (True, False):
+        r = bearer(app, new_token(boss_client, read_only=read_only)["token"]).get("/api/bootstrap")
+        assert r.status_code == 200 and "data_dir" not in r.json() and str(config.data_dir) not in r.text
+
+
+def test_logout_is_public_and_leaves_the_cookie_alone_when_a_bearer_is_present(app, boss_client):
+    token = new_token(boss_client)["token"]
+    anonymous = TestClient(app).post("/api/auth/logout")
+    assert anonymous.status_code == 204 and "authorization=" in anonymous.headers.get("set-cookie", "")
+    for credential in (token, boss_client.headers["Authorization"].split()[1]):
+        r = bearer(app, credential).post("/api/auth/logout")
+        assert r.status_code == 204 and "set-cookie" not in r.headers
+    assert bearer(app, token).get("/api/customers").status_code == 200  # nothing was revoked or audited as a route
+    (public,) = [r for m, r, p in _routes(app) if (m, p) == ("POST", "/api/auth/logout")]
+    assert not is_session_only(public) and not declared(public)

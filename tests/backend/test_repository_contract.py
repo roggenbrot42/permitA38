@@ -8,7 +8,7 @@ import pytest
 from permita38.core.repository import COLLECTIONS, INTERNAL_COLLECTIONS, TABLES, DatabaseRevisionError, Repository
 from permita38.core.repository.schema import Table
 
-from .repository_registry import REGISTRY, registry_params
+from .repository_registry import REGISTRY, integrity_error, registry_params
 
 ALL = [*COLLECTIONS, *INTERNAL_COLLECTIONS]
 
@@ -293,7 +293,7 @@ def test_api_token_hash_is_unique_and_findable(repo):
     a = repo.save("api_tokens", {"user_id": "u1", "label": "a", "token_hash": "h" * 64, "expires_at": 10})
     assert repo.find("api_tokens", token_hash="h" * 64) == [a]
     assert repo.find("api_tokens", token_hash="x" * 64) == []
-    with pytest.raises(Exception):  # unique index idx_api_tokens_hash
+    with pytest.raises(integrity_error(repo)):  # unique index idx_api_tokens_hash
         repo.save("api_tokens", {"user_id": "u2", "label": "b", "token_hash": "h" * 64, "expires_at": 10})
     assert len(repo.list("api_tokens")) == 1
 

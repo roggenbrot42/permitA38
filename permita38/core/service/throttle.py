@@ -12,6 +12,7 @@ from permita38.core.errors import ServiceError
 
 MAX_FAILURES = 5
 FAILURE_WINDOW = 300  # seconds
+MAX_KEYS = 10000  # upper bound for the number of remembered keys (a flood of distinct IPs must not grow memory)
 
 
 class AttemptThrottle:
@@ -53,6 +54,17 @@ class AttemptThrottle:
             for k in keys:
                 self._recent(k, now)
                 self._failures.setdefault(k, []).append(now)
+            if len(self._failures) > MAX_KEYS:
+                self._shrink(now)
+
+    def _shrink(self, now: float) -> None:
+        """Sweep expired windows; if still over the cap, forget the keys whose last failure is oldest."""
+        for k in list(self._failures):
+            self._recent(k, now)
+        extra = len(self._failures) - MAX_KEYS + MAX_KEYS // 10  # trim below the cap so the sweep is not repeated
+        if len(self._failures) > MAX_KEYS:
+            for k in sorted(self._failures, key=lambda key: self._failures[key][-1])[:extra]:
+                del self._failures[k]
 
     def clear(self, *keys: str) -> None:
         with self._lock:

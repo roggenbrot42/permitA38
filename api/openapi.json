@@ -2692,9 +2692,6 @@
         "security": [
           {
             "HTTPBearer": []
-          },
-          {
-            "ApiToken": []
           }
         ]
       }
@@ -2856,9 +2853,6 @@
         "security": [
           {
             "HTTPBearer": []
-          },
-          {
-            "ApiToken": []
           }
         ]
       }
@@ -2907,9 +2901,6 @@
         "security": [
           {
             "HTTPBearer": []
-          },
-          {
-            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5361,9 +5352,6 @@
         "security": [
           {
             "HTTPBearer": []
-          },
-          {
-            "ApiToken": []
           }
         ]
       }
@@ -5410,9 +5398,6 @@
         "security": [
           {
             "HTTPBearer": []
-          },
-          {
-            "ApiToken": []
           }
         ]
       }
@@ -5427,9 +5412,6 @@
         "security": [
           {
             "HTTPBearer": []
-          },
-          {
-            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5485,9 +5467,6 @@
         "security": [
           {
             "HTTPBearer": []
-          },
-          {
-            "ApiToken": []
           }
         ],
         "parameters": [
@@ -5528,9 +5507,6 @@
         "security": [
           {
             "HTTPBearer": []
-          },
-          {
-            "ApiToken": []
           }
         ],
         "parameters": [
@@ -6446,6 +6422,25 @@
               ],
               "title": "Before"
             }
+          },
+          {
+            "name": "before_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-z]{6,32}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "with `before`: the id of the last row",
+              "title": "Before Id"
+            },
+            "description": "with `before`: the id of the last row"
           }
         ],
         "responses": {
@@ -6877,7 +6872,7 @@
           },
           "route": {
             "type": "string",
-            "maxLength": 300,
+            "maxLength": 255,
             "title": "Route"
           },
           "status": {
@@ -6918,6 +6913,18 @@
             ],
             "title": "Next",
             "description": "`before` value for the next page, null at the end"
+          },
+          "next_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Id",
+            "description": "`before_id` value for the next page (with `next`), null at the end"
           }
         },
         "type": "object",

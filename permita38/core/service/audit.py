@@ -10,6 +10,8 @@ from permita38.core.repository import Repository
 
 RETENTION_DAYS = 365
 UNMATCHED_ROUTE = "(unmatched)"
+ROUTE_MAX = 255
+METHOD_MAX = 16
 PUBLIC_FIELDS = ("id", "at", "token_id", "user_id", "method", "route", "status")
 
 
@@ -24,18 +26,23 @@ class AuditService:
                 "at": int(time.time()),
                 "token_id": token_id,
                 "user_id": user_id,
-                "method": method[:16],
-                "route": route[:300],
+                "method": method[:METHOD_MAX],
+                "route": route[:ROUTE_MAX],
                 "status": int(status),
             },
         )
 
-    def list(self, token_id: str, limit: int = 50, before: int | None = None) -> list[dict]:
-        """Newest first; ``before`` keeps rows with ``at < before``."""
+    def list(
+        self, token_id: str, limit: int = 50, before: int | None = None, before_id: str | None = None
+    ) -> list[dict]:
+        """Newest first, ordered by ``(at desc, id desc)`` (deterministic). ``before`` keeps rows with ``at < before``;
+        with ``before_id`` too, the cursor is the pair: rows after ``(before, before_id)`` in that order."""
         rows = self.store.find("audit_log", token_id=token_id)
-        if before is not None:
+        if before is not None and before_id is not None:
+            rows = [r for r in rows if (int(r.get("at") or 0), r["id"]) < (before, before_id)]
+        elif before is not None:
             rows = [r for r in rows if int(r.get("at") or 0) < before]
-        rows.sort(key=lambda r: (int(r.get("at") or 0), int(r.get("created") or 0), r["id"]), reverse=True)
+        rows.sort(key=lambda r: (int(r.get("at") or 0), r["id"]), reverse=True)
         return [{k: r.get(k) for k in PUBLIC_FIELDS} for r in rows[:limit]]
 
     def prune(self, now: int | None = None) -> int:

@@ -987,10 +987,11 @@ class AuditEntryOut(BaseModel):
     token_id: str = Field(max_length=32)
     user_id: str = Field(max_length=32)
     method: str = Field(max_length=16)
-    route: str = Field(max_length=300)
+    route: str = Field(max_length=255)
     status: int
 
 
 class AuditPage(BaseModel):
     items: list[AuditEntryOut]
     next: int | None = Field(None, description="`before` value for the next page, null at the end")
+    next_id: str | None = Field(None, description="`before_id` value for the next page (with `next`), null at the end")

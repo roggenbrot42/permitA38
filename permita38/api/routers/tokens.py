@@ -76,7 +76,11 @@ def token_audit(
     services: ServicesDep,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     before: Annotated[int | None, Query(ge=0, le=EPOCH_MAX)] = None,
+    before_id: Annotated[
+        str | None, Query(pattern=v.ID_PATTERN, description="with `before`: the id of the last row")
+    ] = None,
 ):
     tid = services.tokens.audit_target(user, token_id)
-    items = services.audit.list(tid, limit, before)
-    return {"items": items, "next": items[-1]["at"] if len(items) == limit else None}
+    items = services.audit.list(tid, limit, before, before_id)
+    full = len(items) == limit
+    return {"items": items, "next": items[-1]["at"] if full else None, "next_id": items[-1]["id"] if full else None}

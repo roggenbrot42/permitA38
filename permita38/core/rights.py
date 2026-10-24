@@ -143,10 +143,14 @@ def scope_for(principal: dict, area: str, op: Op = "read") -> Scope:
     """Effective scope of the signed-in principal (user session or API token).
 
     The only function request paths use for the current user: the owner's role decides, and a read-only API token
-    never writes. A token therefore never exceeds the rights of its owner."""
+    never writes (the write clamp applies to unsafe requests; a safe request, GET/HEAD/OPTIONS, gets the owner's
+    scope, because it cannot change anything and some read-only views are declared with a write area). A token
+    therefore never exceeds the rights of its owner."""
     base = scope(principal.get("role"), area, op)
     auth = principal.get("_auth")
     if auth and auth.get("kind") == "token" and auth.get("read_only") and op == "write":
+        if auth.get("safe_request"):
+            return base  # a GET/HEAD/OPTIONS view declared with a write area: exactly what the owner's session gets
         return Scope.NONE
     return base
 
@@ -156,5 +160,8 @@ def allowed_for(principal: dict, area: str, op: Op = "read") -> bool:
 
 
 def permissions_for(principal: dict) -> dict[str, dict[str, str]]:
-    """`permissions` of a principal: the owner's table, with every write entry ``none`` for a read-only token."""
-    return {a: {"read": scope_for(principal, a).value, "write": scope_for(principal, a, "write").value} for a in AREAS}
+    """`permissions` of a principal: the owner's table, with every write entry ``none`` for a read-only token (whatever
+    the method of the request that asks: this is what the token may *do*)."""
+    auth = principal.get("_auth")
+    clamped = principal if not auth else {**principal, "_auth": {**auth, "safe_request": False}}
+    return {a: {"read": scope_for(clamped, a).value, "write": scope_for(clamped, a, "write").value} for a in AREAS}

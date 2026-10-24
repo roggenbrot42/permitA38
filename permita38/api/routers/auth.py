@@ -90,6 +90,8 @@ def login(payload: LoginPayload, request: Request, response: Response, services:
 
 @router.post("/logout", status_code=204, summary="sign out (clears the cookie)")
 def logout(request: Request, response: Response, services: ServicesDep):
+    if request.headers.get("authorization", "").lower().startswith("bearer "):
+        return  # public route: a request that carries a bearer credential (an API token) never touches the cookie
     response.delete_cookie(COOKIE_NAME, path="/", secure=cookie_secure(request, services.config))
 
 

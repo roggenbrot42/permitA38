@@ -295,7 +295,7 @@ def test_every_route_is_denied_exactly_where_the_matrix_says(app, clients):
 
 
 # Hand-written: the routes an API token can never use (credentials, two-factor, user administration, token management,
-# settings writes). Everything else under /api/auth is either public or `me`.
+# settings writes, numbering/import/calendar writes). Everything else under /api/auth is either public or `me`.
 SESSION_ONLY = {
     ("POST", "/api/auth/change-password"),
     ("GET", "/api/auth/totp/status"),
@@ -315,6 +315,15 @@ SESSION_ONLY = {
     ("GET", "/api/tokens/{token_id}/audit"),
     ("PATCH", "/api/tokens/{token_id}"),
     ("PUT", "/api/settings"),
+    # boss-only high-impact writes (contract decision 20)
+    ("PUT", "/api/numbering"),
+    ("POST", "/api/import/run"),
+    ("POST", "/api/import/batches/{rid}/undo"),
+    ("POST", "/api/calendars"),
+    ("POST", "/api/calendars/upload"),
+    ("PUT", "/api/calendars/{source_id}"),
+    ("DELETE", "/api/calendars/{source_id}"),
+    ("POST", "/api/calendars/{source_id}/refresh"),
 }
 # reachable without a credential (a bearer token is ignored there) or open to a token with the owner's rights
 PUBLIC_OR_TOKEN_OK = {
