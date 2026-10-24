@@ -5429,6 +5429,380 @@
           }
         }
       }
+    },
+    "/api/trips": {
+      "get": {
+        "tags": [
+          "trips"
+        ],
+        "summary": "List Trips",
+        "operationId": "list_trips_api_trips_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Trip"
+                  },
+                  "title": "Response List Trips Api Trips Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "trips"
+        ],
+        "summary": "Create Trip",
+        "operationId": "create_trip_api_trips_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Force"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TripIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trip"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/trips/preview": {
+      "post": {
+        "tags": [
+          "trips"
+        ],
+        "summary": "Preview Trip",
+        "description": "The per-day figures and totals of a trip body; nothing is saved. Needs write access (contract).",
+        "operationId": "preview_trip_api_trips_preview_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TripIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TripFigures"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/trips/{rid}": {
+      "get": {
+        "tags": [
+          "trips"
+        ],
+        "summary": "Get Trip",
+        "operationId": "get_trip_api_trips__rid__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trip"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "trips"
+        ],
+        "summary": "Update Trip",
+        "operationId": "update_trip_api_trips__rid__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rid"
+            }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Force"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TripIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trip"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "trips"
+        ],
+        "summary": "Delete Trip",
+        "operationId": "delete_trip_api_trips__rid__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/trips/{rid}/reopen": {
+      "post": {
+        "tags": [
+          "trips"
+        ],
+        "summary": "Reopen Trip",
+        "description": "Boss only: a final trip becomes a draft again so that it can be changed.",
+        "operationId": "reopen_trip_api_trips__rid__reopen_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Trip"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/trips/{rid}/statement.pdf": {
+      "get": {
+        "tags": [
+          "trips"
+        ],
+        "summary": "Trip Statement Pdf",
+        "operationId": "trip_statement_pdf_api_trips__rid__statement_pdf_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/pdf": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -8583,6 +8957,17 @@
               }
             ],
             "title": "Lines"
+          },
+          "trip_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Id"
           }
         },
         "additionalProperties": true,
@@ -8726,6 +9111,18 @@
               }
             ],
             "title": "Lines"
+          },
+          "trip_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Id"
           }
         },
         "additionalProperties": true,
@@ -11542,6 +11939,811 @@
         ],
         "title": "TotpStatus"
       },
+      "Trip": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "places": {
+            "items": {
+              "$ref": "#/components/schemas/TripPlace"
+            },
+            "type": "array",
+            "title": "Places",
+            "default": []
+          },
+          "meals_provided": {
+            "items": {
+              "$ref": "#/components/schemas/TripMeal"
+            },
+            "type": "array",
+            "title": "Meals Provided",
+            "default": []
+          },
+          "mileage": {
+            "items": {
+              "$ref": "#/components/schemas/TripMileage"
+            },
+            "type": "array",
+            "title": "Mileage",
+            "default": []
+          },
+          "not_needed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Not Needed",
+            "default": []
+          },
+          "cost_centre": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "project",
+                  "general"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Centre"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "final"
+            ],
+            "title": "Status",
+            "default": "draft"
+          },
+          "allowance_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowance Total"
+          },
+          "mileage_km": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mileage Km"
+          },
+          "mileage_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mileage Total"
+          },
+          "rules_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rules Version"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/TripDay"
+            },
+            "type": "array",
+            "title": "Days",
+            "default": []
+          },
+          "bills": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TripBills"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checklist": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TripChecklistItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checklist"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Trip"
+      },
+      "TripBills": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "default": 0
+          },
+          "net": {
+            "type": "number",
+            "title": "Net",
+            "default": 0
+          },
+          "vat": {
+            "type": "number",
+            "title": "Vat",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "TripBills",
+        "description": "The linked bills (expenses with this trip_id): count and sums of their net and VAT."
+      },
+      "TripChecklistItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "hint": {
+            "type": "string",
+            "title": "Hint"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "added",
+              "open",
+              "not_needed"
+            ],
+            "title": "State"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "default": 0
+          },
+          "sum": {
+            "type": "number",
+            "title": "Sum",
+            "default": 0
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "hint",
+          "state"
+        ],
+        "title": "TripChecklistItem"
+      },
+      "TripDay": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "country": {
+            "type": "string",
+            "title": "Country"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "absence_hours": {
+            "type": "number",
+            "title": "Absence Hours"
+          },
+          "base": {
+            "type": "number",
+            "title": "Base"
+          },
+          "reductions": {
+            "items": {
+              "$ref": "#/components/schemas/TripReduction"
+            },
+            "type": "array",
+            "title": "Reductions",
+            "default": []
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note",
+            "default": ""
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "country",
+          "absence_hours",
+          "base",
+          "amount"
+        ],
+        "title": "TripDay",
+        "description": "One calendar day of the trip (stored with the trip, returned by preview and the trip)."
+      },
+      "TripFigures": {
+        "properties": {
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/TripDay"
+            },
+            "type": "array",
+            "title": "Days",
+            "default": []
+          },
+          "allowance_total": {
+            "type": "number",
+            "title": "Allowance Total",
+            "default": 0
+          },
+          "mileage_km": {
+            "type": "number",
+            "title": "Mileage Km",
+            "default": 0
+          },
+          "mileage_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mileage Rate"
+          },
+          "mileage_total": {
+            "type": "number",
+            "title": "Mileage Total",
+            "default": 0
+          },
+          "rules_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rules Version"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "TripFigures",
+        "description": "Computed figures; the same numbers the trip stores, preview returns them without saving."
+      },
+      "TripIn": {
+        "properties": {
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "purpose": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Purpose"
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "title": "End"
+          },
+          "places": {
+            "items": {
+              "$ref": "#/components/schemas/TripPlaceIn"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Places",
+            "default": []
+          },
+          "meals_provided": {
+            "items": {
+              "$ref": "#/components/schemas/TripMealIn"
+            },
+            "type": "array",
+            "maxItems": 90,
+            "title": "Meals Provided",
+            "default": []
+          },
+          "mileage": {
+            "items": {
+              "$ref": "#/components/schemas/TripMileageIn"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Mileage",
+            "default": []
+          },
+          "not_needed": {
+            "items": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Not Needed",
+            "default": []
+          },
+          "cost_centre": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "project",
+                  "general"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Centre"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "final"
+            ],
+            "title": "Status",
+            "default": "draft"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "purpose",
+          "start",
+          "end"
+        ],
+        "title": "TripIn",
+        "description": "A business trip. Figures (allowance, mileage, days) are computed by the server, never taken from the client."
+      },
+      "TripMeal": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "breakfast": {
+            "type": "boolean",
+            "title": "Breakfast",
+            "default": false
+          },
+          "lunch": {
+            "type": "boolean",
+            "title": "Lunch",
+            "default": false
+          },
+          "dinner": {
+            "type": "boolean",
+            "title": "Dinner",
+            "default": false
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date"
+        ],
+        "title": "TripMeal"
+      },
+      "TripMealIn": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "breakfast": {
+            "type": "boolean",
+            "title": "Breakfast",
+            "default": false
+          },
+          "lunch": {
+            "type": "boolean",
+            "title": "Lunch",
+            "default": false
+          },
+          "dinner": {
+            "type": "boolean",
+            "title": "Dinner",
+            "default": false
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date"
+        ],
+        "title": "TripMealIn"
+      },
+      "TripMileage": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          },
+          "km": {
+            "type": "number",
+            "title": "Km"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "km"
+        ],
+        "title": "TripMileage"
+      },
+      "TripMileageIn": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          },
+          "km": {
+            "type": "number",
+            "maximum": 5000.0,
+            "minimum": 0.1,
+            "title": "Km"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "km"
+        ],
+        "title": "TripMileageIn"
+      },
+      "TripPlace": {
+        "properties": {
+          "from_date": {
+            "type": "string",
+            "title": "From Date"
+          },
+          "country": {
+            "type": "string",
+            "title": "Country"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "from_date",
+          "country"
+        ],
+        "title": "TripPlace",
+        "description": "The destination from a given day on (the first entry is the outbound destination)."
+      },
+      "TripPlaceIn": {
+        "properties": {
+          "from_date": {
+            "type": "string",
+            "title": "From Date"
+          },
+          "country": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$",
+            "title": "Country"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "from_date",
+          "country"
+        ],
+        "title": "TripPlaceIn"
+      },
+      "TripReduction": {
+        "properties": {
+          "meal": {
+            "type": "string",
+            "enum": [
+              "breakfast",
+              "lunch",
+              "dinner"
+            ],
+            "title": "Meal"
+          },
+          "amount": {
+            "type": "number",
+            "title": "Amount"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "meal",
+          "amount"
+        ],
+        "title": "TripReduction"
+      },
       "Uploaded": {
         "properties": {
           "name": {
@@ -13666,6 +14868,17 @@
               }
             ],
             "title": "Lines"
+          },
+          "trip_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Id"
           },
           "planning_warnings": {
             "anyOf": [

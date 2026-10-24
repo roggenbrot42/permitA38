@@ -226,6 +226,16 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("GET", "/api/expenses/{rid}"): ("expenses", "read", False),
     ("PUT", "/api/expenses/{rid}"): ("expenses", "write", False),
     ("DELETE", "/api/expenses/{rid}"): ("expenses", "write", False),
+    # business trips: employees see and change their own trips only (service check); accountants read all, change none;
+    # reopening a final trip is boss only (full scope); preview needs write access (contract), nothing is saved
+    ("GET", "/api/trips"): ("trips", "read", False),
+    ("POST", "/api/trips"): ("trips", "write", False),
+    ("POST", "/api/trips/preview"): ("trips", "write", False),
+    ("GET", "/api/trips/{rid}"): ("trips", "read", False),
+    ("PUT", "/api/trips/{rid}"): ("trips", "write", False),
+    ("DELETE", "/api/trips/{rid}"): ("trips", "write", False),
+    ("POST", "/api/trips/{rid}/reopen"): ("trips", "write", True),
+    ("GET", "/api/trips/{rid}/statement.pdf"): ("trips", "read", False),
     ("GET", "/api/templates"): ("templates", "read", False),
     ("POST", "/api/templates"): ("templates", "write", False),
     ("GET", "/api/templates/{rid}"): ("templates", "read", False),
@@ -448,6 +458,8 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
         )
     if "expense_lines" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         raw.execute('ALTER TABLE "expenses" DROP COLUMN "lines"')
+    if "trips" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.executescript('DROP TABLE "trips"; ALTER TABLE "expenses" DROP COLUMN "trip_id";')
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)
