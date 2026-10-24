@@ -39,13 +39,14 @@ async function bootstrap() {
 }
 
 /* ---------- modal + forms ---------- */
-function closeModal() { runCloseHook(); $('#modal-root').innerHTML = ''; }
+function closeModal() { runCloseHook(); $('#modal-root').onkeydown = null; $('#modal-root').innerHTML = ''; }
 /** A dialog can register cleanup (e.g. revoking object URLs) that runs once when it closes. */
 function runCloseHook() { const h = closeModal.onClose; closeModal.onClose = null; if (h) h(); }
 let MODAL_SEQ = 0;  // bumped every time a dialog opens: a save that finishes after its dialog was cancelled must not close another one
 function modal(html, wide) {
   runCloseHook();
   MODAL_SEQ++;
+  $('#modal-root').onkeydown = null;   // a dialog's key handler must not outlive it
   $('#modal-root').innerHTML = `<div class="modal-bg"><div class="modal ${wide ? 'wide' : ''}">${html}</div></div>`;
   const first = $('#modal-root input:not([type=hidden]), #modal-root select'); if (first) first.focus();
 }

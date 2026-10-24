@@ -66,9 +66,22 @@ class FakeTokenApi:
         self.create_error = None  # (status, payload, headers) answered by POST /tokens
         self.audit_pages = [{"items": [AUDIT_ROW], "next": None, "next_id": None}]
         self.confirms = []
+        self.customers = [{"id": "cust0001", "name": "Demo Customer GmbH"}]
+        self.held = []  # audit routes kept open until the test answers them
+        self.hold_audit = False
+        self.fail = {}  # (method, path suffix) -> status: answered with a 500 (or this status)
 
     def calls(self, method, path):
         return [r for r in self.requests if r[0] == method and r[1] == path]
+
+    def audit_page(self, query):
+        """Index of the page that follows the cursor (before) the client sent."""
+        if "before" not in query:
+            return 0
+        for i in range(1, len(self.audit_pages)):
+            if str(self.audit_pages[i - 1]["next"]) == query["before"][0]:
+                return i
+        raise AssertionError("unknown cursor " + str(query))
 
     def handle(self, route):
         req = route.request
@@ -92,6 +105,14 @@ class FakeTokenApi:
                     "features": {},
                 },
             )
+        for (method, suffix), status in self.fail.items():
+            if req.method == method and path.endswith(suffix):
+                return _json(route, status, {"detail": "Boom" if status >= 500 else "Please sign in"})
+        if path == "customers" and req.method == "GET":
+            return _json(route, 200, copy.deepcopy(self.customers))
+        if path.startswith("tokens/") and path.endswith("/audit") and self.hold_audit:
+            self.held.append((route, query))
+            return None
         if path == "tokens" and req.method == "GET":
             return _json(route, 200, copy.deepcopy(self.items))
         if path == "tokens" and req.method == "POST":
@@ -114,11 +135,20 @@ class FakeTokenApi:
                     return _json(route, 200, t)
             return _json(route, 404, {"detail": "Token not found"})
         if path.startswith("tokens/") and path.endswith("/audit"):
-            page = 1 if "before" in query else 0
-            return _json(route, 200, self.audit_pages[page])
+            return _json(route, 200, self.audit_pages[self.audit_page(query)])
         if path in ("settings", "auth/status"):
             return _json(route, 200, {})
         return _json(route, 200, [])
+
+
+def assert_secret_gone(pg):
+    """No dialog, no input holding the secret and no element text containing it."""
+    expect(pg.locator("#modal-root .modal")).to_have_count(0)
+    assert not pg.evaluate(
+        "s => [...document.querySelectorAll('input,textarea')].some(i => i.value === s)"
+        " || [...document.querySelectorAll('*')].some(e => (e.textContent || '').includes(s))",
+        SECRET,
+    )
 
 
 def open_app(browser, api, page="tokens"):
@@ -176,7 +206,7 @@ def test_list_columns_and_statuses(browser):
     gone = table.locator("tr", has_text="Gone")
     expect(gone).to_contain_text("Revoked")
     expect(gone.locator("[data-a=tokRevoke]")).to_have_count(0)
-    assert SECRET not in pg.content()
+    assert_secret_gone(pg)
     assert problems == []
     ctx.close()
 
@@ -210,7 +240,9 @@ def test_create_shows_secret_once_and_removes_it_on_close(browser):
     pg.check("#tk_saved")
     pg.click("#tk_close")
     expect(pg.locator("#modal-root .modal")).to_have_count(0)
-    assert SECRET not in pg.content()
+    assert_secret_gone(pg)
+    # keyboard focus returns to the button that opened the dialog
+    expect(pg.locator("[data-a=tokNew]")).to_be_focused()
     assert SECRET not in pg.url
     stored = pg.evaluate("JSON.stringify([localStorage, sessionStorage])")
     assert SECRET not in stored
@@ -287,7 +319,11 @@ def test_activity_dialog_pages_with_next(browser):
     api = FakeTokenApi(BOSS, [copy.deepcopy(ITEM)])
     api.audit_pages = [
         {"items": [AUDIT_ROW], "next": 1766399990, "next_id": "a1b2c3d4"},
-        {"items": [{**AUDIT_ROW, "id": "a1b2c3d5", "at": 1766399990, "method": "POST", "status": 403}], "next": None, "next_id": None},
+        {
+            "items": [{**AUDIT_ROW, "id": "a1b2c3d5", "at": 1766399990, "method": "POST", "status": 403}],
+            "next": None,
+            "next_id": None,
+        },
     ]
     ctx, pg, problems = open_app(browser, api)
     pg.click("[data-a=tokAudit]")
@@ -337,4 +373,152 @@ def test_settings_page_has_the_card_for_the_boss(browser):
     )
     ctx, pg, problems = open_app(browser, api, page="settings")
     expect(pg.locator("#tokens-card")).to_contain_text("Backup script")
+    ctx.close()
+
+
+def audit_requests(api):
+    return api.calls("GET", "tokens/c0ffee01/audit")
+
+
+def test_activity_paging_continues_past_page_two(browser):
+    api = FakeTokenApi(BOSS, [copy.deepcopy(ITEM)])
+    rows = [{**AUDIT_ROW, "id": f"a1b2c3d{i}", "at": 1766400000 - i, "route": f"/api/page{i}"} for i in range(3)]
+    api.audit_pages = [
+        {"items": [rows[0]], "next": 1766399999, "next_id": "a1b2c3d0"},
+        {"items": [rows[1]], "next": 1766399998, "next_id": "a1b2c3d1"},
+        {"items": [rows[2]], "next": None, "next_id": None},
+    ]
+    ctx, pg, problems = open_app(browser, api)
+    pg.click("[data-a=tokAudit]")
+    table = pg.locator("[data-testid=audit-table]")
+    expect(table.locator("tbody tr")).to_have_count(1)
+    pg.click("[data-a=tokAuditMore]")
+    expect(table.locator("tbody tr")).to_have_count(2)
+    pg.click("[data-a=tokAuditMore]")
+    expect(table.locator("tbody tr")).to_have_count(3)
+    expect(pg.locator("[data-a=tokAuditMore]")).to_have_count(0)
+    reqs = audit_requests(api)
+    assert len(reqs) == 3
+    assert "before" not in reqs[0][2]
+    assert reqs[1][2]["before"] == ["1766399999"] and reqs[1][2]["before_id"] == ["a1b2c3d0"]
+    assert reqs[2][2]["before"] == ["1766399998"] and reqs[2][2]["before_id"] == ["a1b2c3d1"]
+    assert problems == []
+    ctx.close()
+
+
+def test_stale_dialog_key_handler_does_not_leak_into_token_dialogs(browser):
+    api = FakeTokenApi({**BOSS, "permissions": {"customers": {"read": "all", "write": "all"}}})
+    ctx, pg, problems = open_app(browser, api, page="customers")
+    pg.evaluate("A.editCustomer({dataset: {id: 'cust0001'}})")
+    expect(pg.locator("#modal-root h2")).to_have_text("Edit customer")
+    pg.click("#m-cancel")
+    expect(pg.locator("#modal-root .modal")).to_have_count(0)
+    pg.evaluate("location.hash = '#/tokens'")
+    pg.wait_for_selector("[data-a=tokNew]")
+    pg.click("[data-a=tokNew]")
+    pg.fill("#tk_label", "Enter test")
+    pg.press("#tk_label", "Enter")  # submits the create form only
+    expect(pg.locator("[data-testid=token-secret]")).to_have_value(SECRET)
+    assert [r for r in api.requests if r[0] in ("PUT", "POST") and "customers" in r[1]] == []
+    assert len(api.calls("POST", "tokens")) == 1
+    # Escape must not discard the secret
+    pg.keyboard.press("Escape")
+    pg.locator("#tk_saved").focus()
+    pg.keyboard.press("Escape")
+    expect(pg.locator("[data-testid=token-secret]")).to_have_value(SECRET)
+    pg.check("#tk_saved")
+    pg.click("#tk_close")
+    assert_secret_gone(pg)
+    # Escape closes the dialogs that carry no secret, and returns focus to the button
+    pg.click("[data-a=tokNew]")
+    pg.press("#tk_label", "Escape")
+    expect(pg.locator("#modal-root .modal")).to_have_count(0)
+    expect(pg.locator("[data-a=tokNew]")).to_be_focused()
+    pg.click("[data-a=tokAudit]")
+    expect(pg.locator("[data-testid=audit-table]")).to_be_visible()
+    expect(pg.locator("#modal-root .modal")).to_have_attribute("role", "dialog")
+    expect(pg.locator("#modal-root .modal")).to_have_attribute("aria-modal", "true")
+    pg.keyboard.press("Escape")
+    expect(pg.locator("#modal-root .modal")).to_have_count(0)
+    expect(
+        pg.locator("tr[data-token=c0ffee02] [data-a=tokAudit], tr[data-token=c0ffee01] [data-a=tokAudit]").first
+    ).to_be_focused()
+    assert [r for r in api.requests if r[0] in ("PUT", "DELETE") and "customers" in r[1]] == []
+    assert problems == []
+    ctx.close()
+
+
+def test_late_audit_answer_does_not_replace_the_secret_dialog(browser):
+    api = FakeTokenApi(BOSS, [copy.deepcopy(ITEM)])
+    api.hold_audit = True
+    ctx, pg, problems = open_app(browser, api)
+    pg.click("[data-a=tokAudit]")
+    pg.wait_for_function("true")
+    assert pg.evaluate("document.querySelectorAll('#modal-root .modal').length") == 0
+    pg.click("[data-a=tokNew]")
+    pg.fill("#tk_label", "Late test")
+    pg.click("#tk_submit")
+    expect(pg.locator("[data-testid=token-secret]")).to_have_value(SECRET)
+    for _ in range(100):
+        if api.held:
+            break
+        pg.wait_for_timeout(20)
+    route, query = api.held[0]
+    _json(route, 200, api.audit_pages[0])
+    pg.wait_for_timeout(300)
+    expect(pg.locator("[data-testid=token-secret]")).to_have_value(SECRET)
+    expect(pg.locator("[data-testid=audit-table]")).to_have_count(0)
+    assert problems == []
+    ctx.close()
+
+
+def test_labels_and_routes_are_escaped(browser):
+    evil = "<img src=x onerror=window.__x=1>"
+    api = FakeTokenApi(
+        BOSS,
+        [{**ITEM, "label": evil, "owner_name": evil}],
+    )
+    api.audit_pages = [{"items": [{**AUDIT_ROW, "route": evil}], "next": None, "next_id": None}]
+    ctx, pg, problems = open_app(browser, api)
+    pg.check("[data-change=tokShowAll]")
+    expect(pg.locator("[data-testid=tokens-table]")).to_contain_text(evil)
+    pg.click("[data-a=tokAudit]")
+    expect(pg.locator("[data-testid=audit-table]")).to_contain_text(evil)
+    expect(pg.locator("#modal-root h2")).to_contain_text(evil)
+    assert pg.evaluate("document.querySelectorAll('img[src=x]').length") == 0
+    pg.wait_for_timeout(200)
+    assert pg.evaluate("window.__x") is None
+    assert problems == []
+    ctx.close()
+
+
+def test_revoke_failure_shows_a_toast_and_keeps_the_list(browser):
+    api = FakeTokenApi(BOSS, [copy.deepcopy(ITEM)])
+    api.fail[("POST", "/revoke")] = 500
+    ctx, pg, problems = open_app(browser, api)
+    pg.locator("tr", has_text="Backup script").locator("[data-a=tokRevoke]").click()
+    expect(pg.locator("#toast")).to_have_text("Boom")
+    expect(pg.locator("#toast")).to_have_class("on err")
+    expect(pg.locator("tr", has_text="Backup script")).to_contain_text("Active")
+    assert api.items[0]["status"] == "active"
+    ctx.close()
+
+
+def test_revoke_all_failure_shows_a_toast_and_keeps_the_list(browser):
+    api = FakeTokenApi(BOSS, [copy.deepcopy(ITEM)])
+    api.fail[("POST", "tokens/revoke-all")] = 500
+    ctx, pg, problems = open_app(browser, api)
+    pg.click("[data-a=tokRevokeAll]")
+    expect(pg.locator("#toast")).to_have_text("Boom")
+    expect(pg.locator("tr", has_text="Backup script")).to_contain_text("Active")
+    ctx.close()
+
+
+def test_revoke_with_expired_session_signs_out(browser):
+    api = FakeTokenApi(BOSS, [copy.deepcopy(ITEM)])
+    api.fail[("POST", "/revoke")] = 401
+    ctx, pg, problems = open_app(browser, api)
+    pg.locator("tr", has_text="Backup script").locator("[data-a=tokRevoke]").click()
+    expect(pg.locator("#tokens-card")).to_have_count(0)  # the sign-in screen replaced the app
+    assert pg.evaluate("localStorage.getItem('permita38.token')") is None
     ctx.close()

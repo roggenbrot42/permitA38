@@ -39,8 +39,13 @@ def test_create_use_activity_and_revoke(browser, srv):
     assert secret.startswith("pat_")
     pg.check("#tk_saved")
     pg.click("#tk_close")
+    expect(pg.locator("#modal-root .modal")).to_have_count(0)
+    assert not pg.evaluate(
+        "s => [...document.querySelectorAll('input,textarea')].some(i => i.value === s)"
+        " || [...document.querySelectorAll('*')].some(e => (e.textContent || '').includes(s))",
+        secret,
+    )
     expect(pg.locator("tr", has_text="Live test")).to_contain_text("Read only")
-    assert secret not in pg.content()
     # the token works for reading, not for writing
     h = {"Authorization": "Bearer " + secret}
     assert httpx.get(srv.base + "/api/customers", headers=h).status_code == 200
