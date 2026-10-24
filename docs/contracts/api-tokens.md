@@ -345,7 +345,8 @@ throttle limits (per client IP). Add `ApiTokenCreateIn` to `core/validation.py` 
 ## UI contract (web)
 
 New file `web/tokens.js`, one hook in `web/main.js` and `web/index.html`; no build step; only talks to the API above. The
-section "API tokens" is a card on the Settings page, visible to every signed-in role (it is "your own credentials").
+section "API tokens" is its own navigation page `#/tokens` labelled "API tokens", visible to every signed-in role (it is
+"your own credentials"). The same card is also kept in Settings, for the boss only.
 
 * **List** (table, `data-testid="tokens-table"`): label, hint, access ("Read only" / "Read and write"), created, expires,
   last used ("never" when `null`), status badge (`active`/`expired`/`revoked`, text, not colour only), a "Revoke"
@@ -420,8 +421,8 @@ Backend and UI need only this file. Suggested merge order: A (with C), B, D, the
   still works; malformed `pat_x` -> 401 without a lookup; no `Set-Cookie` on token responses; 401 bodies identical for
   unknown/revoked/expired.
 * Invalid-token throttle: failed token requests from one IP count with the login limits; once locked out, a request
-  with a **valid** token from that IP gets 429 with the login message and a `Retry-After` header, before any lookup; another
-  IP is not affected; the login route also sends `Retry-After` on its 429.
+  with a **valid** token from that IP is still served (never throttled), while an **invalid** token from it gets 429 with
+  the login message and a `Retry-After` header (and is still counted); another IP is not affected; the login route also sends `Retry-After` on its 429.
 * Audit: exactly one row per token request (also for 403/404/422), none for session requests, no row for invalid tokens,
   route is the template, canary secret/query string not found in the database bytes; prune (rows older than 365 days
   removed at startup, newer kept); append-only contract test; **a failing audit write (forced in the test) is logged
@@ -436,8 +437,8 @@ Backend and UI need only this file. Suggested merge order: A (with C), B, D, the
 ## Review (Full tier, three Sonnet 5.5 passes)
 
 (1) Code review: auth seam, no path where `_auth` is dropped or a token is treated as a session, cookie/bearer
-precedence, constant-time compare, no secret in logs/responses/`extra`, throttle keyed by client IP and checked before
-lookup. (2) Test review: would the route-walk and scan fail if one `Needs` were wrong; canary test real; the settings
+precedence, constant-time compare, no secret in logs/responses/`extra`, throttle keyed by client IP; a valid token is never refused by it (the lookup
+runs first). (2) Test review: would the route-walk and scan fail if one `Needs` were wrong; canary test real; the settings
 test fails if `SessionOnly` is removed from a settings write. (3) Logic review (never a smaller model): recompute the min
 rule by hand for the three roles x {read, write} x {read-only, read-write}, check expiry arithmetic (`now + days*86400`,
 boundary `expires_at == now` is expired), the 20-token count, role change and deactivation timing, the throttle window.

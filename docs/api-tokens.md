@@ -14,7 +14,8 @@ If you only click around in the web app you do not need a token.
 
 ## Create a token
 
-1. Open **Settings** and find the **API tokens** card (every signed-in role has it, it is your own credential).
+1. Open **API tokens** in the navigation (every signed-in role has this page, it is your own credential; a boss finds the
+   same card in **Settings** too).
 2. Click **New token**.
 3. Give it a **label** that says what it is for ("Backup script", up to 80 characters).
 4. Choose how long it stays valid (7, 30, 90, 180 or 365 days; the default is 90).
@@ -81,7 +82,7 @@ Replace `pat_xxx` by your token and the address by your server. Answers:
 | 200 | ok |
 | 401 | token unknown, revoked or expired, or the owner is deactivated (always the same message) |
 | 403 | read-only token on a write, a session-only route, or your role may not do this |
-| 429 | too many failed token attempts from your address, wait (see the `Retry-After` header) |
+| 429 | too many failed token attempts from your address; sent only to an invalid token, wait (see the `Retry-After` header). A valid token is never refused by the throttle |
 
 **Throttle and `trust_proxy`.** Failed token attempts are counted per client address like failed logins, five within
 five minutes lock that address out. Behind a reverse proxy permitA38 sees only the proxy's address unless you set
