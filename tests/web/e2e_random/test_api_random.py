@@ -227,11 +227,13 @@ class ApiSim:
     def op_doc_create(self):
         kind = self.rng.choice(["offers", "invoices"])
         b = self.doc_body(kind)
+        days = {date.today().isoformat()}  # the server stamps the date: accept the day before/after the call
         r = self.boss.http.post(f"/{kind}", json=b)
+        days.add(date.today().isoformat())
         assert r.status_code in (200, 201), r.text
         d = r.json()
         assert d["status"] == "draft" and not d.get("number"), "a client must not choose status/number on create"
-        assert d["date"] == self.today.isoformat() and d["template_id"] == "classic"
+        assert d["date"] in days and d["template_id"] == "classic"
         for src, dst in zip(b["lines"], d["lines"], strict=True):
             exact = money(Decimal(str(src["qty"])) * Decimal(str(src["price"])))
             assert abs(money(dst["amount"]) - exact) <= Decimal("0.01"), (src, dst)  # float rounding tolerance
