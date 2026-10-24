@@ -2,13 +2,13 @@
 
 import io
 import json
-import threading
 import tracemalloc
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from permita38.core.errors import ServiceError
 from permita38.core.service.transfer import limits
 from permita38.core.service.transfer.archive import ArchiveError, ArchiveReader
 from permita38.core.service.transfer.service import _LOCK
@@ -308,10 +308,11 @@ def test_the_lock_is_released_after_a_failure(pair, monkeypatch):
         raise RuntimeError("x")
 
     monkeypatch.setattr(exp, "build", boom)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ServiceError):
         src.app.state.services.transfer.export(None, exp.ExportOptions())
     monkeypatch.undo()
-    assert threading.Lock().acquire(blocking=False) and _LOCK.acquire(blocking=False)
+    ok = _LOCK.acquire(blocking=False)
+    assert ok
     _LOCK.release()
 
 

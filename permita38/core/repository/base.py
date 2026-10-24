@@ -17,6 +17,7 @@ Contract (verified for every backend by tests/backend/test_repository_contract.p
 import re
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
@@ -136,6 +137,29 @@ class Repository(ABC):
     def restore_attachment(self, name: str, blob: bytes) -> None:
         """Write an attachment under its exact ``name`` (data import). Refuses a bad name (``ValueError``) and an
         existing file with different content (``FileExistsError``); the same content is fine. Written atomically."""
+
+    @abstractmethod
+    def stage_attachment(self, stage: str, name: str, chunks: Iterable[bytes]) -> None:
+        """Write an attachment into the staging area ``stage`` (data import), invisible to ``list_attachments``.
+        ``stage`` is a token from ``new_stage``; bad names raise ``ValueError``."""
+
+    @abstractmethod
+    def new_stage(self) -> str:
+        """A fresh, empty staging area for attachments; returns its token."""
+
+    @abstractmethod
+    def commit_stage(self, stage: str) -> StrList:
+        """Move every staged file into place (after the database commit) and remove the staging area. A file that
+        already exists with identical content is left alone; with different content ``FileExistsError`` is raised.
+        Returns the names now in place."""
+
+    @abstractmethod
+    def discard_stage(self, stage: str) -> None:
+        """Remove a staging area and everything in it (idempotent)."""
+
+    @abstractmethod
+    def discard_stale_stages(self, max_age: float) -> int:
+        """Remove staging areas older than ``max_age`` seconds (left behind by a crash); returns how many."""
 
     @abstractmethod
     def delete_attachment(self, name: str) -> bool:

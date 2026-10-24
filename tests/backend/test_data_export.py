@@ -213,7 +213,7 @@ def test_contract_examples_have_the_documented_keys(source, tmp_path):
     assert frozenset(man) in by_keys
     run = c2.post("/api/data/import/run", files={"file": ("a.zip", blob)}, data={"confirm": "true"}).json()
     assert set(run) == {"imported", "counts", "attachments", "relogin", "users", "numbering", "warnings"}
-    assert set(run["users"]) == {"replaces_setup_user", "kept_setup_user", "without_password"}
+    assert set(run["users"]) == {"replaces_setup_user", "kept_setup_user", "without_password", "with_login", "bosses"}
     log = c2.post("/api/auth/login", json={"username": "boss", "password": "correct horse battery"})
     assert log.status_code == 200
     c2.headers["Authorization"] = "Bearer " + log.json()["token"]

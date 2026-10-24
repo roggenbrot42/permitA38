@@ -41,23 +41,22 @@ def with_extras(base: dict, extras: dict) -> dict:
     return {**extras, **base}
 
 
+HASH = "pbkdf2_sha256$1000$" + "ab" * 16 + "$" + "cd" * 32
+LOCAL_HASH = "pbkdf2_sha256$1000$" + "12" * 16 + "$" + "34" * 32
+#: collections filled generically (a record with a name and unknown extra fields); the rest has dedicated code
+SPECIAL = ("users", "number_sequences", "invoices", "settings")
+GENERIC = [c for c in manifest.exported_collections() if c not in SPECIAL]
+
+
 @st.composite
 def datasets(draw) -> dict:
-    n = lambda: draw(st.integers(0, 3))  # noqa: E731
-    data: dict = {"customers": [], "projects": [], "entries": [], "expenses": [], "invoices": [], "attachments": []}
-    for _ in range(n()):
-        data["customers"].append(
-            with_extras({"name": draw(TEXT), "rate": draw(FLOAT), "notes": draw(TEXT)}, draw(EXTRAS))
-        )
-    for _ in range(n()):
-        data["projects"].append(with_extras({"name": draw(TEXT), "member_ids": []}, draw(EXTRAS)))
-    for _ in range(n()):
-        data["entries"].append(
-            with_extras({"date": "2026-02-03", "minutes": draw(st.integers(1, 600)), "note": draw(TEXT)}, draw(EXTRAS))
-        )
-    for _ in range(draw(st.integers(0, 4))):
-        data["attachments"].append(draw(st.binary(max_size=2000)))
-    for i in range(n()):
+    """Records with unknown extra fields in EVERY exported collection, at least three attachments, a counter."""
+    data: dict = {"records": {}, "invoices": [], "users": [], "attachments": []}
+    for coll in GENERIC:
+        data["records"][coll] = [
+            with_extras({"name": draw(TEXT)}, draw(EXTRAS)) for _ in range(draw(st.integers(0, 2)))
+        ]
+    for i in range(draw(st.integers(0, 3))):
         data["invoices"].append(
             with_extras(
                 {
@@ -68,11 +67,17 @@ def datasets(draw) -> dict:
                 draw(EXTRAS),
             )
         )
-    for _ in range(n()):
-        data["expenses"].append(
-            with_extras({"date": "2026-02-01", "net": draw(FLOAT), "vendor": draw(TEXT)}, draw(EXTRAS))
+    for i in range(draw(st.integers(0, 2))):
+        role = draw(st.sampled_from(["boss", "employee", "accountant"]))
+        data["users"].append(
+            with_extras(
+                {"username": f"user{i}", "name": draw(TEXT), "role": role, "password_hash": HASH, "pw_changed": 1},
+                draw(EXTRAS),
+            )
         )
+    data["attachments"] = draw(st.lists(st.binary(max_size=2000), min_size=3, max_size=5))
     data["counter"] = draw(st.integers(0, 50))
+    data["sequence_extras"] = draw(EXTRAS)
     data["settings"] = draw(st.dictionaries(st.from_regex(r"s_[a-z]{1,6}", fullmatch=True), JSON_VALUE, max_size=3))
     return data
 
@@ -84,22 +89,27 @@ def boss_row(store, hash_value: str) -> dict:
 
 
 def populate(store, data: dict) -> None:
-    boss = store.list("users")[0]
-    cust = [store.save("customers", c) for c in data["customers"]]
-    projs = [
-        store.save("projects", {**p, **({"customer_id": cust[0]["id"]} if cust else {})}) for p in data["projects"]
-    ]
-    for e in data["entries"]:
-        store.save("entries", {**e, "user_id": boss["id"], **({"project_id": projs[0]["id"]} if projs else {})})
-    names = [store.save_attachment("f.pdf", blob) for blob in data["attachments"]]
-    for i, e in enumerate(data["expenses"]):
-        store.save("expenses", {**e, **({"attachment": names[i % len(names)]} if names else {})})
+    for coll, recs in data["records"].items():
+        for rec in recs:
+            store.save(coll, rec)
+    for u in data["users"]:
+        store.save("users", u)
+    names = [store.save_attachment("f.bin", blob) for blob in data["attachments"]]
+    for i, name in enumerate(names):
+        store.save("expenses", {"date": "2026-02-01", "net": 1.5, "vendor": "=cmd|' /C calc'!A0", "attachment": name})
     for inv in data["invoices"]:
-        store.save("invoices", {**inv, **({"customer_id": cust[0]["id"]} if cust else {})})
+        store.save("invoices", inv)
     if data["counter"]:
         sid = NumberingService(store)._row_id("invoices", "2026")
         store.save(
-            "number_sequences", {"id": sid, "doc_type": "invoices", "period": "2026", "last_value": data["counter"]}
+            "number_sequences",
+            {
+                "id": sid,
+                "doc_type": "invoices",
+                "period": "2026",
+                "last_value": data["counter"],
+                **data["sequence_extras"],
+            },
         )
     store.save_settings({"company_name": "Demo", **data["settings"]})
 
@@ -131,14 +141,31 @@ def canonical(files: dict[str, bytes]) -> dict:
     return out
 
 
+def assert_same_rows(src, dst) -> None:
+    """The repository rows themselves (not the archive) are equal, including created/updated and unknown fields."""
+
+    def rows(store, coll):
+        recs = sorted(store.list(coll), key=lambda r: r["id"])
+        if coll == "users":  # the setup account keeps its local password
+            skip = ("password_hash", "pw_changed")
+            recs = [{k: v for k, v in r.items() if k not in skip and not k.startswith("totp")} for r in recs]
+        if coll == "calendar_sources":  # link URLs are never exported
+            recs = [{**r, "url": ""} for r in recs]
+        return recs
+
+    for coll in manifest.exported_collections():
+        assert rows(src, coll) == rows(dst, coll), coll
+    assert dst.list_attachments() == src.list_attachments()
+
+
 def roundtrip(base: Path, data: dict, tag: str) -> None:
     src = SQLiteRepository(base / f"src-{tag}")
     src.startup()
-    boss_row(src, "hash-of-source-boss")
+    boss_row(src, HASH)
     populate(src, data)
     dst = SQLiteRepository(base / f"dst-{tag}")
     dst.startup()
-    boss_row(dst, "hash-of-local-boss")
+    boss_row(dst, LOCAL_HASH)
     ts, td = TransferService(src, base / f"src-{tag}" / "tmp"), TransferService(dst, base / f"dst-{tag}" / "tmp")
     a = ts.export("u", ExportOptions(include_accounts=True))
     try:
@@ -149,12 +176,14 @@ def roundtrip(base: Path, data: dict, tag: str) -> None:
         try:
             assert canonical(read_archive(a.path)) == canonical(read_archive(b.path))
             # the setup-user rule is the only allowed difference: the local password hash is kept
-            assert dst.list("users")[0]["password_hash"] == "hash-of-local-boss"
-            assert src.list("users")[0]["password_hash"] == "hash-of-source-boss"
+            assert next(u for u in dst.list("users") if u["username"] == "boss")["password_hash"] == LOCAL_HASH
+            assert next(u for u in src.list("users") if u["username"] == "boss")["password_hash"] == HASH
             clock = lambda: date(2026, 4, 1)  # noqa: E731
             assert NumberingService(src, clock).preview("invoice", 2) == NumberingService(dst, clock).preview(
                 "invoice", 2
             )
+            assert result["numbering"]["invoices"]["next"] == NumberingService(src, clock).preview("invoice", 1)[0]
+            assert_same_rows(src, dst)
         finally:
             b.path.unlink()
     finally:
@@ -181,30 +210,25 @@ def test_export_import_export_is_identical(data, tmp_path_factory):
     roundtrip(tmp_path_factory.mktemp("rt"), data, str(_counter["n"]))
 
 
-def test_zero_records_everywhere(tmp_path):
-    empty = {
-        "customers": [],
-        "projects": [],
-        "entries": [],
-        "expenses": [],
+def _empty() -> dict:
+    return {
+        "records": {},
         "invoices": [],
+        "users": [],
         "attachments": [],
         "counter": 0,
+        "sequence_extras": {},
         "settings": {},
     }
-    roundtrip(tmp_path, empty, "zero")
+
+
+def test_zero_records_everywhere(tmp_path):
+    roundtrip(tmp_path, _empty(), "zero")
 
 
 def test_a_24_mib_attachment_survives(tmp_path):
     big = (b"permitA38" * 1000 + bytes(range(256))) * 2600
-    data = {
-        "customers": [],
-        "projects": [],
-        "entries": [],
-        "expenses": [{"date": "2026-02-01", "net": 1.0}],
-        "invoices": [],
-        "attachments": [big[: 24 * 1024 * 1024]],
-        "counter": 1,
-        "settings": {},
-    }
+    data = _empty()
+    data["attachments"] = [big[: 24 * 1024 * 1024]]
+    data["counter"] = 1
     roundtrip(tmp_path, data, "big")

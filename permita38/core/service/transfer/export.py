@@ -163,8 +163,6 @@ def build(store: Repository, opts: ExportOptions, tmp_dir: Path) -> ExportResult
                     p = store.attachment_path(name)
                     if not p:
                         continue
-                    if os.path.getsize(p) > limits.MAX_ATTACHMENT:
-                        raise ServiceError(413, "An attachment is larger than the limit (25 MiB).")
 
                     def blob(p: str = p) -> Iterator[bytes]:
                         with open(p, "rb") as f:

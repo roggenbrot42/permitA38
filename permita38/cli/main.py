@@ -126,7 +126,7 @@ def _import_archive(services, args) -> None:
     path: Path = args.file
     if not path.is_file():
         sys.exit(f"{path} is not a file.")
-    report = transfer.preview(None, path)
+    report = transfer.preview(None, path, log=False)  # a dry run writes nothing, not even the transfer log
     for coll, n in report["counts"].items():
         print(f"  {coll}: {n}")
     print(f"  attachments: {report['attachments']['files']} files, {report['attachments']['bytes']} bytes")
@@ -134,6 +134,11 @@ def _import_archive(services, args) -> None:
         print(f"  warning ({w['code']}): {w['message']}")
     for e in report["errors"]:
         print(f"  error ({e['code']}): {e['message']}")
+    if report["users"]:
+        u = report["users"]
+        print(
+            f"  logins after the import: {', '.join(u['with_login']) or 'none'} (bosses: {', '.join(u['bosses']) or 'none'})"
+        )
     if not report["ok"]:
         sys.exit("The archive cannot be imported.")
     if args.dry_run:
@@ -204,7 +209,12 @@ def main(argv: list[str] | None = None):
     xp.add_argument("--no-attachments", action="store_true")
     xp.add_argument("--force", action="store_true", help="overwrite FILE")
     xp.add_argument("--yes", action="store_true", help="confirm --include-accounts without asking")
-    mi = sub.add_parser("import", help="restore a data export archive into an empty instance")
+    mi = sub.add_parser(
+        "import",
+        help="restore a data export archive into an empty instance (stop the server first)",
+        description="Restore a data export archive into an empty instance. Stop the web server before a command line "
+        "import: the two do not coordinate, only the final check inside the write transaction protects the data.",
+    )
     mi.add_argument("file", type=Path)
     mi.add_argument("--dry-run", action="store_true", help="validate and report only")
     mi.add_argument("--yes", action="store_true", help="do not ask")

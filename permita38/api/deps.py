@@ -87,7 +87,7 @@ class Services:
 def startup_services(services: Services) -> None:
     """Open the database (migrating if needed; refuses a newer one) and take the daily backup."""
     services.store.startup()
-    clean_stale_tmp(services.config.data_dir / "tmp")
+    clean_stale_tmp(services.config.data_dir / "tmp", store=services.store)
     db = services.config.database
     if db.auto_backup:
         auto_backup(services.store, db.backup_keep)

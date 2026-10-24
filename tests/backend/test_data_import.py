@@ -8,6 +8,7 @@ import pytest
 
 from permita38.cli.main import main
 from permita38.core.database import list_migrations
+from permita38.core.errors import ServiceError
 from permita38.core.service.numbering import NumberingService
 from permita38.core.service.transfer import manifest
 
@@ -222,8 +223,9 @@ def test_failure_in_the_middle_of_the_records_writes_nothing(source, target, mon
         return real(coll, obj, touch=touch)
 
     monkeypatch.setattr(dst_store, "save", flaky)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ServiceError) as exc:
         dst_app.state.services.transfer.run(None, _write(blob, dst_app))
+    assert exc.value.status == 500 and "disk full" not in exc.value.message
     monkeypatch.setattr(dst_store, "save", real)
     assert snapshot(dst_store) == before and dst_store.list_attachments() == []
     assert not dst_store.attachment_path(ids["attachment"])
@@ -233,22 +235,22 @@ def test_failure_while_writing_attachments_writes_nothing(source, target, monkey
     src_app, src_client, _ = source
     dst_app, dst_client, dst_store = target
     for i in range(3):
-        src_app.state.services.store.save_attachment(f"f{i}.png", b"png%d" % i)
+        src_app.state.services.store.save_attachment(f"f{i}.png", b"\x89PNG\r\n\x1a\n%d" % i)
     blob = export_archive(src_client)
     before = snapshot(dst_store)
-    real = dst_store.restore_attachment
+    real = dst_store.stage_attachment
     calls = {"n": 0}
 
-    def flaky(name, data):
+    def flaky(stage, name, chunks):
         calls["n"] += 1
         if calls["n"] == 3:
             raise OSError("no space left")
-        real(name, data)
+        real(stage, name, chunks)
 
-    monkeypatch.setattr(dst_store, "restore_attachment", flaky)
-    with pytest.raises(OSError):
+    monkeypatch.setattr(dst_store, "stage_attachment", flaky)
+    with pytest.raises(ServiceError):
         dst_app.state.services.transfer.run(None, _write(blob, dst_app))
-    monkeypatch.setattr(dst_store, "restore_attachment", real)
+    monkeypatch.setattr(dst_store, "stage_attachment", real)
     assert snapshot(dst_store) == before and dst_store.list_attachments() == []
 
 

@@ -34,17 +34,23 @@ at all) and do not create other data.
 2. The import is all-or-nothing: any error writes nothing.
 3. If your setup account has the same username as an account in the archive, the archive's record replaces it (the
    ids of the old instance are kept) but the local password stays; log in again afterwards.
-4. Users that were exported without password hashes are inactive; activate them and set a password
+4. The import trusts password hashes only if the archive was exported with "include accounts" (the manifest says so);
+   the result lists which accounts can log in and which of them are bosses. Users without a hash are inactive; activate them and set a password
    (`permita38 set-password <username>`). Two-factor is off for everyone; enrol again.
 5. Check the numbering page: the result shows the next invoice and offer number. The import never lowers a counter.
 6. Reconnect the calendar links.
 
 A master-data archive cannot be imported; use Import documents with type customers (it accepts the JSON file).
 
+Stop the web server before a command line import (`permita38 import`): the two do not coordinate. A final check inside
+the write transaction still refuses the import (409) if data appeared in between.
+
+Not exported: the running timer state (`timers`), calendar events, secrets and anything listed in the manifest `excluded`.
+
 ## Limits
 
-Upload 512 MiB; 20,000 archive entries; 2 GiB uncompressed; 256 MiB per data file; 25 MiB per attachment;
-compression ratio 200; 1,000,000 records per collection; 1 MiB per record. Only one export or import runs at a time.
+Upload 512 MiB; 20,000 archive entries; 2 GiB uncompressed; 64 MiB per data file; 64 MiB per attachment on import;
+compression ratio 200; 200,000 records per collection; 1 MiB per record. Only one export or import runs at a time.
 
 ## Not a legal archive
 

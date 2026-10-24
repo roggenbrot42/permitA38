@@ -7,20 +7,13 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from permita38.api.deps import Needs, ServicesDep
+from permita38.core.filetypes import INLINE_TYPES
+from permita38.core.filetypes import magic_ok as _magic_ok
 
 router = APIRouter(prefix="/attachments", tags=["files"])
 routers = [router]
 MAX_UPLOAD = 15 * 1024 * 1024
 
-# Served inline with their own type. Everything else is served as a download (see docs/specs/itemised-expenses.md).
-INLINE_TYPES = {
-    ".pdf": "application/pdf",
-    ".png": "image/png",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".webp": "image/webp",
-    ".gif": "image/gif",
-}
 # Attachment responses may only be framed by the same origin and cannot run scripts or load anything external.
 # No `sandbox` directive: it would disable the browser's PDF viewer.
 ATTACHMENT_CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'"
@@ -33,21 +26,6 @@ class Uploaded(BaseModel):
 def _quoted(name: str) -> str:
     """A quoted-string filename for Content-Disposition: backslash, quote and CR/LF are removed, never passed on."""
     return re.sub(r'[\\"\r\n]', "", name)
-
-
-def _magic_ok(ext: str, blob: bytes) -> bool:
-    """The first bytes must match the extension for the types we serve inline. Other extensions are not checked."""
-    if ext == ".pdf":
-        return blob.startswith(b"%PDF-")
-    if ext == ".png":
-        return blob.startswith(b"\x89PNG\r\n\x1a\n")
-    if ext in (".jpg", ".jpeg"):
-        return blob.startswith(b"\xff\xd8\xff")
-    if ext == ".webp":
-        return blob[:4] == b"RIFF" and blob[8:12] == b"WEBP"
-    if ext == ".gif":
-        return blob.startswith(b"GIF8")
-    return True
 
 
 @router.post("", response_model=Uploaded, summary="upload a bill, photo or logo")

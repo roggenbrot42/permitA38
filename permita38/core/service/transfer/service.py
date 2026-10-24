@@ -1,8 +1,10 @@
 """Export/import service: one operation at a time, transfer log, audit line. The router and the CLI call only this."""
 
+import contextlib
 import logging
 import threading
 import time
+from collections.abc import Iterator
 from datetime import date
 from pathlib import Path
 
@@ -18,6 +20,18 @@ _LOCK = threading.Lock()
 BUSY = "Another export or import is running."
 
 
+@contextlib.contextmanager
+def _clean_errors(what: str) -> Iterator[None]:
+    """Unexpected failures become a short ServiceError (details only in the log, never in the answer)."""
+    try:
+        yield
+    except (ServiceError, ImportRefused):
+        raise
+    except Exception as e:
+        audit.exception("data %s failed unexpectedly", what)
+        raise ServiceError(500, f"The {what} failed unexpectedly; see the server log. Nothing was imported.") from e
+
+
 class _Single:
     def __enter__(self) -> None:
         if not _LOCK.acquire(blocking=False):
@@ -27,16 +41,15 @@ class _Single:
         _LOCK.release()
 
 
-def clean_stale_tmp(tmp_dir: Path, max_age: float = 3600) -> None:
-    """Remove export/import temp files left behind by a crash."""
-    if not tmp_dir.is_dir():
-        return
-    for p in tmp_dir.glob("permita38-*"):
-        try:
-            if p.is_file() and time.time() - p.stat().st_mtime > max_age:
-                p.unlink()
-        except OSError:
-            pass
+def clean_stale_tmp(tmp_dir: Path, max_age: float = 3600, store: Repository | None = None) -> None:
+    """Remove export/import temp files and attachment staging areas left behind by a crash."""
+    if tmp_dir.is_dir():
+        for p in tmp_dir.glob("permita38-*"):
+            with contextlib.suppress(OSError):  # a file we cannot stat or remove is retried at the next start
+                if p.is_file() and time.time() - p.stat().st_mtime > max_age:
+                    p.unlink()
+    if store is not None:
+        store.discard_stale_stages(max_age)
 
 
 class TransferService:
@@ -88,7 +101,8 @@ class TransferService:
         action = "export_master_data" if opts.scope == "master_data" else "export"
         with _Single():
             try:
-                result = export.build(self.store, opts, self.tmp_dir)
+                with _clean_errors("export"):
+                    result = export.build(self.store, opts, self.tmp_dir)
             except BaseException:
                 self._log(user_id, action, False, None, {}, None)
                 raise
@@ -103,22 +117,26 @@ class TransferService:
             return result
 
     # ------------------------------------------------------------------ import
-    def preview(self, user_id: str | None, path: Path, today: date | None = None) -> dict:
+    def preview(self, user_id: str | None, path: Path, today: date | None = None, *, log: bool = True) -> dict:
         with _Single():
-            plan = importer.validate(path, self.store, allow_no_users=self.allow_no_users, today=today)
-            self._log(user_id, "import_preview", plan.ok, _accounts(plan), plan.counts(), None)
+            with _clean_errors("import check"):
+                plan = importer.validate(path, self.store, allow_no_users=self.allow_no_users, today=today)
+            if log:
+                self._log(user_id, "import_preview", plan.ok, _accounts(plan), plan.counts(), None)
             return plan.preview()
 
     def run(self, user_id: str | None, path: Path, today: date | None = None) -> dict:
         with _Single():
-            plan = importer.validate(path, self.store, allow_no_users=self.allow_no_users, today=today)
+            with _clean_errors("import check"):
+                plan = importer.validate(path, self.store, allow_no_users=self.allow_no_users, today=today)
             if not plan.ok:
                 self._log(user_id, "import", False, _accounts(plan), {}, None)
                 if plan.empty_reason and len(plan.errors) == 1:
                     raise ServiceError(409, plan.empty_reason)
                 raise ImportRefused(plan)
             try:
-                res = importer.apply(path, self.store, plan)
+                with _clean_errors("import"):
+                    res = importer.apply(path, self.store, plan)
             except BaseException:
                 self._log(user_id, "import", False, _accounts(plan), {}, None)
                 raise

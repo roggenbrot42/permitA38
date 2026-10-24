@@ -8,16 +8,19 @@ Everything here is generic: records are encoded/decoded from the declarative sch
 from __future__ import annotations
 
 import builtins
+import contextlib
 import math
 import os
 import re
+import secrets
+import shutil
 import threading
 import time
 from abc import abstractmethod
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 from permita38.core.database import LEGACY_IDS, Migration, list_migrations
 
@@ -27,6 +30,7 @@ from .schema import BOOL, FLOAT, ID, INT, JSON, STR, TABLES, TEXT, Column, Table
 
 MIGRATIONS_TABLE = "schema_migrations"
 ATTACHMENT_RE = re.compile(r"[0-9a-z]{6,32}\.[a-z0-9]{1,5}")
+STAGE_RE = re.compile(r"\.import-[0-9a-f]{16}")
 
 
 def _now() -> str:
@@ -469,8 +473,60 @@ class SQLRepository(Repository):
                 return
             raise FileExistsError(name)
         tmp = folder / (name + ".tmp")
-        tmp.write_bytes(blob)
-        os.replace(tmp, target)
+        try:
+            tmp.write_bytes(blob)
+            os.replace(tmp, target)
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def _stage_dir(self, stage: str) -> Path:
+        if not STAGE_RE.fullmatch(stage):
+            raise ValueError("bad staging token")
+        return self.data_dir / "attachments" / stage
+
+    def new_stage(self) -> str:
+        folder = self.data_dir / "attachments"
+        folder.mkdir(parents=True, exist_ok=True)
+        token = ".import-" + secrets.token_hex(8)
+        (folder / token).mkdir(mode=0o700)
+        return token
+
+    def stage_attachment(self, stage: str, name: str, chunks: Iterable[bytes]) -> None:
+        if not ATTACHMENT_RE.fullmatch(name):
+            raise ValueError("bad attachment name")
+        with open(self._stage_dir(stage) / name, "wb") as f:
+            for chunk in chunks:
+                f.write(chunk)
+
+    def commit_stage(self, stage: str) -> StrList:
+        src = self._stage_dir(stage)
+        folder = self.data_dir / "attachments"
+        placed: builtins.list[str] = []
+        for p in sorted(src.iterdir()):
+            target = folder / p.name
+            if target.exists():
+                if target.read_bytes() != p.read_bytes():
+                    raise FileExistsError(p.name)
+                continue
+            os.replace(p, target)
+            placed.append(p.name)
+        shutil.rmtree(src, ignore_errors=True)
+        return placed
+
+    def discard_stage(self, stage: str) -> None:
+        shutil.rmtree(self._stage_dir(stage), ignore_errors=True)
+
+    def discard_stale_stages(self, max_age: float) -> int:
+        folder = self.data_dir / "attachments"
+        if not folder.is_dir():
+            return 0
+        n = 0
+        for p in folder.glob(".import-*"):
+            with contextlib.suppress(OSError):  # a stage we cannot stat or remove is retried at the next start
+                if p.is_dir() and time.time() - p.stat().st_mtime > max_age:
+                    shutil.rmtree(p)
+                    n += 1
+        return n
 
     def delete_attachment(self, name: str) -> bool:
         if not ATTACHMENT_RE.fullmatch(name):

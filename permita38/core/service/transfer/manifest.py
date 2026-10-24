@@ -15,11 +15,13 @@ LOG_KEY = "data_transfer_log"
 EXCLUDED_TABLES: dict[str, str] = {
     "settings": "exported as data/settings.json, not as records",
     "calendar_events": "cache of the calendar links, refreshed after the import",
+    "timers": "transient running-timer state of single users, meaningless on another instance",
 }
 
 #: Setting keys that are never exported besides the ones matching SECRET_SETTING_RE.
 SECRET_SETTING_KEYS: tuple[str, ...] = (LOG_KEY,)
-SECRET_SETTING_RE = re.compile(r"(?i)(secret|token|password|passwd|api[_-]?key|private)")
+#: Real setting names (core/models.py Settings) must not match; tests/backend/test_data_export.py pins that.
+SECRET_SETTING_RE = re.compile(r"(?i)(secret|token|pass|cred|auth|api[_-]?key|private|key$)")
 
 EXCLUDED_NOTES = [
     "secret key",

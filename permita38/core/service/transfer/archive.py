@@ -5,6 +5,7 @@ limit. Every entry name must have exactly one of the allowed shapes, otherwise t
 
 import hashlib
 import json
+import math
 import re
 import stat
 import zipfile
@@ -128,13 +129,19 @@ class ArchiveReader:
     def read(self, name: str) -> bytes:
         return b"".join(self._chunks(name))
 
-    def digest(self, name: str) -> tuple[int, str]:
-        """(bytes, sha256) of an entry without keeping it in memory."""
-        sha, n = hashlib.sha256(), 0
+    def digest(self, name: str) -> tuple[int, str, bytes]:
+        """(bytes, sha256, first 16 bytes) of an entry without keeping it in memory."""
+        sha, n, head = hashlib.sha256(), 0, b""
         for c in self._chunks(name):
             sha.update(c)
             n += len(c)
-        return n, sha.hexdigest()
+            if len(head) < 16:
+                head += c[: 16 - len(head)]
+        return n, sha.hexdigest(), head
+
+    def stream(self, name: str):
+        """The entry as bounded chunks (for copying an attachment to disk without holding it in memory)."""
+        return self._chunks(name)
 
 
 def depth_ok(value: Any, max_depth: int = limits.MAX_JSON_DEPTH) -> bool:
@@ -148,9 +155,21 @@ def depth_ok(value: Any, max_depth: int = limits.MAX_JSON_DEPTH) -> bool:
     return True
 
 
+def _reject_constant(text: str) -> Any:
+    raise ValueError(f"{text} is not allowed")
+
+
+def _finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("number out of range")
+    return value
+
+
 def parse_json(blob: bytes, name: str) -> Any:
+    """Strict JSON: no NaN/Infinity (also not as 1e999)."""
     try:
-        value = json.loads(blob.decode("utf-8"))
+        value = json.loads(blob.decode("utf-8"), parse_constant=_reject_constant, parse_float=_finite_float)
     except RecursionError as e:
         raise ArchiveError("limit_exceeded", f"{_show(name)!r} is nested too deeply.", name) from e
     except (ValueError, UnicodeDecodeError) as e:

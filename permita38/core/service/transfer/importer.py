@@ -1,19 +1,24 @@
 """Validate an export archive completely, then write it into an empty instance in one transaction."""
 
+import hashlib
 import json
 import logging
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from permita38.core.database import list_migrations
 from permita38.core.errors import ServiceError
+from permita38.core.filetypes import INLINE_TYPES, magic_ok
 from permita38.core.numbering import PatternError, parse_pattern, period_key
 from permita38.core.repository import Repository
 from permita38.core.repository.base import ID_RE
 from permita38.core.repository.schema import BOOL, FLOAT, ID, INT, JSON, TABLES
+from permita38.core.rights import ROLES, normalize_role
+from permita38.core.service.numbering import NumberingService
 from permita38.core.settings import effective_settings
 
 from . import limits, manifest
@@ -40,6 +45,9 @@ LIST_REFERENCES: dict[str, tuple[str, str]] = {  # (collection, column) -> targe
 #: attachment names referenced by a record
 ATTACHMENT_COLUMNS = (("expenses", "attachment"), ("invoices", "original_pdf"), ("offers", "original_pdf"))
 SHA_RE = re.compile(r"[0-9a-f]{64}")
+#: what core/service/auth.hash_password produces
+PASSWORD_HASH_RE = re.compile(r"pbkdf2_sha256\$[0-9]{1,8}\$(?:[0-9a-f]{2}){1,64}\$(?:[0-9a-f]{2}){16,128}")
+MAX_ITERATIONS = 10_000_000
 
 
 @dataclass
@@ -61,6 +69,8 @@ class Plan:
     records: dict[str, list[dict]] = field(default_factory=dict)
     settings: dict = field(default_factory=dict)
     attachments: dict[str, int] = field(default_factory=dict)  # name -> bytes
+    attachment_sha: dict[str, str] = field(default_factory=dict)  # name -> sha256
+    allow_no_users: bool = False
     users: dict | None = None
     numbering: dict | None = None
     empty_reason: str | None = None
@@ -145,7 +155,12 @@ def _check_type(col_type: str, value: Any) -> bool:
     if col_type == INT:
         return isinstance(value, int) and not isinstance(value, bool) and abs(value) < 2**63
     if col_type == FLOAT:
-        return isinstance(value, (int, float)) and not isinstance(value, bool)
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+            and abs(value) <= limits.MAX_FLOAT
+        )
     if col_type == JSON:
         return True
     return isinstance(value, str)
@@ -190,6 +205,38 @@ def _validate_records(plan: Plan, coll: str, name: str, body: Any) -> list[dict]
             continue
         out.append(rec)
     return out
+
+
+def _check_semantics(plan: Plan) -> None:
+    """Rules across a whole collection, after the upgrade hooks ran: unique indexes, roles, counters, settings."""
+    for coll, recs in plan.records.items():
+        name = f"data/{coll}.json"
+        for index in (ix for ix in TABLES[coll].indexes if ix.unique):
+            seen: dict[tuple, int] = {}
+            for i, rec in enumerate(recs):
+                values = tuple(rec.get(c) for c in index.columns)
+                if any(v is None for v in values):
+                    continue
+                key = tuple(v.casefold() if isinstance(v, str) else v for v in values)
+                if key in seen:
+                    plan.error(
+                        "duplicate_id",
+                        f"{name} record {i}: {', '.join(index.columns)} is the same as in record {seen[key]}.",
+                        name,
+                    )
+                else:
+                    seen[key] = i
+    for i, u in enumerate(plan.records.get("users", [])):
+        if not isinstance(u.get("username"), str) or not u["username"].strip():
+            plan.error("record_invalid", f"data/users.json record {i}: username is missing.", "data/users.json")
+        if u.get("role") not in ROLES:
+            plan.error("record_invalid", f"data/users.json record {i}: unknown role.", "data/users.json")
+    for i, r in enumerate(plan.records.get("number_sequences", [])):
+        last = r.get("last_value", 0)
+        if not isinstance(last, int) or not 0 <= last <= limits.MAX_SEQUENCE:
+            plan.error("record_invalid", f"data/number_sequences.json record {i}: last_value is out of range.")
+    if not _settings_ok(plan.settings):
+        plan.error("record_invalid", "data/settings.json contains settings that are not valid.", "data/settings.json")
 
 
 def _check_references(plan: Plan) -> None:
@@ -249,6 +296,30 @@ def _check_references(plan: Plan) -> None:
         plan.warn("dangling_reference", f"{missing_files} referenced attachment files are not in the archive.")
 
 
+def _hash_ok(value: str) -> bool:
+    if not PASSWORD_HASH_RE.fullmatch(value):
+        return False
+    return 1 <= int(value.split("$")[1]) <= MAX_ITERATIONS
+
+
+def _prepare_users(plan: Plan) -> None:
+    """Archive users as they will be written: no two-factor data ever; no login unless the archive says it carries
+    accounts (``include_accounts`` is true). A hand-made archive cannot smuggle hashes into an export without them."""
+    accounts = bool(plan.manifest and plan.manifest.get("include_accounts") is True)
+    users = []
+    for i, u in enumerate(plan.records.get("users", [])):
+        rec = {k: v for k, v in u.items() if not k.startswith("totp")}
+        if not accounts:
+            rec.pop("password_hash", None)
+            rec.pop("pw_changed", None)
+        elif rec.get("password_hash") and not _hash_ok(rec["password_hash"]):
+            plan.error(
+                "record_invalid", f"data/users.json record {i}: password_hash has an unknown format.", "data/users.json"
+            )
+        users.append(rec)
+    plan.records["users"] = users
+
+
 def _user_plan(plan: Plan, local_users: list[dict]) -> None:
     archive = plan.records.get("users", [])
     local = local_users[0] if local_users else None
@@ -256,7 +327,8 @@ def _user_plan(plan: Plan, local_users: list[dict]) -> None:
     without: list[str] = []
     match = None
     if local is not None:
-        match = next((u for u in archive if u.get("username") == local.get("username")), None)
+        folded = str(local.get("username", "")).casefold()
+        match = next((u for u in archive if str(u.get("username", "")).casefold() == folded), None)
         if match is not None:
             replaces = local.get("username")
         else:
@@ -272,35 +344,69 @@ def _user_plan(plan: Plan, local_users: list[dict]) -> None:
                 "A user in the archive has the id of the setup account but another username.",
                 "data/users.json",
             )
+    with_login: list[str] = [str(local.get("username"))] if local is not None else []
+    bosses: list[str] = [str(local.get("username"))] if local is not None and match is None else []
+    if match is not None:
+        bosses.append(str(match.get("username")))  # the matched account becomes the setup account: a boss
     for u in archive:
-        if u is not match and not u.get("password_hash"):
+        if u is match:
+            continue
+        if u.get("password_hash"):
+            with_login.append(str(u.get("username")))
+            if normalize_role(u.get("role")) == "boss":
+                bosses.append(str(u.get("username")))
+        else:
             without.append(str(u.get("username")))
     if without:
         plan.warn(
             "users_without_password",
             f"{len(without)} users have no password and are inactive until you set one: {', '.join(without)}.",
         )
-    plan.users = {"replaces_setup_user": replaces, "kept_setup_user": kept, "without_password": without}
+    imported_logins = len(with_login) - (1 if local is not None else 0)
+    if imported_logins > 0:
+        plan.warn(
+            "accounts_can_login",
+            f"{len(with_login)} accounts incl. {len(bosses)} bosses can log in after the import.",
+        )
+    plan.users = {
+        "replaces_setup_user": replaces,
+        "kept_setup_user": kept,
+        "without_password": without,
+        "with_login": with_login,
+        "bosses": bosses,
+    }
+
+
+class _PlanStore:
+    """Read-only view of the archive data with the interface NumberingService needs, so the numbers shown in the
+    preview and the result are computed by the same code that hands out numbers after the import."""
+
+    def __init__(self, plan: Plan):
+        self.plan = plan
+
+    def settings(self) -> dict:
+        return self.plan.settings if _settings_ok(self.plan.settings) else {}
+
+    def list(self, coll: str) -> list[dict]:
+        return list(self.plan.records.get(coll, []))
+
+    def get(self, coll: str, rid: str) -> dict | None:
+        return next((r for r in self.plan.records.get(coll, []) if r.get("id") == rid), None)
 
 
 def _numbering(plan: Plan, today: date) -> None:
-    st = (
-        effective_settings({k: v for k, v in plan.settings.items()})
-        if _settings_ok(plan.settings)
-        else effective_settings({})
-    )
-    shared = bool(st.get("numbering_shared"))
+    service = NumberingService(cast(Repository, _PlanStore(plan)), clock=lambda: today)
     sequences = plan.records.get("number_sequences", [])
     out: dict = {}
-    for key, coll in (("invoices", "invoices"), ("offers", "offers")):
-        short = "invoice" if coll == "invoices" else "offer"
+    for key, short in (("invoices", "invoice"), ("offers", "offer")):
         try:
-            pattern = parse_pattern(st[f"{short}_pattern"], strict=False)
-        except PatternError:
+            cfg = service.config(short)
+            pattern = parse_pattern(cfg.pattern, strict=False)
+            nxt = service.preview(short, 1)[0]
+        except (PatternError, ServiceError):
             continue
-        reset = st[f"{short}_reset"]
-        colls = ("invoices", "offers") if shared else (coll,)
-        group = "shared" if shared else coll
+        group = "shared" if cfg.shared else cfg.coll
+        colls = ("invoices", "offers") if cfg.shared else (cfg.coll,)
         best: tuple[int, str] | None = None
         by_period: dict[str, int] = {}
         for c in colls:
@@ -313,26 +419,29 @@ def _numbering(plan: Plan, today: date) -> None:
                     continue
                 if best is None or n > best[0]:
                     best = (n, number)
-                p = period_key(reset, day)
+                p = period_key(cfg.reset, day)
                 by_period[p] = max(by_period.get(p, 0), n)
         rows = sorted((r for r in sequences if r.get("doc_type") == group), key=lambda r: str(r.get("period")))
         row = rows[-1] if rows else None
-        counter = int(row.get("last_value") or 0) if row else 0
-        now_period = period_key(reset, today)
-        cur = next((int(r.get("last_value") or 0) for r in rows if r.get("period") == now_period), None)
-        base = cur if cur is not None else by_period.get(now_period, 0)
         for r in rows:
             p = str(r.get("period"))
             if by_period.get(p, 0) > int(r.get("last_value") or 0):
                 plan.warn(
                     "numbering_counter_low",
-                    f"The {short} counter for {p} ({r.get('last_value')}) is lower than the highest imported number ({by_period[p]}).",
+                    f"The {short} counter for {p} ({r.get('last_value')}) is lower than the highest imported number "
+                    f"({by_period[p]}); numbers already in use are skipped.",
+                )
+            if r.get("id") != service._row_id(group, p):
+                plan.warn(
+                    "numbering_counter_unreachable",
+                    f"The {short} counter row for {p} has an unexpected id and is not used; the counter is "
+                    "recomputed from the documents.",
                 )
         out[key] = {
             "highest_imported": best[1] if best else None,
             "counter_period": row.get("period") if row else None,
-            "counter": counter if row else None,
-            "next": pattern.format(today, base + 1),
+            "counter": int(row.get("last_value") or 0) if row else None,
+            "next": nxt,
         }
     plan.numbering = out
 
@@ -356,7 +465,7 @@ def _day(value: Any) -> date | None:
 
 def validate(path: Path, store: Repository, *, allow_no_users: bool = False, today: date | None = None) -> Plan:
     """Read the whole archive; nothing is written. Errors and warnings are collected in the returned plan."""
-    plan = Plan()
+    plan = Plan(allow_no_users=allow_no_users)
     try:
         with ArchiveReader(path) as reader:
             _validate(plan, reader, store, today or date.today())
@@ -415,40 +524,40 @@ def _validate(plan: Plan, reader: ArchiveReader, store: Repository, today: date)
             plan.error("file_missing", f"{name} is listed in the manifest but missing.", name)
     if plan.errors:
         return
-    raw: dict[str, Any] = {}
     for name, meta in listed.items():
         kind, arg = reader.kinds[name]
-        if kind in ("data", "settings", "readme", "csv", "attachment"):
-            if kind in ("data", "settings"):
-                blob = reader.read(name)
-                size, sha = len(blob), _sha(blob)
-            else:
-                size, sha = reader.digest(name)
-                blob = b""
-            if sha != meta.get("sha256") or size != meta.get("bytes"):
-                plan.error("hash_mismatch", f"{name} does not match its hash in the manifest.", name)
-                continue
-            if kind == "attachment":
-                plan.attachments[arg] = size
-            elif kind in ("data", "settings"):
-                raw[name] = blob
-    if plan.errors:
-        return
-    for name, blob in raw.items():
-        kind, arg = reader.kinds[name]
-        body = parse_json(blob, name)
-        if kind == "settings":
-            if not isinstance(body, dict) or not isinstance(body.get("settings"), dict):
-                plan.error("json_invalid", "data/settings.json must be an object with 'settings'.", name)
-            else:
-                plan.settings = body["settings"]
+        if kind in ("data", "settings"):
+            blob = reader.read(name)
+            size, sha, first = len(blob), hashlib.sha256(blob).hexdigest(), b""
         else:
-            plan.records[arg] = _validate_records(plan, arg, name, body)
+            blob = b""
+            size, sha, first = reader.digest(name)
+        if sha != meta.get("sha256") or size != meta.get("bytes"):
+            plan.error("hash_mismatch", f"{name} does not match its hash in the manifest.", name)
+            continue
+        if kind == "attachment":
+            ext = "." + arg.rsplit(".", 1)[1]
+            if ext in INLINE_TYPES and not magic_ok(ext, first):
+                plan.error("attachment_invalid", f"{arg} does not look like its {ext} extension.", name)
+                continue
+            plan.attachments[arg] = size
+            plan.attachment_sha[arg] = sha
+        elif kind in ("data", "settings"):
+            body = parse_json(blob, name)  # each file is parsed once; its bytes are dropped right away
+            del blob
+            if kind == "settings":
+                if not isinstance(body, dict) or not isinstance(body.get("settings"), dict):
+                    plan.error("json_invalid", "data/settings.json must be an object with 'settings'.", name)
+                else:
+                    plan.settings = body["settings"]
+            else:
+                plan.records[arg] = _validate_records(plan, arg, name, body)
     if plan.errors:
         return
     for coll in manifest.exported_collections():
         plan.records.setdefault(coll, [])
     upgrade(plan.records, head, chain)
+    _prepare_users(plan)
     if any(manifest.is_secret_setting(k) for k in plan.settings):
         plan.settings = manifest.exportable_settings(plan.settings)
     if plan.records.get("calendar_sources"):
@@ -456,30 +565,42 @@ def _validate(plan: Plan, reader: ArchiveReader, store: Repository, today: date)
         plan.warn(
             "calendar_url_removed", f"Calendar links are not exported; reconnect {n} calendar sources after the import."
         )
+    _check_semantics(plan)
+    if plan.errors:
+        return
     _check_references(plan)
     _user_plan(plan, store.list("users"))
     _numbering(plan, today)
 
 
-def _sha(blob: bytes) -> str:
-    import hashlib
-
-    return hashlib.sha256(blob).hexdigest()
-
-
 # ------------------------------------------------------------------ writing
+def _stage_one(reader: ArchiveReader, store: Repository, stage: str, name: str, plan: Plan) -> None:
+    sha = hashlib.sha256()
+
+    def chunks():
+        for chunk in reader.stream(f"attachments/{name}"):
+            sha.update(chunk)
+            yield chunk
+
+    store.stage_attachment(stage, name, chunks())
+    if sha.hexdigest() != plan.attachment_sha.get(name):
+        raise ServiceError(422, f"The attachment {name} changed while it was read; nothing was imported.")
+
+
 def apply(path: Path, store: Repository, plan: Plan) -> dict:
-    """Write a validated plan: attachments first, then one transaction for everything else. All or nothing."""
+    """Write a validated plan. Attachments are staged first, the records go in one transaction, and the staged files
+    are moved into place only after the commit. On any failure (also an interrupt) nothing is left behind."""
     if not plan.ok:
         raise ServiceError(422, "The archive was not imported.")
-    written: list[str] = []
+    stage = store.new_stage()
     try:
         with ArchiveReader(path) as reader:
             for name in sorted(plan.attachments):
-                store.restore_attachment(name, reader.read(f"attachments/{name}"))
-                written.append(name)
-        relogin = False
+                _stage_one(reader, store, stage, name, plan)
         with store.transaction():
+            reason = instance_state(store, allow_no_users=plan.allow_no_users)  # re-checked: it may have changed
+            if reason:
+                raise ServiceError(409, reason)
             local = store.list("users")
             local_user = local[0] if local else None
             for coll in manifest.exported_collections():
@@ -490,18 +611,23 @@ def apply(path: Path, store: Repository, plan: Plan) -> dict:
             relogin = _write_users(store, plan, local_user)
             keep = {k: v for k, v in store.settings().items() if manifest.is_secret_setting(k)}
             store.save_settings({**plan.settings, **keep})
-        return {"relogin": relogin}
     except BaseException:
-        for name in written:
-            store.delete_attachment(name)
+        store.discard_stage(stage)
         raise
+    try:
+        store.commit_stage(stage)
+    except (OSError, ValueError) as e:  # the records are committed; the staged files stay for a manual recovery
+        log.exception("could not move the imported attachments into place (staging area %s)", stage)
+        raise ServiceError(500, "The data was imported but the attachment files could not be moved into place.") from e
+    return {"relogin": relogin}
 
 
 def _write_users(store: Repository, plan: Plan, local: dict | None) -> bool:
     relogin = False
+    folded = str(local.get("username", "")).casefold() if local is not None else None
     for u in plan.records.get("users", []):
         rec = {k: v for k, v in u.items() if not k.startswith("totp")}
-        if local is not None and rec.get("username") == local.get("username"):
+        if local is not None and str(rec.get("username", "")).casefold() == folded:
             store.delete("users", local["id"])
             rec["password_hash"] = local.get("password_hash")
             rec["pw_changed"] = local.get("pw_changed", 0)
@@ -511,6 +637,7 @@ def _write_users(store: Repository, plan: Plan, local: dict | None) -> bool:
             relogin = rec["id"] != local["id"]
         elif not rec.get("password_hash"):
             rec.pop("password_hash", None)
+            rec.pop("pw_changed", None)
             rec["active"] = False
         rec["totp_enabled"] = False
         store.save("users", rec, touch=False)
