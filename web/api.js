@@ -32,6 +32,7 @@
     if (!r.ok) {
       const err = new Error(detailText(data.detail, r.statusText || 'Request failed'));
       err.status = r.status;
+      err.retryAfter = r.headers.get('Retry-After');
       throw err;
     }
     if (data && typeof api.onWarnings === 'function') {
