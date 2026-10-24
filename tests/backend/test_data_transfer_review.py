@@ -516,7 +516,7 @@ def test_a_big_old_attachment_never_blocks_the_export(src, dst):
 # ------------------------------------------------------------------ limits that really reach their check
 def _zeros_zip(path: Path, name: str, size: int) -> Path:
     with (
-        zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as zf,
+        zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as zf,
         zf.open(name, "w", force_zip64=True) as f,
     ):
         block = bytes(limits.MIB)
@@ -534,6 +534,11 @@ def test_the_pinned_limits():
 def test_the_ratio_check_itself_refuses_a_bomb_below_the_size_limit(tmp_path):
     path = _zeros_zip(tmp_path / "ratio.zip", "data/customers.json", 60 * limits.MIB)
     assert 60 * limits.MIB < limits.MAX_DATA_FILE  # the size check does not fire, the ratio check must
+    # precondition: level 9 makes the ratio ~1000 on every zlib (fixed-Huffman quick levels, e.g. zlib-ng level 1 on
+    # Windows, only reach ~150, below MAX_RATIO)
+    with zipfile.ZipFile(path) as zf:
+        info = zf.getinfo("data/customers.json")
+    assert info.file_size > limits.MAX_RATIO * info.compress_size, (info.file_size, info.compress_size)
     with pytest.raises(ArchiveError) as e:
         ArchiveReader(path)
     assert e.value.code == "limit_exceeded" and "compression ratio" in e.value.message

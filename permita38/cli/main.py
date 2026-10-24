@@ -137,7 +137,8 @@ def _import_archive(services, args) -> None:
     if report["users"]:
         u = report["users"]
         print(
-            f"  logins after the import: {', '.join(u['with_login']) or 'none'} (bosses: {', '.join(u['bosses']) or 'none'})"
+            f"  {len(u['with_login'])} accounts can log in afterwards, {len(u['bosses'])} of them bosses; "
+            "the preview in the web UI lists them."
         )
     if not report["ok"]:
         sys.exit("The archive cannot be imported.")
@@ -160,9 +161,8 @@ def _import_archive(services, args) -> None:
         print(f"  {kind}: highest imported {n['highest_imported']}, next number {n['next']}")
     if res["users"]["without_password"]:
         print(
-            "These users have no password yet and cannot log in: "
-            + ", ".join(res["users"]["without_password"])
-            + "\nRun `permita38 set-password <username>` for each of them."
+            f"{len(res['users']['without_password'])} users have no password yet and cannot log in."
+            "\nRun `permita38 set-password <username>` for each of them (the users list in the web UI shows who)."
         )
 
 
