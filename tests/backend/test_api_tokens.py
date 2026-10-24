@@ -105,7 +105,8 @@ def test_the_secret_is_shown_once_and_only_its_hash_is_stored(app, boss_client, 
     assert listing.status_code == 200
     assert secret not in listing.text and "token_hash" not in listing.text
     assert all("token" not in row for row in listing.json())
-    assert secret not in boss_client.post(f"/api/tokens/{item['id']}/revoke").text
+    reply = boss_client.post(f"/api/tokens/{item['id']}/revoke")
+    assert secret not in reply.text
     row = store.get("api_tokens", item["id"])
     assert row["token_hash"] == hashlib.sha256(secret.encode()).hexdigest()
     assert secret not in "".join(str(v) for v in row.values())
@@ -158,14 +159,18 @@ def test_every_role_creates_tokens_for_itself_only(sessions, role):
     made = new_token(sessions[role])
     assert made["item"]["user_id"] == sessions[role].get("/api/auth/me").json()["id"]
     assert sessions[role].get("/api/tokens").json()[0]["id"] == made["item"]["id"]
-    assert "user_id" not in sessions[role].post("/api/tokens", json={"label": "a", "user_id": "x"}).json()  # 422
+    reply = sessions[role].post("/api/tokens", json={"label": "a", "user_id": "x"})
+    assert "user_id" not in reply.json()  # 422
 
 
 def test_unauthenticated_token_routes_answer_401(client):
     assert client.get("/api/tokens").status_code == 401
-    assert client.post("/api/tokens", json={"label": "a"}).status_code == 401
-    assert client.post("/api/tokens/revoke-all").status_code == 401
-    assert client.post("/api/tokens/abcdef12/revoke").status_code == 401
+    reply = client.post("/api/tokens", json={"label": "a"})
+    assert reply.status_code == 401
+    reply = client.post("/api/tokens/revoke-all")
+    assert reply.status_code == 401
+    reply = client.post("/api/tokens/abcdef12/revoke")
+    assert reply.status_code == 401
     assert client.get("/api/tokens/abcdef12/audit").status_code == 401
 
 
@@ -174,24 +179,30 @@ def test_twenty_active_tokens_are_allowed_the_21st_is_a_409(boss_client, clock):
     r = boss_client.post("/api/tokens", json={"label": "one too many"})
     assert r.status_code == 409 and r.json() == {"detail": "Too many active tokens (maximum 20)"}
     boss_client.post(f"/api/tokens/{items[0]['id']}/revoke")  # revoked tokens do not count
-    assert boss_client.post("/api/tokens", json={"label": "fits again"}).status_code == 201
-    assert boss_client.post("/api/tokens", json={"label": "full again"}).status_code == 409
+    reply = boss_client.post("/api/tokens", json={"label": "fits again"})
+    assert reply.status_code == 201
+    reply = boss_client.post("/api/tokens", json={"label": "full again"})
+    assert reply.status_code == 409
 
 
 def test_the_limit_is_per_user_and_expired_tokens_do_not_count(app, sessions, store, clock):
     for i in range(20):
         new_token(sessions["employee"], label=f"t{i}", expires_in_days=1)
-    assert sessions["employee"].post("/api/tokens", json={"label": "x"}).status_code == 409
-    assert sessions["accountant"].post("/api/tokens", json={"label": "x"}).status_code == 201  # other user
+    reply = sessions["employee"].post("/api/tokens", json={"label": "x"})
+    assert reply.status_code == 409
+    reply = sessions["accountant"].post("/api/tokens", json={"label": "x"})
+    assert reply.status_code == 201  # other user
     for row in store.list("api_tokens"):
         store.save("api_tokens", {**row, "expires_at": int(clock.now) - 1})  # all of them expired just now
-    assert sessions["employee"].post("/api/tokens", json={"label": "x"}).status_code == 201
+    reply = sessions["employee"].post("/api/tokens", json={"label": "x"})
+    assert reply.status_code == 201
 
 
 def test_the_validation_error_beats_the_conflict(boss_client):
     for i in range(20):
         new_token(boss_client, label=f"t{i}")
-    assert boss_client.post("/api/tokens", json={"label": ""}).status_code == 422  # order: 401, 403, 422, 409
+    reply = boss_client.post("/api/tokens", json={"label": ""})
+    assert reply.status_code == 422  # order: 401, 403, 422, 409
 
 
 # ------------------------------------------------------------------ using a token
@@ -201,8 +212,10 @@ def test_a_read_only_token_reads_but_never_writes(app, boss_client):
     assert t.get("/api/customers").status_code == 200
     r = t.post("/api/customers", json={"name": "Demo"})
     assert r.status_code == 403 and r.json() == {"detail": "Forbidden"}
-    assert t.put("/api/customers/abc123def456", json={"name": "x"}).status_code == 403
-    assert t.delete("/api/customers/abc123def456").status_code == 403
+    reply = t.put("/api/customers/abc123def456", json={"name": "x"})
+    assert reply.status_code == 403
+    reply = t.delete("/api/customers/abc123def456")
+    assert reply.status_code == 403
     assert boss_client.get("/api/customers").json() == []
 
 
@@ -225,15 +238,19 @@ def test_the_read_only_guard_does_not_depend_on_the_routes_own_declaration(app, 
     rw = bearer(app, new_token(boss_client, read_only=False)["token"])
     r = ro.request(method, "/api/_probe")
     assert r.status_code == 403 and r.json() == {"detail": "Forbidden"}
-    assert rw.request(method, "/api/_probe").status_code == 200
-    assert boss_client.request(method, "/api/_probe").status_code == 200
+    reply = rw.request(method, "/api/_probe")
+    assert reply.status_code == 200
+    reply = boss_client.request(method, "/api/_probe")
+    assert reply.status_code == 200
 
 
 @pytest.mark.parametrize("path", ["/api/plan/simulate", "/api/timer/start", "/api/anything"])
 def test_the_read_only_guard_covers_posts_that_only_compute(app, boss_client, path):
     t = bearer(app, new_token(boss_client)["token"])
-    assert t.post(path, json={}).status_code in (403, 404)
-    assert t.post("/api/plan/simulate", json={}).json() == {"detail": "Forbidden"}
+    reply = t.post(path, json={})
+    assert reply.status_code in (403, 404)
+    reply = t.post("/api/plan/simulate", json={})
+    assert reply.json() == {"detail": "Forbidden"}
 
 
 def test_me_with_a_token_has_auth_and_no_private_key(app, boss_client):
@@ -371,8 +388,10 @@ def test_rights_are_literal_for_the_three_roles():
 
 def test_a_limited_scope_returns_only_the_owners_own_records_through_a_token(app, sessions):
     boss, emp = sessions["boss"], sessions["employee"]
-    assert boss.post("/api/entries", json={"date": "2026-01-05", "minutes": 60}).status_code == 200
-    assert emp.post("/api/entries", json={"date": "2026-01-06", "minutes": 30}).status_code == 200
+    reply = boss.post("/api/entries", json={"date": "2026-01-05", "minutes": 60})
+    assert reply.status_code == 200
+    reply = emp.post("/api/entries", json={"date": "2026-01-06", "minutes": 30})
+    assert reply.status_code == 200
     via_token = bearer(app, new_token(emp)["token"]).get("/api/entries").json()
     assert [e["minutes"] for e in via_token] == [30]
     assert all(e["user_id"] == emp.user_id for e in via_token)
@@ -385,10 +404,12 @@ def test_a_demotion_clamps_the_very_next_request_and_a_promotion_widens_it(app, 
     t = bearer(app, new_token(_login(app, "bob"), read_only=False)["token"])
     assert t.get("/api/customers").status_code == 200
     body = {"username": "bob", "name": "Bob", "role": "employee"}
-    assert boss.put(f"/api/users/{other['id']}", json=body).status_code == 200
+    reply = boss.put(f"/api/users/{other['id']}", json=body)
+    assert reply.status_code == 200
     assert t.get("/api/customers").status_code == 403  # the employee has no customers
     assert t.get("/api/entries").status_code == 200
-    assert boss.put(f"/api/users/{other['id']}", json={**body, "role": "boss"}).status_code == 200
+    reply = boss.put(f"/api/users/{other['id']}", json={**body, "role": "boss"})
+    assert reply.status_code == 200
     assert t.get("/api/customers").status_code == 200
 
 
@@ -399,10 +420,12 @@ def test_deactivating_the_owner_revokes_the_tokens_and_reactivating_does_not_rev
     t = bearer(app, made["token"])
     assert t.get("/api/entries").status_code == 200
     body = {"username": "empx", "name": "Employee", "role": "employee", "active": False}
-    assert boss.put(f"/api/users/{emp.user_id}", json=body).status_code == 200
+    reply = boss.put(f"/api/users/{emp.user_id}", json=body)
+    assert reply.status_code == 200
     assert t.get("/api/entries").status_code == 401
     assert boss.get("/api/tokens?all=true").json()[0]["status"] == "revoked"
-    assert boss.put(f"/api/users/{emp.user_id}", json={**body, "active": True}).status_code == 200
+    reply = boss.put(f"/api/users/{emp.user_id}", json={**body, "active": True})
+    assert reply.status_code == 200
     assert t.get("/api/entries").status_code == 401  # a revoked token stays revoked
     assert _login(app, "empx").get("/api/entries").status_code == 200
     assert (
@@ -424,7 +447,8 @@ def test_deleting_the_owner_deletes_tokens_and_audit_rows(app, sessions, store):
     bearer(app, theirs["token"]).get("/api/entries")
     bearer(app, mine["token"]).get("/api/customers")
     assert len(store.list("audit_log")) == 2
-    assert boss.delete(f"/api/users/{emp.user_id}").status_code == 204
+    reply = boss.delete(f"/api/users/{emp.user_id}")
+    assert reply.status_code == 204
     assert [r["id"] for r in store.list("api_tokens")] == [mine["item"]["id"]]
     assert [r["token_id"] for r in store.list("audit_log")] == [mine["item"]["id"]]
     assert bearer(app, theirs["token"]).get("/api/entries").status_code == 401
@@ -455,9 +479,11 @@ def test_session_only_refuses_a_token_whatever_the_role(app, sessions):
 def test_a_token_cannot_manage_tokens_or_passwords(app, boss_client, store):
     made = new_token(boss_client, read_only=False)
     t = bearer(app, made["token"])
-    assert t.post("/api/tokens", json={"label": "child"}).json() == SESSION_ONLY_BODY
+    reply = t.post("/api/tokens", json={"label": "child"})
+    assert reply.json() == SESSION_ONLY_BODY
     assert t.get("/api/tokens").status_code == 403
-    assert t.post(f"/api/tokens/{made['item']['id']}/revoke").status_code == 403
+    reply = t.post(f"/api/tokens/{made['item']['id']}/revoke")
+    assert reply.status_code == 403
     assert len(store.list("api_tokens")) == 1
     before = store.list("users")
     r = t.post("/api/auth/change-password", json={"old_password": PASSWORD, "new_password": "another password"})
@@ -470,18 +496,21 @@ def test_a_read_write_boss_token_cannot_write_settings_but_reads_them(app, boss_
     r = t.put("/api/settings", json={"company_name": "Hijacked Ltd"})
     assert r.status_code == 403 and r.json() == SESSION_ONLY_BODY
     for method in ("POST", "DELETE", "PATCH"):  # no such routes: nothing to write
-        assert t.request(method, "/api/settings", json={}).status_code in (403, 404, 405)
+        reply = t.request(method, "/api/settings", json={})
+        assert reply.status_code in (403, 404, 405)
     assert store.settings() == before
     got = t.get("/api/settings")
     assert got.status_code == 200 and got.json()["company_name"] == before["company_name"]
-    assert boss_client.put("/api/settings", json={"company_name": "Renamed"}).status_code == 200  # the session can
+    reply = boss_client.put("/api/settings", json={"company_name": "Renamed"})
+    assert reply.status_code == 200  # the session can
 
 
 def test_public_routes_ignore_a_bearer_token_and_do_not_audit(app, boss_client, store):
     t = bearer(app, new_token(boss_client)["token"])
     assert t.get("/api/auth/status").status_code == 200
     assert t.get("/api/health").status_code == 200
-    assert t.post("/api/auth/login", json={"username": "boss", "password": "wrong password"}).status_code == 401
+    reply = t.post("/api/auth/login", json={"username": "boss", "password": "wrong password"})
+    assert reply.status_code == 401
     assert store.list("audit_log") == []
     assert store.list("api_tokens")[0].get("last_used_at") is None
 
@@ -551,14 +580,17 @@ def test_other_users_tokens_are_404_for_revoke_and_audit_but_the_boss_may(app, s
         r = call(acc, theirs)
         assert r.status_code == 404 and r.json() == {"detail": "Token not found"}
         assert call(acc, "00000000").json() == r.json()  # an unknown id answers the same: no existence leak
-    assert acc.post(f"/api/tokens/{theirs}/revoke").status_code == 404
+    reply = acc.post(f"/api/tokens/{theirs}/revoke")
+    assert reply.status_code == 404
     assert boss.get(f"/api/tokens/{theirs}/audit").status_code == 200
-    assert boss.post(f"/api/tokens/{theirs}/revoke").json()["status"] == "revoked"
+    reply = boss.post(f"/api/tokens/{theirs}/revoke")
+    assert reply.json()["status"] == "revoked"
 
 
 @pytest.mark.parametrize("bad", ["abc", "ABCDEF12", "abcdef1", "abcdef123", "zzzzzzzz"])
 def test_the_token_id_must_be_eight_hex_characters(boss_client, bad):
-    assert boss_client.post(f"/api/tokens/{bad}/revoke").status_code == 422
+    reply = boss_client.post(f"/api/tokens/{bad}/revoke")
+    assert reply.status_code == 422
     assert boss_client.get(f"/api/tokens/{bad}/audit").status_code == 422
 
 
@@ -569,13 +601,18 @@ def test_revoke_all(app, sessions):
     new_token(acc)
     r = emp.post("/api/tokens/revoke-all")
     assert r.status_code == 200 and r.json() == {"revoked": 3}
-    assert emp.post("/api/tokens/revoke-all").json() == {"revoked": 0}
+    reply = emp.post("/api/tokens/revoke-all")
+    assert reply.json() == {"revoked": 0}
     assert all(bearer(app, m["token"]).get("/api/entries").status_code == 401 for m in mine)
-    assert emp.post(f"/api/tokens/revoke-all?user_id={acc.user_id}").status_code == 403
-    assert emp.post(f"/api/tokens/revoke-all?user_id={emp.user_id}").json() == {"revoked": 0}  # own id is fine
-    assert boss.post(f"/api/tokens/revoke-all?user_id={acc.user_id}").json() == {"revoked": 1}
+    reply = emp.post(f"/api/tokens/revoke-all?user_id={acc.user_id}")
+    assert reply.status_code == 403
+    reply = emp.post(f"/api/tokens/revoke-all?user_id={emp.user_id}")
+    assert reply.json() == {"revoked": 0}  # own id is fine
+    reply = boss.post(f"/api/tokens/revoke-all?user_id={acc.user_id}")
+    assert reply.json() == {"revoked": 1}
     assert [x["status"] for x in boss.get("/api/tokens").json()] == ["active"]
-    assert boss.post("/api/tokens/revoke-all?user_id=!").status_code == 422
+    reply = boss.post("/api/tokens/revoke-all?user_id=!")
+    assert reply.status_code == 422
 
 
 def test_revoke_all_counts_only_active_tokens_and_leaves_expired_ones_expired(app, sessions, store, clock):
@@ -583,13 +620,15 @@ def test_revoke_all_counts_only_active_tokens_and_leaves_expired_ones_expired(ap
     live = new_token(emp, label="live")["item"]
     old = new_token(emp, label="old")["item"]
     store.save("api_tokens", {**store.get("api_tokens", old["id"]), "expires_at": int(clock.now) - 1})
-    assert emp.post("/api/tokens/revoke-all").json() == {"revoked": 1}
+    reply = emp.post("/api/tokens/revoke-all")
+    assert reply.json() == {"revoked": 1}
     status = {
         t["label"]: t["status"] for t in boss.get("/api/tokens?all=true").json() if t["id"] in (live["id"], old["id"])
     }
     assert status == {"live": "revoked", "old": "expired"}
     assert store.get("api_tokens", old["id"]).get("revoked_at") is None
-    assert emp.post("/api/tokens/revoke-all").json() == {"revoked": 0}
+    reply = emp.post("/api/tokens/revoke-all")
+    assert reply.json() == {"revoked": 0}
 
 
 def test_deactivating_does_not_stamp_expired_tokens(app, sessions, store, clock):
@@ -597,7 +636,8 @@ def test_deactivating_does_not_stamp_expired_tokens(app, sessions, store, clock)
     old = new_token(emp)["item"]
     store.save("api_tokens", {**store.get("api_tokens", old["id"]), "expires_at": int(clock.now) - 1})
     body = {"username": "empx", "name": "Employee", "role": "employee", "active": False}
-    assert boss.put(f"/api/users/{emp.user_id}", json=body).status_code == 200
+    reply = boss.put(f"/api/users/{emp.user_id}", json=body)
+    assert reply.status_code == 200
     assert store.get("api_tokens", old["id"]).get("revoked_at") is None
 
 
@@ -606,8 +646,10 @@ def test_there_is_no_patch_route(boss_client):
     r = boss_client.patch(f"/api/tokens/{made['id']}", json={"label": "new"})
     assert r.status_code == 405
     assert boss_client.get("/api/tokens").json()[0]["label"] == "Backup script"
-    assert boss_client.put(f"/api/tokens/{made['id']}", json={"label": "new"}).status_code in (404, 405)
-    assert boss_client.delete(f"/api/tokens/{made['id']}").status_code in (404, 405)
+    reply = boss_client.put(f"/api/tokens/{made['id']}", json={"label": "new"})
+    assert reply.status_code in (404, 405)
+    reply = boss_client.delete(f"/api/tokens/{made['id']}")
+    assert reply.status_code in (404, 405)
 
 
 # ------------------------------------------------------------------ transport
@@ -628,7 +670,8 @@ def test_a_pat_in_the_cookie_is_refused_and_a_bearer_wins_over_a_cookie(app, ses
 
 def test_a_bad_bearer_does_not_fall_back_to_a_valid_cookie(app, boss_client):
     c = TestClient(app)
-    assert c.post("/api/auth/login", json={"username": "boss", "password": PASSWORD}).status_code == 200
+    reply = c.post("/api/auth/login", json={"username": "boss", "password": PASSWORD})
+    assert reply.status_code == 200
     assert c.get("/api/auth/me").status_code == 200  # the cookie alone works
     assert c.get("/api/auth/me", headers={"Authorization": f"Bearer {FAKE_SECRET}"}).status_code == 401
     assert c.get("/api/auth/me", headers={"Authorization": "Bearer not.a.jwt"}).status_code == 401
@@ -647,7 +690,8 @@ def test_a_session_jwt_works_as_a_bearer_and_is_never_tried_as_a_token(app, boss
     c = bearer(app, jwt)
     me = c.get("/api/auth/me").json()
     assert me["auth"] == {"kind": "session"}
-    assert c.post("/api/tokens", json={"label": "a"}).status_code == 201  # a real session may create tokens
+    reply = c.post("/api/tokens", json={"label": "a"})
+    assert reply.status_code == 201  # a real session may create tokens
 
 
 def test_malformed_pat_values_are_401_without_a_lookup(app, boss_client, monkeypatch):
@@ -733,7 +777,8 @@ def test_retry_after_shrinks_as_the_window_passes(app, boss_client, clock):
 
 def test_the_login_route_sends_retry_after_too(app, client):
     for _ in range(5):
-        assert client.post("/api/auth/login", json={"username": "nobody", "password": "x"}).status_code == 401
+        reply = client.post("/api/auth/login", json={"username": "nobody", "password": "x"})
+        assert reply.status_code == 401
     r = client.post("/api/auth/login", json={"username": "nobody", "password": "x"})
     assert r.status_code == 429 and r.json() == LOCKED and 1 <= int(r.headers["retry-after"]) <= 300
 
@@ -813,11 +858,14 @@ def test_exactly_one_audit_row_per_token_request_including_errors(app, boss_clie
     rw = new_token(boss_client, read_only=False)
     t, w = bearer(app, made["token"]), bearer(app, rw["token"])
     assert t.get("/api/customers").status_code == 200
-    assert t.post("/api/customers", json={"name": "x"}).status_code == 403  # read-only guard
+    reply = t.post("/api/customers", json={"name": "x"})
+    assert reply.status_code == 403  # read-only guard
     assert t.get("/api/customers/abc123def456").status_code == 404
-    assert t.post("/api/tokens", json={"label": "x"}).status_code == 403  # session-only
+    reply = t.post("/api/tokens", json={"label": "x"})
+    assert reply.status_code == 403  # session-only
     assert t.get("/api/team/timeline").status_code == 422  # missing query
-    assert w.post("/api/customers", json={}).status_code == 422
+    reply = w.post("/api/customers", json={})
+    assert reply.status_code == 422
     rows = audit(boss_client, made["item"]["id"])["items"]
     # (several requests in one second have no stable order, so the rows are compared as a set)
     assert sorted((r["method"], r["route"], r["status"]) for r in rows) == sorted([
@@ -1005,7 +1053,7 @@ def test_request_paths_never_use_the_role_based_check_or_the_matrix_for_the_curr
     offenders = []
     for folder in ("api", "core/service"):
         for path in sorted((root / folder).rglob("*.py")):
-            text = path.read_text()
+            text = path.read_text(encoding="utf-8")
             rel = path.relative_to(root)
             for n, line in enumerate(text.splitlines(), 1):
                 if call.search(line) or alias.search(line):
@@ -1058,7 +1106,8 @@ def test_boss_only_high_impact_writes_are_session_only(app, boss_client, method,
     else:
         assert r.status_code == 403 and r.json() == SESSION_ONLY_BODY
     # the session of the same boss is not refused for that reason
-    assert boss_client.request(method, path, json={}).json() != SESSION_ONLY_BODY
+    reply = boss_client.request(method, path, json={})
+    assert reply.json() != SESSION_ONLY_BODY
 
 
 def test_the_session_only_writes_are_exactly_the_documented_ones():
@@ -1089,13 +1138,15 @@ def test_a_read_only_boss_token_reads_the_views_and_is_refused_every_unsafe_meth
 
 def test_a_read_write_boss_token_cannot_change_numbering_or_import_but_reads_them(app, boss_client):
     rw = bearer(app, new_token(boss_client, read_only=False)["token"])
-    assert rw.put("/api/numbering", json={"type": "invoice", "next": 50, "confirm": True}).json() == SESSION_ONLY_BODY
+    reply = rw.put("/api/numbering", json={"type": "invoice", "next": 50, "confirm": True})
+    assert reply.json() == SESSION_ONLY_BODY
     assert (
         rw.post("/api/import/run", data={"type": "customers"}, files={"file": ("a.csv", b"name\nA\n")}).json()
         == SESSION_ONLY_BODY
     )
     assert rw.get("/api/numbering/status").status_code == 200
-    assert rw.post("/api/numbering/check", json={"type": "invoice"}).status_code == 200  # a dry run changes nothing
+    reply = rw.post("/api/numbering/check", json={"type": "invoice"})
+    assert reply.status_code == 200  # a dry run changes nothing
     assert boss_client.get("/api/numbering/status").json()["next"] != 50
 
 

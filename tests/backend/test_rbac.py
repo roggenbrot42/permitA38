@@ -94,7 +94,7 @@ def test_legacy_and_unknown_roles():
 
 
 def test_docs_list_every_area_and_role():
-    text = (Path(__file__).parents[2] / "docs" / "roles.md").read_text()
+    text = (Path(__file__).parents[2] / "docs" / "roles.md").read_text(encoding="utf-8")
     for area in rights.AREAS:
         assert f"`{area}`" in text, area
     for role in rights.ROLES:
@@ -382,19 +382,28 @@ def test_accountant_reads_money_and_books_expenses_but_changes_nothing_else(boss
     # full project records for the accountant (rates), not the restricted employee view
     assert acc.get(f"/api/projects/{proj['id']}").json()["rate"] == 90
     # expenses and bills: yes
-    assert acc.post("/api/expenses", json={"date": "2026-01-06", "description": "Paper", "net": 10}).status_code == 200
-    assert acc.post("/api/attachments", files={"file": ("bill.txt", b"x")}).status_code == 200
+    reply = acc.post("/api/expenses", json={"date": "2026-01-06", "description": "Paper", "net": 10})
+    assert reply.status_code == 200
+    reply = acc.post("/api/attachments", files={"file": ("bill.txt", b"x")})
+    assert reply.status_code == 200
     # everything else: no
-    assert acc.post("/api/customers", json={"name": "X"}).status_code == 403
-    assert acc.put(f"/api/invoices/{inv.json()['id']}", json={"customer_id": cust["id"]}).status_code == 403
-    assert acc.post(f"/api/invoices/{inv.json()['id']}/finalize").status_code == 403
-    assert acc.delete(f"/api/invoices/{inv.json()['id']}").status_code == 403
-    assert acc.post("/api/entries", json={"date": "2026-01-05", "minutes": 5}).status_code == 403
-    assert acc.post("/api/timer/start", json={}).status_code == 403
+    reply = acc.post("/api/customers", json={"name": "X"})
+    assert reply.status_code == 403
+    reply = acc.put(f"/api/invoices/{inv.json()['id']}", json={"customer_id": cust["id"]})
+    assert reply.status_code == 403
+    reply = acc.post(f"/api/invoices/{inv.json()['id']}/finalize")
+    assert reply.status_code == 403
+    reply = acc.delete(f"/api/invoices/{inv.json()['id']}")
+    assert reply.status_code == 403
+    reply = acc.post("/api/entries", json={"date": "2026-01-05", "minutes": 5})
+    assert reply.status_code == 403
+    reply = acc.post("/api/timer/start", json={})
+    assert reply.status_code == 403
     assert acc.get("/api/dashboard").status_code == 403
     assert acc.get("/api/absences").status_code == 403
     assert acc.get("/api/forecast").status_code == 403
-    assert acc.put("/api/settings", json={"company_name": "Hacked"}).status_code == 403
+    reply = acc.put("/api/settings", json={"company_name": "Hacked"})
+    assert reply.status_code == 403
     assert (
         acc.post("/api/users", json={"username": "ev", "name": "E", "role": "boss", "password": PASSWORD}).status_code
         == 403
@@ -419,13 +428,16 @@ def test_employee_is_unchanged(boss_client, clients):
         assert emp.get(path).status_code == 403, path
     assert emp.get("/api/projects").status_code == 200
     assert emp.get("/api/dashboard").status_code == 200
-    assert emp.post("/api/timer/start", json={}).status_code == 200
+    reply = emp.post("/api/timer/start", json={})
+    assert reply.status_code == 200
     assert (
         emp.post("/api/absences", json={"kind": "vacation", "start": "2026-02-02", "end": "2026-02-03"}).status_code
         == 200
     )
-    assert emp.post("/api/projects", json={"name": "P"}).status_code == 403
-    assert emp.post("/api/attachments", files={"file": ("a.txt", b"x")}).status_code == 403
+    reply = emp.post("/api/projects", json={"name": "P"})
+    assert reply.status_code == 403
+    reply = emp.post("/api/attachments", files={"file": ("a.txt", b"x")})
+    assert reply.status_code == 403
     assert emp.get(f"/api/dashboard?user_id={clients['boss'].get('/api/auth/me').json()['id']}").status_code == 403
 
 
@@ -493,7 +505,8 @@ def test_an_unknown_stored_role_has_no_rights(app, boss_client):
 def test_demoting_to_accountant_and_last_boss_rule(boss_client, clients):
     me = boss_client.get("/api/auth/me").json()
     body = {"username": "boss", "name": "Test Boss", "role": "accountant"}
-    assert boss_client.put(f"/api/users/{me['id']}", json=body).status_code == 400  # last boss stays boss
+    reply = boss_client.put(f"/api/users/{me['id']}", json=body)
+    assert reply.status_code == 400  # last boss stays boss
 
 
 def test_role_change_takes_effect_on_the_next_request(boss_client, clients):

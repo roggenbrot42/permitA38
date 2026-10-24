@@ -147,7 +147,6 @@ class TokenService:
             names = {u["id"]: u.get("name") or u.get("username") for u in self.store.list("users")}
         else:
             rows = self.store.find("api_tokens", user_id=me["id"])
-            names = {}
         rows.sort(key=lambda r: (int(r.get("created") or 0), r["id"]), reverse=True)
         out = []
         for r in rows:
