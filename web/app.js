@@ -160,6 +160,7 @@ function lockPage(root, p) {
 async function render() {
   const app = $('#app');
   clearInterval(render.tick);
+  const seq = render.seq = (render.seq || 0) + 1;   // a slower, older render must not overwrite a newer page
   if (!S.me) return renderLogin(app);
   const [p, args] = route();
   if (p !== 'doc' && typeof DOC !== 'undefined') DOC = null;
@@ -180,7 +181,7 @@ async function render() {
     if (e.status) { toast(e.message, true); html = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; }  // API error: shown, not a crash
     else { html = `<div class="card">Something went wrong: ${esc(e.message)}</div>`; console.error(e); }
   }
-  if (!S.me) return;
+  if (!S.me || seq !== render.seq) return;
   app.innerHTML = `<div class="shell"><nav class="side"><div class="brand"><i></i>permitA38</div>
     ${nav.map(([k, ic, l]) => `<a class="nav ${k === active ? 'on' : ''}" href="#/${k}"><span>${ic}</span>${l}</a>`).join('')}
     <div class="spacer"></div><div class="me"><b>${esc(S.me.name)}</b><br>${esc(ROLE_LABEL[S.me.role] || S.me.role)}</div>
