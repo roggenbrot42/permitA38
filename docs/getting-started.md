@@ -112,3 +112,6 @@ Open the account menu (bottom left) → **Two-factor authentication**. Enter you
 - **A change from another device is missing** – wait for Syncthing to finish, then reload the page.
 - **⚠ banner about sync-conflict files** – open the named file next to its original, keep the version you want, delete the other.
 - **PDF has no logo** – the logo must be a JPEG (Settings → Your business).
+
+## Data export and import
+Boss only: Settings > Data export and import. Download a copy of all your data (optionally with user accounts), or check an archive and import it into an empty instance. The copy is not a GoBD-compliant archive; see the notice on the page.
