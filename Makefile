@@ -1,6 +1,9 @@
 PYTHON ?= python3
 OPENAPI = api/openapi.json
 
+# worker processes for the randomized and browser suites (they are independent and CPU bound): make test-random XDIST="-n 1"
+XDIST ?= -n 4 --dist worksteal
+
 .PHONY: test test-backend test-random test-web test-all test-summary
 # fast backend suite (unit, API, repository contract, migrations) - what CI runs on every OS/Python
 test: test-backend
@@ -8,14 +11,15 @@ test: test-backend
 test-backend:
 	$(PYTHON) -m pytest tests/backend -q
 
-# randomized API tests: hypothesis state machine + schema fuzzer (default "ci" profile, deterministic, ~1 min).
+# randomized API tests: hypothesis state machine + schema fuzzer (default "ci" profile, deterministic, ~50 s on 4 workers,
+# ~90 s with XDIST="-n 1").
 # HYPOTHESIS_PROFILE=thorough for a long non-deterministic run.
 test-random:
-	$(PYTHON) -m pytest tests/backend/randomized -q
+	$(PYTHON) -m pytest tests/backend/randomized -q $(XDIST)
 
-# browser UI + live-server random user simulations (needs `playwright install chromium` or PERMITA38_CHROMIUM, ~3 min)
+# browser UI + live-server random user simulations (needs `playwright install chromium` or PERMITA38_CHROMIUM, ~1.5 min on 4 workers)
 test-web:
-	$(PYTHON) -m pytest tests/web -q
+	$(PYTHON) -m pytest tests/web -q $(XDIST)
 
 test-all: test-backend test-random test-web
 

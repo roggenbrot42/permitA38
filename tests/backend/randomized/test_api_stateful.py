@@ -381,12 +381,12 @@ class ApiMachine(RuleBasedStateMachine):
         exp.setdefault("lines", [])
         if old is None:
             exp["status"] = "draft"
-            exp["date"] = exp.get("date") or TODAY.isoformat()
+            exp["date"] = exp.get("date") or date.today().isoformat()
         else:
             exp.pop("number", None)
             if old.get("number"):
                 exp["number"] = old["number"]
-            exp["date"] = exp.get("date") or old.get("date") or TODAY.isoformat()  # a PUT cannot drop the date
+            exp["date"] = exp.get("date") or old.get("date") or date.today().isoformat()  # a PUT cannot drop the date
         exp.setdefault("template_id", "classic")
         lines = []
         for ln in exp["lines"]:
@@ -560,7 +560,9 @@ class ApiMachine(RuleBasedStateMachine):
         self.tick()
         s = data.draw(self.actor())
         before = {e["id"] for e in self.call("GET", "/entries", self.mint(self.boss_id)).json()}
+        days = {date.today().isoformat()}  # the server stamps the entry date; accept the day before/after the call
         r = self.call("POST", "/timer/stop", s, json={"note": note})
+        days.add(date.today().isoformat())
         if (g := self.gate(s)) is not None:
             assert r.status_code == g
             return
@@ -571,7 +573,7 @@ class ApiMachine(RuleBasedStateMachine):
             return
         e = r.json()["entry"]
         assert e["id"] not in before and e["user_id"] == s.user_id and e["billable"] is True
-        assert e["date"] == date.today().isoformat() and 1 <= e["minutes"] <= 2
+        assert e["date"] in days and 1 <= e["minutes"] <= 2
         assert e.get("project_id") == t["project_id"] and e.get("task_id") == t["task_id"]
         assert e["note"] == (note if note is not None else t["note"])
         self.m["entries"][e["id"]] = {k: v for k, v in e.items() if v is not None and k not in ("created", "updated")}
@@ -826,9 +828,11 @@ class ApiMachine(RuleBasedStateMachine):
         s = data.draw(self.actor())
         cust = data.draw(self.ref("customers", none=False)) if by_customer else None
         proj = data.draw(self.ref("projects", none=False)) if by_project else None
+        days = {date.today().isoformat()}  # server-stamped invoice date: accept the day before/after the call
         r = self.call(
             "POST", "/invoices/from-time", s, json={"customer_id": cust, "project_id": proj, "from": lo, "to": hi}
         )
+        days.add(date.today().isoformat())
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
@@ -858,7 +862,7 @@ class ApiMachine(RuleBasedStateMachine):
         assert approx(sum(ln["amount"] for ln in inv["lines"]), sum(oracle.line_amount(ln) for ln in inv["lines"]))
         dates = sorted(e["date"] for e in picked)
         assert inv["status"] == "draft" and inv["service_from"] == dates[0] and inv["service_to"] == dates[-1]
-        assert inv["vat_rate"] == 19 and inv["date"] == TODAY.isoformat() and ("number" not in inv)
+        assert inv["vat_rate"] == 19 and inv["date"] in days and ("number" not in inv)
         candidates = {self.m["projects"][k[0]].get("customer_id") for k in groups}
         assert inv.get("customer_id") == cust if cust else inv.get("customer_id") in candidates | {None}
         assert inv.get("project_id") == proj if proj else "project_id" not in inv
@@ -1130,11 +1134,15 @@ class ApiMachine(RuleBasedStateMachine):
         boss = self._boss()
         entries, absences = list(self.m["entries"].values()), list(self.m["absences"].values())
         for uid, u in list(self.m["users"].items())[:4]:
+            days = {date.today()}  # the server computes "this week" on its own clock: accept either side of the call
             r = self.call("GET", f"/dashboard?user_id={uid}", boss)
+            days.add(date.today())
             assert r.status_code == 200, r.text
-            target, worked = oracle.week_target_and_worked(u, entries, absences, date.today())
             d = r.json()
-            assert approx(d["target"], target) and approx(d["worked"], worked), (u["username"], d, target, worked)
+            candidates = [oracle.week_target_and_worked(u, entries, absences, day) for day in sorted(days)]
+            matches = [(t, w) for t, w in candidates if approx(d["target"], t) and approx(d["worked"], w)]
+            assert matches, (u["username"], d, candidates)
+            target, worked = matches[0]
             assert approx(d["remaining"], max(target - worked, 0)), (d, target, worked)
         assert self.call("GET", f"/dashboard?user_id={DEAD_ID}", boss).status_code == 404
 
@@ -1181,8 +1189,19 @@ class ApiMachine(RuleBasedStateMachine):
         self.dirty = set()
 
 
-ApiMachine.TestCase.settings = settings(settings.default)
-TestApiStateful = ApiMachine.TestCase
+# The run is split into SHARDS independent state machines with 1/SHARDS of the examples each, so that pytest-xdist can
+# run them on different workers. Each shard is its own class and therefore draws its own (deterministic) examples.
+SHARDS = 3
+
+
+def _shard(n: int):
+    machine = type(f"ApiMachineShard{n}", (ApiMachine,), {})
+    base = settings.default
+    machine.TestCase.settings = settings(base, max_examples=-(-base.max_examples // SHARDS))
+    return type(f"TestApiStatefulShard{n}", (machine.TestCase,), {})
+
+
+TestApiStatefulShard1, TestApiStatefulShard2, TestApiStatefulShard3 = (_shard(i) for i in range(1, SHARDS + 1))
 
 
 pytestmark = pytest.mark.randomized

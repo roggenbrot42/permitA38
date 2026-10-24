@@ -306,6 +306,25 @@ def itemise_expense(rec: dict) -> dict:
     }
 
 
+def trip_amounts(trip: dict) -> list[dict[str, Any]]:
+    """The finance lines of a business trip: its meal allowance per day and its mileage (dated at the trip start).
+
+    The single place where trips feed the finance report (docs/specs/business-trips.md). Both are deductible at 100 %
+    and carry no VAT. Only a FINAL trip counts: drafts are excluded until they are finalised. The figures are the ones
+    stored with the trip, so a final trip never changes here.
+    """
+    if trip.get("status") != "final":
+        return []
+    out: list[dict[str, Any]] = [
+        {"date": x.get("date"), "category": "Meal allowance", "amount": x.get("amount")}
+        for x in trip.get("days") or []
+        if isinstance(x, dict)
+    ]
+    if trip.get("mileage_total"):
+        out.append({"date": str(trip.get("start") or "")[:10], "category": "Mileage", "amount": trip["mileage_total"]})
+    return out
+
+
 def finance(store, year, today=None):
     today = today or date.today()
     s = store.settings()
@@ -345,6 +364,14 @@ def finance(store, year, today=None):
             if not klein:
                 m["vat_in"] += q2(vat_raw * vat_pct)
             cats[ln["category"] or "Other"] += cost
+    for t in store.list("trips"):
+        for item in trip_amounts(t):
+            when = d(item["date"])
+            if not when or when.year != year:
+                continue
+            amount = dec(item["amount"])
+            months[when.month - 1]["expenses"] += amount  # deductible 100 %, no VAT (also in Kleinunternehmer mode)
+            cats[item["category"]] += amount
     for m in months:
         m["profit"] = m["revenue"] - m["expenses"]
         m["vat_due"] = ZERO if klein else m["vat_out"] - m["vat_in"]

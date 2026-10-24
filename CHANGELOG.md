@@ -17,6 +17,13 @@ All notable changes to this project are documented here. The format is based on
   `off`). Hidden details are removed on the server. New permission area `team_timeline`. See
   `docs/contracts/team-timeline.md` and `docs/roles.md`.
 
+### Added
+- **Business trips (backend)**: trips with destinations per day, meal allowance (*Verpflegungsmehraufwand*) with
+  reductions for provided meals, the three-month limit, mileage at 0,30 € per km, linked bills, a checklist, and a
+  printable trip statement (`/api/trips`). Figures are computed by the server and frozen when a trip is finalised.
+  Allowance and mileage appear in the finance report as deductible lines. Tax rules marked *(verify)* in
+  `docs/compliance.md`; the 2026 country table is a placeholder. New rights area `trips`.
+
 ## [0.4.0-alpha.2] - 2026-10-23
 
 Second alpha. Adds roles, sanity warnings, calendars, document numbering and import, itemised expenses with a bill

@@ -8,7 +8,6 @@ Replay a failing run with:  PERMITA38_E2E_SEED=<seed> pytest tests/web/e2e_rando
 """
 
 import random
-import time
 import traceback
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -372,8 +371,10 @@ class Journey:
         self.page.fill("#t_note", f"{tag} timer")
         self.click_render("[data-a=timerStart]")
         self.page.wait_for_selector("#clock")
-        time.sleep(1.2)
-        assert self.page.inner_text("#clock") != "00:00:00", "the running timer does not tick"
+        try:  # wait for the first tick instead of sleeping a fixed time
+            self.page.wait_for_function("() => document.querySelector('#clock').innerText !== '00:00:00'", timeout=5000)
+        except Exception:
+            pytest.fail("the running timer does not tick")
         self.click_render("[data-a=timerStop]")
         self.m.entries.append(MEntry(tag, 1, self.today, proj, True))
         self.say(f"timer {tag} on {proj.name!r} -> 1min")
