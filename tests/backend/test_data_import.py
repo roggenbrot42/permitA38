@@ -1,6 +1,7 @@
 """Data import: refusals leave the instance unchanged, atomicity, users, numbering, preview/run, CLI."""
 
 import json
+import os
 import stat
 from datetime import date
 
@@ -12,8 +13,8 @@ from permita38.core.errors import ServiceError
 from permita38.core.service.numbering import NumberingService
 from permita38.core.service.transfer import manifest
 
-from .conftest import PASSWORD, _login
-from .transfer_helpers import build_zip, export_archive, make_instance, seed, zip_files
+from .conftest import PASSWORD
+from .transfer_helpers import build_zip, export_archive, login, make_instance, seed, zip_files
 
 
 def snapshot(store) -> dict:
@@ -71,7 +72,8 @@ def test_records_keep_created_and_updated(source, target):
     src_app, src_client, ids = source
     _, dst_client, dst_store = target
     before = src_app.state.services.store.get("customers", ids["customer"])
-    assert post_run(dst_client, export_archive(src_client)).status_code == 200
+    resp = post_run(dst_client, export_archive(src_client))
+    assert resp.status_code == 200
     after = dst_store.get("customers", ids["customer"])
     assert (after["created"], after["updated"]) == (before["created"], before["updated"])
 
@@ -81,11 +83,12 @@ def test_non_empty_instance_is_refused_with_409(source, target):
     _, src_client, _ = source
     _, dst_client, dst_store = target
     blob = export_archive(src_client)
-    assert post_run(dst_client, blob).status_code == 200
-    again = post_run(_login(target[0], "boss"), blob)
+    resp = post_run(dst_client, blob)
+    assert resp.status_code == 200
+    again = post_run(login(target[0], "boss"), blob)
     assert again.status_code == 409
     assert again.json()["detail"].startswith("This instance already contains data (")
-    pre = post_preview(_login(target[0], "boss"), blob).json()
+    pre = post_preview(login(target[0], "boss"), blob).json()
     assert pre["ok"] is False and "not_empty" in codes(pre["errors"])
 
 
@@ -196,7 +199,8 @@ def test_older_schema_head_is_accepted_with_a_warning(source, target, tmp_path):
     pre = post_preview(dst_client, path.read_bytes()).json()
     assert pre["ok"] is True and pre["compatibility"]["status"] == "older"
     assert "schema_older" in codes(pre["warnings"])
-    assert post_run(dst_client, path.read_bytes()).status_code == 200
+    resp = post_run(dst_client, path.read_bytes())
+    assert resp.status_code == 200
 
 
 def test_confirmation_is_required(source, target):
@@ -280,7 +284,7 @@ def test_same_username_keeps_local_password_and_role(source, target):
     assert users["boss"]["password_hash"] == local["password_hash"]
     assert users["mia"]["password_hash"] and users["mia"]["active"] is not False
     assert all(not u.get("totp_enabled") for u in users.values())
-    _login(dst_app, "boss")  # the local password still works
+    login(dst_app, "boss")  # the local password still works
     assert dst_app.state.services.auth.user_from_token(dst_client.headers["Authorization"][7:]) is None
 
 
@@ -385,7 +389,7 @@ def test_transfer_log_records_every_attempt_without_contents(source, target):
     post_run(dst_client, b"garbage")
     post_preview(dst_client, blob)
     post_run(dst_client, blob)
-    client = _login(dst_app, "boss")
+    client = login(dst_app, "boss")
     log = client.get("/api/data/transfers").json()
     assert [(e["action"], e["ok"]) for e in log] == [("import", True), ("import_preview", True), ("import", False)]
     assert all(set(e) == {"at", "user_id", "action", "ok", "include_accounts", "counts", "archive_sha256"} for e in log)
@@ -414,7 +418,8 @@ def test_cli_export_dry_run_and_import(source, tmp_path, capsys):
     main([*_cli(tmp_path, "src"), "export", str(out)])
     text = capsys.readouterr().out
     assert "SHA-256" in text and "customers: 1" in text
-    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+    if os.name != "nt":  # Windows has no POSIX file modes
+        assert stat.S_IMODE(out.stat().st_mode) == 0o600
     with pytest.raises(SystemExit, match="exists"):
         main([*_cli(tmp_path, "src"), "export", str(out)])
     main([*_cli(tmp_path, "src"), "export", str(out), "--force"])

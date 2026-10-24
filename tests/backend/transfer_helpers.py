@@ -13,12 +13,33 @@ from permita38.core.config import Config
 
 from .conftest import PASSWORD, _login
 
+_OPEN: list[tuple[TestClient, bool]] = []  # (client, entered with __enter__)
+
+
+def track(client: TestClient, entered: bool = False) -> TestClient:
+    """Remember a client so the autouse fixture in conftest.py closes it (open clients keep files open on Windows)."""
+    _OPEN.append((client, entered))
+    return client
+
+
+def close_all() -> None:
+    while _OPEN:
+        client, entered = _OPEN.pop()
+        if entered:
+            client.__exit__(None, None, None)
+        else:
+            client.close()
+
+
+def login(app, username: str):
+    return track(_login(app, username))
+
 
 def make_instance(tmp_path: Path, name: str, *, setup: bool = True):
     """(app, boss client or None) of a fresh instance in ``tmp_path/name``."""
     cfg = Config(data_dir=tmp_path / name, secret_key="test-secret-key-" + name, web_dir=None)
     app = get_app(cfg)
-    client = TestClient(app)
+    client = track(TestClient(app), entered=True)
     client.__enter__()
     if not setup:
         return app, client
@@ -27,7 +48,7 @@ def make_instance(tmp_path: Path, name: str, *, setup: bool = True):
         json={"username": "boss", "name": "Test Boss", "password": PASSWORD, "company_name": "Demo Studio"},
     )
     assert r.status_code == 200, r.text
-    return app, _login(app, "boss")
+    return app, login(app, "boss")
 
 
 def seed(store, *, extras: bool = True) -> dict:

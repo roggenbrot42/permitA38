@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import tracemalloc
 import zipfile
 from pathlib import Path
@@ -13,8 +14,10 @@ from permita38.core.service.transfer import limits
 from permita38.core.service.transfer.archive import ArchiveError, ArchiveReader
 from permita38.core.service.transfer.service import _LOCK
 
-from .conftest import PASSWORD, _login
-from .transfer_helpers import build_zip, export_archive, make_instance, seed, zip_files
+from .conftest import PASSWORD
+from .transfer_helpers import build_zip, export_archive, login, make_instance, seed, zip_files
+
+NOT_WINDOWS = pytest.mark.skipif(os.name == "nt", reason="tracemalloc peaks differ on Windows")
 
 
 @pytest.fixture
@@ -96,15 +99,18 @@ def test_duplicate_and_casefold_duplicate_entries(pair):
     path = build_zip(files, tmp / "z.zip")
     with zipfile.ZipFile(path, "a") as zf, pytest.warns(UserWarning):
         zf.writestr("README.txt", "again")
-    assert _codes(_run(dst, path)) == ["unsafe_entry"]
+    resp = _run(dst, path)
+    assert _codes(resp) == ["unsafe_entry"]
     path2 = build_zip(files, tmp / "z2.zip")
     with zipfile.ZipFile(path2, "a") as zf:
         zf.writestr("attachments/ABCDEF12.PNG", "x")  # not even a valid attachment name
-    assert _codes(_run(dst, path2)) == ["unsafe_entry"]
+    resp = _run(dst, path2)
+    assert _codes(resp) == ["unsafe_entry"]
     path3 = build_zip({**files, "attachments/abcdef12.png": b"a"}, tmp / "z3.zip")
     with zipfile.ZipFile(path3, "a") as zf:
         zf.writestr("attachments/abcdef12.PNG", "b")
-    assert _codes(_run(dst, path3)) == ["unsafe_entry"]
+    resp = _run(dst, path3)
+    assert _codes(resp) == ["unsafe_entry"]
 
 
 def test_encrypted_entry_and_unsupported_method_are_rejected(pair):
@@ -120,7 +126,8 @@ def test_encrypted_entry_and_unsupported_method_are_rejected(pair):
     path2 = build_zip(zip_files(export_archive(src)), tmp / "z2.zip")
     with zipfile.ZipFile(path2, "a", zipfile.ZIP_BZIP2) as zf:
         zf.writestr("attachments/abcdef12.png", "x")
-    assert "unsafe_entry" in _codes(_run(dst, path2))
+    resp = _run(dst, path2)
+    assert "unsafe_entry" in _codes(resp)
 
 
 # ------------------------------------------------------------------ limits
@@ -134,6 +141,7 @@ def test_too_many_entries(pair):
     assert r.status_code == 422 and _codes(r) == ["limit_exceeded"]
 
 
+@NOT_WINDOWS
 def test_zeros_bomb_is_rejected_quickly_with_bounded_memory(pair):
     _, _, dst, tmp = pair
     path = tmp / "bomb.zip"
@@ -166,15 +174,25 @@ def test_a_lying_declared_size_aborts_at_the_limit(tmp_path, monkeypatch):
     # ... and a directory that lies is caught while reading
     monkeypatch.setattr(limits, "MAX_ATTACHMENT", 5000)
     reader = ArchiveReader(path)
-    reader.entries["attachments/abcdef12.png"].file_size = 10
     monkeypatch.setattr(limits, "MAX_ATTACHMENT", 1000)
     with pytest.raises(ArchiveError) as e2:
         reader.read("attachments/abcdef12.png")
-    assert e2.value.code in {
-        "limit_exceeded",
-        "not_a_zip",
-    }  # never reads past the declared data, and a CRC mismatch fails
+    assert e2.value.code == "limit_exceeded"
     reader.close()
+
+
+def test_a_directory_that_lies_about_the_size_is_a_damaged_archive(tmp_path):
+    """The size in the central directory is patched to 10 bytes: the reader never reads past it and the CRC fails."""
+    path = tmp_path / "lie.zip"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_STORED) as zf:
+        zf.writestr("attachments/abcdef12.png", b"y" * 2000)
+    raw = bytearray(path.read_bytes())
+    cd = raw.rindex(b"PK\x01\x02")
+    raw[cd + 24 : cd + 28] = (10).to_bytes(4, "little")  # uncompressed size in the central directory
+    path.write_bytes(raw)
+    with ArchiveReader(path) as reader, pytest.raises(ArchiveError) as e:
+        reader.read("attachments/abcdef12.png")
+    assert e.value.code == "not_a_zip"
 
 
 def test_json_depth_bomb(pair):
@@ -219,7 +237,8 @@ def test_wrong_content_types_in_records(pair):
         r = _run(dst, build_zip(files, tmp / "t.zip"))
         assert r.status_code == 422 and _codes(r) == ["json_invalid"]
     files["data/customers.json"] = json.dumps({"collection": "customers", "count": 1, "records": ["x"]}).encode()
-    assert _codes(_run(dst, build_zip(files, tmp / "t.zip"))) == ["record_invalid"]
+    resp = _run(dst, build_zip(files, tmp / "t.zip"))
+    assert _codes(resp) == ["record_invalid"]
 
 
 def test_error_list_is_capped(pair):
@@ -244,16 +263,20 @@ ROUTES = [
 @pytest.mark.parametrize("method,path", ROUTES)
 def test_only_the_boss_may_use_the_routes(method, path, app, boss_client, member_client, client):
     kwargs = {"files": {"file": ("a.zip", b"x")}} if "import" in path else {}
-    assert client.request(method, path, **kwargs).status_code == 401
-    assert member_client.request(method, path, **kwargs).status_code == 403
+    resp = client.request(method, path, **kwargs)
+    assert resp.status_code == 401
+    resp = member_client.request(method, path, **kwargs)
+    assert resp.status_code == 403
     for role in ("employee", "accountant"):
         r = boss_client.post(
             "/api/users", json={"username": role[:3] + "x", "name": role, "role": role, "password": PASSWORD}
         )
         assert r.status_code == 200
-        c = _login(app, role[:3] + "x")
-        assert c.request(method, path, **kwargs).status_code == 403, (role, path)
-    assert boss_client.request(method, path, **kwargs).status_code != 403
+        c = login(app, role[:3] + "x")
+        resp = c.request(method, path, **kwargs)
+        assert resp.status_code == 403, (role, path)
+    resp = boss_client.request(method, path, **kwargs)
+    assert resp.status_code != 403
 
 
 @pytest.mark.skip(reason="TODO(api-tokens): add the five routes to the session-only list and assert 403 for a token")
@@ -267,12 +290,16 @@ def test_export_response_headers_and_body_validation(boss_client):
     assert r.headers["cache-control"] == "no-store" and r.headers["x-content-type-options"] == "nosniff"
     assert int(r.headers["content-length"]) == len(r.content)
     assert r.headers["content-disposition"].startswith('attachment; filename="permita38-export-')
-    assert boss_client.post("/api/data/export").status_code == 200  # no body at all is the default
-    assert boss_client.post("/api/data/export", json={"scope": "everything"}).status_code == 422
+    resp = boss_client.post("/api/data/export")
+    assert resp.status_code == 200  # no body at all is the default
+    resp = boss_client.post("/api/data/export", json={"scope": "everything"})
+    assert resp.status_code == 422
     r2 = boss_client.post("/api/data/export", json={"bogus": 1})
     assert r2.status_code == 422 and r2.json()["detail"][0]["type"] == "extra_forbidden"
-    assert boss_client.post("/api/data/export", json={"include_accounts": "maybe"}).status_code == 422
-    assert boss_client.post("/api/data/export", json={"scope": "full\x00"}).status_code == 422
+    resp = boss_client.post("/api/data/export", json={"include_accounts": "maybe"})
+    assert resp.status_code == 422
+    resp = boss_client.post("/api/data/export", json={"scope": "full\x00"})
+    assert resp.status_code == 422
 
 
 def test_temp_files_are_removed_after_every_operation(pair):
@@ -297,7 +324,8 @@ def test_a_second_request_while_one_runs_gets_409(pair):
             assert r.status_code == 409 and r.json() == {"detail": "Another export or import is running."}
     finally:
         _LOCK.release()
-    assert src.post("/api/data/export", json={}).status_code == 200
+    resp = src.post("/api/data/export", json={})
+    assert resp.status_code == 200
 
 
 def test_the_lock_is_released_after_a_failure(pair, monkeypatch):
@@ -316,6 +344,7 @@ def test_the_lock_is_released_after_a_failure(pair, monkeypatch):
     _LOCK.release()
 
 
+@NOT_WINDOWS
 def test_export_memory_stays_bounded_with_a_large_attachment(pair):
     src, _, _, _ = pair
     store = src.app.state.services.store

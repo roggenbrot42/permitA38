@@ -307,3 +307,25 @@ def test_restore_list_and_delete_attachments(repo):
     assert repo.delete_attachment("abc123def4.pdf") is False
     assert repo.delete_attachment("../x.pdf") is False
     assert repo.list_attachments() == [saved]
+
+
+def test_attachment_staging_is_invisible_until_committed(repo):
+    stage = repo.new_stage()
+    repo.stage_attachment(stage, "abc123def4.pdf", [b"on", b"e"])
+    assert repo.list_attachments() == [] and repo.attachment_path("abc123def4.pdf") is None
+    with pytest.raises(ValueError):
+        repo.stage_attachment(stage, "../x.pdf", [b"x"])
+    with pytest.raises(ValueError):
+        repo.stage_attachment("../../etc", "abc123def4.pdf", [b"x"])
+    assert repo.commit_stage(stage) == ["abc123def4.pdf"]
+    assert repo.list_attachments() == ["abc123def4.pdf"]
+    repo.discard_stage(stage)  # idempotent: the stage is gone already
+    other = repo.new_stage()
+    repo.stage_attachment(other, "zzz999aaa1.pdf", [b"x"])
+    repo.discard_stage(other)
+    assert repo.list_attachments() == ["abc123def4.pdf"]
+    stale = repo.new_stage()
+    assert repo.discard_stale_stages(3600) == 0
+    assert repo.discard_stale_stages(-1) >= 1
+    with pytest.raises(OSError):
+        repo.stage_attachment(stale, "abc123def5.pdf", [b"x"])

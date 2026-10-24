@@ -32,6 +32,15 @@ def pytest_ignore_collect(collection_path, config):
     return None if asked else True
 
 
+@pytest.fixture(autouse=True)
+def _close_transfer_clients():
+    """Clients made by the data export/import helpers are closed after every test."""
+    yield
+    from .transfer_helpers import close_all
+
+    close_all()
+
+
 @pytest.fixture
 def config(tmp_path):
     return Config(data_dir=tmp_path / "data", secret_key="test-secret-key", web_dir=None)
