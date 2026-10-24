@@ -17,7 +17,7 @@ from permita38.core.numbering import PatternError, parse_pattern, period_key
 from permita38.core.repository import Repository
 from permita38.core.repository.base import ID_RE
 from permita38.core.repository.schema import BOOL, FLOAT, ID, INT, JSON, TABLES
-from permita38.core.rights import ROLES, normalize_role
+from permita38.core.rights import ROLES
 from permita38.core.service.numbering import NumberingService
 from permita38.core.settings import effective_settings
 
@@ -353,7 +353,7 @@ def _user_plan(plan: Plan, local_users: list[dict]) -> None:
             continue
         if u.get("password_hash"):
             with_login.append(str(u.get("username")))
-            if normalize_role(u.get("role")) == "boss":
+            if u.get("role") == "boss":
                 bosses.append(str(u.get("username")))
         else:
             without.append(str(u.get("username")))

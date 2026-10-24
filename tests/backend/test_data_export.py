@@ -52,7 +52,13 @@ def test_every_table_is_exported_or_explicitly_excluded():
 
 
 def test_every_id_column_is_in_the_reference_table():
-    id_columns = {c.name for t in TABLES.values() for c in t.columns if c.type == "id" and c.name != "id"}
+    id_columns = {
+        c.name
+        for t in TABLES.values()
+        if t.name in manifest.exported_collections()
+        for c in t.columns
+        if c.type == "id" and c.name != "id"
+    }
     assert id_columns <= set(REFERENCES), id_columns - set(REFERENCES)
     for key in LIST_REFERENCES:
         coll, col = key.split(".")

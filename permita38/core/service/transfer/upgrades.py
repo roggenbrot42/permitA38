@@ -27,6 +27,7 @@ NO_UPGRADE_NEEDED: dict[str, str] = {
     "c41e7d90": "0007-calendars: adds tables and columns",
     "d8a69cde": "0008-expense_lines: adds a column; absent means no lines",
     "9897dd11": "0009-trips: adds a table",
+    "c8af1eca": "0010-api_tokens: adds tables that are never exported",
 }
 
 

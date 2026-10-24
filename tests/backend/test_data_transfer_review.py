@@ -407,9 +407,9 @@ def test_a_failure_inside_the_write_leaves_nothing_behind(inject, src, dst, monk
     dapp, dc, dstore = dst
     blob = export_archive(sc)
     before = state(dstore)
-    inject(dstore, monkeypatch)
-    with TestClient(dapp, raise_server_exceptions=False) as c:
+    with TestClient(dapp, raise_server_exceptions=False) as c:  # started before the failure is injected
         c.headers["Authorization"] = dc.headers["Authorization"]
+        inject(dstore, monkeypatch)
         r = run(c, blob)
     assert r.status_code == 500 and "failed" not in r.json()["detail"].replace("failed unexpectedly", "")
     monkeypatch.undo()
@@ -770,7 +770,7 @@ def test_exported_collections_and_excluded_tables_are_pinned():
         "numbering_log",
         "import_batches",
     ]
-    assert sorted(manifest.EXCLUDED_TABLES) == ["calendar_events", "settings", "timers"]
+    assert sorted(manifest.EXCLUDED_TABLES) == ["api_tokens", "audit_log", "calendar_events", "settings", "timers"]
     assert all(manifest.EXCLUDED_TABLES.values())  # every exclusion has a reason
 
 

@@ -15,6 +15,8 @@ LOG_KEY = "data_transfer_log"
 EXCLUDED_TABLES: dict[str, str] = {
     "settings": "exported as data/settings.json, not as records",
     "calendar_events": "cache of the calendar links, refreshed after the import",
+    "api_tokens": "credentials of scripts; never leave the server",
+    "audit_log": "token audit trail, tied to the excluded tokens",
     "timers": "transient running-timer state of single users, meaningless on another instance",
 }
 
