@@ -1189,8 +1189,19 @@ class ApiMachine(RuleBasedStateMachine):
         self.dirty = set()
 
 
-ApiMachine.TestCase.settings = settings(settings.default)
-TestApiStateful = ApiMachine.TestCase
+# The run is split into SHARDS independent state machines with 1/SHARDS of the examples each, so that pytest-xdist can
+# run them on different workers. Each shard is its own class and therefore draws its own (deterministic) examples.
+SHARDS = 3
+
+
+def _shard(n: int):
+    machine = type(f"ApiMachineShard{n}", (ApiMachine,), {})
+    base = settings.default
+    machine.TestCase.settings = settings(base, max_examples=-(-base.max_examples // SHARDS))
+    return type(f"TestApiStatefulShard{n}", (machine.TestCase,), {})
+
+
+TestApiStatefulShard1, TestApiStatefulShard2, TestApiStatefulShard3 = (_shard(i) for i in range(1, SHARDS + 1))
 
 
 pytestmark = pytest.mark.randomized
