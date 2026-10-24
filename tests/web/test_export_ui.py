@@ -123,10 +123,26 @@ EMPLOYEE = {
     "permissions": {"trips": {"read": "limited", "write": "limited"}},
 }
 ZIP_BYTES = b"PK\x05\x06" + b"\x00" * 18
+ZIP_HEADERS = {
+    "Content-Type": "application/zip",
+    "Content-Disposition": 'attachment; filename="permita38-export-20261024-093015.zip"',
+}
+REVOKE_SPY = (
+    "window.__revoked = 0; const _rv = URL.revokeObjectURL.bind(URL);"
+    " URL.revokeObjectURL = u => { window.__revoked++; return _rv(u); };"
+)
+# every File called big.zip reports 513 MiB, so the browser-side size check can be tested without a real file
+BIG_FILE_SPY = (
+    "const _size = Object.getOwnPropertyDescriptor(Blob.prototype, 'size').get;"
+    " Object.defineProperty(File.prototype, 'size', { configurable: true, get() {"
+    " return this.name === 'big.zip' ? 513 * 1024 * 1024 : _size.call(this); } });"
+)
 
 
-def _json(route, status, payload):
-    return route.fulfill(status=status, content_type="application/json", body=json.dumps(payload))
+def _json(route, status, payload, headers=None):
+    return route.fulfill(
+        status=status, content_type="application/json", body=json.dumps(payload), headers=headers or None
+    )
 
 
 def _static(route):
@@ -150,7 +166,13 @@ class FakeExportApi:
         self.export_answer = None  # (status, payload) instead of the ZIP
         self.preview_answer = (200, PREVIEW_OK)
         self.run_answer = (200, RUN_OK)
-        self.slow_export = False
+        self.slow_export = False  # the export waits until release_export() is called
+        self.export_headers = None  # extra response headers for an export error, e.g. Retry-After
+        self.held = None
+
+    def release_export(self):
+        route, self.held = self.held, None
+        route.fulfill(status=200, body=ZIP_BYTES, headers=ZIP_HEADERS)
 
     def calls(self, method, path):
         return [r for r in self.requests if r[0] == method and r[1] == path]
@@ -170,15 +192,11 @@ class FakeExportApi:
             return _json(route, 200, TRANSFERS)
         if path == "data/export":
             if self.export_answer:
-                return _json(route, *self.export_answer)
-            return route.fulfill(
-                status=200,
-                body=ZIP_BYTES,
-                headers={
-                    "Content-Type": "application/zip",
-                    "Content-Disposition": 'attachment; filename="permita38-export-20261024-093015.zip"',
-                },
-            )
+                return _json(route, *self.export_answer, headers=self.export_headers)
+            if self.slow_export:
+                self.held = route
+                return None
+            return route.fulfill(status=200, body=ZIP_BYTES, headers=ZIP_HEADERS)
         if path == "data/import/preview":
             return _json(route, *self.preview_answer)
         if path == "data/import/run":
@@ -190,9 +208,11 @@ class FakeExportApi:
         return _json(route, 404, {"detail": "Not found"})
 
 
-def open_app(browser, api, page="dataexport"):
+def open_app(browser, api, page="dataexport", init=""):
     ctx = browser.new_context(viewport={"width": 1280, "height": 900}, accept_downloads=True)
     ctx.add_init_script("localStorage.setItem('permita38.token', 'test-token')")
+    if init:
+        ctx.add_init_script(init)
     ctx.route("**/*", _static)
     ctx.route("**/api/**", api.handle)
     pg = ctx.new_page()
@@ -475,5 +495,128 @@ def test_employee_has_no_access(browser):
     pg.wait_for_selector("#toast.on")
     assert "dataexport" not in pg.url
     assert api.calls("GET", "data/export/info") == []
+    assert problems == []
+    ctx.close()
+
+
+def test_download_revokes_the_object_url_right_after_the_click(browser):
+    api = FakeExportApi()
+    ctx, pg, problems = open_app(browser, api, init=REVOKE_SPY)
+    with pg.expect_download() as dl:
+        pg.get_by_role("button", name="Download full archive").click()
+    assert dl.value.failure() is None
+    pg.wait_for_function("window.__revoked === 1", timeout=5000)
+    assert problems == []
+    ctx.close()
+
+
+def test_rate_limit_says_when_to_retry(browser):
+    api = FakeExportApi()
+    api.export_answer = (429, {"detail": "Too many requests"})
+    api.export_headers = {"Retry-After": "30"}
+    ctx, pg, problems = open_app(browser, api)
+    pg.get_by_role("button", name="Download full archive").click()
+    expect(pg.locator("#dx_export [role=alert]")).to_contain_text("Too many requests. Try again in 30 seconds.")
+    assert problems == []
+    ctx.close()
+
+
+def test_archive_strings_are_shown_as_text_not_markup(browser):
+    evil = "<img src=x onerror=window.__x=1>"
+    api = FakeExportApi(info=INFO_EMPTY)
+    api.preview_answer = (
+        200,
+        {
+            **PREVIEW_OK,
+            "manifest": {**PREVIEW_OK["manifest"], "app_version": evil},
+            "users": {**USERS, "without_password": [evil]},
+            "counts": {evil: 1},
+            "warnings": [{"code": "x", "message": evil, "file": None}],
+        },
+    )
+    ctx, pg, problems = open_app(browser, api)
+    upload(pg)
+    pg.get_by_role("button", name="Check file").click()
+    panel = pg.locator("#dx_preview")
+    expect(panel).to_contain_text("permitA38 " + evil)
+    # record keys show their underscores as spaces; the markup stays text
+    expect(panel.locator("table.dx-counts")).to_contain_text("<img src=x onerror=window.")
+    expect(panel).to_contain_text(f"Without a password (set one with permita38 set-password): {evil}")
+    expect(panel).to_contain_text("Warnings (1)")
+    assert panel.locator("img").count() == 0
+    assert pg.evaluate("typeof window.__x") == "undefined"
+    assert problems == []
+    ctx.close()
+
+
+def test_file_over_512_mib_is_refused_in_the_browser(browser):
+    api = FakeExportApi(info=INFO_EMPTY)
+    ctx, pg, problems = open_app(browser, api, init=BIG_FILE_SPY)
+    upload(pg, name="big.zip")
+    pg.get_by_role("button", name="Check file").click()
+    expect(pg.locator("#dx_import [role=alert]")).to_contain_text("The file is larger than 512 MiB.")
+    assert api.calls("POST", "data/import/preview") == []
+    assert problems == []
+    ctx.close()
+
+
+def test_focus_stays_on_the_control_the_user_used(browser):
+    api = FakeExportApi(info=INFO_EMPTY)
+    ctx, pg, problems = open_app(browser, api)
+    upload(pg)
+    pg.get_by_role("button", name="Check file").click()
+    expect(pg.locator("#dx_preview")).to_contain_text("The archive can be imported")
+    expect(pg.get_by_role("button", name="Check file")).to_be_focused()
+    pg.get_by_label("I understand that this instance will be filled").check()
+    run = pg.get_by_role("button", name="Import now")
+    run.click()
+    expect(pg.locator("#dx-cancel")).to_be_focused()
+    pg.locator("#dx-cancel").click()
+    expect(run).to_be_focused()
+    assert problems == []
+    ctx.close()
+
+
+def test_import_is_locked_while_an_export_runs(browser):
+    api = FakeExportApi(info=INFO_EMPTY)
+    api.slow_export = True
+    ctx, pg, problems = open_app(browser, api)
+    upload(pg)
+    pg.get_by_role("button", name="Check file").click()
+    expect(pg.locator("#dx_preview")).to_contain_text("The archive can be imported")
+    pg.get_by_label("I understand that this instance will be filled").check()
+    expect(pg.get_by_role("button", name="Import now")).to_be_enabled()
+    pg.get_by_role("button", name="Download full archive").click()
+    expect(pg.locator("#dx_progress")).to_contain_text("Building the archive")
+    expect(pg.locator("#dx_file")).to_be_disabled()
+    expect(pg.get_by_role("button", name="Check file")).to_be_disabled()
+    expect(pg.get_by_label("I understand that this instance will be filled")).to_be_disabled()
+    expect(pg.get_by_role("button", name="Import now")).to_be_disabled()
+    with pg.expect_download():
+        api.release_export()
+    expect(pg.locator("#dx_file")).to_be_enabled()
+    expect(pg.get_by_role("button", name="Import now")).to_be_enabled()
+    assert problems == []
+    ctx.close()
+
+
+def test_nothing_of_the_archive_stays_in_the_browser_after_preview_and_run(browser):
+    api = FakeExportApi(info=INFO_EMPTY)
+    ctx, pg, problems = open_app(browser, api)
+    with pg.expect_download():
+        pg.get_by_role("button", name="Download full archive").click()
+    expect(pg.locator("#dx_progress")).to_contain_text("Saved permita38-export")
+    upload(pg)
+    pg.get_by_role("button", name="Check file").click()
+    expect(pg.locator("#dx_preview")).to_contain_text("The archive can be imported")
+    keys = pg.evaluate("Object.keys(localStorage).concat(Object.keys(sessionStorage))")
+    assert keys == ["permita38.token"]
+    pg.get_by_label("I understand that this instance will be filled").check()
+    pg.get_by_role("button", name="Import now").click()
+    pg.locator("#dx-go").click()
+    expect(pg.locator("#dx_import")).to_contain_text("The archive was imported")
+    keys = pg.evaluate("Object.keys(localStorage).concat(Object.keys(sessionStorage))")
+    assert keys == ["permita38.token"]
+    assert pg.evaluate("indexedDB.databases().then(d => d.map(x => x.name))") == []
     assert problems == []
     ctx.close()

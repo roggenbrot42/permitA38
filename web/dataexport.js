@@ -13,10 +13,11 @@
   const spin = on => (on ? '<span class="dx-spin" aria-hidden="true"></span> ' : '');
   /** Message for a failed request, by status (contract: 401/403/409/413/422/429). */
   function failText(e) {
-    const m = e.message || 'Request failed';
-    if (e.status === 429) return 'Too many requests. Wait a minute and try again.';
+    const m = e.message || 'Request failed', ra = String(e.retryAfter ?? '').trim();
+    const wait = /^\d+$/.test(ra) ? ` Try again in ${ra} seconds.` : '';   // Retry-After in seconds; the HTTP-date form is not shown
+    if (e.status === 429) return wait ? `Too many requests.${wait}` : 'Too many requests. Wait a minute and try again.';
     if (e.status === 403) return m && m !== 'Forbidden' ? m : 'Only the boss may export or import data, and not with an API token.';
-    return m;
+    return m + wait;
   }
 
   /* ---------- page ---------- */
@@ -65,15 +66,27 @@
     const m = /filename="?(permita38-export-[0-9-]+\.zip)"?/.exec(r.headers.get('Content-Disposition') || '');
     return m ? m[1] : `permita38-export-${todayISO().replace(/-/g, '')}.zip`;
   }
+  /* The control the user last used (its data-a or id). A re-render replaces the buttons, so the focus is put back on it
+     once it is enabled again (a disabled button cannot hold the focus). */
+  let focusKey = null;
+  document.addEventListener('focusin', e => {
+    const el = e.target.closest?.('#dx_export button, #dx_export input, #dx_import button, #dx_import input');
+    if (el) focusKey = el.dataset.a ? `[data-a="${el.dataset.a}"]` : el.id ? `#${el.id}` : null;
+  });
+  function rerender(el, html) {
+    el.innerHTML = html;
+    const t = focusKey && $(focusKey, el);
+    if (t && !t.disabled) t.focus({ preventScroll: true });
+  }
   const setProgress = text => { dx.progress = text; const el = $('#dx_progress'); if (el) el.textContent = text; };
-  function refreshExport() { const el = $('#dx_export'); if (!el) return; const keep = [$('#dx_att')?.checked, $('#dx_acc')?.checked]; el.innerHTML = exportCardHTML(); if (keep[0] !== undefined) { $('#dx_att').checked = keep[0]; $('#dx_acc').checked = keep[1]; } }
+  function refreshExport() { const el = $('#dx_export'); if (!el) return; const keep = [$('#dx_att')?.checked, $('#dx_acc')?.checked]; rerender(el, exportCardHTML()); if (keep[0] !== undefined) { $('#dx_att').checked = keep[0]; $('#dx_acc').checked = keep[1]; } }
 
   async function download(master) {
     if (dx.busy) return;
     const body = master ? { scope: 'master_data' } : { scope: 'full', include_accounts: !!$('#dx_acc')?.checked, include_attachments: !!$('#dx_att')?.checked };
     if (body.include_accounts && !confirm('The archive will contain the password hashes of all users and allows logging in as them. Store it as carefully as the database. Continue?')) return;
     Object.assign(dx, { busy: master ? 'master' : 'full', exportError: '', progress: 'Building the archive on the server …' });
-    refreshExport();
+    refreshExport(); refreshImport();   // an export locks the import controls too
     try {
       const headers = { 'Content-Type': 'application/json' }, t = api.token.get();
       if (t) headers.Authorization = 'Bearer ' + t;
@@ -84,6 +97,7 @@
         const d = await r.json().catch(() => ({}));
         const err = new Error(typeof d.detail === 'string' ? d.detail : r.statusText || 'Export failed');
         err.status = r.status;
+        err.retryAfter = r.headers.get('Retry-After');
         if (r.status === 401) { api.token.set(null); if (typeof api.onUnauthorized === 'function') api.onUnauthorized(); }
         throw err;
       }
@@ -102,7 +116,7 @@
       const a = document.createElement('a');
       a.href = url; a.download = blobName(r);
       document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      setTimeout(() => URL.revokeObjectURL(url), 0);   // the click has started the download; the URL is not needed any more
       dx.progress = `Saved ${a.download} (${size(got)}).`;
       toast('Archive downloaded');
       dx.transfers = await api.get('data/transfers').catch(() => dx.transfers);
@@ -111,7 +125,7 @@
       dx.exportError = failText(e); dx.progress = '';
     } finally {
       dx.busy = '';
-      refreshExport();
+      refreshExport(); refreshImport();
     }
   }
   A.dxExportFull = () => download(false);
@@ -130,7 +144,7 @@
     const parts = [];
     if (u.replaces_setup_user) parts.push(`The account <b>${esc(u.replaces_setup_user)}</b> of this instance is replaced by the one from the archive.`);
     if (u.kept_setup_user) parts.push(`The account <b>${esc(u.kept_setup_user)}</b> of this instance is kept.`);
-    if ((u.without_password || []).length) parts.push(`Without a password (set one with <code>permita38 set-password</code>): ${u.without_password.map(esc).join(', ')}.`);
+    if ((u.without_password || []).length) parts.push(`Without a password (set one with <code>permita38 set-password</code>): ${u.without_password.map(x => esc(x)).join(', ')}.`);
     return parts.length ? `<h3>Users</h3><p class="small">${parts.join(' ')}</p>` : '';
   };
   const numberingHTML = n => {
@@ -170,7 +184,7 @@
       ${numberingHTML(r.numbering)}${usersHTML(r.users)}${itemsHTML(r.warnings, 'warning')}
       ${r.relogin ? '<div class="banner info">Your account was replaced by the one from the archive. Log in again.</div><div class="actions"><button type="button" class="primary" data-a="dxRelogin">Log in again</button></div>' : ''}</div>`;
   }
-  function refreshImport() { const el = $('#dx_import'); if (el) el.innerHTML = importCardHTML(); }
+  function refreshImport() { const el = $('#dx_import'); if (el) rerender(el, importCardHTML()); }
 
   A.dxFile = el => {
     dx.file = el.files[0] || null; dx.preview = null; dx.confirmed = false; dx.importError = '';
@@ -202,7 +216,9 @@
     if (!canRun() || !dx.confirmed) return;
     modal(`<h2>Import now?</h2><p>This instance will be filled with the data of the archive. The import is all or nothing: if anything fails, nothing is written. It cannot be undone.</p>
       <div class="actions"><button type="button" id="dx-cancel">Cancel</button><button type="button" class="primary" id="dx-go">Import now</button></div>`);
+    closeModal.onClose = () => { const b = $('[data-a=dxRun]'); if (b && !b.disabled) b.focus(); };   // back to the button that opened the dialog
     $('#dx-cancel').onclick = closeModal;
+    $('#dx-cancel').focus();
     $('#dx-go').onclick = guard(async () => {
       closeModal();
       Object.assign(dx, { busy: 'run', importError: '' });
@@ -210,6 +226,7 @@
       try {
         const r = await api.post('data/import/run', formOf({ confirm: 'true' }));
         dx.result = r; dx.file = null; dx.preview = null;
+        await loadAll().catch(() => {});   // the lists in S.d (customers, projects, ...) were loaded before the import; reload them
         toast('Import finished');
       } catch (e) {
         failImport(e);
@@ -219,5 +236,7 @@
       refreshImport();
     });
   };
+  /* leaving the page drops the chosen archive and its preview from memory */
+  window.addEventListener('hashchange', () => { if (!location.hash.startsWith('#/dataexport')) Object.assign(dx, { file: null, preview: null, result: null, confirmed: false, importError: '' }); });
   A.dxRelogin = async () => { dx.result = null; await A.logout(); };
 })();
