@@ -101,7 +101,7 @@ Rights: new area `proposals` in `core/rights.py` (`AREAS` + `MATRIX`, `docs/role
 `subject_user_id` is the user; `all` = everyone's. Creating needs `proposals` write **and** write on the target area
 (effective scope; for `limited` the payload must concern the subject user's own data: enforced per kind). Approve and
 reject need the approver to be the subject user or a boss, **and** write scope on the target area. Approve/reject/PATCH
-are **session-only** (token gets `403`). A token must be read-write to create proposals (a read-only token is denied `POST`); the owner's rights apply.
+are **session-only** (token gets `403`). A token must be read-write to create proposals (a read-only token is denied `POST`); the owner's rights apply. A `proposals-only` token mode is a listed follow-up of the token contract, not in this version (api-tokens decision 11).
 
 `GET /api/proposals?status=pending|approved|rejected|expired|failed&kind=&limit=50&before=` ->
 

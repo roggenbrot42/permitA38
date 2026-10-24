@@ -15,15 +15,34 @@ other tables. Review tier: **Full** (authentication, rights), see the end.
 3. **Any signed-in user may create tokens** (boss, employee, accountant), for themselves only.
 4. **A token never exceeds its owner's rights.** Its scope is the owner's role, evaluated on every request against the
    owner's *current* role and the current `rights.MATRIX`, optionally narrowed to **read-only** (all write operations
-   denied). There are no per-area grants in this version.
+   denied). There are no per-area grants in this version; the one exception is the session-only settings writes
+   (decision 12).
 5. **Transport**: `Authorization: Bearer pat_...` only. Never in a query string, cookie or body.
 6. **Audit log**: every request authenticated by a token writes one row (token id, method, route template, status,
    time). No bodies, no query strings, no token, no concrete record ids.
 7. **Revoke is immediate**: the token row is checked against the database on every request (no cache).
 8. **At most 20 active tokens per user** (not revoked, not expired). The 21st `POST` answers 409.
 9. **Session-only routes**: a token can never create, list or revoke tokens, change a password, touch two-factor
-   authentication, or use user administration. These answer 403 for a token whatever its scope.
+   authentication, or use user administration. These answer 403 for a token whatever its scope. Settings writes are
+   session-only too (decision 12).
 10. **Migration** `0010-api_tokens`, identical in `sqlite/`, `postgresql/` and `mariadb/`.
+11. **Proposals need a read-write token** for now: a read-only token is denied `POST /api/proposals`. A
+    `proposals-only` token mode is a listed follow-up, not in this version (the MCP spec and the AI spec say the same).
+12. **Settings writes are session-only.** A token, even a read-write token of a boss, gets `403` on `PUT`, `POST` and
+    `DELETE` under `/api/settings`. Settings reads (`GET /api/settings/*`) are allowed with the owner's rights. This
+    replaces the former open decision on settings.
+13. **`read_only` defaults to `true`** when omitted in the API; the UI pre-checks the box.
+14. **Invalid bearer tokens are throttled per client IP.** Failed token requests (unknown, revoked, expired, owner
+    missing or inactive, malformed `pat_` value) are counted with the existing login throttle
+    (`permita38/core/service/throttle.py`, `AttemptThrottle`), with the same limits and window as failed logins. A
+    locked-out client gets `429` with `Retry-After` (seconds). See "Authentication seam", rule 3. This replaces the
+    former "no throttle" decision.
+15. **A failed audit write is logged only.** The response is unchanged (fail-open): the status is only known after the
+    handler has run, and fail-closed would need a pre-write and an update, which breaks append-only.
+16. **Audit retention is fixed at 365 days**, pruned at startup, no setting.
+17. **No PATCH route.** Label, expiry and `read_only` are immutable; to change them, revoke and create a new token.
+18. **No CLI `create-token`** in this version.
+19. **A revoked token stays revoked** when its owner is reactivated. Only a new token works again.
 
 ## Token format
 
@@ -31,7 +50,7 @@ other tables. Review tier: **Full** (authentication, rights), see the end.
 total, regex `^pat_[A-Za-z0-9_-]{43}$`. `hint` = `pat_` + the first 4 characters of the secret part (8 characters,
 `pat_Xk3f`), stored in clear, shown in lists. A bearer value that starts with `pat_` is looked up as a token and is
 **never** tried as a session JWT (and a JWT is never tried as a token); a bearer value that does not match the regex
-answers 401 without a database lookup.
+answers 401 without a database lookup (and counts as a failed token request, decision 14).
 
 Lookup: `sha256(token.encode()).hexdigest()` -> row by unique index on `token_hash`, then `hmac.compare_digest` on the
 hash. Plain SHA-256, no salt, no device `secret_key` (the secret has 256 bits of entropy; the data folder is synced
@@ -75,7 +94,12 @@ Rules, in order:
 2. A `pat_...` value in the **cookie** -> 401. Only the bearer header carries tokens.
 3. Token path: unknown hash, revoked (`revoked_at` set), expired (`expires_at <= now`), owner missing or inactive ->
    **401** `{"detail": "Not authenticated"}` with `WWW-Authenticate: Bearer`; the body and headers are identical for
-   all four cases (no oracle).
+   all four cases (no oracle). Each such failure, and each malformed `pat_` value, is counted per client IP in the
+   login `AttemptThrottle` (`core/service/throttle.py`, same limits and window as failed logins). While the client IP
+   is locked out, every bearer token request from it is answered **429**
+   `{"detail": "Too many failed attempts. Please wait a few minutes and try again."}` with a `Retry-After` header
+   (seconds). The check runs before any lookup, as the login throttle runs before the password check. The header is
+   new: the login route gets it too (work package A).
 4. The owner's role and `active` flag are read from the database on every request, so a demotion or deactivation is
    effective at once.
 5. `last_used_at` is written at most once per 60 seconds per token.
@@ -101,7 +125,7 @@ def scope_for(principal: dict, area: str, op: Op = "read") -> Scope:
 and `allowed_for(principal, area, op)` = `scope_for(...) != NONE`. Defence in depth: a middleware/dependency denies every
 **non-safe method** (anything but GET, HEAD, OPTIONS) of a read-only token with 403 `"Forbidden"` regardless of what the
 route declares, so a write route that forgets `Needs(..., "write")` is still safe. (Read-write tokens: the route's own
-`Needs` decides.)
+`Needs` decides, plus `SessionOnly` on the settings write routes.)
 
 ### Existing call sites to change (found by grep, all must use `scope_for(user, ...)`)
 
@@ -109,7 +133,7 @@ route declares, so a write route that forgets `Needs(..., "write")` is still saf
 |---|---|---|---|
 | `permita38/api/deps.py` | `Needs.check`, `rights.scope(user.get("role"), area, op)` | role | `rights.scope_for(user, area, op)`; also the `get_current_user` token branch, the `SessionOnly` dependency, `public_user` strip |
 | `permita38/api/routers/records.py` | 31, `rights.scope(user["role"], "planning")` | role | `scope_for(user, "planning")` |
-| `permita38/api/routers/settings.py` | 18, `rights.scope(user["role"], "settings", "write")`; 27 `normalize_role(user.get("role")) == BOSS` | role | `scope_for(user, "settings", "write")`; line 27 stays role-based (it decides the view, not a right) but must be reviewed |
+| `permita38/api/routers/settings.py` | 18, `rights.scope(user["role"], "settings", "write")`; 27 `normalize_role(user.get("role")) == BOSS` | role | `scope_for(user, "settings", "write")` plus `SessionOnly` on the `PUT`/`POST`/`DELETE` routes; line 27 stays role-based (it decides the view, not a right) but must be reviewed |
 | `permita38/core/service/records.py` | 223 `rights.scope(me.get("role"), "team")`; 233 `rights.scope(me.get("role"), COLLECTION_AREA[coll], op)` | role | `scope_for(me, ...)` (this is the `limited` own-records view, `me` is the principal) |
 | `permita38/core/service/settings.py` | 51 `rights.scope(me.get("role"), "settings")`; 54 and 59 `rights.allowed(role, ...)` | role | `scope_for(me, ...)` / `allowed_for(me, ...)`; `role` local variable removed |
 | `permita38/core/service/time.py` | 61 `rights.scope(me.get("role"), "time")` | role | `scope_for(me, "time")` |
@@ -128,7 +152,8 @@ Services that receive the principal (`me`) keep working for both kinds; they nev
 ### Session-only routes
 
 Dependency `SessionOnly` (in `api/deps.py`), applied to the **routers** `tokens`, `auth` (except one route, below),
-`totp` and `users`: a token request answers
+`totp` and `users`, and to the **write routes** (`PUT`, `POST`, `DELETE`) of the `settings` router (these also carry
+`Needs(settings, write)`). A token request there answers
 
 ```
 403  {"detail": "This route cannot be used with an API token"}
@@ -136,10 +161,11 @@ Dependency `SessionOnly` (in `api/deps.py`), applied to the **routers** `tokens`
 
 Allowed with a token from these routers: `GET /api/auth/me` only. Everything else under `/api/auth/*`
 (`login`, `logout`, `setup`, `change-password`, `login/totp`), `/api/totp/*`, `/api/users/*` and all of
-`/api/tokens/*` is session-only. Public routes (`GET /api/auth/status`, `POST /api/auth/setup`, `POST /api/auth/login`,
+`/api/tokens/*` is session-only. Settings reads (`GET /api/settings/*`) are not session-only: they follow the owner's
+rights. Public routes (`GET /api/auth/status`, `POST /api/auth/setup`, `POST /api/auth/login`,
 `POST /api/auth/login/totp`) do not authenticate at all, so they ignore a bearer token (no change); a token presented
-there is not looked up and not audited. A test walks `app.routes` and fails for any route that is not exactly one of:
-`Needs(...)`, `SessionOnly`, or on an explicit public list.
+there is not looked up and not audited. A test walks `app.routes` and fails for any route that is not `Needs(...)`,
+`SessionOnly`, or on an explicit public list; the settings write routes must have both `Needs(...)` and `SessionOnly`.
 
 `GET /api/auth/me` with a token returns the normal user object plus:
 
@@ -160,6 +186,8 @@ entries set to `"none"` for a read-only token (`rights.permissions` applied thro
 | `POST /api/tokens/revoke-all` | session | own tokens (boss: also `?user_id=`) |
 | `GET /api/tokens/{id}/audit` | session | owner, or boss; others 404 |
 | all of the above | token | 403 `"This route cannot be used with an API token"` |
+| `PUT`, `POST`, `DELETE` under `/api/settings/*` | token, read-write or read-only, owner any role | 403 `"This route cannot be used with an API token"` (session-only, decision 12) |
+| `GET /api/settings/*` | token | the owner's rights as today (`Needs`/`scope_for`) |
 | every other route | token | the owner's role as today (`Needs`/`scope_for`); `read_only` token: 403 on any non-safe method |
 
 No rights area is added to `rights.py`: token management is "own credentials", like changing one's own password, and is
@@ -169,6 +197,10 @@ token for someone else.
 ## Routes
 
 All under `/api`, `Content-Type: application/json`. Strict models reject unknown fields (422).
+
+Any request that presents a bearer token may also answer **429** (invalid-token throttle, `Retry-After`, auth seam
+rule 3). There is no `PATCH` route on `/api/tokens/{id}` (decision 17; `PATCH` answers 405), and no CLI command creates
+tokens (decision 18).
 
 ### `POST /api/tokens` -> 201
 
@@ -252,19 +284,20 @@ revoked and expired tokens too. No write or delete route exists for the audit lo
 * Written by one middleware around the whole app, after the response status is known, for every request that was
   **authenticated by a valid, unrevoked, unexpired token** (including when the response is 403 session-only, 403
   `Forbidden`, 404, 422, 429/500). Requests with an unknown, revoked or expired token have no known token id: no row
-  (they are logged to the server log without the credential).
+  (they are logged to the server log without the credential, and counted by the throttle, decision 14).
 * Columns: `at`, `token_id`, `user_id` (the owner), `method`, `route` (template), `status`. Nothing else: no body, no
   query string, no headers, no IP, no record id. (Later versions may add to `extra`.)
 * Append-only: `core/service/audit.py` is the only writer and has `append(...)` and `list(...)` only. The only deletes
-  are the startup prune of rows older than 365 days and the cascade on deleting a user. A repository contract test asserts there is no update path.
-* A failing audit write is logged and does not change the response (see Open design decisions, 3).
+  are the startup prune of rows older than 365 days (decision 16) and the cascade on deleting a user. A repository
+  contract test asserts there is no update path.
+* A failing audit write is logged and does not change the response (decision 15).
 * Canary test: send a token with a distinctive secret and query string; scan the whole database file bytes and the log
   output: the secret appears nowhere (only its hash), the query string appears nowhere.
 
 ## Deleting or changing the owner
 
 * `DELETE /api/users/{id}` deletes that user's tokens and their audit rows in the same transaction.
-* Deactivation revokes the tokens (set `revoked_at`), see above; re-activation does not revive them.
+* Deactivation revokes the tokens (set `revoked_at`); re-activation does not revive them (decision 19).
 * Role change: effective at once because the role is read per request. A token of a demoted boss can use only what an
   employee can; if the user is promoted, the token gains rights up to the new role (documented in the UI text: "A token
   has the rights of its owner").
@@ -272,8 +305,9 @@ revoked and expired tokens too. No write or delete route exists for the audit lo
 ## Validation bounds (summary)
 
 `label` 1-80, `expires_in_days` 1-365, `limit` 1-200, `before` 0 to 4102444800 (2100-01-01), max 20 active tokens per user,
-`id` path parameter = 8 hex characters, bearer value `^pat_[A-Za-z0-9_-]{43}$`. Add `ApiTokenCreateIn` to
-`core/validation.py` primitives where they exist; update `docs/validation.md`.
+`id` path parameter = 8 hex characters, bearer value `^pat_[A-Za-z0-9_-]{43}$`, invalid-token throttle = the login
+throttle limits (per client IP). Add `ApiTokenCreateIn` to `core/validation.py` primitives where they exist; update
+`docs/validation.md`.
 
 ## UI contract (web)
 
@@ -286,17 +320,18 @@ section "API tokens" is a card on the Settings page, visible to every signed-in 
   "Load more" using `next`). Empty state: "No API tokens yet". Boss: switch "Show all users" (`?all=true`, extra column
   "Owner"). A "Revoke all my tokens" button (confirm) sits in the card header.
 * **New token** button -> dialog: `label` (required, max 80), `expires_in_days` select (7, 30, 90 default, 180, 365),
-  checkbox "Read only" (checked by default). Under the checkbox: "A token has the rights of its owner (your role: boss).
-  It can never create tokens or change passwords." A visible warning (text, `role="alert"`) when "Read only" is
-  unchecked: "This token can change data." Disabled with the explanation "You already have 20 active tokens" when the
-  list shows 20 active ones (the server still enforces 409).
+  checkbox "Read only" (checked by default, decision 13). Under the checkbox: "A token has the rights of its owner (your
+  role: boss). It can never create tokens or change passwords or settings." A visible warning (text, `role="alert"`)
+  when "Read only" is unchecked: "This token can change data." Disabled with the explanation "You already have 20 active
+  tokens" when the list shows 20 active ones (the server still enforces 409).
 * **After create**: a modal with the token in a read-only input (`data-testid="token-secret"`), a "Copy" button
   (`aria-live="polite"` confirmation "Copied"), the text "This is the only time the token is shown", and a checkbox "I
   have saved it" that must be ticked before "Close" is enabled. The secret is kept only in the DOM of this modal: not in
   `localStorage`/`sessionStorage`, not in the URL, not in any list row; the modal's DOM is removed on close. The list
   reloads and shows only the `hint`.
-* Errors: 409 -> inline message from `detail`; 422 -> field messages; 401 -> the existing sign-in flow. All text from
-  the server is escaped (`textContent`), keyboard operable, no information only in tooltips.
+* Errors: 409 -> inline message from `detail`; 422 -> field messages; 401 -> the existing sign-in flow; 429 -> the
+  `detail` text with the `Retry-After` seconds. All text from the server is escaped (`textContent`), keyboard operable,
+  no information only in tooltips.
 * Demo data and screenshots use fake tokens only (never a real secret).
 
 ## Examples (curl)
@@ -308,7 +343,10 @@ POST /api/tokens   {"label": "Backup script", "expires_in_days": 30}
 GET /api/customers   Authorization: Bearer pat_3q7mXc0Qd1pZk9Yw2eLr8VbT5uHnA4sJf6GoKiDxE1c      -> 200
 POST /api/customers  (same token, read_only)                                                      -> 403 {"detail":"Forbidden"}
 POST /api/tokens     (same token)                  -> 403 {"detail":"This route cannot be used with an API token"}
+PUT /api/settings    (read-write boss token)       -> 403 {"detail":"This route cannot be used with an API token"}
+GET /api/settings    (read-write boss token)       -> 200
 GET /api/customers   (revoked/expired/unknown token) -> 401 {"detail":"Not authenticated"}
+GET /api/customers   (after too many failed token requests from this IP) -> 429 {"detail":"Too many failed attempts. Please wait a few minutes and try again."} + Retry-After
 ```
 
 ## Work packages (parallel)
@@ -317,9 +355,9 @@ Backend and UI need only this file. Suggested merge order: A (with C), B, D, the
 
 | WP | Files | Content | Tier |
 |---|---|---|---|
-| A backend core | `core/rights.py` (`scope_for`, `allowed_for`), `core/service/tokens.py`, `core/service/audit.py`, `core/models.py` (append only), `core/repository/schema.py`, migration files (3 dialects), `core/database.py` only if needed, `api/deps.py` (principal, `SessionOnly`, `Needs`) | hashing, lookup, principal, rights seam, audit service, prune | Full |
+| A backend core | `core/rights.py` (`scope_for`, `allowed_for`), `core/service/tokens.py`, `core/service/audit.py`, `core/service/throttle.py` (`Retry-After` on 429, login too), `core/models.py` (append only), `core/repository/schema.py`, migration files (3 dialects), `core/database.py` only if needed, `api/deps.py` (principal, `SessionOnly`, `Needs`, invalid-token throttle) | hashing, lookup, principal, rights seam, audit service, prune | Full |
 | B backend API | `api/routers/tokens.py`, `api/server.py` (router, audit middleware, safe-method guard), `api/openapi.json` | the routes of this file | Full |
-| C call-site sweep | the files in the table above | replace role-based checks with `scope_for(principal)`; source-scan test | Full |
+| C call-site sweep | the files in the table above (`api/routers/settings.py` gets `SessionOnly` on its writes) | replace role-based checks with `scope_for(principal)`; source-scan test | Full |
 | D web UI | `web/tokens.js`, small hooks in `web/main.js`/`index.html`, `tests/web/test_tokens_ui.py` | the UI contract (mock server data from the examples) | Standard (Full if the secret handling in the DOM is questionable) |
 | E docs | `docs/api-tokens.md` (user guide, curl, threat model summary), `docs/roles.md` note, `docs/roadmap.md` row | | Light |
 | Tests | `tests/backend/test_api_tokens.py`, additions to `test_rbac.py`, `test_repository_contract.py`, migration tests; hypothesis model | see below | part of A/B/C |
@@ -332,46 +370,51 @@ Backend and UI need only this file. Suggested merge order: A (with C), B, D, the
   gets exactly what the same user session gets, except read-only tokens get 403 on every non-safe method; demote the
   owner (boss -> employee) and the very next request of the same token is clamped; deactivated owner -> 401;
   `limited` scope returns only the owner's own records through a token.
+* Settings: a **read-write boss token cannot write settings**: `PUT`, `POST` and `DELETE` under `/api/settings` answer
+  the exact 403 session-only body, and the settings data is unchanged afterwards; `GET /api/settings` with the same
+  token answers 200 with the boss's rights.
+* Proposals (when the proposals API ships): a read-only token gets 403 on `POST /api/proposals`; a read-write token
+  is allowed; there is no `proposals-only` mode to test.
 * Session-only: every route in `tokens`, `auth` (except `me`), `totp`, `users` answers the exact 403 body for a token;
-  `GET /api/auth/me` works and has `auth`; a route walk fails for a route without `Needs`/`SessionOnly`/public marker.
+  `GET /api/auth/me` works and has `auth`; a route walk fails for a route without `Needs`/`SessionOnly`/public marker,
+  and for a settings write route without both `Needs` and `SessionOnly`.
 * Source scan: no `rights.scope(` with `.get("role")`/`["role"]` in request-path modules (`api/`, `core/service/`).
 * Lifecycle: expiry (fake clock), revoke immediate (next request 401), revoke idempotent, 20 active ok / 21st 409,
   revoked/expired do not count, boss `all=true` vs non-boss 403, other user's token id 404 for revoke and audit,
-  `revoke-all`, deleting a user removes tokens and audit rows, deactivating revokes.
+  `revoke-all`, deleting a user removes tokens and audit rows, deactivating revokes; **a revoked token stays revoked
+  after its owner is reactivated** (401); **no PATCH route**: `PATCH /api/tokens/{id}` answers 405.
 * Transport: `pat_` in the cookie -> 401; token in a query string ignored (401); token + cookie -> token wins; JWT as bearer
   still works; malformed `pat_x` -> 401 without a lookup; no `Set-Cookie` on token responses; 401 bodies identical for
   unknown/revoked/expired.
+* Invalid-token throttle: failed token requests from one IP count with the login limits; once locked out, a request
+  with a **valid** token from that IP gets 429 with the login message and a `Retry-After` header, before any lookup; another
+  IP is not affected; the login route also sends `Retry-After` on its 429.
 * Audit: exactly one row per token request (also for 403/404/422), none for session requests, no row for invalid tokens,
-  route is the template, canary secret/query string not found in the database bytes; prune; append-only contract test.
+  route is the template, canary secret/query string not found in the database bytes; prune (rows older than 365 days
+  removed at startup, newer kept); append-only contract test; **a failing audit write (forced in the test) is logged
+  and the response is unchanged** (decision 15).
 * Migration: chain test, three dialect folders identical, migrated schema equals `schema.py`, repository contract test
   for `api_tokens` and `audit_log` (unknown fields survive).
 * Randomized (`tests/backend/randomized`): add create/revoke/use of tokens to the state machine, invariant "an effective
-  right never exceeds the owner's; read-only never writes".
-* Web (`tests/web/test_tokens_ui.py`, fake data): create (read-only by default), secret shown once and gone after reload,
-  Close disabled until "I have saved it", revoke, boss "Show all users", activity list, 20-token limit message.
+  right never exceeds the owner's; read-only never writes; a token never writes settings".
+* Web (`tests/web/test_tokens_ui.py`, fake data): create (read-only by default, box pre-checked), secret shown once and gone
+  after reload, Close disabled until "I have saved it", revoke, boss "Show all users", activity list, 20-token limit message.
 
 ## Review (Full tier, three Sonnet 5.5 passes)
 
 (1) Code review: auth seam, no path where `_auth` is dropped or a token is treated as a session, cookie/bearer
-precedence, constant-time compare, no secret in logs/responses/`extra`. (2) Test review: would the route-walk and scan
-fail if one `Needs` were wrong; canary test real. (3) Logic review (never a smaller model): recompute the min rule
-by hand for the three roles x {read, write} x {read-only, read-write}, check expiry arithmetic (`now + days*86400`,
-boundary `expires_at == now` is expired), the 20-token count, role change and deactivation timing.
+precedence, constant-time compare, no secret in logs/responses/`extra`, throttle keyed by client IP and checked before
+lookup. (2) Test review: would the route-walk and scan fail if one `Needs` were wrong; canary test real; the settings
+test fails if `SessionOnly` is removed from a settings write. (3) Logic review (never a smaller model): recompute the min
+rule by hand for the three roles x {read, write} x {read-only, read-write}, check expiry arithmetic (`now + days*86400`,
+boundary `expires_at == now` is expired), the 20-token count, role change and deactivation timing, the throttle window.
 
 ## Open design decisions (assumed by the architect; confirm or change before the merge)
 
-1. **API default `read_only: true`** when omitted (safe default; the UI also pre-checks it).
-2. **No per-token rate limit and no per-IP invalid-token throttle in this version** (the old spec had both). The audit
-   log shows abuse; add later if wanted. The existing login `AttemptThrottle` is unchanged.
-3. **Audit write failure is fail-open** (logged, response unchanged), because the status is only known after the handler
-   has run. Fail-closed would need a pre-write and an update of the row, which breaks append-only.
-4. **Fixed retention 365 days**, pruned at startup, no setting.
-5. **No PATCH**: label, expiry and `read_only` are immutable; revoke and create a new one.
-6. **Settings and `team` are not excluded** for read-write tokens of a boss (a boss token can change settings and users'
-   `team` data except the session-only routes). The old spec forbade settings-write grants. If unwanted, add `settings`
-   write to the safe-method guard for tokens.
-7. **`GET /api/team/timeline`, sanity warnings and the settings view** stay role-based (they are views, not rights).
-8. **No CLI `create-token` and no MCP changes** in this version; the MCP spec uses the same tokens
-   (`docs/specs/mcp-server.md`) and a CLI is a follow-up.
-9. **Token for a deactivated-then-reactivated user** stays revoked.
-10. **Display of expired tokens**: kept in the list with status `expired`; no automatic deletion of token rows.
+1. **Team data for a read-write boss token.** A boss token can change `team` data (users' team fields) except the
+   session-only routes. Only settings writes are excluded (decision 12). If unwanted, add `team` write to the safe-method
+   guard for tokens.
+2. **`GET /api/team/timeline`, sanity warnings and the settings view** stay role-based (they are views, not rights).
+3. **MCP** uses the same tokens (`docs/specs/mcp-server.md`) with no change to this contract; a CLI is a follow-up
+   (decision 18).
+4. **Display of expired tokens**: kept in the list with status `expired`; no automatic deletion of token rows.

@@ -98,8 +98,9 @@ Example, call and result:
 No tool changes a business record. The only write tools create **pending proposals** (`POST /api/proposals`, see the
 third spec); a human approves, edits or rejects them in the web app. They need a **read-write token** (a read-only token is denied every non-safe method, `POST /api/proposals`
 included) and the owner's `proposals` write right plus write on the target area (so a token cannot propose what its
-owner could not do). Open question for the maintainer: a read-write token can also call every other write route of its
-owner; a `proposals-only` token mode would remove that and is a follow-up of the token contract.
+owner could not do). Decided: proposals need a read-write token in this version (api-tokens decision 11). A read-write
+token can also call every other write route of its owner (settings writes excepted, they are session-only); a
+`proposals-only` token mode would remove that and is a listed follow-up of the token contract, not in this version.
 
 | Tool | Creates a proposal of kind | Input (strict, extra keys rejected) |
 |---|---|---|
@@ -144,7 +145,7 @@ the damage:
 
 Each tool call is exactly one or a few API requests, hence one or a few `audit_log` rows with `source: "mcp"` (rule 13
 of the token spec). The MCP process keeps no log of results; its stderr log has tool name, status and duration only.
-There is no server-side rate limit in the first token version (a `429` would be mapped to an MCP tool error with `retry_after`). A client-side concurrency limit of
+There is no server-side rate limit in the first token version (the only `429` is the invalid-token throttle with `Retry-After`, api-tokens rule 12; the MCP client maps it to a tool error with `retry_after`). A client-side concurrency limit of
 4 requests avoids hammering. Timeouts: 10 s per API call.
 
 ## Local-first and network
