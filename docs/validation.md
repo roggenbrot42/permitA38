@@ -50,6 +50,7 @@ nesting depth).
 | Passwords | 8 … 1 000 characters (login, change, setup, CLI `set-password`; a longer one could never log in) |
 | Usernames | ≤ 64 characters in the request; the service requires 2–32 letters, digits, `.`, `-`, `_` |
 | Two-factor codes | `code` and `recovery_code` ≤ 64 characters (a recovery code is 19); `mfa_token` ≤ 4 096 |
+| API tokens | label 1 … 80 characters after trimming, no control characters; `expires_in_days` an integer 1 … 365 (default 90); `read_only` a boolean (default true); unknown fields are refused; token id in the path = 8 hex characters; audit `limit` 1 … 200, `before` 0 … 4 102 444 800; at most 20 active tokens per user; bearer value `pat_` + 43 characters `A-Za-z0-9_-` |
 | Sign-up | setup: name 1 … 200 (not blank), company name ≤ 200, weekly hours 0 … 168 |
 | URLs (company website, calendar link) | ≤ 2 048 characters |
 | Short text (street, city, title, …) | ≤ 200 characters; notes/intro/outro ≤ 5 000 |

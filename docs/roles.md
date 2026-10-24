@@ -64,5 +64,10 @@ Notes
 * The accountant can download PDFs of offers and invoices (read access) but not change their status.
 * Account-level endpoints (own password, own two-factor authentication, bootstrap, holidays) are open to every
   signed-in person; resetting someone else's two-factor authentication needs `team` write access.
+* **API tokens** (`Authorization: Bearer pat_...`, see `contracts/api-tokens.md`) are the owner's own credentials and
+  not part of this table: a token has the rights of its owner (evaluated on every request, so a demotion applies at
+  once), optionally read-only, and never more. A token can never manage tokens, passwords, two-factor authentication
+  or users, and can never write the settings (those routes answer `403` for a token). Every request made with a
+  token is written to an audit log.
 * The table lives in `permita38/core/rights.py` and is the single source of truth; a test checks this page against it
   and another test calls every API route as every role and expects `403` exactly where the table says so.
