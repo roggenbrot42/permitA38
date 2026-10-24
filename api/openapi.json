@@ -1912,6 +1912,62 @@
         ]
       }
     },
+    "/api/team/timeline": {
+      "get": {
+        "tags": [
+          "team"
+        ],
+        "summary": "who is away and when, at the viewer's level",
+        "operationId": "team_timeline_api_team_timeline_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "End"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamTimeline"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/attachments": {
       "post": {
         "tags": [
@@ -10371,6 +10427,13 @@
             "minimum": 0.0,
             "title": "Planning Default Win Probability",
             "default": 100
+          },
+          "team_timeline_visibility": {
+            "$ref": "#/components/schemas/TeamTimelineVisibilityIn",
+            "default": {
+              "employee": "away",
+              "accountant": "off"
+            }
           }
         },
         "additionalProperties": true,
@@ -10840,6 +10903,77 @@
         ],
         "title": "TaskIn"
       },
+      "TeamTimeline": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "title": "Level"
+          },
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "title": "End"
+          },
+          "holidays": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Holidays",
+            "default": {}
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/TimelinePerson"
+            },
+            "type": "array",
+            "title": "People",
+            "default": []
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "level",
+          "start",
+          "end"
+        ],
+        "title": "TeamTimeline",
+        "description": "GET /api/team/timeline (docs/contracts/team-timeline.md)."
+      },
+      "TeamTimelineVisibilityIn": {
+        "properties": {
+          "employee": {
+            "type": "string",
+            "enum": [
+              "off",
+              "away",
+              "time-off",
+              "full"
+            ],
+            "title": "Employee",
+            "default": "away"
+          },
+          "accountant": {
+            "type": "string",
+            "enum": [
+              "off",
+              "away",
+              "time-off",
+              "full"
+            ],
+            "title": "Accountant",
+            "default": "off"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "TeamTimelineVisibilityIn",
+        "description": "``team_timeline_visibility`` of PUT /settings: the level per role. Only ``employee`` and ``accountant`` (the\nboss is always ``full``); any other key, the boss included, is rejected. A missing key keeps its value."
+      },
       "Template": {
         "properties": {
           "id": {
@@ -11066,6 +11200,180 @@
           "name"
         ],
         "title": "TemplateIn"
+      },
+      "TimelineAbsence": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "title": "End"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "TimelineAbsence",
+        "description": "One stored absence as the viewer may see it (``kind`` and ``label`` are null where the level hides them)."
+      },
+      "TimelineContract": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer"
+          },
+          "start": {
+            "type": "string",
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "hours_per_week": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hours Per Week"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "start"
+        ],
+        "title": "TimelineContract"
+      },
+      "TimelinePerson": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "weekly_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekly Hours"
+          },
+          "absences": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineAbsence"
+            },
+            "type": "array",
+            "title": "Absences",
+            "default": []
+          },
+          "contracts": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineContract"
+            },
+            "type": "array",
+            "title": "Contracts",
+            "default": []
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "TimelinePerson"
       },
       "TimerStartIn": {
         "properties": {

@@ -22,6 +22,7 @@ from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.sanity import SanityService
 from permita38.core.service.settings import SettingsService
+from permita38.core.service.team_timeline import TeamTimelineService
 from permita38.core.service.time import TimeService
 from permita38.core.service.totp import TotpService
 
@@ -44,6 +45,7 @@ class Services:
     busy: BusyTimeProvider
     planning: PlanningService
     sanity: SanityService
+    team_timeline: TeamTimelineService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
@@ -67,6 +69,7 @@ class Services:
             imports=ImportService(store, numbering=None),
             time=TimeService(store),
             settings=SettingsService(store),
+            team_timeline=TeamTimelineService(store),
             impressum=ImpressumService(
                 SafeFetcher(user_agent),
                 enabled=config.features.impressum_lookup,
