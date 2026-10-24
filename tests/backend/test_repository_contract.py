@@ -288,6 +288,49 @@ def test_save_many_is_all_or_nothing(repo):
     assert saved[0]["id"] == "batchbb02" and repo.get("calendar_events", "batchbb02")
 
 
+def test_restore_list_and_delete_attachments(repo):
+    assert repo.list_attachments() == []
+    repo.restore_attachment("abc123def4.pdf", b"one")
+    repo.restore_attachment("abc123def4.pdf", b"one")  # same content again is fine
+    with pytest.raises(FileExistsError):
+        repo.restore_attachment("abc123def4.pdf", b"other")
+    for bad in ("../x.pdf", "A1B2C3D4.pdf", "nodot", "a/b.pdf", ".pdf", ""):
+        with pytest.raises(ValueError):
+            repo.restore_attachment(bad, b"x")
+    saved = repo.save_attachment("r.png", b"png")
+    assert repo.list_attachments() == sorted(["abc123def4.pdf", saved])
+    path = repo.attachment_path("abc123def4.pdf")
+    assert path is not None
+    with open(path, "rb") as f:
+        assert f.read() == b"one"
+    assert repo.delete_attachment("abc123def4.pdf") is True
+    assert repo.delete_attachment("abc123def4.pdf") is False
+    assert repo.delete_attachment("../x.pdf") is False
+    assert repo.list_attachments() == [saved]
+
+
+def test_attachment_staging_is_invisible_until_committed(repo):
+    stage = repo.new_stage()
+    repo.stage_attachment(stage, "abc123def4.pdf", [b"on", b"e"])
+    assert repo.list_attachments() == [] and repo.attachment_path("abc123def4.pdf") is None
+    with pytest.raises(ValueError):
+        repo.stage_attachment(stage, "../x.pdf", [b"x"])
+    with pytest.raises(ValueError):
+        repo.stage_attachment("../../etc", "abc123def4.pdf", [b"x"])
+    assert repo.commit_stage(stage) == ["abc123def4.pdf"]
+    assert repo.list_attachments() == ["abc123def4.pdf"]
+    repo.discard_stage(stage)  # idempotent: the stage is gone already
+    other = repo.new_stage()
+    repo.stage_attachment(other, "zzz999aaa1.pdf", [b"x"])
+    repo.discard_stage(other)
+    assert repo.list_attachments() == ["abc123def4.pdf"]
+    stale = repo.new_stage()
+    assert repo.discard_stale_stages(3600) == 0
+    assert repo.discard_stale_stages(-1) >= 1
+    with pytest.raises(OSError):
+        repo.stage_attachment(stale, "abc123def5.pdf", [b"x"])
+
+
 # ------------------------------------------------------------------ API tokens and the audit log
 def test_api_token_hash_is_unique_and_findable(repo):
     a = repo.save("api_tokens", {"user_id": "u1", "label": "a", "token_hash": "h" * 64, "expires_at": 10})

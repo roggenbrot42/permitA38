@@ -20,6 +20,7 @@ from .deps import AUDIT_SCOPE_KEY, Services, is_session_only, startup_services
 from .routers import (
     auth,
     calendars,
+    data_transfer,
     files,
     finance,
     health,
@@ -68,6 +69,7 @@ def all_routers() -> list:
         records,
         calendars,
         trips,
+        data_transfer,
         tokens,
     )
     return [router for module in modules for router in module.routers]

@@ -10,8 +10,8 @@ Times are epoch seconds (integers). Review tier: **Full**.
 ## Rights
 
 Every route: **boss only**, **session only** (`Needs("settings", "write", full=True)`, like the document importer).
-Employee and accountant: 403. No session: 401. When scoped API tokens exist, all routes below answer 403 to a token
-whatever its scope (add them to the session-only list and test it).
+Employee and accountant: 403. No session: 401. All routes below carry `SessionOnly`: an API token gets 403 whatever its scope (tested in
+`tests/backend/test_data_transfer_security.py` and listed in `SESSION_ONLY` of `tests/backend/test_rbac.py`).
 
 Only one export or import runs at a time; a second request answers `409 {"detail": "Another export or import is running."}`.
 
@@ -53,7 +53,7 @@ Body (`application/json`, strict; every field optional):
 | Field | Type | Default | Rule |
 |---|---|---|---|
 | `scope` | `"full"` or `"master_data"` | `"full"` | enum |
-| `include_accounts` | bool | `false` | adds `users.password_hash` and `pw_changed`; TOTP is never included. Ignored (and rejected with 422) for `master_data` |
+| `include_accounts` | bool | `false` | adds `users.password_hash` and `pw_changed`; TOTP is never included. The import trusts hashes only when the manifest says `include_accounts: true`; otherwise it drops them from every archive user. Ignored (and rejected with 422) for `master_data` |
 | `include_attachments` | bool | `true` | `false` writes no `attachments/` entries; the manifest says so and import warns that referenced files are missing. Rejected for `master_data` (always none) |
 
 Unknown fields: 422. Response: the ZIP stream with the headers
@@ -92,7 +92,7 @@ afterwards.
   "compatibility": {"status": "same", "message": null},
   "counts": {"customers": 12, "projects": 9, "entries": 3041, "invoices": 87, "expenses": 140, "users": 2},
   "attachments": {"files": 211, "bytes": 48213377},
-  "users": {"replaces_setup_user": "anna", "kept_setup_user": null, "without_password": ["lena", "tom"]},
+  "users": {"replaces_setup_user": "anna", "kept_setup_user": null, "without_password": ["lena", "tom"], "with_login": ["anna", "max"], "bosses": ["anna"]},
   "numbering": {
     "invoices": {"highest_imported": "RE-2026-0087", "counter_period": "2026", "counter": 87, "next": "RE-2026-0088"},
     "offers": {"highest_imported": "AN-2026-0031", "counter_period": "2026", "counter": 31, "next": "AN-2026-0032"}
@@ -131,7 +131,7 @@ for people), `file` (archive path or `null`).
   "counts": {"customers": 12, "projects": 9, "entries": 3041, "invoices": 87, "expenses": 140, "users": 2},
   "attachments": {"files": 211, "bytes": 48213377},
   "relogin": true,
-  "users": {"replaces_setup_user": "anna", "kept_setup_user": null, "without_password": ["lena", "tom"]},
+  "users": {"replaces_setup_user": "anna", "kept_setup_user": null, "without_password": ["lena", "tom"], "with_login": ["anna", "max"], "bosses": ["anna"]},
   "numbering": { "...": "as in the preview, plus the numbering check warnings" },
   "warnings": []
 }
@@ -172,7 +172,7 @@ contents, no file names.
 | `attachment_name_invalid`, `attachment_conflict` | name outside the allowed pattern, or a different file already there |
 | `not_empty` | the instance already has data (also returned as 409 on run) |
 | `dangling_reference` (warning) | a reference to a record that is not in the archive |
-| `calendar_url_removed`, `attachments_not_included`, `users_without_password`, `numbering_counter_low`, `schema_older`, `setup_user_kept` (warnings) | informational |
+| `calendar_url_removed`, `attachments_not_included`, `users_without_password`, `accounts_can_login`, `numbering_counter_unreachable`, `numbering_counter_low`, `schema_older`, `setup_user_kept` (warnings) | informational |
 
 ## Archive format version 1
 
@@ -180,7 +180,7 @@ contents, no file names.
 manifest.json
 README.txt
 data/<collection>.json   customers, projects, tasks, entries, contracts, absences, plan_scenarios, offers, invoices,
-                         expenses, trips, users, templates, calendar_sources, timers, number_sequences, numbering_log,
+                         expenses, trips, users, templates, calendar_sources, number_sequences, numbering_log,
                          import_batches (+ every future table not in EXCLUDED_TABLES)
 data/settings.json
 csv/<collection>.csv     for the record collections (not for internal tables, not for settings)
@@ -241,8 +241,8 @@ a1b2c3d4;1790000000;1790000500;Beispiel GmbH;K-001;95.0;'=1+1\r\n
 
 ## Bounds (all enforced; see spec decision 13)
 
-Upload 512 MiB; 20,000 entries; 2 GiB uncompressed total; 256 MiB per data file; 25 MiB per attachment; ratio 200
-(entries under 1 MiB exempt); 1,000,000 records per collection; 1 MiB per record; JSON depth 32; `confirm` bool;
+Upload 512 MiB; 20,000 entries; 2 GiB uncompressed total; 64 MiB per data file; 64 MiB per attachment entry on import (export has no per-file limit); ratio 200
+(entries under 1 MiB exempt); 200,000 records per collection; 1 MiB per record; JSON depth 32; `confirm` bool;
 `ExportRequest` booleans and one enum only; echoed file names at most 200 characters.
 
 ## CLI

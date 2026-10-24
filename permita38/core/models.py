@@ -926,6 +926,22 @@ class TripIn(v.StrictRecord):
         return self
 
 
+class ExportRequest(v.CheckedBody):
+    """Options of POST /api/data/export (docs/contracts/data-export.md). Unknown fields are refused."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: Literal["full", "master_data"] = "full"
+    include_accounts: bool = False
+    include_attachments: bool = True
+
+    @model_validator(mode="after")
+    def _master_data_is_plain(self) -> "ExportRequest":
+        if self.scope == "master_data" and (self.include_accounts or "include_attachments" in self.model_fields_set):
+            raise ValueError("include_accounts and include_attachments cannot be used with scope master_data")
+        return self
+
+
 # ---------------------------------------------------------------- API tokens (docs/contracts/api-tokens.md)
 API_TOKEN_MAX_ACTIVE = 20
 API_TOKEN_LABEL_MAX = 80
