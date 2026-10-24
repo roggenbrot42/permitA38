@@ -1,5 +1,4 @@
-"""Data export and import against the real server (demo data only). Skipped until the backend routes exist
-(branch feat/data-export); the integrator removes the probe skip after the backend has merged."""
+"""Data export and import against the real server (demo data only)."""
 
 import io
 import json
@@ -18,10 +17,6 @@ from tests.web.test_impressum_prefill import PASSWORD, Server  # noqa: E402  (sh
 def srv(tmp_path):
     s = Server(tmp_path)
     h = {"Authorization": "Bearer " + s.token}
-    probe = httpx.get(s.base + "/api/data/export/info", headers=h)
-    if probe.status_code == 404:
-        s.stop()
-        pytest.skip("GET /api/data/export/info does not exist yet: the backend of feat/data-export is not merged")
     r = httpx.post(
         s.base + "/api/users",
         headers=h,
