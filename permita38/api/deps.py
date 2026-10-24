@@ -25,6 +25,7 @@ from permita38.core.service.settings import SettingsService
 from permita38.core.service.team_timeline import TeamTimelineService
 from permita38.core.service.time import TimeService
 from permita38.core.service.totp import TotpService
+from permita38.core.service.transfer.service import TransferService, clean_stale_tmp
 from permita38.core.service.trips import TripService
 
 COOKIE_NAME = "authorization"
@@ -48,6 +49,7 @@ class Services:
     sanity: SanityService
     trips: TripService
     team_timeline: TeamTimelineService
+    transfer: TransferService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
@@ -73,6 +75,7 @@ class Services:
             time=TimeService(store),
             settings=SettingsService(store),
             team_timeline=TeamTimelineService(store),
+            transfer=TransferService(store, config.data_dir / "tmp"),
             impressum=ImpressumService(
                 SafeFetcher(user_agent),
                 enabled=config.features.impressum_lookup,
@@ -84,6 +87,7 @@ class Services:
 def startup_services(services: Services) -> None:
     """Open the database (migrating if needed; refuses a newer one) and take the daily backup."""
     services.store.startup()
+    clean_stale_tmp(services.config.data_dir / "tmp")
     db = services.config.database
     if db.auto_backup:
         auto_backup(services.store, db.backup_keep)

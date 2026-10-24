@@ -5803,6 +5803,208 @@
           }
         }
       }
+    },
+    "/api/data/export/info": {
+      "get": {
+        "tags": [
+          "data transfer"
+        ],
+        "summary": "what an export would contain and whether an import is possible",
+        "operationId": "export_info_api_data_export_info_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Export Info Api Data Export Info Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/data/export": {
+      "post": {
+        "tags": [
+          "data transfer"
+        ],
+        "summary": "build and download the export archive (ZIP)",
+        "operationId": "export_archive_api_data_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ExportRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/data/import/preview": {
+      "post": {
+        "tags": [
+          "data transfer"
+        ],
+        "summary": "dry run: validate an archive, write nothing",
+        "operationId": "import_preview_api_data_import_preview_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_preview_api_data_import_preview_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Import Preview Api Data Import Preview Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/data/import/run": {
+      "post": {
+        "tags": [
+          "data transfer"
+        ],
+        "summary": "import an archive into the empty instance (all or nothing)",
+        "operationId": "import_run_api_data_import_run_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_run_api_data_import_run_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/data/transfers": {
+      "get": {
+        "tags": [
+          "data transfer"
+        ],
+        "summary": "the transfer log (last 50)",
+        "operationId": "transfers_api_data_transfers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response Transfers Api Data Transfers Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -6062,6 +6264,39 @@
           "version"
         ],
         "title": "AuthStatus"
+      },
+      "Body_import_preview_api_data_import_preview_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_preview_api_data_import_preview_post"
+      },
+      "Body_import_run_api_data_import_run_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_import_run_api_data_import_run_post"
       },
       "Body_preview_api_import_preview_post": {
         "properties": {
@@ -9277,6 +9512,33 @@
         ],
         "title": "ExpenseLineIn",
         "description": "One line of an itemised bill. ``net`` and ``vat`` sent by a client are ignored (derived by the server)."
+      },
+      "ExportRequest": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "enum": [
+              "full",
+              "master_data"
+            ],
+            "title": "Scope",
+            "default": "full"
+          },
+          "include_accounts": {
+            "type": "boolean",
+            "title": "Include Accounts",
+            "default": false
+          },
+          "include_attachments": {
+            "type": "boolean",
+            "title": "Include Attachments",
+            "default": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ExportRequest",
+        "description": "Options of POST /api/data/export (docs/contracts/data-export.md). Unknown fields are refused."
       },
       "ExtendIn": {
         "properties": {

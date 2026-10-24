@@ -79,6 +79,90 @@ def _import_documents(services, args) -> None:
         print(f"  the next number is now {report['next_number']} (was {report['next_number_before']})")
 
 
+def _export_archive(services, args) -> None:
+    import os
+    import shutil
+
+    from permita38.core.service.transfer.export import ExportOptions
+    from permita38.core.service.transfer.service import TransferService
+
+    out: Path = args.file
+    if out.exists() and not args.force:
+        sys.exit(f"{out} exists; use --force to overwrite it.")
+    if args.include_accounts and not args.yes:
+        print(
+            "WARNING: the archive will contain password hashes. It allows logging in as these users; store it as "
+            "carefully as the database. Two-factor secrets and API tokens are never included."
+        )
+        if not sys.stdin.isatty():
+            sys.exit("Not running on a terminal: repeat with --yes to confirm --include-accounts.")
+        if input("Continue? [y/N] ").strip().lower() not in ("y", "yes"):
+            sys.exit("Cancelled.")
+    services.store.startup()
+    transfer = TransferService(services.store, services.config.data_dir / "tmp", allow_no_users=True)
+    opts = ExportOptions(
+        "master_data" if args.master_data else "full", args.include_accounts, not args.no_attachments
+    )
+    try:
+        result = transfer.export(None, opts)
+    except ServiceError as e:
+        sys.exit(e.message)
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | (os.O_TRUNC if args.force else os.O_EXCL)
+        fd = os.open(out, flags, 0o600)
+        with os.fdopen(fd, "wb") as dst, open(result.path, "rb") as src:
+            shutil.copyfileobj(src, dst)
+        os.chmod(out, 0o600)
+    finally:
+        result.path.unlink(missing_ok=True)
+    for coll, n in result.counts.items():
+        print(f"  {coll}: {n}")
+    print(f"Wrote {out} ({result.size} bytes)\nSHA-256 {result.sha256}")
+
+
+def _import_archive(services, args) -> None:
+    from permita38.core.service.transfer.service import ImportRefused, TransferService
+
+    services.store.startup()
+    transfer = TransferService(services.store, services.config.data_dir / "tmp", allow_no_users=True)
+    path: Path = args.file
+    if not path.is_file():
+        sys.exit(f"{path} is not a file.")
+    report = transfer.preview(None, path)
+    for coll, n in report["counts"].items():
+        print(f"  {coll}: {n}")
+    print(f"  attachments: {report['attachments']['files']} files, {report['attachments']['bytes']} bytes")
+    for w in report["warnings"]:
+        print(f"  warning ({w['code']}): {w['message']}")
+    for e in report["errors"]:
+        print(f"  error ({e['code']}): {e['message']}")
+    if not report["ok"]:
+        sys.exit("The archive cannot be imported.")
+    if args.dry_run:
+        print("Dry run: nothing was written.")
+        return
+    if not args.yes:
+        if not sys.stdin.isatty():
+            sys.exit("Not running on a terminal: repeat with --yes to import.")
+        if input("Import now? [y/N] ").strip().lower() not in ("y", "yes"):
+            sys.exit("Cancelled.")
+    try:
+        res = transfer.run(None, path)
+    except ImportRefused as e:
+        sys.exit(e.body()["detail"])
+    except ServiceError as e:
+        sys.exit(e.message)
+    print("Imported.")
+    for kind, n in (res["numbering"] or {}).items():
+        print(f"  {kind}: highest imported {n['highest_imported']}, next number {n['next']}")
+    if res["users"]["without_password"]:
+        print(
+            "These users have no password yet and cannot log in: "
+            + ", ".join(res["users"]["without_password"])
+            + "\nRun `permita38 set-password <username>` for each of them."
+        )
+
+
 def main(argv: list[str] | None = None):
     ap = argparse.ArgumentParser(
         prog="permita38",
@@ -115,6 +199,17 @@ def main(argv: list[str] | None = None):
     idp.add_argument("--delimiter", help="CSV delimiter (default: detected)")
     idp.add_argument("--decimal", choices=["auto", "comma", "point"], default=None)
     idp.add_argument("--date-order", choices=["dmy", "mdy"], default=None)
+    xp = sub.add_parser("export", help="write a full data export archive (ZIP) to FILE")
+    xp.add_argument("file", type=Path)
+    xp.add_argument("--master-data", action="store_true", help="customers (and suppliers) only")
+    xp.add_argument("--include-accounts", action="store_true", help="include password hashes (never two-factor data)")
+    xp.add_argument("--no-attachments", action="store_true")
+    xp.add_argument("--force", action="store_true", help="overwrite FILE")
+    xp.add_argument("--yes", action="store_true", help="confirm --include-accounts without asking")
+    mi = sub.add_parser("import", help="restore a data export archive into an empty instance")
+    mi.add_argument("file", type=Path)
+    mi.add_argument("--dry-run", action="store_true", help="validate and report only")
+    mi.add_argument("--yes", action="store_true", help="do not ask")
     cp = sub.add_parser(
         "create-migration", help="create a new migration file (random id, requires = current head) in all dialects"
     )
@@ -193,6 +288,10 @@ def main(argv: list[str] | None = None):
                     + "\nRun `permita38 set-password <username>` for each of them."
                 )
             return
+        if command == "export":
+            return _export_archive(services, args)
+        if command == "import":
+            return _import_archive(services, args)
         if command == "import-documents":
             return _import_documents(services, args)
         if command == "calendar":
