@@ -286,3 +286,24 @@ def test_save_many_is_all_or_nothing(repo):
     assert [r["id"] for r in repo.list("calendar_events")] == ["survivor1"]
     saved = repo.save_many("calendar_events", [{"id": "batchbb02", "source_id": "srcx0003"}])
     assert saved[0]["id"] == "batchbb02" and repo.get("calendar_events", "batchbb02")
+
+
+def test_restore_list_and_delete_attachments(repo):
+    assert repo.list_attachments() == []
+    repo.restore_attachment("abc123def4.pdf", b"one")
+    repo.restore_attachment("abc123def4.pdf", b"one")  # same content again is fine
+    with pytest.raises(FileExistsError):
+        repo.restore_attachment("abc123def4.pdf", b"other")
+    for bad in ("../x.pdf", "A1B2C3D4.pdf", "nodot", "a/b.pdf", ".pdf", ""):
+        with pytest.raises(ValueError):
+            repo.restore_attachment(bad, b"x")
+    saved = repo.save_attachment("r.png", b"png")
+    assert repo.list_attachments() == sorted(["abc123def4.pdf", saved])
+    path = repo.attachment_path("abc123def4.pdf")
+    assert path is not None
+    with open(path, "rb") as f:
+        assert f.read() == b"one"
+    assert repo.delete_attachment("abc123def4.pdf") is True
+    assert repo.delete_attachment("abc123def4.pdf") is False
+    assert repo.delete_attachment("../x.pdf") is False
+    assert repo.list_attachments() == [saved]

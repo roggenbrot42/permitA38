@@ -26,6 +26,7 @@ from .dialect import Dialect
 from .schema import BOOL, FLOAT, ID, INT, JSON, STR, TABLES, TEXT, Column, Table
 
 MIGRATIONS_TABLE = "schema_migrations"
+ATTACHMENT_RE = re.compile(r"[0-9a-z]{6,32}\.[a-z0-9]{1,5}")
 
 
 def _now() -> str:
@@ -446,10 +447,39 @@ class SQLRepository(Repository):
         return name
 
     def attachment_path(self, name: str) -> str | None:
-        if not re.fullmatch(r"[0-9a-z]{6,32}\.[a-z0-9]{1,5}", name):
+        if not ATTACHMENT_RE.fullmatch(name):
             return None
         p = self.data_dir / "attachments" / name
         return str(p) if p.is_file() else None
+
+    def list_attachments(self) -> list[str]:
+        folder = self.data_dir / "attachments"
+        if not folder.is_dir():
+            return []
+        return sorted(p.name for p in folder.iterdir() if ATTACHMENT_RE.fullmatch(p.name) and p.is_file())
+
+    def restore_attachment(self, name: str, blob: bytes) -> None:
+        if not ATTACHMENT_RE.fullmatch(name):
+            raise ValueError("bad attachment name")
+        folder = self.data_dir / "attachments"
+        folder.mkdir(parents=True, exist_ok=True)
+        target = folder / name
+        if target.exists():
+            if target.read_bytes() == blob:
+                return
+            raise FileExistsError(name)
+        tmp = folder / (name + ".tmp")
+        tmp.write_bytes(blob)
+        os.replace(tmp, target)
+
+    def delete_attachment(self, name: str) -> bool:
+        if not ATTACHMENT_RE.fullmatch(name):
+            return False
+        p = self.data_dir / "attachments" / name
+        if not p.is_file():
+            return False
+        p.unlink()
+        return True
 
     # ------------------------------------------------------------------ sync conflicts
     def conflicts(self) -> StrList:

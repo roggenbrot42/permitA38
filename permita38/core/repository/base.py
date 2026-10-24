@@ -128,6 +128,19 @@ class Repository(ABC):
     @abstractmethod
     def attachment_path(self, name: str) -> str | None: ...
 
+    @abstractmethod
+    def list_attachments(self) -> list[str]:
+        """Names of the stored attachment files (only names that match the attachment name pattern), sorted."""
+
+    @abstractmethod
+    def restore_attachment(self, name: str, blob: bytes) -> None:
+        """Write an attachment under its exact ``name`` (data import). Refuses a bad name (``ValueError``) and an
+        existing file with different content (``FileExistsError``); the same content is fine. Written atomically."""
+
+    @abstractmethod
+    def delete_attachment(self, name: str) -> bool:
+        """Remove an attachment; False when it does not exist (or the name is not valid)."""
+
     # ---- operations ----
     @abstractmethod
     def conflicts(self) -> StrList:
