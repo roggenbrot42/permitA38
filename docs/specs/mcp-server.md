@@ -20,8 +20,8 @@ the provider spec); multi-user hosted MCP gateway.
 ## Architecture decision: the MCP server is a client of the HTTP API
 
 `permita38 mcp` is a separate process that talks to the running permitA38 server over HTTP with a **scoped API token**
-(`Authorization: Bearer pa38_...`). It never opens the database and never imports `core/service`. Consequences, all
-wanted: the rights check (`rights.scope_for`, min of token and owner), the audit log, the per-token rate limit,
+(`Authorization: Bearer pat_...`). It never opens the database and never imports `core/service`. Consequences, all
+wanted: the rights check (`rights.scope_for`: the owner's role, narrowed to read-only for a read-only token), the audit log, the (rate limiting is not part of the first token version),
 expiry and revocation apply unchanged and in exactly one place; there is no second code path that could forget a
 check; the confused-deputy risk of an "internal super-user" does not exist. Cost: the server must be running (it is,
 for the web app; `permita38 serve`), and each tool call is one local HTTP round trip.
@@ -31,7 +31,7 @@ for the web app; `permita38 serve`), and each tool call is one local HTTP round 
 | Transport | Version | Notes |
 |---|---|---|
 | **stdio** | **first (recommended)** | The client starts `permita38 mcp` as a subprocess; no network listener, nothing to authenticate beyond the token in the environment. Fits the local-first, single-user desktop case and every MCP client. |
-| Streamable HTTP | second | Same tool set mounted by `permita38 mcp --http 127.0.0.1:8766`. Binds to loopback only unless `--allow-remote` (prints a warning, requires https in front); every MCP request must carry its own `Authorization: Bearer pa38_...` and is forwarded to the API with that token (no server-side token store); `Origin` header validated against an allow-list (DNS-rebinding protection required by the MCP spec). Not started automatically. |
+| Streamable HTTP | second | Same tool set mounted by `permita38 mcp --http 127.0.0.1:8766`. Binds to loopback only unless `--allow-remote` (prints a warning, requires https in front); every MCP request must carry its own `Authorization: Bearer pat_...` and is forwarded to the API with that token (no server-side token store); `Origin` header validated against an allow-list (DNS-rebinding protection required by the MCP spec). Not started automatically. |
 
 SSE (the legacy transport) is not offered.
 
@@ -39,24 +39,24 @@ SSE (the legacy transport) is not offered.
 
 Environment / CLI of `permita38 mcp` (per device, never in the data folder):
 
-* `PERMITA38_URL` (default `http://127.0.0.1:8765`), `PERMITA38_TOKEN` (required, `pa38_...`), or `--token-file PATH`
+* `PERMITA38_URL` (default `http://127.0.0.1:8765`), `PERMITA38_TOKEN` (required, `pat_...`), or `--token-file PATH`
   (preferred: file mode `0600`, checked; refuses world-readable files on POSIX). The token is never accepted as a
   command-line argument (visible in process lists) and never printed or logged.
 * `--read-only` (default **on** until proposals exist): do not register write tools even if the token could use them.
 * Startup check: `GET /api/auth/me` -> logs (stderr, never stdout: stdout is the protocol channel) the token label,
-  expiry and grants; exits non-zero with a clear message on 401. Refuses to start when the URL is not loopback and not
+  expiry, `read_only` and permissions; exits non-zero with a clear message on 401. Refuses to start when the URL is not loopback and not
   https.
 
 ## Tool list
 
 Names are `snake_case`, prefixed by the domain. Every tool has a JSON-schema input, a typed output and the MCP
 annotations `readOnlyHint` (true for all read tools), `destructiveHint: false`, `idempotentHint`, `openWorldHint: false`.
-Tools are registered **only if the token grants at least `read` on the underlying area** (checked from
-`/api/auth/me` at startup and re-checked on `403`, so the model is not shown tools it cannot use).
+Tools are registered **only if the token's effective rights include `read` on the underlying area** (the owner's `permissions` as returned by
+`/api/auth/me`, with write already set to `none` for a read-only token; checked at startup and re-checked on `403`, so the model is not shown tools it cannot use).
 
 ### Read tools (version 1)
 
-| Tool | Area (token must grant) | Backing API | Input |
+| Tool | Area (needs read) | Backing API | Input |
 |---|---|---|---|
 | `customers_search` | customers read | `GET /api/customers` | `query?`, `limit` (1-50, default 20) |
 | `customers_get` | customers read | `GET /api/customers/{id}` | `id` |
@@ -68,7 +68,7 @@ Tools are registered **only if the token grants at least `read` on the underlyin
 | `expenses_list` | expenses read | `GET /api/expenses` | `from?`, `to?`, `category?`, `limit` |
 | `trips_list` | expenses read | `GET /api/trips` (exists after [business trips](business-trips.md)) | `from?`, `to?`, `limit` |
 | `planner_summary` | planning read | `GET /api/planning/...` (week capacity, over-capacity weeks, forecast summary) | `weeks` (1-26) |
-| `whoami` | none | `GET /api/auth/me` | none: the token's label, expiry and grants, so the model knows its limits |
+| `whoami` | none | `GET /api/auth/me` | none: the token's label, expiry, `read_only` and the owner's permissions, so the model knows its limits |
 
 Rules for all read tools: results are **projections**, not raw rows: only fields the schema below lists, with
 `extra` fields dropped, free-text fields (`notes`, `title`, `intro`) truncated to 500 characters, rates and amounts as
@@ -96,9 +96,10 @@ Example, call and result:
 ### Write tools (version 2, only through the proposal queue)
 
 No tool changes a business record. The only write tools create **pending proposals** (`POST /api/proposals`, see the
-third spec); a human approves, edits or rejects them in the web app. They need the token grant `proposals` write
-(a new area-like grant defined in the third spec) **and** the grant on the target area (so a token cannot propose
-what its owner could not do).
+third spec); a human approves, edits or rejects them in the web app. They need a **read-write token** (a read-only token is denied every non-safe method, `POST /api/proposals`
+included) and the owner's `proposals` write right plus write on the target area (so a token cannot propose what its
+owner could not do). Open question for the maintainer: a read-write token can also call every other write route of its
+owner; a `proposals-only` token mode would remove that and is a follow-up of the token contract.
 
 | Tool | Creates a proposal of kind | Input (strict, extra keys rejected) |
 |---|---|---|
@@ -113,12 +114,11 @@ download, import/undo, backup, anything with VAT-return or tax-filing effect. Th
 
 ## Tokens map to rights
 
-The token's grants (api-tokens rule 5/6) are the only authority. The MCP server adds no permissions; it merely hides
-tools the token cannot use. Recommended token preset **"MCP read-only"** (customers, projects, time, invoices, offers,
-expenses, planning: all `read`, `limited` where the owner is not a boss); a second preset **"MCP + proposals"** adds
-`proposals` write. A token for MCP should have a short expiry (30 days default in the preset) and its own label, so the
-audit log shows `source: "mcp"`: the MCP server sends header `X-Permita38-Client: mcp/<version>` which the API records in
-the audit row (informational; rights never depend on it).
+The owner's role, narrowed by `read_only` (api-tokens rules 5 and 6), is the only authority. The MCP server adds no
+permissions; it merely hides tools the token cannot use. Recommended: a **read-only** token (the default); the proposal
+tools need a read-write token (see above). A token for MCP should have a short expiry (30 days default in the preset) and its own label, so the
+audit log (token id, route, status) shows what it did. Recording an `X-Permita38-Client` header is a later extension
+of the audit row's `extra`; rights never depend on it.
 
 ## Prompt-injection stance
 
@@ -126,8 +126,7 @@ Everything the tools return is **untrusted data** that may contain instructions 
 an attacker who got text into a note, a vendor name or a PDF. The design assumes the model *can* be fooled and bounds
 the damage:
 
-1. **No ambient authority.** A tool can only do what the token grants; the grants are chosen by the human, default
-   read-only; the model cannot widen them (token routes are session-only).
+1. **No ambient authority.** A tool can only do what the token allows (the owner's rights, read-only by default); the model cannot widen them (token routes are session-only).
 2. **No direct writes.** Version 1 has no write tools. Version 2 can only create *pending proposals*; a proposal changes
    nothing until a human approves it in the UI, where the diff and its source (`mcp`, token label) are shown.
 3. **Destructive and financial actions are not tools at all** (list above), not even behind a proposal.
@@ -137,7 +136,7 @@ the damage:
 5. **No exfiltration channels.** No tool fetches URLs, sends mail or writes files; `openWorldHint: false`; results contain
    no links that the server would follow. Whether the client's model then sends data elsewhere is outside this server;
    the docs say that read access means the model provider sees what is read.
-6. **Bounded blast radius**: per-token rate limit (api-tokens rule 12), result size caps, date-range caps, audit log of
+6. **Bounded blast radius**: result size caps, date-range caps, audit log of
    every call (who, which token, which route, status).
 7. **Human-visible provenance**: a proposal created by MCP shows the token label and the tool arguments verbatim.
 
@@ -145,7 +144,7 @@ the damage:
 
 Each tool call is exactly one or a few API requests, hence one or a few `audit_log` rows with `source: "mcp"` (rule 13
 of the token spec). The MCP process keeps no log of results; its stderr log has tool name, status and duration only.
-Rate limit is the token's (`429` is mapped to an MCP tool error with `retry_after`). A client-side concurrency limit of
+There is no server-side rate limit in the first token version (a `429` would be mapped to an MCP tool error with `retry_after`). A client-side concurrency limit of
 4 requests avoids hammering. Timeouts: 10 s per API call.
 
 ## Local-first and network
@@ -174,7 +173,7 @@ hosts). Data leaves the machine only through the MCP client the user chose; `doc
 ```
 permita38/mcp/__init__.py
 permita38/mcp/client.py     ApiClient (httpx, token, timeouts, error mapping)
-permita38/mcp/tools.py      tool definitions: name, schema, projection, required grants
+permita38/mcp/tools.py      tool definitions: name, schema, projection, required rights
 permita38/mcp/server.py     SDK adapter, stdio and HTTP entry, tool registration from /auth/me
 permita38/mcp/sanitize.py   truncate, strip control/bidi characters, untrusted_data envelope
 permita38/cli/ (mcp subcommand: one new file permita38/cli/mcp_cmd.py + one registration line)
@@ -184,11 +183,10 @@ permita38/cli/ (mcp subcommand: one new file permita38/cli/mcp_cmd.py + one regi
 
 * Unit (`tests/mcp/` or `tests/backend/test_mcp_*.py`, no SDK needed): projections drop `extra`, secrets and over-long
   text; sanitize removes bidi/control characters; size/limit caps; the `FORBIDDEN_TOOLS` list (invoice finalise, delete,
-  settings, tokens, attachments...) is asserted absent from the registry; every tool lists the grant it needs.
+  settings, tokens, attachments...) is asserted absent from the registry; every tool lists the area it needs.
 * Integration with a real app: `TestClient`-backed `ApiClient` (httpx ASGI transport) and tokens from the token service:
-  read-only token -> only read tools registered, a call for an area without grant -> tool error, not data; `limited`
-  scope returns only own time entries; revoked/expired token -> clean error; rate limit -> `retry_after`; audit rows have
-  `source: "mcp"`; no token string in any log record (canary).
+  read-only token -> only read tools registered, a call for an area the owner cannot read -> tool error, not data; `limited`
+  scope returns only own time entries; revoked/expired token -> clean error; audit rows exist for every call; no token string in any log record (canary).
 * Protocol tests with the SDK's in-memory client/server pair (list tools, call, schema validation of bad arguments,
   stdout contains protocol only); one stdio subprocess smoke test (marked, uses the real entry point and a fixture
   server on an ephemeral port).
@@ -206,7 +204,7 @@ permita38/cli/ (mcp subcommand: one new file permita38/cli/mcp_cmd.py + one regi
 | B server + CLI (stdio) | `permita38/mcp/server.py`, `cli/mcp_cmd.py`, `pyproject.toml` (extra `mcp` only) | SDK adapter, startup check, token file handling | **Full** |
 | C Streamable HTTP | `permita38/mcp/http.py`, tests | loopback/Origin/bearer handling | **Full** (after B) |
 | D write tools | `permita38/mcp/tools_propose.py`, tests | three `propose_*` tools; only after the proposals API exists | **Full** |
-| E UI | `web/tokens.js` section "MCP" (preset "MCP read-only", copy-ready client config snippet without the token) | small addition on top of the tokens UI | **Light** |
+| E UI | `web/tokens.js` section "MCP" (read-only token, copy-ready client config snippet without the token) | small addition on top of the tokens UI | **Light** |
 | F docs | `docs/mcp.md` (setup for Claude Desktop/Claude Code, what leaves the machine, injection stance), roadmap row | | **Light** |
 
 A and B are independent after the `ApiClient` protocol is fixed (above). Migration ids: **none** (this spec adds no

@@ -101,8 +101,7 @@ Rights: new area `proposals` in `core/rights.py` (`AREAS` + `MATRIX`, `docs/role
 `subject_user_id` is the user; `all` = everyone's. Creating needs `proposals` write **and** write on the target area
 (effective scope; for `limited` the payload must concern the subject user's own data: enforced per kind). Approve and
 reject need the approver to be the subject user or a boss, **and** write scope on the target area. Approve/reject/PATCH
-are **session-only** (token gets `403`). Token grants: `proposals` is grantable only as `write`+`limited`/`all` and
-`read`.
+are **session-only** (token gets `403`). A token must be read-write to create proposals (a read-only token is denied `POST`); the owner's rights apply.
 
 `GET /api/proposals?status=pending|approved|rejected|expired|failed&kind=&limit=50&before=` ->
 
@@ -253,7 +252,7 @@ Server-side after the model answers (all in `core/service/ai_expense.py`, no mod
   queue limit, edited payload re-validated, stale `before` -> 409, warnings need confirm, transaction rollback leaves the
   proposal `failed` and no record, diff computed server-side (client-supplied diff ignored), `source` taken from the
   principal, token cannot approve/reject (403), limited scope sees only own, a creator without target-area write gets 403.
-* Rights: matrix test for the new `proposals` area; `docs/roles.md` consistency test; route-walk with token grants.
+* Rights: matrix test for the new `proposals` area; `docs/roles.md` consistency test; route-walk with tokens.
 * Provider: `OpenAICompatProvider` against `httpx.MockTransport` and a local fake server: request shape, retry without
   `response_format`, timeout, oversize response, redirect refused, key never in logs/errors (canary), remote without
   `allow_remote`/https/consent disabled at startup, hourly limit, one-at-a-time lock.
