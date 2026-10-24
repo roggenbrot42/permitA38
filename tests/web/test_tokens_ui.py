@@ -64,7 +64,7 @@ class FakeTokenApi:
         self.items = items if items is not None else []
         self.requests = []
         self.create_error = None  # (status, payload, headers) answered by POST /tokens
-        self.audit_pages = [{"items": [AUDIT_ROW], "next": None}]
+        self.audit_pages = [{"items": [AUDIT_ROW], "next": None, "next_id": None}]
         self.confirms = []
 
     def calls(self, method, path):
@@ -286,8 +286,8 @@ def test_revoke_and_revoke_all_ask_first(browser):
 def test_activity_dialog_pages_with_next(browser):
     api = FakeTokenApi(BOSS, [copy.deepcopy(ITEM)])
     api.audit_pages = [
-        {"items": [AUDIT_ROW], "next": 1766399990},
-        {"items": [{**AUDIT_ROW, "id": "a1b2c3d5", "at": 1766399990, "method": "POST", "status": 403}], "next": None},
+        {"items": [AUDIT_ROW], "next": 1766399990, "next_id": "a1b2c3d4"},
+        {"items": [{**AUDIT_ROW, "id": "a1b2c3d5", "at": 1766399990, "method": "POST", "status": 403}], "next": None, "next_id": None},
     ]
     ctx, pg, problems = open_app(browser, api)
     pg.click("[data-a=tokAudit]")
@@ -299,6 +299,7 @@ def test_activity_dialog_pages_with_next(browser):
     expect(table).to_contain_text("403")
     expect(pg.locator("[data-a=tokAuditMore]")).to_have_count(0)
     assert api.calls("GET", "tokens/c0ffee01/audit")[1][2]["before"] == ["1766399990"]
+    assert api.calls("GET", "tokens/c0ffee01/audit")[1][2]["before_id"] == ["a1b2c3d4"]
     assert problems == []
     ctx.close()
 

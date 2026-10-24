@@ -5,7 +5,7 @@
 const TOKEN_MAX_ACTIVE = 20;
 const TOKEN_DAYS = [7, 30, 90, 180, 365];
 const TOK = { all: false, items: [], error: '' };   // list state of the card (never holds a secret)
-let TOK_AUDIT = null;                                // {id, label, items, next} of the open activity dialog
+let TOK_AUDIT = null;                                // {id, label, items, next, nextId} of the open activity dialog
 
 const tokTime = s => (s ? new Date(s * 1000).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' }) : '');
 const tokStatus = { active: 'Active', expired: 'Expired', revoked: 'Revoked' };
@@ -115,20 +115,20 @@ function tokAuditHTML() {
     ${a.error ? `<div class="banner" role="alert">${esc(a.error)}</div>` : ''}
     ${a.items.length ? `<div class="table-wrap"><table data-testid="audit-table"><caption class="sr-only">Requests made with this token</caption><thead><tr><th scope="col">Time</th><th scope="col">Method</th><th scope="col">Route</th><th scope="col">Status</th></tr></thead><tbody>${a.items.map(r => `<tr><td class="nowrap">${esc(tokTime(r.at))}</td><td>${esc(r.method)}</td><td><code>${esc(r.route)}</code></td><td>${esc(r.status)}</td></tr>`).join('')}</tbody></table></div>`
       : a.error ? '' : '<div class="empty">No requests yet</div>'}
-    <div class="actions">${a.next ? '<button data-a="tokAuditMore">Load more</button>' : ''}<button data-a="tokCloseDialog">Close</button></div>`;
+    <div class="actions">${a.next != null && a.nextId ? '<button data-a="tokAuditMore">Load more</button>' : ''}<button data-a="tokCloseDialog">Close</button></div>`;
 }
 async function tokAuditLoad() {
-  const a = TOK_AUDIT, q = a.next ? `&before=${encodeURIComponent(a.next)}` : '';
+  const a = TOK_AUDIT, q = a.next != null ? `&before=${encodeURIComponent(a.next)}&before_id=${encodeURIComponent(a.nextId)}` : '';
   try {
     const r = await api('GET', `tokens/${encodeURIComponent(a.id)}/audit?limit=50${q}`);
-    a.items = a.items.concat(r.items); a.next = r.next; a.error = '';
+    a.items = a.items.concat(r.items); a.next = r.next ?? null; a.nextId = r.next_id ?? null; a.error = '';
   } catch (e) { a.error = tokError(e); }
   modal(tokAuditHTML(), true);
   closeModal.onClose = () => { TOK_AUDIT = null; };   // registered after modal(), which runs the previous dialog's hook
 }
 A.tokAudit = async el => {
   const t = TOK.items.find(x => x.id === el.dataset.id);
-  TOK_AUDIT = { id: el.dataset.id, label: t?.label ?? '', items: [], next: null, error: '' };
+  TOK_AUDIT = { id: el.dataset.id, label: t?.label ?? '', items: [], next: null, nextId: null, error: '' };
   await tokAuditLoad();
 };
 A.tokAuditMore = async () => { if (TOK_AUDIT) await tokAuditLoad(); };
