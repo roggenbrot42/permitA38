@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0-alpha.3] - 2026-10-25
+
+Third alpha. Adds personal API tokens, the data export and import page, the team timeline API and business trips
+(backend). Back up your data folder before upgrading (the app also does it automatically); the schema changes with
+migration `0010-api_tokens`. Not for production bookkeeping yet; the tax rules marked *(verify)* in
+`docs/compliance.md` still need your tax adviser.
+
 ### Fixed
 - Planner: a job with a total number of hours was spread over all workdays of its period, including vacation and
   holidays, so the week before a vacation looked overloaded although the work fitted before it. The hours are now
