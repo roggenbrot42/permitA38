@@ -8,7 +8,7 @@ import pytest
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from permita38.api.deps import declared
+from permita38.api.deps import declared, is_session_only
 from permita38.api.server import all_routers
 from permita38.core import rights
 from permita38.core.database import list_migrations
@@ -36,6 +36,13 @@ OWN_ACCOUNT_OR_PUBLIC = {
     ("POST", "/api/auth/totp/recovery-codes/regenerate"),
     ("GET", "/api/bootstrap"),
     ("GET", "/api/holidays"),
+    # API tokens are the signed-in user's own credentials (session-only, see SESSION_ONLY below)
+    ("GET", "/api/tokens"),
+    ("POST", "/api/tokens"),
+    ("POST", "/api/tokens/revoke-all"),
+    ("POST", "/api/tokens/{token_id}/revoke"),
+    ("GET", "/api/tokens/{token_id}/audit"),
+    ("PATCH", "/api/tokens/{token_id}"),  # answers 405: tokens are immutable
 }
 
 
@@ -287,6 +294,62 @@ def test_every_route_is_denied_exactly_where_the_matrix_says(app, clients):
     assert checked > 150
 
 
+# Hand-written: the routes an API token can never use (credentials, two-factor, user administration, token management,
+# settings writes). Everything else under /api/auth is either public or `me`.
+SESSION_ONLY = {
+    ("POST", "/api/auth/change-password"),
+    ("GET", "/api/auth/totp/status"),
+    ("POST", "/api/auth/totp/setup"),
+    ("POST", "/api/auth/totp/enable"),
+    ("POST", "/api/auth/totp/disable"),
+    ("POST", "/api/auth/totp/recovery-codes/regenerate"),
+    ("POST", "/api/users/{user_id}/totp/reset"),
+    ("GET", "/api/users"),
+    ("POST", "/api/users"),
+    ("PUT", "/api/users/{user_id}"),
+    ("DELETE", "/api/users/{user_id}"),
+    ("GET", "/api/tokens"),
+    ("POST", "/api/tokens"),
+    ("POST", "/api/tokens/revoke-all"),
+    ("POST", "/api/tokens/{token_id}/revoke"),
+    ("GET", "/api/tokens/{token_id}/audit"),
+    ("PATCH", "/api/tokens/{token_id}"),
+    ("PUT", "/api/settings"),
+}
+# reachable without a credential (a bearer token is ignored there) or open to a token with the owner's rights
+PUBLIC_OR_TOKEN_OK = {
+    ("GET", "/api/health"),
+    ("GET", "/api/auth/status"),
+    ("POST", "/api/auth/setup"),
+    ("POST", "/api/auth/login"),
+    ("POST", "/api/auth/logout"),
+    ("POST", "/api/auth/login/totp"),
+    ("GET", "/api/auth/me"),
+    ("GET", "/api/bootstrap"),
+    ("GET", "/api/holidays"),
+}
+
+
+def test_session_only_routes_equal_the_hand_written_table(app):
+    actual = {(m, path) for m, r, path in _routes(app) if is_session_only(r)}
+    assert actual == SESSION_ONLY
+
+
+def test_every_route_is_guarded_session_only_or_explicitly_public(app):
+    """A new route without `Needs(...)` and `SessionOnly` fails here until it is classified on purpose."""
+    open_routes = {(m, path) for m, r, path in _routes(app) if not declared(r) and not is_session_only(r)}
+    assert open_routes == PUBLIC_OR_TOKEN_OK
+
+
+def test_settings_writes_need_both_the_right_and_session_only(app):
+    found = 0
+    for m, r, path in _routes(app):
+        if path.startswith("/api/settings") and m in ("PUT", "POST", "DELETE", "PATCH"):
+            assert declared(r) and is_session_only(r), (m, path)
+            found += 1
+    assert found >= 1
+
+
 def test_anonymous_gets_401_not_403_everywhere(app, client):
     for method, route, path in _routes(app):
         if declared(route):
@@ -460,6 +523,8 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
         raw.execute('ALTER TABLE "expenses" DROP COLUMN "lines"')
     if "trips" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         raw.executescript('DROP TABLE "trips"; ALTER TABLE "expenses" DROP COLUMN "trip_id";')
+    if "api_tokens" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.executescript('DROP TABLE "api_tokens"; DROP TABLE "audit_log";')
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)

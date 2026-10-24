@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request, Response
 from pydantic import BaseModel, Field
 
 from permita38 import __version__
-from permita38.api.deps import COOKIE_NAME, CurrentUser, ServicesDep
+from permita38.api.deps import COOKIE_NAME, CurrentUser, ServicesDep, SessionOnly
 from permita38.core import validation as v
 from permita38.core.config import Config
 from permita38.core.models import UserOut
@@ -93,7 +93,7 @@ def logout(request: Request, response: Response, services: ServicesDep):
     response.delete_cookie(COOKIE_NAME, path="/", secure=cookie_secure(request, services.config))
 
 
-@router.post("/change-password", response_model=TokenResult, summary="change own password")
+@router.post("/change-password", response_model=TokenResult, summary="change own password", dependencies=[SessionOnly])
 def change_password(
     payload: ChangePasswordPayload, request: Request, user: CurrentUser, response: Response, services: ServicesDep
 ):
@@ -102,6 +102,19 @@ def change_password(
     return {"token": token}
 
 
-@router.get("/me", response_model=UserOut)
-def me(user: CurrentUser):
-    return public_user(user)
+@router.get("/me", response_model=UserOut, summary="the signed-in user (also usable with an API token)")
+def me(user: CurrentUser, services: ServicesDep):
+    out = public_user(user)
+    token = user.get("_auth")
+    if token and token.get("kind") == "token":
+        details = services.tokens.details(token["token_id"]) or {}
+        out["auth"] = {
+            "kind": "token",
+            "token_id": token["token_id"],
+            "label": details.get("label"),
+            "read_only": token["read_only"],
+            "expires_at": details.get("expires_at"),
+        }
+    else:
+        out["auth"] = {"kind": "session"}
+    return out

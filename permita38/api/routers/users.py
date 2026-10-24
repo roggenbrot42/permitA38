@@ -2,11 +2,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Response
 
-from permita38.api.deps import Needs, ServicesDep
+from permita38.api.deps import Needs, ServicesDep, SessionOnly
 from permita38.api.responses import stored
 from permita38.core.models import UserIn, UserOut
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/users", tags=["users"], dependencies=[SessionOnly])
 routers = [router]
 
 

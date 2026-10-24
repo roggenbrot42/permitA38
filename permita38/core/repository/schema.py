@@ -207,12 +207,35 @@ TABLES: dict[str, Table] = {
             "import_batches",
             _cols(_BASE + "kind:str filename:str status:str counts:json mapping:json finished:int" + _EXTRA),
         ),
+        # API tokens (docs/contracts/api-tokens.md): only the SHA-256 of the token is stored
+        Table(
+            "api_tokens",
+            _cols(
+                _BASE + "user_id:id label:str token_hash:str hint:str read_only:bool expires_at:int "
+                "revoked_at:int last_used_at:int" + _EXTRA
+            ),
+            (
+                Index("idx_api_tokens_user", ("user_id",)),
+                Index("idx_api_tokens_hash", ("token_hash",), unique=True),
+            ),
+        ),
+        # append-only: one row per request authenticated by a token (no bodies, no query strings, no secrets)
+        Table(
+            "audit_log",
+            _cols(_BASE + "at:int token_id:id user_id:id method:str route:str status:int" + _EXTRA),
+            (
+                Index("idx_audit_log_token", ("token_id", "at")),
+                Index("idx_audit_log_at", ("at",)),
+            ),
+        ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
 }
 
 # internal per-user collections that are not exposed through the CRUD API
 INTERNAL_COLLECTIONS = [
+    "api_tokens",
+    "audit_log",
     "timers",
     "number_sequences",
     "numbering_log",

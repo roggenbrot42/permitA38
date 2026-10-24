@@ -1,10 +1,10 @@
 """Failed-attempt throttling.
 
-A caller supplies one or more *keys* per attempt (today: the username, or ``totp:<user id>``). Per-IP throttling can be
-added later by passing an additional ``ip:<address>`` key from the API layer: an attempt is refused as soon as ANY of its
+A caller supplies one or more *keys* per attempt (the username, ``totp:<user id>``, or ``ip:<address>`` for invalid API tokens): an attempt is refused as soon as ANY of its
 keys has reached the limit, and a failure is counted against ALL of its keys. State is in memory and per process.
 """
 
+import math
 import threading
 import time
 
@@ -33,8 +33,19 @@ class AttemptThrottle:
         """Raise 429 if any key is currently locked out."""
         now = time.time()
         with self._lock:
-            if any(len(self._recent(k, now)) >= self.max_failures for k in keys):
-                raise ServiceError(429, "Too many failed attempts. Please wait a few minutes and try again.")
+            waits = []
+            for k in keys:
+                recent = self._recent(k, now)
+                if len(recent) >= self.max_failures:
+                    # locked until enough old failures have left the window to get below the limit
+                    waits.append(recent[len(recent) - self.max_failures] + self.window - now)
+            if waits:
+                retry_after = max(1, math.ceil(max(waits)))
+                raise ServiceError(
+                    429,
+                    "Too many failed attempts. Please wait a few minutes and try again.",
+                    headers={"Retry-After": str(retry_after)},
+                )
 
     def fail(self, *keys: str) -> None:
         now = time.time()
