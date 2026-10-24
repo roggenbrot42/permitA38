@@ -6140,6 +6140,55 @@
         }
       }
     },
+    "/api/tokens/{token_id}": {
+      "patch": {
+        "tags": [
+          "tokens"
+        ],
+        "summary": "not supported: tokens are immutable (always 405)",
+        "description": "Label, expiry and access are immutable (docs/contracts/api-tokens.md, decision 17): revoke and create anew.",
+        "operationId": "no_patch_api_tokens__token_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "token_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{8}$",
+              "description": "8 hex characters",
+              "title": "Token Id"
+            },
+            "description": "8 hex characters"
+          }
+        ],
+        "responses": {
+          "405": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/tokens": {
       "post": {
         "tags": [

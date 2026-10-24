@@ -21,7 +21,7 @@ routers = [router]
 TokenId = Annotated[str, Path(pattern=r"^[0-9a-f]{8}$", description="8 hex characters")]
 
 
-@router.patch("/{token_id}", include_in_schema=False)
+@router.patch("/{token_id}", status_code=405, summary="not supported: tokens are immutable (always 405)")
 def no_patch(token_id: TokenId, user: CurrentUser):
     """Label, expiry and access are immutable (docs/contracts/api-tokens.md, decision 17): revoke and create anew."""
     raise HTTPException(405, "Method Not Allowed", headers={"Allow": "GET, POST"})
