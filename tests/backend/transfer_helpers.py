@@ -1,5 +1,6 @@
 """Shared helpers of the data export/import tests: build instances, seed data, read archives."""
 
+import hashlib
 import io
 import json
 import zipfile
@@ -52,7 +53,7 @@ def seed(store, *, extras: bool = True) -> dict:
             "lines": [{"description": "Work", "quantity": 1, "unit_price": 100}],
         },
     )
-    store.save("number_sequences", {"id": "ninv0000000001", "doc_type": "invoices", "period": "2026", "last_value": 7})
+    store.save("number_sequences", {"id": "n" + hashlib.sha256(b"invoices|2026").hexdigest()[:20], "doc_type": "invoices", "period": "2026", "last_value": 7})
     store.save(
         "calendar_sources",
         {"user_id": boss["id"], "name": "Cal", "kind": "ics", "url": "https://example.invalid/secret-feed-token"},

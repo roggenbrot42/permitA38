@@ -79,7 +79,7 @@ class ArchiveReader:
                 raise ArchiveError("unsafe_entry", f"Duplicate entry: {_show(name)!r}.", name)
             folded.add(name.casefold())
             mode = info.external_attr >> 16
-            if info.is_dir() or (mode and not stat.S_ISREG(mode)):
+            if info.is_dir() or stat.S_IFMT(mode) not in (0, stat.S_IFREG):
                 raise ArchiveError("unsafe_entry", f"Not a regular file: {_show(name)!r}.", name)
             if info.flag_bits & 0x1:
                 raise ArchiveError("unsafe_entry", f"Encrypted entry: {_show(name)!r}.", name)
