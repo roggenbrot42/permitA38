@@ -82,11 +82,44 @@ def test_accountant_nav_and_read_only_pages(browser, srv):
     ctx.close()
 
 
+def test_slow_older_page_does_not_overwrite_newer_page(browser, srv):
+    """A denied page redirects to the landing page; if that page loads slowly it must not replace a page opened meanwhile."""
+    ctx, pg, problems = open_as(browser, srv, "accountant")
+    pg.goto(srv.base + "/")
+    pg.wait_for_selector("text=Read-only")
+    held = []
+    pg.route("**/api/customers*", lambda route: held.append(route))  # hold the landing page's data back
+    pg.goto(srv.base + "/#/team")
+    pg.wait_for_selector("#toast.on")
+    pg.goto(srv.base + "/#/timeline")
+    pg.wait_for_selector("text=switched off for your role")
+    assert held, "the redirect to the landing page should have asked for customers"
+    for route in held:
+        route.continue_()  # the older page's data arrives last
+    pg.wait_for_timeout(1500)
+    assert "switched off for your role" in pg.inner_text("#main")
+    ctx.close()
+
+
 def test_employee_nav_is_unchanged(browser, srv):
     ctx, pg, problems = open_as(browser, srv, "employee")
     pg.goto(srv.base + "/")
     labels = " ".join(nav(pg))
-    assert labels.split() == ["⏱", "Today", "🗓", "Timesheet", "🏖", "Time", "off", "📅", "Team", "timeline"]
+    assert labels.split() == [
+        "⏱",
+        "Today",
+        "🗓",
+        "Timesheet",
+        "🏖",
+        "Time",
+        "off",
+        "🧳",
+        "Business",
+        "trips",
+        "📅",
+        "Team",
+        "timeline",
+    ]
     pg.goto(srv.base + "/#/customers")
     pg.wait_for_selector("#toast.on")
     assert "#/customers" not in pg.url

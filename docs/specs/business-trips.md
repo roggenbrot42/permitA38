@@ -77,7 +77,7 @@ New collection **`trips`** (strict `*In` model, lenient response model, every fi
 | `mileage` | list of `{date, from, to, km, purpose?}` (max 100) | `km` 0.1–5000, one decimal |
 | `status` | `draft` / `final` | final locks the computed figures |
 | `allowance_total`, `mileage_total` | computed, response only | exact cents |
-| `rules_version` | computed | e.g. `2026-12-05` of the rate table used |
+| `rules_version` | computed | e.g. `2025-12-05` (the BMF letter date) of the rate table used |
 
 `expenses` gets an optional **`trip_id`** (bill belongs to a trip; validated to exist). Allowance and mileage are not
 expenses: `calc.py` reads them from the trips through one helper (same pattern as the itemised-expenses lines), so
@@ -100,7 +100,10 @@ falls back to Luxembourg exactly as the rule says, and the statement shows "coun
 
 Per calendar day *d* of the trip, in local time:
 
-1. Absence on *d* = time between max(start, d 00:00) and min(end, d+1 00:00).
+0. An `end` of exactly 00:00 on a later date is read as 24:00 of the previous day, before the days are classified.
+   Absence is elapsed time in Europe/Berlin (a DST change day has 23 or 25 hours); an arrival or departure day needs
+   at least one minute of absence to pay.
+1. Absence on *d* = elapsed time between max(start, d 00:00) and min(end, d+1 00:00).
 2. Domestic/abroad rate of *d*: for a multi-day trip the country of the place reached by 24:00 of *d* (`places`
    entry with the greatest `from_date` ≤ *d*); for a one-day trip the last `places` entry.
 3. Base amount:
@@ -171,7 +174,8 @@ Worked examples (domestic 2026 values, to be used as tests):
 
 ## Reports and compliance
 
-* Finance and the tax estimate include allowance and mileage as 100 % deductible expenses without VAT.
+* Finance and the tax estimate include allowance and mileage as 100 % deductible expenses without VAT, only for
+  **final** trips (drafts add nothing). Mileage is booked at the trip start date with the start year's rate.
 * `docs/compliance.md` gets a "Business trips" section with the rules above and the *(verify)* markers; the roadmap
   row links here.
 

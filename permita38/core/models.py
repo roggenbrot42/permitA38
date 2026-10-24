@@ -1,6 +1,7 @@
 """Typed records. `extra="allow"` keeps unknown fields so files written by newer versions or
 other devices survive a round-trip through this version."""
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal
 
@@ -123,6 +124,7 @@ class Expense(Record):
     external_id: str | None = None
     import_batch: str | None = None
     lines: list[ExpenseLine] | None = None  # itemised bill; absent for a classic single-amount expense
+    trip_id: str | None = None  # the bill belongs to this business trip (its figures are not in the expense)
 
 
 class Line(BaseModel):
@@ -451,6 +453,7 @@ class ExpenseIn(v.StrictRecord):
     vat_deductible: v.Percent | None = None
     attachment: v.OptAttachment = None
     lines: Annotated[list[ExpenseLineIn], Field(max_length=v.MAX_EXPENSE_LINES)] | None = None
+    trip_id: v.OptId = None
 
     @model_validator(mode="after")
     def _net_or_lines(self):
@@ -721,3 +724,175 @@ class PlanScenario(Record):
     name: str
     user_id: str | None = None
     changes: dict = {}
+
+
+# -- business trips (docs/specs/business-trips.md) -------------------------------------------------------------
+TRIP_MAX_DAYS = 90
+TRIP_MAX_PLACES = 20
+TRIP_MAX_MILEAGE = 100
+
+
+class TripPlace(BaseModel):
+    """The destination from a given day on (the first entry is the outbound destination)."""
+
+    model_config = ConfigDict(extra="allow")
+    from_date: str
+    country: str
+    city: str | None = None
+
+
+class TripMeal(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    date: str
+    breakfast: bool = False
+    lunch: bool = False
+    dinner: bool = False
+
+
+class TripMileage(BaseModel):
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    date: str
+    from_: str | None = Field(None, alias="from")
+    to: str | None = None
+    km: float
+    purpose: str | None = None
+
+
+class TripReduction(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    meal: Literal["breakfast", "lunch", "dinner"]
+    amount: float
+
+
+class TripDay(BaseModel):
+    """One calendar day of the trip (stored with the trip, returned by preview and the trip)."""
+
+    model_config = ConfigDict(extra="allow")
+    date: str
+    country: str  # the country whose rate row was used (LU after fallback)
+    city: str | None = None  # omitted when the place has no city
+    absence_hours: float
+    base: float
+    reductions: list[TripReduction] = []
+    amount: float
+    note: str = ""
+
+
+class TripBills(BaseModel):
+    """The linked bills (expenses with this trip_id): count and sums of their net and VAT."""
+
+    count: int = 0
+    net: float = 0
+    vat: float = 0
+
+
+class TripChecklistItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str
+    label: str
+    hint: str
+    state: Literal["added", "open", "not_needed"]
+    count: int = 0
+    sum: float = 0
+
+
+class TripFigures(BaseModel):
+    """Computed figures; the same numbers the trip stores, preview returns them without saving."""
+
+    model_config = ConfigDict(extra="allow")
+    days: list[TripDay] = []
+    allowance_total: float = 0
+    mileage_km: float = 0
+    mileage_rate: float | None = None
+    mileage_total: float = 0
+    rules_version: str | None = None
+
+
+class Trip(Record):
+    user_id: str | None = None
+    title: str | None = None
+    purpose: str | None = None
+    customer_id: str | None = None
+    project_id: str | None = None
+    start: str | None = None
+    end: str | None = None
+    places: list[TripPlace] = []
+    meals_provided: list[TripMeal] = []
+    mileage: list[TripMileage] = []
+    not_needed: list[str] = []
+    cost_centre: Literal["project", "general"] | None = None
+    status: Literal["draft", "final"] = "draft"
+    allowance_total: float | None = None
+    mileage_km: float | None = None
+    mileage_total: float | None = None
+    rules_version: str | None = None
+    days: list[TripDay] = []
+    bills: TripBills | None = None  # response-only, computed on every read
+    checklist: list[TripChecklistItem] | None = None  # response-only, computed on every read
+
+
+class TripPlaceIn(v.StrictRecord):
+    from_date: v.ISODate
+    country: Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")]  # ISO 3166-1 alpha-2, e.g. DE, AT
+    city: v.Short | None = None
+
+
+class TripMealIn(v.StrictRecord):
+    date: v.ISODate
+    breakfast: bool = False
+    lunch: bool = False
+    dinner: bool = False
+
+
+class TripMileageIn(v.StrictRecord):
+    date: v.ISODate
+    from_: v.Short | None = Field(None, alias="from")
+    to: v.Short | None = None
+    km: Annotated[float, Field(ge=0.1, le=5000, allow_inf_nan=False)]
+    purpose: v.Short | None = None
+
+    @field_validator("km")
+    @classmethod
+    def _one_decimal(cls, value: float) -> float:
+        if Decimal(repr(value)) % Decimal("0.1") != 0:
+            raise ValueError("must have at most one decimal place (0.1 km)")
+        return value
+
+
+class TripIn(v.StrictRecord):
+    """A business trip. Figures (allowance, mileage, days) are computed by the server, never taken from the client."""
+
+    title: v.Short | None = None
+    purpose: v.Name
+    customer_id: v.OptId = None
+    project_id: v.OptId = None
+    start: v.LocalDateTime
+    end: v.LocalDateTime
+    places: Annotated[list[TripPlaceIn], Field(max_length=TRIP_MAX_PLACES)] = []
+    meals_provided: Annotated[list[TripMealIn], Field(max_length=90)] = []
+    mileage: Annotated[list[TripMileageIn], Field(max_length=TRIP_MAX_MILEAGE)] = []
+    not_needed: Annotated[list[v.Short], Field(max_length=20)] = []
+    cost_centre: Literal["project", "general"] | None = None
+    status: Literal["draft", "final"] = "draft"
+
+    @model_validator(mode="after")
+    def _period(self):
+        from .trips_calc import effective_last  # an end of exactly 00:00 belongs to the day before
+
+        start = datetime.strptime(self.start, "%Y-%m-%dT%H:%M")
+        end = datetime.strptime(self.end, "%Y-%m-%dT%H:%M")
+        if end <= start:
+            raise ValueError("end must be after start")
+        last = effective_last(start, end)
+        days = (last - start.date()).days + 1
+        if days > TRIP_MAX_DAYS:
+            raise ValueError(f"a trip may cover at most {TRIP_MAX_DAYS} calendar days (this one covers {days})")
+        for meal in self.meals_provided:
+            if not start.date().isoformat() <= meal.date <= last.isoformat():
+                raise ValueError(f"meal date {meal.date} is outside the trip")
+        for row in self.mileage:
+            if not start.date().isoformat() <= row.date <= last.isoformat():
+                raise ValueError(f"mileage date {row.date} is outside the trip")
+        if self.cost_centre == "project" and not (self.project_id or self.customer_id):
+            raise ValueError("Choose a customer or project, or general")
+        return self

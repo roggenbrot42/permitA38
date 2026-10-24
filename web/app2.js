@@ -306,9 +306,9 @@ A.docToInvoice = async () => { await persistDoc(); const r = await api('POST', `
 A.billTimeInto = () => A.billTime({ dataset: { cust: DOC.customer_id } });
 
 /* ================= EXPENSES ================= */
-const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & coworking', 'Travel', 'Business meals', 'Marketing', 'Insurance', 'Phone & internet', 'Training', 'Subcontractors', 'Fees & bank', 'Other'];
+const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & coworking', 'Travel', 'Transportation', 'Accommodation', 'Material', 'Business meals', 'Marketing', 'Insurance', 'Phone & internet', 'Training', 'Subcontractors', 'Fees & bank', 'Other'];
 PAGES.expenses = async () => {
-  await loadAll(['expenses', 'projects']);
+  await loadAll(['expenses', 'projects', 'trips']);   // trips: the bill dialog's trip select
   const y = new Date().getFullYear(), list = S.d.expenses.sort((a, b) => a.date < b.date ? 1 : -1), yr = list.filter(e => (e.date || '').startsWith(y));
   return `<div class="head"><div><h1>Expenses</h1><div class="muted">Bills you pay – general or tied to a project.</div></div><button class="primary" data-a="editExpense">+ Add bill</button></div>
   <div class="grid g3"><div class="card kpi"><div class="l">${y} net expenses</div><div class="v">${eur(yr.reduce((a, e) => a + (e.net || 0) * (e.deductible ?? 100) / 100, 0))}</div></div><div class="card kpi"><div class="l">Input VAT ${y}</div><div class="v">${S.settings.kleinunternehmer ? '–' : eur(yr.reduce((a, e) => a + (e.vat || 0) * (e.vat_deductible ?? e.deductible ?? 100) / 100, 0))}</div></div></div>
@@ -519,7 +519,8 @@ function lineError(l, i) {
   return null;
 }
 A.editExpense = el => {
-  const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: EXP_CATS[0] };
+  // a new bill can be started from a business trip: data-trip, data-category and data-project preselect those fields
+  const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: el?.dataset?.category || EXP_CATS[0], project_id: el?.dataset?.project || '', trip_id: el?.dataset?.trip || '' };
   const cats = e.category && !EXP_CATS.includes(e.category) ? [...EXP_CATS, e.category] : EXP_CATS;   // keep a category entered elsewhere
   const stored = Array.isArray(e.lines) ? e.lines : [];
   // a stored line keeps the fields this dialog does not show (line category, unknown fields); net/vat are derived
@@ -534,6 +535,7 @@ A.editExpense = el => {
       { k: 'itemise', l: 'Itemise this bill (several lines, e.g. a hotel invoice with different VAT rates)', t: 'check' },
       { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: LINE_RATES, row: 2 },
       { k: 'category', l: 'Category', t: 'select', o: cats, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
+      { k: 'trip_id', l: 'Business trip', t: 'select', o: [['', '— no trip —'], ...tripOptions(e.trip_id)], row: 4 },
       { k: 'deductible', l: 'Deductible %', t: 'number', h: '100 normally; 70 for business meals with business partners (set automatically with that category). Input VAT of business meals is reclaimed in full.' }],
     extra: `<div id="e_body" class="exp-body">
       <div id="e_itemised" class="exp-itemised" hidden>
@@ -557,6 +559,7 @@ A.editExpense = el => {
       delete v.itemise; delete v.gross;
       const bmeal = v.category === 'Business meals';
       v.project_id = v.project_id || null;
+      v.trip_id = v.trip_id || null;   // a bill belongs to one business trip (or none)
       v.vat_deductible = bmeal ? 100 : null;   // the 30 % that is not deductible does not touch the input VAT
       if (itemised) {
         if (!LN.length) throw new Error('Add at least one line');
