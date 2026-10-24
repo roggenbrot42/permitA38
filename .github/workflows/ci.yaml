@@ -62,7 +62,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python -m pytest tests/web -q -rfE --tb=short -p no:cacheprovider 2>&1 | tee /tmp/web-tests.log
+          python -m pytest tests/web -q -n 4 --dist worksteal -rfE --tb=short -p no:cacheprovider 2>&1 | tee /tmp/web-tests.log
           status=${PIPESTATUS[0]}
           if [ "$status" != 0 ]; then
             # surface the result as an annotation so it is visible without downloading logs

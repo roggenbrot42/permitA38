@@ -20,6 +20,9 @@ from .helpers import env_int, norm, report_failure, seeds_from_env, week_start
 pytestmark = pytest.mark.e2e_random
 
 MONKEY_SEEDS = [7, 99]
+# A gremlin click that is not possible right away (covered by a dialog, detached by a re-render) is skipped, not
+# an error. Playwright would wait the full timeout for each of them, so keep it short.
+CLICK_TIMEOUT = 250
 XSS_MARK = "XSS_MARK"
 PAYLOADS = [
     "",
@@ -242,9 +245,9 @@ class Monkey:
         try:
             if loc.evaluate("e => e.tagName") == "SELECT":
                 n = loc.evaluate("e => e.options.length")
-                loc.select_option(index=self.rng.randrange(n), timeout=700)
+                loc.select_option(index=self.rng.randrange(n), timeout=CLICK_TIMEOUT)
             else:
-                loc.click(timeout=700, no_wait_after=True)
+                loc.click(timeout=CLICK_TIMEOUT, no_wait_after=True)
         except Exception as e:  # covered by a modal, detached by a re-render, ... – not an application error
             self.say(f"  (skipped: {str(e).splitlines()[0][:60]})")
 
@@ -258,10 +261,10 @@ class Monkey:
             tag = loc.evaluate("e => e.tagName")
             if tag == "SELECT":
                 n = loc.evaluate("e => e.options.length")
-                loc.select_option(index=self.rng.randrange(n), timeout=700)
+                loc.select_option(index=self.rng.randrange(n), timeout=CLICK_TIMEOUT)
                 self.say("select random option")
             else:
-                loc.fill(value, timeout=700)
+                loc.fill(value, timeout=CLICK_TIMEOUT)
                 self.say(f"fill {value[:30]!r}{'…' if len(value) > 30 else ''}")
         except Exception as e:
             self.say(f"  (skipped fill: {str(e).splitlines()[0][:60]})")
@@ -279,7 +282,7 @@ class Monkey:
             btn = self.rng.choice(["#m-save", "#m-cancel", "#m-cancel"])
             self.say(f"modal {btn}")
             try:
-                self.page.click(btn, timeout=700, no_wait_after=True)
+                self.page.click(btn, timeout=CLICK_TIMEOUT, no_wait_after=True)
             except Exception:
                 pass
         else:
@@ -302,6 +305,8 @@ class Monkey:
             self.say("calendar: going to #/settings")
             self.page.evaluate("h => { location.hash = h; }", "#/settings")
             self.settle()
+            if self.secrets is not None:
+                return  # members do not see the settings page (asserted by the member checks); do not wait for it
             try:
                 self.page.wait_for_selector("#cal_link", timeout=5000)
             except Exception:
@@ -390,8 +395,8 @@ class Monkey:
         loc = self.page.locator(self.OPENERS).nth(self.rng.choice(idx))
         try:
             what = loc.evaluate("e => (e.dataset.a || e.tagName) + ' ' + (e.innerText || '').trim().slice(0, 25)")
-            loc.click(timeout=700, no_wait_after=True)
-            self.page.wait_for_selector("#modal-root > *", timeout=700)
+            loc.click(timeout=CLICK_TIMEOUT, no_wait_after=True)
+            self.page.wait_for_selector("#modal-root > *", timeout=CLICK_TIMEOUT)
         except Exception:
             return self.say("episode: opener did not open a form")
         n = self._fill_container("#modal-root")
@@ -399,7 +404,7 @@ class Monkey:
         self.say(f"episode: opened {what!r}, filled {n} fields, {action}")
         try:
             if self.page.query_selector(action):
-                self.page.click(action, timeout=700, no_wait_after=True)
+                self.page.click(action, timeout=CLICK_TIMEOUT, no_wait_after=True)
         except Exception:
             pass
 
@@ -426,7 +431,7 @@ class Monkey:
         try:
             what = loc.evaluate("e => e.dataset.a")
             self.say(f"episode: doc editor, filled {n} fields, {what}")
-            loc.click(timeout=700, no_wait_after=True)
+            loc.click(timeout=CLICK_TIMEOUT, no_wait_after=True)
         except Exception:
             pass
 

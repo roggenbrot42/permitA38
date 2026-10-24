@@ -58,7 +58,7 @@ class TimeService:
     def dashboard(self, me: dict, user_id: str | None) -> dict:
         target = me
         if user_id and user_id != me["id"]:
-            if rights.scope(me.get("role"), "time") != rights.Scope.ALL:
+            if rights.scope_for(me, "time") != rights.Scope.ALL:
                 raise ServiceError(403, "Forbidden")
             found = self.store.get("users", user_id)
             if not found:

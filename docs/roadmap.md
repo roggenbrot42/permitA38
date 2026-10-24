@@ -25,7 +25,7 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | **Validation and sanity-check layer** (plausibility checks for invoices, dates, tax ids, totals; ArbZG warnings), see [`sanity-checks.md`](sanity-checks.md) | done (feat/sanity-v2, awaiting merge) |
 | Impressum extraction (if not in alpha.1) | planned |
 | **Calendars**: import a personal calendar by ICS link or file (Proton Calendar, Nextcloud, Google, Outlook); meetings reduce planned capacity; read-only | done on branch (steps for Proton may change, see [docs/calendar.md](calendar.md)) |
-| Full data export as JSON and CSV, re-importable by the app (round-trip tested) | in progress |
+| **Full data export and import** (one ZIP: JSON per collection incl. unknown fields, CSV, attachments, numbering counters; restore into a fresh instance, all-or-nothing, dry run; `permita38 export` / `import`; round-trip tested). Not a GoBD archive | in progress, scheduled to be built today; spec [`specs/data-export-import.md`](specs/data-export-import.md), API [`contracts/data-export.md`](contracts/data-export.md) |
 | Quarterly **tax-rule review process** (issue reminder, checklist, rule tables with source and valid-from date) | planned (reminder workflow already in place) |
 
 ### Maintainer priorities (added after the first alpha, highest first)
@@ -39,7 +39,8 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | **"Numbers don't add up" warnings** for offers and billing (hours vs. offered hours, price vs. rate, billed vs. offered budget) | in progress |
 | **Calendar connection** (Proton "Share via link" ICS URL, ICS file; works with any ICS source): meetings reduce capacity | in progress |
 | **Adjustable document numbering** (pattern, start number, yearly reset, preview) and an adopter checklist | in progress |
-| **Import of existing documents** (invoices/offers/customers/expenses from CSV/XLSX/JSON, originals attached, undo) | in progress |
+| **Import of existing documents** (invoices/offers/customers/expenses from CSV/XLSX/JSON, originals attached, undo) | done (preview, run, batches and undo are on `main`, API and `permita38 import-documents`; originals are attached only when a PDF zip is supplied, see [`import.md`](import.md)) |
+| **Supplier master data + subcontractors**: suppliers as their own collection next to customers, and external people you allocate time to | planned; spec [`specs/subcontractors.md`](specs/subcontractors.md), in review |
 | **Subcontractors**: external people (with or without login) you allocate time to, who send offers you can accept; treated like team members in capacity and costs | planned (needs the planner merged first) |
 | **Itemised expenses**: a bill can have several lines, each with its own VAT rate and deductible share (business lunch, hotel with breakfast/city tax) | planned |
 | **Bill extraction from PDF/image** (prefill vendor, date, lines, VAT rates; also e-invoice XML); local OCR/LLM, you confirm before saving | later (see AI ideas) |
@@ -94,7 +95,11 @@ Release trains and gates are described in [`release-plan.md`](release-plan.md). 
 | **ELSTER transmission** | research: certificate handling, ERiC library licensing, or an export for the official software |
 | **Public customer demo** | per-visitor sandboxes with fake data, risky features off; see [`specs/demo-deployment.md`](specs/demo-deployment.md) |
 | **Team timeline** (who is away, who works on what) | read-only people-per-row chart in the planner, visibility set per role by the boss; see [`specs/team-timeline.md`](specs/team-timeline.md) |
+| **API tokens** (personal access tokens, read-only or read-write, audit log) | backend done; API in [`contracts/api-tokens.md`](contracts/api-tokens.md), behaviour in [`specs/api-tokens.md`](specs/api-tokens.md); web UI in progress; MCP and a CLI are follow-ups |
 | **Business trips** (meal allowance, mileage, receipts per trip, trip statement) | backend in progress; rules in [`compliance.md` section 10](compliance.md) and [`specs/business-trips.md`](specs/business-trips.md); API in [`contracts/trips.md`](contracts/trips.md). Reminder: add `permita38/core/trip_rates/2027.json` when the BMF letter for 2027 appears (December 2026); the country rows of 2026 are placeholders until the BMF table is imported |
+| **Merge-import into an existing instance** (import an export archive into an instance that already has data: id remapping, conflict policy) | later; v1 import needs an empty instance, see [`specs/data-export-import.md`](specs/data-export-import.md) |
+| **Migration checklist for adopters** (moving from another tool or another instance): import keeps document numbers; check the numbering status after the import and set the start number above the last used one, see [`adopting.md`](adopting.md) and [`numbering.md`](numbering.md) | planned (with the data export) |
+| **GDPR per-person export** from the export archive (filter by customer or user) | planned (alpha.4, with the GDPR tooling) |
 | Recurring invoices, credit notes, reminders (Mahnungen) | |
 | macOS and Linux arm64 bundles | needs signing and notarisation |
 

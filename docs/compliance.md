@@ -91,7 +91,7 @@ readable and unchanged. The backup module (alpha.4) keeps yearly archives protec
 
 | Topic | Plain meaning | Status |
 |---|---|---|
-| **Umsatzsteuer-Voranmeldung (UStVA)** | The regular advance VAT return (monthly/quarterly). | in progress (alpha.2/3) |
+| **Umsatzsteuer-Voranmeldung (UStVA)** | The regular advance VAT return (monthly/quarterly); specified in [`specs/ustva.md`](specs/ustva.md). | in progress (alpha.2/3) |
 | **Zusammenfassende Meldung (ZM)** | A separate report of your tax-free B2B sales to other EU countries. | proposed (alpha.3) |
 | **One-Stop-Shop (OSS)** | If you sell to private customers in other EU countries above 10,000 € per year you may have to charge their VAT rate and report through one portal. | proposed (later) |
 | **Reverse charge (§ 13b UStG)** | For some services from abroad *you* owe the VAT. Appears in the UStVA boxes. | in progress |

@@ -42,7 +42,8 @@ TRAVERSAL = ["../../etc/passwd", "..%2f..%2fsecret.txt", "..\\..\\secret.txt", "
              "....//....//secret.txt", "/etc/passwd", "secret.txt%00.png", "a/../../secret.txt"]  # fmt: skip
 PUBLIC = {("get", "/api/health"), ("get", "/api/auth/status"), ("post", "/api/auth/setup"),
                  ("post", "/api/auth/login"), ("post", "/api/auth/logout")}  # fmt: skip
-MEMBER_WRITE_TABLES = {"entries", "absences", "timers"}  # the only tables a member may write to
+# the only tables a member may write to (api_tokens: their own credentials, any signed-in user may create them)
+MEMBER_WRITE_TABLES = {"entries", "absences", "timers", "api_tokens"}
 
 
 class World:
@@ -333,13 +334,19 @@ def verify_consistency(world: World):
             assert r.status_code == 200, (path, r.status_code, r.text[:200])
 
 
+FUZZ_SHARDS = 2  # independent halves of the examples, so that pytest-xdist can run them on different workers
+
+
 @pytest.mark.randomized
-@settings(settings.default, max_examples=max(8, settings.default.max_examples * 2 // 3))
+@pytest.mark.parametrize("shard", range(FUZZ_SHARDS))
+@settings(settings.default, max_examples=-(-max(8, settings.default.max_examples * 2 // 3) // FUZZ_SHARDS))
 @given(seed=st.integers(0, 2**32 - 1))
-def test_random_requests_never_break_the_api(seed):
+def test_random_requests_never_break_the_api(shard, seed):
     """`seed` drives a real PRNG (hypothesis' own random source is biased towards 'simplest' values, which
-    would make every body junk). A failure prints the seed: replay with run_session(seed, steps=40)."""
-    run_session(seed, steps=40)
+    would make every body junk). A failure prints the seed: replay with run_session(seed, steps=40).
+    The shard only changes which sessions are drawn (the seed is mixed with a per-shard constant, and the replay
+    seed printed on failure is the mixed one)."""
+    run_session(seed ^ (shard * 0x5BD1E995), steps=40)
 
 
 @pytest.mark.randomized

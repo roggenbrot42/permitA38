@@ -25,6 +25,7 @@ from permita38.api.server import get_app
 from permita38.core.config import Config
 from permita38.core.service import auth as auth_module
 from permita38.core.service import throttle as throttle_module
+from permita38.core.service import tokens as tokens_module
 
 from . import oracle
 from .conftest import FakeClock
@@ -37,6 +38,23 @@ BOSS_ONLY = ("customers", "contracts", "expenses", "templates", "offers", "invoi
 MEMBER_OWN = ("entries", "absences")
 CRUD = ("customers", "projects", "tasks", "entries", "contracts", "absences", "expenses", "templates")
 DEAD_ID = "deadbeef0000"  # valid id format, never exists
+SESSION_ONLY = "This route cannot be used with an API token"
+TOKEN_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+# name -> (method, path, safe method, session-only route); {tok} = the token's own id
+TOKEN_CALLS = {
+    "me": ("GET", "/auth/me", True, False),
+    "get_customers": ("GET", "/customers", True, False),
+    "get_entries": ("GET", "/entries", True, False),
+    "get_projects": ("GET", "/projects", True, False),
+    "get_settings": ("GET", "/settings", True, False),
+    "get_users": ("GET", "/users", True, True),
+    "list_tokens": ("GET", "/tokens", True, True),
+    "post_customer": ("POST", "/customers", False, False),
+    "delete_customer": ("DELETE", "/customers/{cid}", False, False),
+    "put_settings": ("PUT", "/settings", False, True),
+    "create_token": ("POST", "/tokens", False, True),
+    "revoke_self": ("POST", "/tokens/{tok}/revoke", False, True),
+}
 
 # top-level keys that are absent (None) unless set; defaults apply otherwise
 OPTIONAL = {
@@ -130,12 +148,19 @@ class ApiMachine(RuleBasedStateMachine):
         auth_module.time = self.clock.as_module()
         self._real_throttle_time = throttle_module.time
         throttle_module.time = self.clock.as_module()
-        cfg = Config(data_dir=self.tmp / "data", secret_key="stateful-secret-key", web_dir=None)
+        self._real_tokens_time = tokens_module.time
+        tokens_module.time = self.clock.as_module()
+        # trust_proxy: invariant probes come from their own (fake) client address so they never feed the throttle
+        # that the token rules model for the default address
+        cfg = Config(data_dir=self.tmp / "data", secret_key="stateful-secret-key", web_dir=None, trust_proxy=True)
         self.app = get_app(cfg)
         self.http = TestClient(self.app)
         self.http.__enter__()  # one event-loop portal for the whole run (much faster than one per request)
         self.sessions: list[Session] = []
         self.fails: dict[str, list[float]] = {}
+        self.tokens: list[dict] = []  # API tokens: secret, id, user_id, read_only, expires_at, revoked
+        self.tok_fails: list[float] = []  # failed token requests from the default address (invalid-token throttle)
+        self.probe_n = 0
         self.dirty: set[str] = set()
         self.steps = 0
         self.timers: dict[str, dict | None] = {}
@@ -161,6 +186,7 @@ class ApiMachine(RuleBasedStateMachine):
     def teardown(self):
         auth_module.time = self._real_time
         throttle_module.time = self._real_throttle_time
+        tokens_module.time = self._real_tokens_time
         self.http.__exit__(None, None, None)
         shutil.rmtree(self.tmp, ignore_errors=True)
 
@@ -1039,6 +1065,8 @@ class ApiMachine(RuleBasedStateMachine):
             assert r.status_code == 400, (body, r.text)
             return
         assert r.status_code == 200, r.text
+        if old["active"] and not active:
+            self.revoke_tokens_of(rid)  # deactivating revokes; reactivating must not revive them
         old.update(
             username=norm, name="Renamed", role=role, active=active, weekly_hours=hours, workdays=[0, 1, 2, 3, 4]
         )
@@ -1069,7 +1097,186 @@ class ApiMachine(RuleBasedStateMachine):
             self.timers.pop(rid, None)
             self.dirty.add("users")
 
+    # ------------------------------------------------------------------ rules: API tokens
+    def revoke_tokens_of(self, user_id):
+        for t in self.tokens:
+            if t["user_id"] == user_id:
+                t["revoked"] = True
+
+    def tok_dead(self, t) -> bool:
+        owner = self.m["users"].get(t["user_id"])
+        return bool(t["revoked"] or t["expires_at"] <= self.now or owner is None or not owner["active"])
+
+    def throttled(self) -> bool:
+        self.tok_fails = [x for x in self.tok_fails if self.clock.now - x < 300]
+        return len(self.tok_fails) >= 5
+
+    def snapshot(self) -> dict:
+        """What a token must not change when it is refused: the data as the boss sees it."""
+        boss = self._boss()
+        snap = {c: self.call("GET", f"/{c}", boss).json() for c in ("customers", "entries", "settings", "users")}
+        rows = self.call("GET", "/tokens", boss, params={"all": "true"}).json()
+        snap["tokens"] = {t["id"]: t["status"] for t in rows}
+        return snap
+
+    @rule(data=st.data(), days=st.sampled_from([1, 1, 2, 30]), read_only=st.booleans())
+    def create_token(self, data, days, read_only):
+        self.tick()
+        s = data.draw(self.actor())
+        body = {"label": f"tok{len(self.tokens)}", "expires_in_days": days, "read_only": read_only}
+        r = self.call("POST", "/tokens", s, json=body)
+        if (g := self.gate(s)) is not None:
+            assert r.status_code == g, r.text
+            return
+        mine = [t for t in self.tokens if t["user_id"] == s.user_id and not t["revoked"] and t["expires_at"] > self.now]
+        if len(mine) >= 20:
+            assert r.status_code == 409, r.text
+            return
+        assert r.status_code == 201, r.text
+        got = r.json()
+        item = got["item"]
+        assert len(got["token"]) == 47 and got["token"].startswith("pat_") and "token" not in item
+        assert item["read_only"] is read_only and item["user_id"] == s.user_id and item["status"] == "active"
+        assert item["expires_at"] == self.now + days * 86400, (item, self.now)
+        assert item["hint"] == got["token"][:8]
+        self.tokens.append(dict(secret=got["token"], id=item["id"], user_id=s.user_id, read_only=read_only,
+                                expires_at=item["expires_at"], revoked=False))  # fmt: skip
+
+    @precondition(lambda self: self.tokens)
+    @rule(data=st.data(), as_owner=st.booleans())
+    def revoke_token(self, data, as_owner):
+        self.tick()
+        tok = data.draw(st.sampled_from(self.tokens))
+        owner = self.m["users"].get(tok["user_id"])
+        s = self.mint(owner["id"]) if as_owner and owner and owner["active"] else data.draw(self.actor())
+        r = self.call("POST", f"/tokens/{tok['id']}/revoke", s)
+        if (g := self.gate(s)) is not None:
+            assert r.status_code == g, r.text
+            return
+        if owner is None or (s.user_id != tok["user_id"] and self.role_of(s) != "boss"):
+            assert r.status_code == 404, r.text  # deleted owner, or a token the caller may not see
+            return
+        assert r.status_code == 200 and r.json()["status"] == "revoked", r.text
+        tok["revoked"] = True
+
+    @rule(secs=st.sampled_from([86399, 86400, 86401]))
+    def day_passes(self, secs):
+        """Tokens live in whole days; the boundary `expires_at == now` is already expired."""
+        self.tick(secs)
+
+    @precondition(lambda self: self.tokens)
+    @rule(data=st.data(), call=st.sampled_from(sorted(TOKEN_CALLS)))
+    def use_token(self, data, call):
+        self.tick()
+        tok = data.draw(st.sampled_from(self.tokens))
+        method, path, safe, session_only = TOKEN_CALLS[call]
+        kw = {}
+        if call == "post_customer":
+            kw["json"] = data.draw(self.body_st("customers"))
+        elif call == "delete_customer":
+            path = path.format(cid=data.draw(st.sampled_from([*self.m["customers"], DEAD_ID])))
+        elif call == "put_settings":
+            kw["json"] = {"kleinunternehmer": not self.settings["kleinunternehmer"]}
+        elif call == "create_token":
+            kw["json"] = {"label": "by a token", "read_only": False}
+        path = path.format(tok=tok["id"])
+        guest = Session(tok["secret"], None, 0)
+        before = None if safe else self.snapshot()
+        throttled = self.throttled()
+        r = self.call(method, path, guest, **kw)
+        owner = self.m["users"].get(tok["user_id"])
+        changed = False
+        if self.tok_dead(tok):  # an invalid token is refused (429 while the address is locked out); always counted
+            if throttled:
+                assert r.status_code == 429 and int(r.headers["Retry-After"]) >= 1, (r.status_code, r.text)
+            else:
+                assert r.status_code == 401 and r.json() == {"detail": "Not authenticated"}, (call, r.status_code)
+            self.tok_fails.append(self.clock.now)
+        elif session_only:
+            assert r.status_code == 403 and r.json() == {"detail": SESSION_ONLY}, (call, r.status_code, r.text)
+        elif not safe and tok["read_only"]:
+            assert r.status_code == 403 and r.json() == {"detail": "Forbidden"}, (call, r.status_code, r.text)
+        elif call == "me":
+            me = r.json()
+            assert r.status_code == 200 and me["id"] == owner["id"] and "_auth" not in me, r.text
+            assert me["auth"]["kind"] == "token" and me["auth"]["token_id"] == tok["id"]
+            assert me["auth"]["read_only"] is tok["read_only"] and "set-cookie" not in r.headers
+        elif safe:
+            same = self.call(method, path, self.mint(owner["id"]))  # exactly what the owner's session gets
+            assert (r.status_code, r.json()) == (same.status_code, same.json()), (call, r.status_code)
+        elif owner["role"] != "boss":
+            assert r.status_code == 403, (call, r.status_code, r.text)
+        elif call == "post_customer":
+            assert r.status_code == 200, r.text
+            exp = self.expected("customers", kw["json"], None, owner) | {"id": r.json()["id"]}
+            self.check_record("customers", exp, r.json())
+            self.m["customers"][exp["id"]] = exp
+            self.dirty.add("customers")
+            changed = True
+        else:  # delete_customer by a read-write boss token
+            assert r.status_code == 204, r.text
+            cid = path.rsplit("/", 1)[1]
+            if cid in self.m["customers"]:
+                del self.m["customers"][cid]
+                self.graveyard.append(cid)
+                self.dirty.add("customers")
+                changed = True
+        if before is not None and not changed:
+            assert self.snapshot() == before, f"{call} with a refused token changed data"
+
+    @rule(data=st.data(), attempts=st.integers(5, 7), unlock=st.booleans())
+    def token_brute_force(self, data, attempts, unlock):
+        """Guessed tokens from one address lock out further guesses (429) until the window passes; a valid token is
+        not affected by the lockout (an attacker must not be able to lock the owner out)."""
+        self.tick()
+        for _ in range(attempts):
+            guess = "pat_" + data.draw(st.text(TOKEN_CHARS, min_size=43, max_size=43))
+            throttled = self.throttled()
+            r = self.call("GET", "/customers", Session(guess, None, 0))
+            if throttled:
+                assert r.status_code == 429 and "Retry-After" in r.headers
+            else:
+                assert r.status_code == 401, r.text
+            self.tok_fails.append(self.clock.now)  # counted even while locked out
+        live = [t for t in self.tokens if not self.tok_dead(t)]
+        if live:
+            r = self.call("GET", "/auth/me", Session(live[0]["secret"], None, 0))
+            assert r.status_code == 200, (self.throttled(), r.status_code)
+        if unlock:
+            self.tick(301)
+
     # ------------------------------------------------------------------ invariants
+    def probe(self, tok, path):
+        """A token request from a fresh client address (never throttled, never feeds the modelled throttle)."""
+        self.probe_n += 1
+        ip = f"10.9.{self.probe_n // 250}.{self.probe_n % 250 + 1}"
+        return self.call("GET", path, Session(tok["secret"], None, 0), headers={"X-Forwarded-For": ip})
+
+    def tokens_match_model(self):
+        """(1) a token never gets more than its owner's session, (2) revoked, expired and deactivated-owner tokens
+        always answer 401, (3) the settings are never changed through a token (read-only and session-only rules are
+        checked against before/after snapshots in `use_token`)."""
+        live = [t for t in self.tokens if not self.tok_dead(t)]
+        dead = [t for t in self.tokens if self.tok_dead(t)]
+        if live:
+            tok = live[self.steps % len(live)]
+            ownersess = self.mint(tok["user_id"])
+            for path in ("/customers", "/entries", "/settings", "/users"):
+                got, want = self.probe(tok, path), self.call("GET", path, ownersess)
+                if path == "/users":  # session-only: the owner may list users, the token never
+                    assert got.status_code == 403 and got.json() == {"detail": SESSION_ONLY}, path
+                else:
+                    assert (got.status_code, got.json()) == (want.status_code, want.json()), path
+            for write in ("/settings", "/tokens"):
+                r = self.call("PUT" if write == "/settings" else "POST", write, Session(tok["secret"], None, 0),
+                              headers={"X-Forwarded-For": "10.8.0.1"}, json={"kleinunternehmer": True} if write == "/settings" else {"label": "x"})  # fmt: skip
+                assert r.status_code == 403, (write, r.status_code, tok["read_only"])
+            settings = self.call("GET", "/settings", self._boss()).json()
+            assert all(settings[k] == v for k, v in self.settings.items()), "a token changed the settings"
+        for tok in dead[-2:] if len(dead) < 3 else [dead[self.steps % len(dead)], dead[-1]]:
+            r = self.probe(tok, "/auth/me")
+            assert r.status_code == 401 and r.json() == {"detail": "Not authenticated"}, (tok["id"], r.status_code)
+
     def _boss(self) -> Session:
         bosses = [u["id"] for u in self.m["users"].values() if u["role"] == "boss" and u["active"]]
         assert bosses, "model lost its last active boss - the API must never allow that"
@@ -1183,14 +1390,26 @@ class ApiMachine(RuleBasedStateMachine):
     def everything_matches_the_model(self):
         """One invariant (hypothesis runs separate ones in alphabetical order, which would clear `dirty` too early)."""
         self.sessions_match_model()
+        self.tokens_match_model()
         self.lists_match_model()
         self.dashboard_matches_model()
         self.finance_matches_model()
         self.dirty = set()
 
 
-ApiMachine.TestCase.settings = settings(settings.default)
-TestApiStateful = ApiMachine.TestCase
+# The run is split into SHARDS independent state machines with 1/SHARDS of the examples each, so that pytest-xdist can
+# run them on different workers. Each shard is its own class and therefore draws its own (deterministic) examples.
+SHARDS = 3
+
+
+def _shard(n: int):
+    machine = type(f"ApiMachineShard{n}", (ApiMachine,), {})
+    base = settings.default
+    machine.TestCase.settings = settings(base, max_examples=-(-base.max_examples // SHARDS))
+    return type(f"TestApiStatefulShard{n}", (machine.TestCase,), {})
+
+
+TestApiStatefulShard1, TestApiStatefulShard2, TestApiStatefulShard3 = (_shard(i) for i in range(1, SHARDS + 1))
 
 
 pytestmark = pytest.mark.randomized

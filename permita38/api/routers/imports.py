@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
-from permita38.api.deps import Needs, ServicesDep
+from permita38.api.deps import Needs, ServicesDep, SessionOnly
 from permita38.api.forms import check_form
 from permita38.core.errors import ServiceError
 from permita38.core.service.importer.tables import MAX_BYTES
@@ -58,7 +58,11 @@ def preview(
     )
 
 
-@router.post("/import/run", summary="import; all-or-nothing: any error row (HTTP 422) writes nothing")
+@router.post(
+    "/import/run",
+    summary="import; all-or-nothing: any error row (HTTP 422) writes nothing",
+    dependencies=[SessionOnly],
+)
 def run(
     _: Annotated[dict, Needs("settings", "write", full=True)],
     services: ServicesDep,
@@ -94,6 +98,10 @@ def batches(_: Annotated[dict, Needs("settings", "write", full=True)], services:
     return sorted(services.imports.batches(), key=lambda b: b.get("created") or 0, reverse=True)
 
 
-@router.post("/import/batches/{rid}/undo", summary="remove the records of an import run (only if unchanged since)")
+@router.post(
+    "/import/batches/{rid}/undo",
+    summary="remove the records of an import run (only if unchanged since)",
+    dependencies=[SessionOnly],
+)
 def undo(rid: str, _: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep) -> dict:
     return services.imports.undo(rid)

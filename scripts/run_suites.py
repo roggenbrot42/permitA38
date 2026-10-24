@@ -21,11 +21,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "test-artifacts"
 PYTEST = [sys.executable, "-m", "pytest", "-q", "--no-header", "--tb=line", "-rfE", "-p", "no:cacheprovider"]
+# the randomized and browser suites are independent tests with their own servers: run them on 4 workers
+XDIST = ["-n", "4", "--dist", "worksteal"]
 SUITES: dict[str, list[str]] = {
     "lint": [],  # handled below
     "backend": [*PYTEST, "tests/backend", "tests/release", "--ignore=tests/backend/randomized"],
-    "random": [*PYTEST, "tests/backend/randomized"],
-    "web": [*PYTEST, "tests/web"],
+    "random": [*PYTEST, *XDIST, "tests/backend/randomized"],
+    "web": [*PYTEST, *XDIST, "tests/web"],
 }
 DEFAULT = ["backend", "random", "web"]
 
