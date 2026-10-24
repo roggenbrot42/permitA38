@@ -101,7 +101,8 @@ Out of v1 (listed in the roadmap):
    | Password hashes (`users.password_hash`, `pw_changed`) | **Only with the explicit option "include accounts".** Default off. With it on, the archive is as sensitive as the database (the UI says so). |
    | User profiles (name, username, role, rates, hours, colour, ...) | Always (entries etc. refer to users; without them the data is meaningless). Without "include accounts" `password_hash` is dropped. |
    | Calendar subscription URLs (`calendar_sources.url`; a "share via link" URL is a secret) | Blanked (`""`); sources are exported so the user can reconnect. `calendar_events` is a cache and is **not exported** (refresh after import). |
-   | Settings | All keys except those matching the denylist regex `(?i)(secret|token|password|passwd|api[_-]?key|private)` and keys listed in `SECRET_SETTING_KEYS` (empty list in v1; a guard test checks that no stored key name matches the denylist without being excluded). The IBAN and tax ids are business data and **are** exported. |
+   | Running timers (`timers`) | Not exported (`EXCLUDED_TABLES`): transient state of single users. |
+   | Settings | All keys except those matching the denylist regex `(?i)(secret|token|pass|cred|auth|api[_-]?key|private|key$)` and keys listed in `SECRET_SETTING_KEYS` (empty list in v1; a guard test checks that no stored key name matches the denylist without being excluded). The IBAN and tax ids are business data and **are** exported. |
 
    The manifest lists what was deliberately left out (`excluded`) so nobody believes the archive is complete in the
    security sense.
@@ -119,12 +120,21 @@ Out of v1 (listed in the roadmap):
    * Archive users without a password hash (archive made without "include accounts") are written as `active=false`
      with an empty hash and listed in the result (`users_without_password`); the owner activates them and sets a
      password (user administration, `permita38 set-password`). `totp_enabled` is false for everyone.
+   * The import enforces `manifest.include_accounts`: when it is not `true`, `password_hash` and `pw_changed` are dropped
+     from every archive user (they land inactive, listed under `users_without_password`); when it is `true` the hash
+     must have the shape `pbkdf2_sha256$<iterations>$<hex salt>$<hex digest>`. All `totp*` keys are always stripped.
+     The user is matched to the setup account by casefolded username. The result lists `with_login` and `bosses` (the
+     setup account counts) and warns `accounts_can_login` when imported accounts can log in.
+   * Unique indexes of `schema.py` are pre-checked for the whole archive (usernames also case-insensitively); roles
+     must be known (`member` is mapped to `employee` by the upgrade hook of migration 0006); NaN/Infinity and
+     out-of-range floats are refused.
 10. **All-or-nothing.** Order: (1) read and fully validate the whole archive in memory/temp files (limits, hashes,
-    JSON, per-record validation, references, empty-instance check); only if there are no errors (2) write
-    attachments to their final names (names are collision-free in an empty folder; a pre-existing name with other
-    content is an error found in step 1), then (3) inside **one** `store.transaction()` write all records, settings
-    and counters; on any exception the transaction rolls back and the attachments written in step 2 are deleted
-    (compensating cleanup, in a `finally`). Nothing is partially imported. Only after the commit the result is
+    JSON, per-record validation, references, empty-instance check); only if there are no errors (2) stream
+    the attachments (hash and magic bytes checked again) into a staging folder `<attachments>/.import-<random>/`,
+    then (3) inside **one** `store.transaction()` re-check that the instance is still empty (409 otherwise) and write
+    all records, settings and counters; (4) only after the commit the staged files are renamed into place. On any
+    exception or interrupt the transaction rolls back and the staging folder is removed; a crash leaves only a
+    staging folder, which the instance ignores and the next start removes after an hour. Nothing is partially imported. Only after the commit the result is
     reported and one entry is added to the transfer log (decision 14).
 11. **Id preservation.** Ids are never regenerated. A reference column (`customer_id`, `project_id`, `task_id`,
     `user_id`, `invoice_id`, `offer_id`, `trip_id`, `source_id`, and the list columns `member_ids` / `user_ids`)
@@ -144,10 +154,10 @@ Out of v1 (listed in the roadmap):
     | Upload size (archive) | 512 MiB |
     | Entries in the archive | 20,000 |
     | Total uncompressed size | 2 GiB |
-    | Uncompressed size of one data file (`data/*.json`) | 256 MiB |
-    | One attachment | 25 MiB |
+    | Uncompressed size of one data file (`data/*.json`) | 64 MiB |
+    | One attachment | 64 MiB per entry on import; no limit on export except the 2 GiB total |
     | Compression ratio per entry (uncompressed / compressed) | 200 (entries under 1 MiB uncompressed are exempt) |
-    | Records per collection | 1,000,000 |
+    | Records per collection | 200,000 |
     | One record serialised | 1 MiB |
     | Depth of nested JSON | 32 (parser guard) |
 
@@ -158,7 +168,7 @@ Out of v1 (listed in the roadmap):
     case folding, symlinks / entries with Unix mode of a link, directories with content, encrypted entries, a
     compression method other than stored/deflate) is **rejected as a whole**, never "skipped". Files are never
     extracted to disk by path from the archive: attachments are read from the zip and written through the
-    repository (`restore_attachment`, which validates the name again). `zipfile` is used with the sizes checked
+    repository (`stage_attachment`, which validates the name again). `zipfile` is used with the sizes checked
     before reading; no `extractall`.
 14. **Audit.** Every export and every import (also a failed or refused attempt, and a dry run) writes one entry to the
     settings key `data_transfer_log` (list, newest first, capped at 50): `at`, `user_id`, `action`
@@ -201,6 +211,7 @@ Out of v1 (listed in the roadmap):
     * `restore_attachment(name: str, blob: bytes) -> None`: validates the name against the attachment regex, refuses
       to overwrite an existing file with different content (same content is fine), writes atomically (tmp + replace),
       like `save_attachment`. Also `attachment_path` stays the way to read; export reads bytes in chunks via it.
+    * `new_stage() / stage_attachment / commit_stage / discard_stage / discard_stale_stages`: the staging area of the import.
     * `delete_attachment(name: str) -> bool` for the compensating cleanup and the tests.
 21. **Master data archive.** `scope: "master_data"` writes `manifest.json` (with `"scope": "master_data"`),
     `data/customers.json` (and `data/suppliers.json` when that collection exists, see
@@ -336,7 +347,7 @@ users rule, CSV bytes. The logic pass is not done by a smaller model.
 | O6 | Excel leading zeros | Documented limitation | write `="0042"` (breaks other tools) |
 | O7 | Master data as ZIP only | ZIP only | also bare CSV/JSON download |
 | O8 | Browser download of a large archive | `fetch` + blob (needs the Authorization header); the UI warns above 500 MB | one-time download ticket URL |
-| O9 | Memory: collections are loaded as lists | yes, 1,000,000 records/collection cap | cursor paging in the repository |
+| O9 | Memory: collections are loaded as lists | yes, 200,000 records/collection cap; each data file is parsed once and dropped | cursor paging in the repository |
 | O10 | Exporting `import_batches` | yes (undo history continues) | skip |
 
 ## Roadmap follow-ups (not in v1)

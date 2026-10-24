@@ -462,7 +462,7 @@ def _fill(path: str) -> str:
 @pytest.mark.parametrize("read_only", [True, False])
 def test_session_only_routes_refuse_every_token_with_the_exact_body(app, boss_client, read_only):
     t = bearer(app, new_token(boss_client, read_only=read_only)["token"])
-    assert len(SESSION_ONLY) == 26
+    assert len(SESSION_ONLY) == 31
     for method, path in sorted(SESSION_ONLY):
         r = t.request(method, _fill(path), json={} if method in ("POST", "PUT") else None)
         assert r.status_code == 403 and r.json() == SESSION_ONLY_BODY, (method, path, r.status_code, r.text)
