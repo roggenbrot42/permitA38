@@ -1,0 +1,59 @@
+{
+  "week": "2026-03-02",
+  "capacity": 40.0,
+  "confirmed": 38.0,
+  "binding_offers": 0.0,
+  "free_after_confirmed": 2.0,
+  "free_worst_case": 2.0,
+  "utilisation": 95.0,
+  "status": "over",
+  "gap": 30.0,
+  "gap_confirmed": 30.0,
+  "gap_expected": 30.0,
+  "projects": [
+    {
+      "project_id": "a1b2c3d4",
+      "name": "Demo project P",
+      "capacity": 0.0,
+      "confirmed": 30.0,
+      "free_worst_case": -30.0,
+      "utilisation": null,
+      "status": "over",
+      "gap": 30.0,
+      "gap_confirmed": 30.0,
+      "gap_expected": 30.0,
+      "internal": {
+        "capacity": 0.0,
+        "assigned": 30.0,
+        "gap": 30.0
+      },
+      "external": {
+        "capacity": 0.0,
+        "assigned": 0.0,
+        "gap": 0.0
+      }
+    },
+    {
+      "project_id": null,
+      "name": "Unassigned",
+      "capacity": 40.0,
+      "confirmed": 8.0,
+      "free_worst_case": 32.0,
+      "utilisation": 20.0,
+      "status": "ok",
+      "gap": 0.0,
+      "gap_confirmed": 0.0,
+      "gap_expected": 0.0,
+      "internal": {
+        "capacity": 40.0,
+        "assigned": 8.0,
+        "gap": 0.0
+      },
+      "external": {
+        "capacity": 0.0,
+        "assigned": 0.0,
+        "gap": 0.0
+      }
+    }
+  ]
+}

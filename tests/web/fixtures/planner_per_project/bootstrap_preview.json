@@ -1,0 +1,26 @@
+{
+  "confirm": false,
+  "created": false,
+  "allocations": [
+    {
+      "user_id": "u1b2c3d4",
+      "user_name": "Demo Boss",
+      "project_id": "a1b2c3d4",
+      "project_name": "Demo project P",
+      "start": "2026-03-02",
+      "end": "2026-03-27",
+      "hours_per_week": 30.0,
+      "source_contract_id": "d4e5f6a7",
+      "source_contract_title": "Contract C_P"
+    }
+  ],
+  "skipped": [
+    {
+      "user_id": "u1b2c3d4",
+      "project_id": "e5f6a7b8",
+      "source_contract_id": "b1b1b1b1",
+      "reason": "already_allocated"
+    }
+  ],
+  "warnings": []
+}
