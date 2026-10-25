@@ -107,6 +107,8 @@ class FakeApi:
         self.forecast = forecast or forecast_a()
         self.allocs = copy.deepcopy(allocations if allocations is not None else fixture("allocations_list"))
         self.projects = projects or copy.deepcopy(PROJECTS)
+        self.me = BOSS
+        self.users = [USER]
         self.requests = []
         self.confirms = []
         self.post_warnings = []  # planning_warnings answered by POST/PUT /allocations
@@ -140,7 +142,7 @@ class FakeApi:
                 route,
                 200,
                 {
-                    "me": BOSS,
+                    "me": self.me,
                     "settings": {},
                     "timer": None,
                     "states": {},
@@ -153,7 +155,7 @@ class FakeApi:
         if path == "projects" and m == "GET":
             return _json(route, 200, self.projects)
         if path == "users" and m == "GET":
-            return _json(route, 200, [USER])
+            return _json(route, 200, self.users)
         if path in ("customers", "contracts", "absences", "offers", "tasks", "entries", "invoices", "expenses"):
             return _json(route, 200, [])
         if path == "project-report":
@@ -162,6 +164,10 @@ class FakeApi:
             return _json(route, 200, {})
         if path == "plan/scenarios":
             return _json(route, 200, [])
+        wanted = query.get("project_id", [None])[0] or (body or {}).get("project_id")
+        if path in ("forecast", "plan/simulate") and wanted not in (None, "unassigned"):
+            if wanted not in [p["id"] for p in self.projects]:
+                return _json(route, 404, {"detail": "Project not found"})
         if path == "forecast":
             return _json(route, 200, self.forecast)
         if path == "plan/simulate":
@@ -174,7 +180,7 @@ class FakeApi:
             return _json(route, 200, self.allocs)
         if path == "allocations" and m == "POST":
             if self.post_error:
-                return _json(route, self.post_error[0], {"detail": self.post_error[1]})
+                return _json(route, self.post_error[0], {"detail": self.post_error[1]})  # detail: text or a 422 list
             row = {"id": "n%07d" % len(self.allocs), "kind": "employee", "user_name": "Demo Boss", "status": "active"}
             row.update(body)
             row["project_name"] = next(p["name"] for p in self.projects if p["id"] == body["project_id"])
@@ -230,7 +236,7 @@ def test_forecast_shows_gap_per_project_and_server_warning(browser):
     api = FakeApi()
     ctx, pg, problems = open_app(browser, api)
     row = pg.locator("table tr.pp-over").first
-    expect(row).to_contain_text("5 h")  # week gap 5.0 of example A
+    expect(row.locator(".pp-gap")).to_have_text("5 h")  # week gap 5.0 of example A
     expect(pg.locator(".pp-summary")).to_contain_text("Not covered: 20 h")
     expect(pg.locator(".pp-summary")).to_contain_text("Demo project P: 20 h")
     expect(pg.locator(".pp-warnings")).to_contain_text("project Demo project P: 30 h are planned but only 25 h")
@@ -298,6 +304,7 @@ def test_person_without_allocation_gets_the_hint(browser):
     ctx, pg, problems = open_app(browser, api, storage={"fcUser": BOSS["id"]})
     expect(pg.locator(".pp-empty")).to_contain_text("All of your capacity is unassigned")
     assert pg.locator(".pp-banner").count() == 0
+    assert problems == []
     ctx.close()
 
 
@@ -391,6 +398,7 @@ def test_team_page_opens_the_dialog_for_a_person(browser):
     pg.locator("[data-a=allocations][data-user=u1b2c3d4]").click()
     expect(pg.locator("#modal-root .modal")).to_contain_text("Allocations of Demo Boss")
     assert api.calls("GET", "allocations")[-1][2]["user_id"] == ["u1b2c3d4"]
+    assert problems == []
     ctx.close()
 
 
@@ -482,4 +490,97 @@ def test_planner_existing_allocation_bar_can_be_moved_with_keyboard(browser):
     sent = api.calls("POST", "plan/simulate")[-2][3]["changes"]["allocations"][0]
     assert sent["id"] == "9f3a1c20" and sent["start"] == (monday() + timedelta(days=1)).isoformat()
     assert problems == []
+    ctx.close()
+
+
+def test_inactive_user_row_keeps_its_person_on_save(browser):
+    api = FakeApi()
+    api.allocs[0]["user_id"] = "uinact01"
+    api.allocs[0]["user_name"] = "Former Employee"
+    api.users = [{**USER}, {**USER, "id": "uinact01", "name": "Former Employee", "active": False}]
+    ctx, pg, dlg, problems = open_dialog_from_project(browser, api)
+    dlg.get_by_role("button", name="Edit").first.click()
+    expect(dlg.locator("#al_user option:checked")).to_have_text("Former Employee (inactive)")
+    dlg.locator("form.al-form").get_by_role("button", name="Save").click()
+    expect(dlg.locator("form.al-form")).to_have_count(0)
+    assert api.calls("PUT", "allocations/9f3a1c20")[0][3]["user_id"] == "uinact01"
+    assert problems == []
+    ctx.close()
+
+
+def test_enter_on_cancel_or_delete_never_saves(browser):
+    api = FakeApi()
+    ctx, pg, dlg, problems = open_dialog_from_project(browser, api)
+    dlg.get_by_role("button", name="+ Allocation").click()
+    dlg.locator("form.al-form").get_by_role("button", name="Cancel").focus()
+    pg.keyboard.press("Enter")
+    expect(dlg.locator("form.al-form")).to_have_count(0)
+    assert api.calls("POST", "allocations") == []
+    dlg.get_by_role("button", name="Edit").first.click()
+    dlg.get_by_role("button", name="Delete").focus()
+    pg.keyboard.press("Enter")  # a button press is its own action (confirmed delete), not a save
+    expect(dlg).to_contain_text("No allocations yet")
+    assert api.calls("POST", "allocations") == [] and api.calls("PUT", "allocations/9f3a1c20") == []
+    assert api.confirms == ["Delete this allocation?"]
+    assert problems == []
+    ctx.close()
+
+
+def test_escape_closes_the_dialog_and_redraws_the_page(browser):
+    api = FakeApi(forecast=forecast_b(), allocations=[])
+    ctx, pg, problems = open_app(browser, api)
+    pg.get_by_role("button", name="Allocate my capacity").click()
+    dlg = pg.locator("#modal-root .modal")
+    dlg.get_by_role("button", name="Create 1 allocation").click()
+    expect(dlg.locator(".al-preview")).to_contain_text("Created 1 allocation")
+    pg.keyboard.press("Escape")
+    expect(pg.locator("#modal-root .modal")).to_have_count(0)
+    pg.wait_for_selector(".pp-banner", state="detached")
+    assert problems == []
+    ctx.close()
+
+
+def test_stale_remembered_project_falls_back_to_all(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api, storage={"fcProject": "gone0001"})
+    expect(pg.locator("select[data-change=fcProject]")).to_have_value("")
+    assert pg.evaluate("() => localStorage.fcProject") == ""
+    ctx.close()
+    api = FakeApi()
+    ctx, pg, problems = open_app(
+        browser, api, page="plan/vacation", storage={"plnProject": "gone0001", "plnUser": BOSS["id"]}
+    )
+    pg.wait_for_selector("#plnProj")
+    expect(pg.locator("#plnProj")).to_have_value("")
+    assert pg.evaluate("() => localStorage.plnProject") == ""
+    ctx.close()
+
+
+@pytest.mark.parametrize(
+    "error,shown",
+    [
+        ((403, "Forbidden"), "Forbidden"),
+        ((422, [{"loc": ["body", "hours_per_week"], "msg": "too large", "type": "x"}]), "hours_per_week: too large"),
+    ],
+)
+def test_dialog_shows_403_and_422(browser, error, shown):
+    api = FakeApi()
+    api.post_error = error
+    ctx, pg, dlg, problems = open_dialog_from_project(browser, api)
+    dlg.get_by_role("button", name="+ Allocation").click()
+    dlg.locator("form.al-form").get_by_role("button", name="Save").click()
+    expect(dlg.locator("[role=alert]")).to_have_text(shown)
+    assert problems == []
+    ctx.close()
+
+
+def test_buttons_are_hidden_without_the_planning_right(browser):
+    api = FakeApi()
+    api.me = {**BOSS, "permissions": {**BOSS["permissions"], "planning": {"read": "none", "write": "none"}}}
+    ctx, pg, problems = open_app(browser, api, page="project/a1b2c3d4")
+    pg.wait_for_selector("[data-a=editProject]")
+    assert pg.locator("[data-a=allocations]").count() == 0
+    pg.goto(f"{ORIGIN}/#/team")
+    pg.wait_for_selector("[data-a=editUser]")
+    assert pg.locator("[data-a=allocations]").count() == 0
     ctx.close()

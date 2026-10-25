@@ -8,6 +8,7 @@ Replay a failing run with:  PERMITA38_E2E_SEED=<seed> pytest tests/web/e2e_rando
 """
 
 import random
+import re
 import traceback
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -618,7 +619,10 @@ class Journey:
         self.page.fill("#al_end", end.isoformat())
         self.page.click("form.al-form [data-a=alSave]")
         self.page.wait_for_selector("#modal-root form.al-form", state="detached")
-        assert f"{hours:g}".replace(".", ",") + " h/week" in norm(self.page.inner_text("#al-body"))
+        text = f"{hours:g}".replace(
+            ".", ","
+        )  # a row with exactly this figure (not "12,5" for "2,5"); repeated runs add rows
+        assert re.search(rf"(?<![\d,.]){re.escape(text)} h/week", norm(self.page.inner_text("#al-body")))
         self.m.allocs.append((p.id, float(hours), start.isoformat(), end.isoformat()))
         self.say(f"allocation {hours} h/week to {p.name!r} {start}..{end}")
         self.mark_old()

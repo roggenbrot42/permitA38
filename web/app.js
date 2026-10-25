@@ -4,6 +4,9 @@ const A = {};      // click actions:  <button data-a="name" data-id="..">
 const PAGES = {};  // route -> async (args) => html
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/** localStorage can be blocked or full: a remembered filter is a convenience, never a reason to fail. */
+const lsGet = (k, d = '') => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } };
 const eur = n => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n || 0);
 const num = (n, d = 1) => new Intl.NumberFormat('de-DE', { maximumFractionDigits: d }).format(n || 0);
 const hm = h => { const m = Math.round(Math.abs(h) * 60); return (h < 0 ? '-' : '') + Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
@@ -352,11 +355,11 @@ PAGES.plan = async (tab = 'forecast') => {
   if (tab === 'contracts') return head + contractsView();
   if (tab === 'timeoff') return head + await timeoffView(true);
   const weeks = +(localStorage.fcWeeks || 26), uid = localStorage.fcUser || '';
-  let pid = localStorage.fcProject || '';
+  let pid = lsGet('fcProject');
   const query = () => `forecast?weeks=${weeks}&user_id=${uid}${pid ? '&project_id=' + encodeURIComponent(pid) : ''}`;
   let fc;
   try { fc = await api('GET', query()); }
-  catch (e) { if (e.status !== 404 || !pid) throw e; pid = ''; localStorage.fcProject = ''; fc = await api('GET', query()); }   // the remembered project is gone
+  catch (e) { if (e.status !== 404 || !pid) throw e; pid = ''; lsSet('fcProject', ''); fc = await api('GET', query()); }   // the remembered project is gone
   const allocs = await ppAllocations();
   const W = fc.weeks, mx = Math.max(10, ...W.map(w => Math.max(w.capacity, w.confirmed + w.tentative)));
   const bw = 900 / W.length, H = 200, y = v => H - v / mx * H;
@@ -381,6 +384,8 @@ PAGES.plan = async (tab = 'forecast') => {
 /* ---- planner per project: everything below only draws numbers computed by the server ---- */
 const FC = { open: new Set(), days: {} };
 const PP_PILL = { ok: 'good', tight: 'warn', over: 'bad' };
+/** Planned hours of a project row: the server's pool sums when present, else confirmed + binding offers (older servers). */
+const ppPlanned = p => (p.internal && p.external ? p.internal.assigned + p.external.assigned : p.confirmed + p.binding_offers);
 const ppH = x => num(x, 1) + ' h';
 async function ppAllocations() {   // null = not readable or not available (older server): then no banner and no hint
   try { return await api('GET', 'allocations?status=active'); } catch { return null; }
@@ -406,7 +411,7 @@ function ppSummary(fc) {
 function ppWeekDetail(w) {
   const gapNames = w.projects.filter(p => p.gap > 0).map(p => p.name).join(', ');
   const rows = w.projects.map(p => {
-    const planned = p.confirmed + p.binding_offers;
+    const planned = ppPlanned(p);
     const free = p.gap > 0 ? `<span class="pp-gap">${esc(ppH(p.gap))} not covered</span>`
       : p.free_worst_case > 0 && gapNames ? `<span class="pp-idle" title="${esc('Not available to project ' + gapNames)}">${esc(ppH(p.free_worst_case))} free</span>`
       : `<span class="muted">${esc(ppH(p.free_worst_case))} free</span>`;
@@ -429,11 +434,11 @@ A.fcExpand = el => { const w = el.dataset.week; FC.open.has(w) ? FC.open.delete(
 A.fcDays = async el => {
   const w = el.dataset.week;
   if (FC.days[w]) { delete FC.days[w]; return render(); }
-  const uid = localStorage.fcUser || '', pid = localStorage.fcProject || '';
+  const uid = localStorage.fcUser || '', pid = lsGet('fcProject');
   FC.days[w] = await api('GET', `plan/day-table?from=${w}&to=${addDays(w, 6)}${uid ? '&user_id=' + uid : ''}${pid ? '&project_id=' + encodeURIComponent(pid) : ''}`);
   render();
 };
-A.fcProject = el => { localStorage.fcProject = el.value; FC.days = {}; render(); };
+A.fcProject = el => { lsSet('fcProject', el.value); FC.days = {}; render(); };
 A.fcWeeks = el => { localStorage.fcWeeks = el.value; render(); };
 A.fcUser = el => { localStorage.fcUser = el.value; FC.days = {}; render(); };
 

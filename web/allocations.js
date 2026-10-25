@@ -27,15 +27,21 @@
 
   function row(a) {
     const external = a.kind === 'external';
+    const readOnly = external || (a.status && a.status !== 'active');   // external and cancelled rows are not edited here
     const who = external ? (a.supplier_name || 'Subcontractor') : (a.user_name || userName(a.user_id));
     const cancelled = a.status === 'cancelled';
-    return `<tr class="${external ? '' : 'click'}" ${external ? '' : `data-a="alEdit" data-id="${esc(a.id)}"`}>
+    return `<tr class="${readOnly ? '' : 'click'}" ${readOnly ? '' : `data-a="alEdit" data-id="${esc(a.id)}"`}>
       <td><b>${esc(who)}</b>${external ? ' <span class="pill">subcontractor</span>' : ''}</td><td>${esc(a.project_name || projectName(a.project_id))}</td>
       <td class="nowrap">${esc(fmtDate(a.start))} – ${esc(fmtDate(a.end))}</td>
       <td class="num">${a.hours_per_week == null ? '' : esc(h2(a.hours_per_week)) + ' h/week'}</td><td class="num">${a.planned_hours == null ? '' : esc(h2(a.planned_hours)) + ' h'}</td>
-      <td>${cancelled ? '<span class="pill">cancelled</span>' : ''}${external ? '<span class="small muted">read-only</span>' : ''}</td></tr>`;
+      <td>${cancelled ? '<span class="pill">cancelled</span> ' : ''}${readOnly ? '<span class="small muted">read-only</span>' : `<button type="button" class="ghost sm" data-a="alEdit" data-id="${esc(a.id)}" aria-label="Edit allocation of ${esc(who)} to ${esc(a.project_name || projectName(a.project_id))}">Edit</button>`}</td></tr>`;
   }
 
+  function userOptions(uid) {   // a person who is no longer active stays selectable for their own row, so saving never reassigns it
+    const list = users().map(u => ({ id: u.id, name: u.name }));
+    if (uid && !list.some(u => u.id === uid)) list.push({ id: uid, name: (userName(uid) || 'Unknown person') + ' (inactive)' });
+    return list.map(u => `<option value="${esc(u.id)}" ${u.id === uid ? 'selected' : ''}>${esc(u.name)}</option>`).join('');
+  }
   function form() {
     const e = Al.edit;
     if (e === undefined) return '';
@@ -46,7 +52,7 @@
     const projects = openProjects().slice();
     if (pid && !projects.some(p => p.id === pid)) projects.push((S.d.projects || []).find(p => p.id === pid) || { id: pid, name: '(deleted project)' });
     return `<form class="card al-form" novalidate><h3>${a.id ? 'Edit allocation' : 'New allocation'}</h3>
-      <div class="row"><div class="auto"><label for="al_user">Person</label><select id="al_user">${users().map(u => `<option value="${esc(u.id)}" ${u.id === uid ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
+      <div class="row"><div class="auto"><label for="al_user">Person</label><select id="al_user">${userOptions(uid)}</select></div>
       <div class="auto"><label for="al_project">Project</label><select id="al_project">${projects.map(p => `<option value="${esc(p.id)}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
       <div class="auto"><label for="al_hours">Hours per week</label><input id="al_hours" type="number" min="0.25" max="80" step="0.25" value="${esc(a.hours_per_week ?? 10)}"></div></div>
       <div class="row"><div class="auto"><label for="al_start">From</label><input id="al_start" type="date" value="${esc(a.start || monday)}"></div>
@@ -79,13 +85,21 @@
       ${previewBox()}${form()}
       ${Al.list.length ? `<table><tr><th>Person</th><th>Project</th><th>Period</th><th class="num">Hours/week</th><th class="num">Planned</th><th></th></tr>${Al.list.map(row).join('')}</table>`
         : `<div class="empty">No allocations yet. An allocation gives a person's hours per week to a project; the planner counts only these hours for that project.</div>`}`;
+    if (Al.focus) { Al.focus = false; focusFirst(); }
   }
 
+  function focusFirst() {
+    const el = body();
+    const target = el && (el.querySelector('[role=alert]') || el.querySelector('form.al-form select, form.al-form input') || el.querySelector('.al-preview button.primary:not([disabled])'));
+    if (target) target.focus();
+  }
   async function refresh() { await load(); paint(); }
 
   function open(opts = {}) {
+    Al.open = true;
     Object.assign(Al, { projectId: opts.projectId || null, userId: opts.userId || null, list: [], edit: undefined, error: '', notes: [], preview: null, changed: false, busy: false });
     modal(`<div class="row" style="align-items:center"><h2 style="margin:0">${title()}</h2><div class="right auto"><button type="button" data-a="alBootstrap">Allocate my capacity</button> <button type="button" class="primary" data-a="alNew">+ Allocation</button></div></div><div id="al-body"><div class="empty">Loading…</div></div><div class="actions"><button type="button" id="al-close" data-a="alClose">Close</button></div>`, true);
+    closeModal.onClose = () => { Al.open = false; if (Al.changed) { Al.changed = false; render(); } };   // every way of closing re-renders the page
     refresh().catch(e => { Al.error = e.message; paint(); });
   }
   window.openAllocations = open;
@@ -97,9 +111,12 @@
 
   A.allocations = el => open({ projectId: el.dataset.project || null, userId: el.dataset.user || null });
   A.allocBootstrap = async () => { open({}); await A.alBootstrap(); };   // the forecast banner
-  A.alClose = () => { const ch = Al.changed; closeModal(); if (ch) render(); };
-  A.alNew = () => { Al.edit = null; Al.error = ''; Al.notes = []; paint(); };
-  A.alEdit = el => { Al.edit = Al.list.find(a => a.id === el.dataset.id) || null; Al.error = ''; Al.notes = []; paint(); };
+  A.alClose = () => { closeModal(); };   // the close hook below re-renders when something changed
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && Al.open && document.getElementById('al-body')) { e.preventDefault(); closeModal(); }
+  });
+  A.alNew = () => { Al.edit = null; Al.error = ''; Al.notes = []; Al.focus = true; paint(); };
+  A.alEdit = el => { Al.edit = Al.list.find(a => a.id === el.dataset.id) || null; Al.error = ''; Al.notes = []; Al.focus = true; paint(); };
   A.alCancelEdit = () => { Al.edit = undefined; Al.error = ''; paint(); };
   A.alSave = async () => {
     if (Al.busy) return;
@@ -112,11 +129,13 @@
     try {
       const r = await (id ? api.put('allocations/' + id, b) : api.post('allocations', b));
       Al.notes = r.planning_warnings || [];
+      if (typeof A.plnDismiss === 'function') A.plnDismiss();   // the dialog shows these warnings itself: no duplicate banner behind it
       Al.edit = undefined; Al.changed = true;
       toast('Allocation saved');
       await load();
     } catch (e) { Al.error = e.message; }
     Al.busy = false;
+    Al.focus = true;
     paint();
   };
   A.alDelete = async () => {
@@ -147,7 +166,7 @@
   // Enter in a form field saves (same convention as planner.js)
   document.addEventListener('keydown', e => {
     if (e.key !== 'Enter' || !e.target.closest) return;
-    const f = e.target.closest('form.al-form');
+    const f = e.target.matches('input, select') && e.target.closest('form.al-form');
     if (f) { e.preventDefault(); guard(A.alSave)(); }
   });
 })();

@@ -7,7 +7,7 @@
   const P = {
     weeks: +(localStorage.plnWeeks || 26),
     user: localStorage.plnUser ?? null,            // null = not chosen yet (default: me); '' = whole team
-    project: localStorage.plnProject || '',        // '' = all projects, 'unassigned', or a project id
+    project: lsGet('plnProject'),        // '' = all projects, 'unassigned', or a project id
     alloc: {}, allocs: [], dayWeek: null, day: null,   // draft allocation changes ("r:<id>" / "n:<token>"), stored allocations, day detail
     abs: {},                                       // draft absences: key -> change
     com: {},                                       // draft commitments: "contract:<id>" | "offer:<id>" -> change
@@ -70,13 +70,16 @@
     return allocations.length ? { absences, commitments, allocations } : { absences, commitments };   // new keys only when used (older servers refuse unknown fields)
   }
   function schedule() { clearTimeout(P.timer); P.timer = setTimeout(simulate, 120); }
-  async function simulate() {
+  async function simulate(retry = true) {
     try {
       const scope = P.project ? { project_id: P.project } : {};
       const body = { changes: payload(), weeks: P.weeks, first: monday0(), user_id: userId() || null, ...scope };
       P.sim = await api('POST', 'plan/simulate', body);
       P.base = await api('POST', 'plan/simulate', { changes: { absences: [], commitments: [] }, weeks: P.weeks, first: monday0(), user_id: userId() || null, ...scope });
-    } catch (e) { toast(e.message, true); }
+    } catch (e) {
+      if (e.status === 404 && P.project && retry) { P.project = ''; lsSet('plnProject', ''); return simulate(false); }   // the remembered project is gone
+      toast(e.message, true);
+    }
     paint();
   }
   async function loadEntitlement() {
@@ -147,7 +150,7 @@
     const items = [...S.d.contracts.filter(c => c.status !== 'done').map(c => ({ kind: 'contract', id: c.id, title: c.title || 'Contract', project_id: c.project_id || null, user_ids: c.user_ids || [], sub: 'contract' })),
       ...S.d.offers.filter(o => o.status === 'sent' && o.plan && !S.d.contracts.some(c => c.offer_id === o.id)).map(o => ({ kind: 'offer', id: o.id, title: 'Offer ' + (o.number || '(draft)'), project_id: o.project_id || null, user_ids: (o.plan && o.plan.user_ids) || [], sub: 'offer' }))];
     let html = '', group;
-    items.sort((a, b) => projName(a.project_id).toLowerCase() < projName(b.project_id).toLowerCase() ? -1 : 1);
+    items.sort((a, b) => (x => x[0] < x[1] ? -1 : x[0] > x[1] ? 1 : 0)([projName(a.project_id), projName(b.project_id)].map(n => n.toLowerCase())));
     for (const it of items) {
       const key = `${it.kind}:${it.id}`;
       if (it.project_id !== group) { group = it.project_id; html += `<div class="pln-row pln-group"><div class="pln-label"><b>${esc(projName(group))}</b></div></div>`; }
@@ -195,13 +198,13 @@
   // One small column per project and week: outline = allocated, fill = planned, red part = not covered (server numbers, scaled to fit).
   function projectStack(W) {
     if (!W.some(w => w.projects && w.projects.length)) return '';
-    const mx = Math.max(1, ...W.flatMap(w => (w.projects || []).map(p => Math.max(p.capacity, p.confirmed + p.binding_offers))));
+    const mx = Math.max(1, ...W.flatMap(w => (w.projects || []).map(p => Math.max(p.capacity, ppPlanned(p)))));
     const H = 28;
     const cols = (w, i) => {
       const list = (w.projects || []).filter(p => p.capacity || p.confirmed || p.binding_offers || p.gap);
       const cw = Math.max(3, Math.floor((7 * DW - 4) / Math.max(list.length, 1)) - 1);
       return `<span class="pln-stack" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px">${list.map(p => {
-        const planned = p.confirmed + p.binding_offers;
+        const planned = ppPlanned(p);
         const d = p.delta ? `; draft ${p.delta > 0 ? '+' : ''}${num(p.delta, 1)} h gap` : '';
         const tip = `${p.name}: allocated ${h1(p.capacity)}, planned ${h1(planned)}${p.gap > 0 ? `, not covered ${h1(p.gap)}` : ''}${d}`;
         return `<i class="pln-pbar${p.delta > 0 ? ' worse' : p.delta < 0 ? ' better' : ''}" style="width:${cw}px" title="${esc(tip)}"><b class="cap" style="height:${p.capacity / mx * H}px"></b><b class="plan" style="height:${planned / mx * H}px"></b>${p.gap > 0 ? `<b class="gap" style="height:${Math.min(p.gap, planned) / mx * H}px;bottom:${(planned - Math.min(p.gap, planned)) / mx * H}px"></b>` : ''}</i>`;
@@ -278,7 +281,7 @@
     if (!P.day || !P.dayWeek) return '';
     const names = P.day.scope_names || {};
     const pool = (b, k) => b && b[k] && (b[k].cap || b[k].assigned) ? `${k} ${num(b[k].assigned, 2)}/${num(b[k].cap, 2)}${b[k].gap > 0 ? ` (gap ${num(b[k].gap, 2)})` : ''}` : '';
-    return `<div class="card pln-day"><h2>Days of the week of ${esc(fmtDate(P.dayWeek))}</h2><table><tr><th>Day</th><th class="num">Capacity</th><th>Per project (planned / capacity)</th></tr>${P.day.days.map(d => `<tr><td class="nowrap">${esc(dayName(d.date))} ${esc(fmtDate(d.date).slice(0, 5))}</td><td class="num">${num(d.cap, 2)}</td><td class="small">${Object.entries(d.scopes || {}).map(([k, sc]) => `<span class="nowrap">${esc(names[k] || k)}: ${esc([pool(sc, 'internal'), pool(sc, 'external')].filter(Boolean).join(', '))}</span>`).join(' · ')}</td></tr>`).join('')}</table></div>`;
+    return `<div class="card pln-day"><h2>Days of the week of ${esc(fmtDate(P.dayWeek))} (without draft)</h2><table><tr><th>Day</th><th class="num">Capacity</th><th>Per project (planned / capacity)</th></tr>${P.day.days.map(d => `<tr><td class="nowrap">${esc(dayName(d.date))} ${esc(fmtDate(d.date).slice(0, 5))}</td><td class="num">${num(d.cap, 2)}</td><td class="small">${Object.entries(d.scopes || {}).map(([k, sc]) => `<span class="nowrap">${esc(names[k] || k)}: ${esc([pool(sc, 'internal'), pool(sc, 'external')].filter(Boolean).join(', '))}</span>`).join(' · ')}</td></tr>`).join('')}</table></div>`;
   }
   function view() {
     const W = weekRows();
@@ -504,7 +507,7 @@
   });
   A.plnDiscardOne = el => { delete ({ abs: P.abs, alloc: P.alloc }[el.dataset.store] || P.com)[el.dataset.key]; schedule(); };
   A.plnDiscard = () => { P.abs = {}; P.com = {}; P.alloc = {}; P.sugg = null; schedule(); };
-  A.plnProject = el => { P.project = el.value; localStorage.plnProject = P.project; P.day = null; P.dayWeek = null; schedule(); };
+  A.plnProject = el => { P.project = el.value; lsSet('plnProject', P.project); P.day = null; P.dayWeek = null; schedule(); };
   A.plnAllocHours = el => {
     const v = +el.value;
     if (!(v >= 0.25 && v <= 80)) { toast('Hours per week must be between 0.25 and 80', true); return paint(); }

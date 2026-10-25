@@ -68,7 +68,8 @@ def ui(browser, srv, seeded):
     pg = ctx.new_page()
     problems: list[str] = []
     pg.on("pageerror", lambda e: problems.append("pageerror: " + str(e)))
-    pg.on("dialog", lambda d: (problems.append("dialog: " + d.message), d.dismiss()))
+    pg.dialogs = []
+    pg.on("dialog", lambda d: (pg.dialogs.append(d.message), d.accept()))
     pg.on("console", lambda m: m.type == "error" and "status of" not in m.text and problems.append(m.text))
     yield pg
     assert problems == []
@@ -112,8 +113,8 @@ def test_dialog_creates_edits_and_deletes_an_allocation(srv, seeded, ui):
     dlg.locator("#al_hours").fill("60")  # more than the 40 h contract: saved, with a warning
     dlg.locator("form.al-form").get_by_role("button", name="Save").click()
     expect(dlg.locator(".al-warn")).to_be_visible()
-    ui.once("dialog", lambda d: d.accept())
     dlg.locator("tr[data-a=alEdit]").first.click()
     dlg.get_by_role("button", name="Delete").click()
     expect(dlg).to_contain_text("No allocations yet")
     assert httpx.get(srv.base + "/api/allocations", headers=seeded["headers"]).json() == []
+    assert ui.dialogs == ["Delete this allocation?"]
