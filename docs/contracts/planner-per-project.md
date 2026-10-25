@@ -124,25 +124,41 @@ equality test does not know CHECK constraints it must be taught to ignore a name
 ## Models (`core/models.py`)
 
 ```python
-class AllocationIn(v.CheckedBody):          # strict: extra="forbid" -> unknown field = 422
+class AllocationIn(v.CheckedBody):  # strict: extra="forbid" -> unknown field = 422
     model_config = ConfigDict(extra="forbid")
-    user_id: v.Id                           # required
-    project_id: v.Id                        # required (never "unassigned": that scope is implicit)
-    start: v.ISODate                        # required
-    end: v.ISODate                          # required; end < start is 409 (service), see Errors
-    hours_per_week: v.AllocHours            # required, 0.25..80
+    user_id: v.Id  # required
+    project_id: v.Id  # required (never "unassigned": that scope is implicit)
+    start: v.ISODate  # required
+    end: v.ISODate  # required; end < start is 409 (service), see Errors
+    hours_per_week: v.AllocHours  # required, 0.25..80
 
-class Allocation(BaseModel):                # lenient response model, extra="allow", response_model_exclude_none
-    id: str; kind: Literal["employee", "external"]
-    user_id: str | None; supplier_id: str | None; incoming_offer_id: str | None
-    project_id: str; contract_id: str | None; customer_id: str | None
-    start: str; end: str; hours_per_week: float | None; total_hours: float | None; rate: float | None
-    status: str; cancelled_from: str | None; cancel_reason: str | None
-    created: int; updated: int
+
+class Allocation(BaseModel):  # lenient response model, extra="allow", response_model_exclude_none
+    id: str
+    kind: Literal["employee", "external"]
+    user_id: str | None
+    supplier_id: str | None
+    incoming_offer_id: str | None
+    project_id: str
+    contract_id: str | None
+    customer_id: str | None
+    start: str
+    end: str
+    hours_per_week: float | None
+    total_hours: float | None
+    rate: float | None
+    status: str
+    cancelled_from: str | None
+    cancel_reason: str | None
+    created: int
+    updated: int
     # response only, ignored if sent:
-    kind; project_name: str; user_name: str | None; supplier_name: str | None
-    planned_hours: float | None            # employee rows: see below
-    planning_warnings: list[dict] | None   # only in POST/PUT answers
+    kind
+    project_name: str
+    user_name: str | None
+    supplier_name: str | None
+    planned_hours: float | None  # employee rows: see below
+    planning_warnings: list[dict] | None  # only in POST/PUT answers
 ```
 
 Every new field is added to both models with a hard bound (`docs/validation.md`; string ids by `v.Id`, the period by
@@ -154,11 +170,11 @@ rounded to 2 decimals. External rows: `planned_hours` as defined by the subcontr
 The what-if change (new, used by `ScenarioChanges.allocations`, `max_length=500`):
 
 ```python
-class AllocationChange(v.CheckedBody):      # extra="forbid"
-    id: v.OptId = None                      # null = a new allocation
+class AllocationChange(v.CheckedBody):  # extra="forbid"
+    id: v.OptId = None  # null = a new allocation
     delete: bool = False
     user_id: v.OptId = None
-    project_id: v.OptId = None              # not "unassigned"
+    project_id: v.OptId = None  # not "unassigned"
     start: v.OptDate = None
     end: v.OptDate = None
     hours_per_week: v.AllocHours | None = None
