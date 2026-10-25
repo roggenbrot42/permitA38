@@ -217,7 +217,7 @@ Warnings at acceptance (none block):
   disappear for them); days before stay. `status` becomes `cancelled`, `cancelled_from` and `cancel_reason` are
   stored, the offer stays `accepted` (history is kept). Linked expenses are untouched; the open commitment is recomputed
   from the shortened allocation. Cancelling twice, or with `effective_from` after `end`, is 409.
-* Allocations cannot be edited or created by hand in v1. A change is a cancel plus a new (revised) incoming offer.
+* External allocations cannot be edited or created by hand in v1 (employee allocations can, see the planner spec). A change is a cancel plus a new (revised) incoming offer.
 
 ## Allocation (the planner object)
 
@@ -225,7 +225,7 @@ New collection **`allocations`** (response model only; there is no `*In` body, r
 
 | Field | Notes |
 |---|---|
-| `id`, `supplier_id`, `incoming_offer_id` | |
+| `id`, `supplier_id`, `incoming_offer_id` | `supplier_id` is set on every row this spec creates (kind `external`); the same collection also holds employee rows (`user_id` set, `supplier_id` null) owned by `docs/specs/planner-per-project.md`; exactly one of the two is set |
 | `project_id`, `contract_id`, `customer_id` | ring fence: only contracts of `project_id` (and `contract_id`, if set) may draw on this allocation; unused capacity is not moved (decided, open question 3) |
 | `start`, `end`, `hours_per_week` or `total_hours` | copied from the plan |
 | `rate` | net hourly rate, exact decimal string in the API (stored as float like every rate, computed through `money.py`) |
@@ -430,16 +430,26 @@ suppliers       id name supplier_no kind active street zip city country vat_id t
 incoming_offers id supplier_id reference title received_on valid_until lines:json net_total vat vat_rate vat_mode
                 gross_total plan:json project_id contract_id customer_id attachment status status_changed_at decided_by
                 decision_note allocation_id notes external_id import_batch                                + base + extra
-allocations     id supplier_id incoming_offer_id project_id contract_id customer_id start end hours_per_week total_hours rate
-                status cancelled_from cancel_reason                                                         + base + extra
+allocations     (created by the planner-per-project migration `NNNN-allocations`, which lands FIRST; see below)
+                id supplier_id user_id incoming_offer_id project_id contract_id customer_id start end hours_per_week
+                total_hours rate status cancelled_from cancel_reason                                       + base + extra
 expenses        + supplier_id:id  + allocation_id:id  + reverse_charge:bool
 indexes         suppliers(name), suppliers(external_id), incoming_offers(supplier_id), incoming_offers(status),
                 allocations(supplier_id), allocations(status), expenses(supplier_id), expenses(allocation_id)
 ```
 
-* One migration, `NNNN-suppliers`, created with `permita38 create-migration suppliers`, identical in `sqlite/`,
-  `postgresql/` and `mariadb/`; `requires` is the head at merge time (see `docs/specs/migration-ids.md`); no
-  `BEGIN`/`COMMIT`. It adds three tables, three nullable columns and indexes, and **rewrites no existing row**.
+* **Order of migrations (decided by the architect, 2026-10-25).** The `allocations` table is shared with
+  `docs/specs/planner-per-project.md` (employee rows carry `user_id`, subcontractor rows `supplier_id`; exactly one is
+  set, a check enforces it). The planner-per-project work lands **first** and creates the table in its own migration
+  `NNNN-allocations` with **both** nullable columns and all columns above. This spec's migration, `NNNN-suppliers`,
+  comes **after** it (`requires` = the allocations migration or the then head) and adds only `suppliers`,
+  `incoming_offers`, the three expense columns and indexes. It does **not** create `allocations`. If this spec must land
+  first, the allocations migration moves into it unchanged and the planner spec adds nothing; the two specs must never
+  both create the table. Both created with `permita38 create-migration <name>`, identical in `sqlite/`, `postgresql/`
+  and `mariadb/`; no `BEGIN`/`COMMIT`; neither rewrites an existing row (see `docs/specs/migration-ids.md`).
+* `allocations.supplier_id` is therefore nullable in the schema; every row this spec creates has it set and `user_id`
+  null. Reading code must filter by `kind` (`external` = `supplier_id` set). Cascade and delete rules below apply to
+  external rows only.
 * Pydantic: `SupplierIn`, `IncomingOfferIn` (strict) with the lenient `Supplier`, `IncomingOffer`, `Allocation`; every
   new field in both, with a hard bound. `reverse_charge` and the two new expense links go into `ExpenseIn`/`Expense`.
 * Cascade: deleting a supplier is 409 while any incoming offer, allocation or expense references it (archive with
