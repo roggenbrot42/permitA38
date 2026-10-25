@@ -514,6 +514,7 @@ def test_delete_of_a_used_supplier_shows_the_server_message(browser):
     pg.click("[data-a=supDelete]")
     expect(pg.locator("#toast")).to_have_text(fixture("errors")[4]["detail"])
     assert pg.confirms and "archive" in pg.confirms[0]
+    assert problems == []
     ctx.close()
 
 
@@ -554,6 +555,7 @@ def test_no_vendor_banner_for_the_employee_and_when_all_linked(browser):
     api.vendor_suggestions = {"groups": [], "unlinked_expenses": 0}
     ctx, pg, problems = open_app(browser, api, page="expenses")
     assert pg.locator(".sup-vendor-banner").count() == 0
+    assert problems == []
     ctx.close()
 
 
@@ -604,6 +606,7 @@ def test_expense_dialog_keeps_an_inactive_supplier_selectable(browser):
     pg.click("tr[data-id=ee000009] td >> nth=0")
     expect(pg.locator("#f_supplier_id")).to_have_value("7a1b2c3d")
     assert pg.locator("#f_supplier_id option[value='7a1b2c3d']").inner_text().endswith("(inactive)")
+    assert problems == []
     ctx.close()
 
 
@@ -700,6 +703,7 @@ def test_expired_offer_needs_the_confirm_checkbox(browser):
     dlg.locator("#ac_submit").click()
     expect(dlg.locator("#ac_result")).to_be_visible()
     assert api.calls("POST", "incoming-offers/9b3e51c7/accept")[0][3]["confirm_expired"] is True
+    assert problems == []
     ctx.close()
 
 
@@ -712,6 +716,7 @@ def test_accept_without_project_shows_the_server_error_and_keeps_the_dialog(brow
     dlg = pg.locator("#modal-root .modal")
     dlg.locator("#ac_submit").click()  # the first open project is preselected for a capacity offer
     assert api.calls("POST", "incoming-offers/9b3e51c7/accept")[0][3]["project_id"] == "a1b2c3d4"
+    assert problems == []
     ctx.close()
 
 
@@ -724,6 +729,7 @@ def test_accept_plain_supplier_offer_is_a_flat_commitment(browser):
     dlg.locator("#ac_submit").click()
     expect(dlg.locator("#ac_result")).to_contain_text("Flat commitment of 3.091,88")
     assert "project_id" not in api.calls("POST", "incoming-offers/9b3e51c8/accept")[0][3]
+    assert problems == []
     ctx.close()
 
 
@@ -734,6 +740,7 @@ def test_accept_dialog_escape_and_cancel_button(browser):
     pg.keyboard.press("Escape")
     expect(pg.locator("#modal-root .modal")).to_have_count(0)
     assert not api.calls("POST", "incoming-offers/9b3e51c7/accept")
+    assert problems == []
     ctx.close()
 
 
@@ -779,6 +786,7 @@ def test_accepted_offer_edit_sends_only_the_allowed_changes(browser):
     body = api.calls("PUT", "incoming-offers/9b3e51c7")[0][3]
     assert body["notes"] == "paid by transfer" and body["lines"] == api.offers[0]["lines"]
     assert not any(k in body for k in ("status", "net_total", "allocation_id", "id"))
+    assert problems == []
     ctx.close()
 
 
@@ -789,6 +797,7 @@ def test_unaccept_asks_first(browser):
     pg.click("[data-a=offUnaccept]")
     expect(pg.locator("h1 .pill")).to_have_text("under review")
     assert "Unaccept" in pg.confirms[0]
+    assert problems == []
     ctx.close()
 
 
@@ -799,6 +808,7 @@ def test_accountant_reads_offers_without_buttons(browser):
     assert pg.locator("[data-a=offAccept], [data-a=offReject], [data-a=offEdit], [data-a=offDelete], [data-a=offReview]").count() == 0
     pg.goto(f"{ORIGIN}/#/suppliers")
     expect(pg.locator("[data-a=supNew]")).to_be_visible()  # the accountant writes suppliers
+    assert problems == []
     ctx.close()
 
 
@@ -855,6 +865,7 @@ def test_customer_dominance_hint_is_dismissible(browser):
     pg.reload()
     pg.wait_for_selector("#proc-commitments")
     assert pg.locator(".proc-hint").count() == 0
+    assert problems == []
     ctx.close()
 
 
@@ -905,6 +916,7 @@ def test_planner_shows_external_allocations_read_only(browser):
     expect(row).to_have_count(1)
     expect(row).to_contain_text("Example Freelance Studio")
     assert row.locator("[data-kind]").count() == 0  # no drag handles
+    assert problems == []
     ctx.close()
 
 
