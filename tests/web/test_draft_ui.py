@@ -83,3 +83,28 @@ def test_new_document_uses_project_then_customer_then_default_rate(browser, srv)
     pg.wait_for_timeout(300)
     assert price() == default
     ctx.close()
+
+
+def test_typing_while_customer_reprices_is_kept(browser, srv):
+    """Regression (journey seed 1337): picking a customer with its own rate reprices the line; that must not re-render
+    the form asynchronously and drop what the user typed meanwhile (here the quantity)."""
+    h = {"Authorization": "Bearer " + srv.token}
+    cust = httpx.post(srv.base + "/api/customers", headers=h, json={"name": "Rate GmbH", "rate": 111}).json()
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    ctx.add_init_script(f"localStorage.setItem('permita38.token', '{srv.token}')")
+    pg = ctx.new_page()
+    pg.goto(srv.base + "/#/doc/offers/new")
+    pg.wait_for_selector("#d_totals")
+
+    def slow(route):   # make any re-render's data load slow, so typing lands inside that window
+        pg.wait_for_timeout(600)
+        route.continue_()
+
+    pg.route("**/api/offers", slow)
+    pg.select_option("#d_cust", cust["id"])
+    pg.fill('[data-l="0"][data-k="qty"]', "8")
+    pg.wait_for_function('() => +document.querySelector(\'[data-l="0"][data-k="price"]\').value === 111')
+    pg.wait_for_timeout(1500)
+    assert pg.input_value('[data-l="0"][data-k="qty"]') == "8"
+    assert "Net 888,00" in " ".join(pg.inner_text("#d_totals").split()).replace("\xa0", " ")
+    ctx.close()

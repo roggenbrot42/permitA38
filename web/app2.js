@@ -247,8 +247,12 @@ function repriceNewDoc() {
   syncDoc();
   const rate = suggestedRate(DOC.customer_id, DOC.project_id);
   let changed = false;   // only lines we priced ourselves are touched, never a price typed by hand
-  DOC.lines.forEach(l => { if (AUTO_PRICED.has(l) && rate !== SUGGESTED_RATE) { l.price = rate; changed = true; } });
-  SUGGESTED_RATE = rate; if (changed) render();
+  DOC.lines.forEach((l, i) => {
+    if (!AUTO_PRICED.has(l) || rate === SUGGESTED_RATE) return;
+    l.price = rate; changed = true;
+    const inp = document.querySelector(`[data-l="${i}"][data-k="price"]`); if (inp) inp.value = rate;
+  });
+  SUGGESTED_RATE = rate; if (changed) recalcDoc();   // in place: an async re-render here would drop what is typed while it loads
 }
 const _origDoc = PAGES.doc;
 PAGES.doc = async (...a) => {
