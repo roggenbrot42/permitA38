@@ -98,7 +98,7 @@ def test_banner_bootstrap_clears_the_gap(srv, seeded, ui):
 def test_dialog_creates_edits_and_deletes_an_allocation(srv, seeded, ui):
     pid = seeded["project"]["id"]
     ui.goto(srv.base + f"/#/project/{pid}")
-    ui.locator(f"[data-a=allocations][data-project=\"{pid}\"]").click()
+    ui.locator(f'[data-a=allocations][data-project="{pid}"]').click()
     dlg = ui.locator("#modal-root .modal")
     dlg.get_by_role("button", name="+ Allocation").click()
     dlg.locator("#al_hours").fill("25")
