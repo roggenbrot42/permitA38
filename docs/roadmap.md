@@ -57,9 +57,6 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 | Item | Status |
 |---|---|
 | **Accounting** (chart of accounts SKR03/SKR04, journal, receipts) and the **German VAT return (UStVA)** | spec: [`specs/ustva.md`](specs/ustva.md); boxes need the tax adviser |
-| XLSX export; **DATEV export** (Buchungsstapel) | planned |
-| **E-invoice export / import**: XRechnung / ZUGFeRD (EN 16931) | planned |
-| **Mobile web app (PWA)** with offline-tolerant time tracking | planned (not started in code) |
 
 ## v0.4.0-alpha.6
 
@@ -77,6 +74,9 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 | Item | Status |
 |---|---|
 | AI-assisted input beyond the alpha.4 proposal queue: **OCR / LLM invoice scan pre-fill**, **bank statement matching** | planned |
+| XLSX export; **DATEV export** (Buchungsstapel) | planned (moved back, not needed now) |
+| **E-invoice export / import**: XRechnung / ZUGFeRD (EN 16931) | planned (moved back; issuing becomes mandatory for domestic B2B in 2027/2028 *(verify)*, so schedule it before then) |
+| **Mobile web app (PWA)** with offline-tolerant time tracking | planned (moved back, not started in code) |
 | German UI translation and the translation framework | planned |
 | Windows code signing, PyPI publication, macOS bundle decision | planned |
 | Coverage 90 %, upgrade tests from every alpha | planned |
@@ -110,8 +110,8 @@ release; `proposed` means not yet scheduled.
 
 | Item | Why it matters | Proposed release |
 |---|---|---|
-| **E-invoice receiving** (parse XRechnung/ZUGFeRD XML, archive the original) | Receiving e-invoices is already mandatory since 2025 *(verify)* | alpha.5 (first) |
-| **E-invoice issuing** (XRechnung / ZUGFeRD export) | Mandatory for all domestic B2B from 2028, for large businesses 2027 *(verify)* | alpha.5 |
+| **E-invoice receiving** (parse XRechnung/ZUGFeRD XML, archive the original) | Receiving e-invoices is already mandatory since 2025 *(verify)* | beta (moved back) |
+| **E-invoice issuing** (XRechnung / ZUGFeRD export) | Mandatory for all domestic B2B from 2028, for large businesses 2027 *(verify)* | beta (moved back; before the deadline) |
 | **GoBD change log (audit trail)** and **Verfahrensdokumentation generator** | GoBD core requirements | alpha.6 |
 | **Zusammenfassende Meldung (ZM)** for EU B2B services | Separate mandatory report next to the UStVA | alpha.5 |
 | **Annual VAT return** and **EÜR form export** (*Anlage EÜR*) | Year-end filing | alpha.6 |
@@ -127,7 +127,7 @@ release; `proposed` means not yet scheduled.
 | **Security baseline self-assessment (OWASP ASVS L2)** and **CRA readiness** review | Trust, regulatory outlook | beta |
 | **Accessibility audit (WCAG 2.2 AA)** | Usability, legal outlook | beta (PWA work starts it) |
 | **Privacy pack** (privacy notice, Art. 28 agreement outline, breach checklist, erasure concept) | GDPR for hosted instances | alpha.6 (with GDPR tooling) |
-| **Mobile web app (PWA)** with offline-tolerant time tracking | Phone use before a native app exists | alpha.5 |
+| **Mobile web app (PWA)** with offline-tolerant time tracking | Phone use before a native app exists | beta (moved back) |
 
 
 ## Recurring: quarterly tax-rule review
