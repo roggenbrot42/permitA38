@@ -78,6 +78,11 @@
   make architectural decisions: on ambiguity it picks the simplest option consistent with the spec and lists it under
   "Open design decisions" in its report, so the reviewer can confirm or change it before the merge.
 - **Review** (code, tests, logic) is done by the stronger model, see "Merge gate".
+- **Subagents.** Implementation tasks always run on the cheapest adequate model: the `implementer` agent
+  (`.claude/agents/implementer.md`, Haiku) does code, tests, docs, lint/CodeQL fixes and rebases; the `reviewer` agent
+  (`.claude/agents/reviewer.md`, Sonnet) does review passes; contracts, specifications and judgement calls stay with the
+  architect. Quality is protected by the review tiers and by hand-computed oracle numbers, not by a stronger
+  implementer. Always set `model` explicitly when starting an agent.
 
 ## Merge gate (before anything lands on `main`)
 - Implementation may be done with smaller/cheaper models. The review effort scales with the risk of the branch:
