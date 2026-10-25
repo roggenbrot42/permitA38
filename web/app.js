@@ -15,6 +15,8 @@ const mondayOf = s => { const d = parseD(s); d.setDate(d.getDate() - ((d.getDay(
 const fmtDate = s => s ? parseD(s).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
 const dayName = s => parseD(s).toLocaleDateString('en-GB', { weekday: 'short' });
 const isBoss = () => S.me && S.me.role === 'boss';
+/** The page of a boss-only area, shown to everybody else. */
+const denyMember = () => '<div class="card" role="alert">This page is only available to the boss.</div>';
 /* permissions come from the server with the user: S.me.permissions[area] = {read, write} with scope none|limited|all.
    The server enforces them; the UI only hides what a role cannot use. */
 const scopeOf = (area, op = 'read') => S.me?.permissions?.[area]?.[op] || 'none';
