@@ -219,9 +219,11 @@ class ApiMachine(RuleBasedStateMachine):
         r = self.http.request(method, "/api" + path, headers=headers, **kw)
         self.http.cookies.clear()
         assert r.status_code < 500, f"{method} {path} -> {r.status_code}: {r.text[:300]}"
-        sent = repr(kw)  # a value the client itself sent (e.g. a note that reads "password_hash") may be echoed back
+        # a value the client itself sent (e.g. a note that reads "password_hash") may be echoed back, also when it was
+        # sent by an earlier request and is stored on a record: everything sent so far counts as the client's own text
+        self.sent_text = getattr(self, "sent_text", "") + repr(kw)
         for word in SECRET_WORDS:
-            assert word in sent or word not in r.text, f"secret field {word!r} leaked by {method} {path}"
+            assert word in self.sent_text or word not in r.text, f"secret field {word!r} leaked by {method} {path}"
         if r.status_code >= 400:
             assert r.headers["content-type"].startswith("application/json"), (path, r.status_code, r.text[:100])
             assert "detail" in r.json(), (path, r.status_code, r.text[:100])
