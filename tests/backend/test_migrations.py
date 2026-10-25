@@ -501,9 +501,35 @@ def test_api_tokens_migration_creates_both_tables_with_the_unique_hash_index(tmp
             "idx_audit_log_token",
             "idx_audit_log_at",
         }
-        assert [m.name for m in database.list_migrations("sqlite")][-1] == "api_tokens"
+        assert "api_tokens" in [m.name for m in database.list_migrations("sqlite")]
         # the same migration exists in every dialect with the same id
-        ids = {d: database.list_migrations(d)[-1].id for d in ("sqlite", "postgresql", "mariadb")}
+        by_name = {d: {m.name: m.id for m in database.list_migrations(d)} for d in ("sqlite", "postgresql", "mariadb")}
+        ids = {d: by_name[d]["api_tokens"] for d in by_name}
         assert len(set(ids.values())) == 1
+    finally:
+        raw.close()
+
+
+def test_allocations_migration_has_both_owner_columns_indexes_and_the_one_owner_check(tmp_path):
+    repo = SQLiteRepository(tmp_path / "data")
+    repo.startup()
+    repo.close()
+    raw = sqlite3.connect(tmp_path / "data" / DB_FILENAME)
+    try:
+        cols = [r[1] for r in raw.execute('PRAGMA table_info("allocations")')]
+        assert cols == TABLES["allocations"].column_names + ["extra"]
+        assert "user_id" in cols and "supplier_id" in cols
+        assert {r[1] for r in raw.execute('PRAGMA index_list("allocations")')} >= {
+            "idx_allocations_user",
+            "idx_allocations_project",
+        }
+        ins = 'INSERT INTO "allocations" ("id", "user_id", "supplier_id", "project_id") VALUES (?, ?, ?, ?)'
+        raw.execute(ins, ("a1", "u1", None, "p1"))
+        raw.execute(ins, ("a2", None, "s1", "p1"))
+        for bad in (("a3", None, None, "p1"), ("a4", "u1", "s1", "p1")):
+            with pytest.raises(sqlite3.IntegrityError):
+                raw.execute(ins, bad)
+        by_name = {d: {m.name: m.id for m in database.list_migrations(d)} for d in ("sqlite", "postgresql", "mariadb")}
+        assert len({by_name[d]["allocations"] for d in by_name}) == 1
     finally:
         raw.close()

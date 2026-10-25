@@ -723,10 +723,102 @@ class CommitmentChange(v.CheckedBody):
         return self
 
 
+ALLOCATION_MAX_DAYS = 1830  # longest period of one allocation (about five years)
+
+
+def _check_alloc_period(start: str | None, end: str | None) -> None:
+    v.check_period(start, end)
+    if start and end and (datetime.strptime(end, "%Y-%m-%d") - datetime.strptime(start, "%Y-%m-%d")).days > ALLOCATION_MAX_DAYS:
+        raise ValueError(f"the period may be at most {ALLOCATION_MAX_DAYS} days")
+
+
+class AllocationChange(v.CheckedBody):
+    """What-if change of an employee allocation. ``id`` null = a new one; omitted fields keep the stored value."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: v.OptId = None
+    delete: bool = False
+    user_id: v.OptId = None
+    project_id: v.OptId = None  # never "unassigned": that scope is implicit
+    start: v.OptDate = None
+    end: v.OptDate = None
+    hours_per_week: v.AllocHours | None = None
+
+    @model_validator(mode="after")
+    def _rules(self):
+        _check_alloc_period(self.start, self.end)
+        if self.project_id == v.UNASSIGNED:
+            raise ValueError("project_id must be a project")
+        if self.delete and not self.id:
+            raise ValueError("delete needs an id")
+        if not self.id and not self.delete:
+            missing = [
+                k for k in ("user_id", "project_id", "start", "end", "hours_per_week") if getattr(self, k) is None
+            ]
+            if missing:
+                raise ValueError("a new allocation needs " + ", ".join(missing))
+        return self
+
+
 class ScenarioChanges(v.CheckedBody):
     model_config = ConfigDict(extra="forbid")
     absences: list[AbsenceChange] = Field(default=[], max_length=500)
     commitments: list[CommitmentChange] = Field(default=[], max_length=500)
+    allocations: list[AllocationChange] = Field(default=[], max_length=500)
+
+
+class AllocationIn(v.CheckedBody):
+    """An employee allocation: hours per week of one person given to one project for a period."""
+
+    model_config = ConfigDict(extra="forbid")
+    user_id: v.Id
+    project_id: v.Id  # never "unassigned": that scope is implicit
+    start: v.ISODate
+    end: v.ISODate  # end < start is a 409 of the service; a period beyond 1830 days is a 422
+    hours_per_week: v.AllocHours
+
+    @model_validator(mode="after")
+    def _rules(self):
+        if self.project_id == v.UNASSIGNED:
+            raise ValueError("project_id must be a project")
+        if self.end >= self.start:
+            _check_alloc_period(self.start, self.end)
+        return self
+
+
+class AllocationBootstrapIn(v.CheckedBody):
+    model_config = ConfigDict(extra="forbid")
+    confirm: bool = False
+
+
+class Allocation(BaseModel):
+    """Response: an employee or (once the subcontractor feature exists) external allocation."""
+
+    model_config = ConfigDict(extra="allow")
+    id: str
+    kind: Literal["employee", "external"]
+    user_id: str | None = None
+    supplier_id: str | None = None
+    incoming_offer_id: str | None = None
+    project_id: str
+    contract_id: str | None = None
+    customer_id: str | None = None
+    start: str
+    end: str
+    hours_per_week: float | None = None
+    total_hours: float | None = None
+    rate: float | None = None
+    status: str = "active"
+    cancelled_from: str | None = None
+    cancel_reason: str | None = None
+    created: int | None = None
+    updated: int | None = None
+    # response only
+    project_name: str | None = None
+    user_name: str | None = None
+    supplier_name: str | None = None
+    planned_hours: float | None = None
+    planning_warnings: list[dict] | None = None  # only in POST/PUT answers
 
 
 class TimerStartIn(v.CheckedBody):
