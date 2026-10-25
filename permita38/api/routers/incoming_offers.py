@@ -64,9 +64,7 @@ def get_offer(incoming_offer_id: OfferId, _: Reader, services: ServicesDep):
     name="update_incoming_offer",
 )
 def update_offer(incoming_offer_id: OfferId, body: models.IncomingOfferIn, _: Writer, services: ServicesDep):
-    return stored(
-        models.IncomingOffer, services.procurement.update(incoming_offer_id, body.model_dump(), date.today())
-    )
+    return stored(models.IncomingOffer, services.procurement.update(incoming_offer_id, body.model_dump(), date.today()))
 
 
 @router.delete("/{incoming_offer_id}", status_code=204, name="delete_incoming_offer")

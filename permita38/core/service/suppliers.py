@@ -7,6 +7,7 @@ their links to expenses.
 
 from __future__ import annotations
 
+import builtins
 import unicodedata
 from collections import defaultdict
 
@@ -68,8 +69,13 @@ class SupplierService:
         return limited(rec) if rights.scope_for(me, "suppliers") != Scope.ALL else rec
 
     def list(
-        self, me: dict, kind: str | None = None, active: bool | None = None, tag: str | None = None, q: str | None = None
-    ) -> list[dict]:
+        self,
+        me: dict,
+        kind: str | None = None,
+        active: bool | None = None,
+        tag: str | None = None,
+        q: str | None = None,
+    ) -> builtins.list[dict]:
         full = rights.scope_for(me, "suppliers") == Scope.ALL
         needle = (q or "").strip().casefold()
         rows = []
@@ -118,8 +124,8 @@ class SupplierService:
             rec.pop("import_batch", None)
         return {k: v for k, v in rec.items() if v is not None}
 
-    def warnings(self, rec: dict) -> list[dict]:
-        out: list[dict] = []
+    def warnings(self, rec: dict) -> builtins.list[dict]:
+        out: builtins.list[dict] = []
         number = str(rec.get("supplier_no") or "").strip().casefold()
         if number:
             for o in self.store.list("suppliers"):
@@ -174,7 +180,7 @@ class SupplierService:
             self.store.delete("suppliers", rid)
 
     # ------------------------------------------------------------------ vendor adoption
-    def _unlinked(self) -> list[dict]:
+    def _unlinked(self) -> builtins.list[dict]:
         return [
             e
             for e in self.store.list("expenses")
@@ -183,21 +189,22 @@ class SupplierService:
 
     def vendor_suggestions(self) -> dict:
         expenses = self._unlinked()
-        by_key: dict[str, list[dict]] = defaultdict(list)
+        by_key: dict[str, builtins.list[dict]] = defaultdict(list)
         for e in expenses:
             key = vendor_key(e["vendor"])
             if key:
                 by_key[key].append(e)
-        suppliers: dict[str, list[dict]] = defaultdict(list)
+        suppliers: dict[str, builtins.list[dict]] = defaultdict(list)
         for s in sorted(self.store.list("suppliers"), key=_sort_key):
             suppliers[vendor_key(str(s.get("name") or ""))].append(s)
-        groups = []
+        groups: builtins.list[dict] = []
         for key, rows in by_key.items():
             counts: dict[str, int] = defaultdict(int)
             for e in rows:
                 counts[e["vendor"]] += 1
             variants = sorted(counts, key=lambda t: (-counts[t], t))
-            best = (suppliers.get(key) or [None])[0]
+            candidates = suppliers.get(key) or []
+            best = candidates[0] if candidates else None
             groups.append(
                 dict(
                     key=key,
@@ -210,7 +217,7 @@ class SupplierService:
         groups.sort(key=lambda g: (-g["count"], g["key"]))
         return dict(groups=groups, unlinked_expenses=len(expenses))
 
-    def adopt_vendors(self, items: list[dict], dry_run: bool) -> dict:
+    def adopt_vendors(self, items: builtins.list[dict], dry_run: bool) -> dict:
         """Link expenses (``supplier_id`` null, ``vendor`` equal to one of the texts) to a supplier, creating it on
         request. ``vendor`` itself is never touched. A real run is one transaction."""
         for item in items:

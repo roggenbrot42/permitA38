@@ -109,6 +109,4 @@ def cancel_allocation(
     _: Annotated[dict, Needs("procurement", "write")],
     services: ServicesDep,
 ):
-    return stored(
-        models.Allocation, services.procurement.cancel_allocation(allocation_id, body.model_dump())
-    )
+    return stored(models.Allocation, services.procurement.cancel_allocation(allocation_id, body.model_dump()))

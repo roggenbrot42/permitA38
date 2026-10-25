@@ -5,8 +5,8 @@ from datetime import date
 
 import pytest
 
-import permita38.core.service.plan_service as plan_module
 import permita38.api.routers.incoming_offers as offers_router
+import permita38.core.service.plan_service as plan_module
 import permita38.core.service.procurement as procurement_module
 
 TODAY = date(2026, 3, 2)
@@ -38,8 +38,14 @@ def new_project(c, name):
 def supplier(c):
     r = c.post(
         "/api/suppliers",
-        json={"name": "Example Freelance Studio (Demo)", "kind": "person-capacity", "workdays": [0, 1, 2, 3],
-              "weekly_hours": 24, "rate": 80.0, "country": "DE"},
+        json={
+            "name": "Example Freelance Studio (Demo)",
+            "kind": "person-capacity",
+            "workdays": [0, 1, 2, 3],
+            "weekly_hours": 24,
+            "rate": 80.0,
+            "country": "DE",
+        },
     )
     assert r.status_code == 201, r.text
     return r.json()
@@ -47,9 +53,13 @@ def supplier(c):
 
 def accept_plan(c, sid, pid, start, end, hpw, net_hours=80, reference="ANG-2026-117"):
     body = {
-        "supplier_id": sid, "reference": reference, "received_on": "2026-02-20", "valid_until": "2026-03-31",
+        "supplier_id": sid,
+        "reference": reference,
+        "received_on": "2026-02-20",
+        "valid_until": "2026-03-31",
         "lines": [{"quantity": net_hours, "unit": "h", "unit_price": 80.0}],
-        "plan": {"start": start, "end": end, "hours_per_week": hpw}, "project_id": pid,
+        "plan": {"start": start, "end": end, "hours_per_week": hpw},
+        "project_id": pid,
     }
     r = c.post("/api/incoming-offers", json=body)
     assert r.status_code == 201, r.text
@@ -61,8 +71,15 @@ def accept_plan(c, sid, pid, start, end, hpw, net_hours=80, reference="ANG-2026-
 def contract(c, title, pid, user_ids, hpw, rate, start="2026-03-02", end="2026-03-27"):
     r = c.post(
         "/api/contracts",
-        json={"title": title, "project_id": pid, "start": start, "end": end, "hours_per_week": hpw, "rate": rate,
-              "user_ids": user_ids},
+        json={
+            "title": title,
+            "project_id": pid,
+            "start": start,
+            "end": end,
+            "hours_per_week": hpw,
+            "rate": rate,
+            "user_ids": user_ids,
+        },
     )
     assert r.status_code == 200, r.text
     return r.json()
@@ -85,7 +102,13 @@ def test_w4_contract_split_to_the_subcontractor_leaves_an_external_gap(boss_clie
     c_row = contract(boss_client, "Contract C_P", p["id"], [boss_id], 50.0, 100.0)
     alloc = boss_client.post(
         "/api/allocations",
-        json={"user_id": boss_id, "project_id": p["id"], "start": "2026-03-02", "end": "2026-03-27", "hours_per_week": 40.0},
+        json={
+            "user_id": boss_id,
+            "project_id": p["id"],
+            "start": "2026-03-02",
+            "end": "2026-03-27",
+            "hours_per_week": 40.0,
+        },
     )
     assert alloc.status_code == 201, alloc.text
     s = supplier(boss_client)
@@ -98,20 +121,34 @@ def test_w4_contract_split_to_the_subcontractor_leaves_an_external_gap(boss_clie
 
     # after: user_ids = [boss, S] -> C splits 25 h each
     contract_body = {k: c_row[k] for k in ("title", "project_id", "start", "end", "hours_per_week", "rate")}
-    r = boss_client.put(f"/api/contracts/{c_row['id']}", json={**contract_body, "user_ids": [boss_id, s["id"]],
-                                                              "status": "confirmed"})
+    r = boss_client.put(
+        f"/api/contracts/{c_row['id']}", json={**contract_body, "user_ids": [boss_id, s["id"]], "status": "confirmed"}
+    )
     assert r.status_code == 200, r.text
     fc = forecast(boss_client, 4)
     week = fc["weeks"][0]
     assert (week["capacity"], week["confirmed"], week["free_after_confirmed"], week["free_worst_case"]) == (
-        60.0, 50.0, 10.0, 10.0)
+        60.0,
+        50.0,
+        10.0,
+        10.0,
+    )
     assert (week["utilisation"], week["status"], week["gap"]) == (83.3, "over", 5.0)
     assert (week["revenue"], week["basis"], week["contracted_revenue"]) == (5000.0, "contract", 5000.0)
     assert (week["external_capacity"], week["external_assigned"], week["external_gap"], week["external_cost"]) == (
-        20.0, 25.0, 5.0, 1600.0)
+        20.0,
+        25.0,
+        5.0,
+        1600.0,
+    )
     assert week["external_by_project"] == [
-        {"project_id": p["id"], "external_capacity": 20.0, "external_assigned": 25.0, "external_gap": 5.0,
-         "external_cost": 1600.0}
+        {
+            "project_id": p["id"],
+            "external_capacity": 20.0,
+            "external_assigned": 25.0,
+            "external_gap": 5.0,
+            "external_cost": 1600.0,
+        }
     ]
     assert week["contributions"] == [
         {"kind": "contract", "id": c_row["id"], "title": "Contract C_P", "hours": 50.0, "binding": False}
@@ -123,37 +160,68 @@ def test_w4_contract_split_to_the_subcontractor_leaves_an_external_gap(boss_clie
     assert all(w["external_gap"] == 5.0 and w["external_cost"] == 1600.0 for w in fc["weeks"])
 
     t = fc["totals"]
-    assert (t["capacity"], t["confirmed"], t["free_after_confirmed"], t["free_worst_case"]) == (240.0, 200.0, 40.0, 40.0)
+    assert (t["capacity"], t["confirmed"], t["free_after_confirmed"], t["free_worst_case"]) == (
+        240.0,
+        200.0,
+        40.0,
+        40.0,
+    )
     assert (t["contracted_revenue"], t["revenue"], t["over_weeks"], t["gap"]) == (20000.0, 20000.0, 4, 20.0)
     assert t["gap_by_project"] == [{"project_id": p["id"], "name": "Demo project P", "gap": 20.0}]
-    assert (t["external_capacity"], t["external_gap"], t["external_cost"], t["margin"]) == (
-        80.0, 20.0, 6400.0, 13600.0)
+    assert (t["external_capacity"], t["external_gap"], t["external_cost"], t["margin"]) == (80.0, 20.0, 6400.0, 13600.0)
     pool_warnings = [w for w in fc["warnings"] if w["code"] == "capacity.gap" and w["details"]["pool"] == "external"]
     assert len(pool_warnings) == 4
     assert pool_warnings[0]["details"] == {
-        "project_id": p["id"], "project_name": "Demo project P", "week": "2026-03-02", "pool": "external",
-        "assigned": 25.0, "capacity": 20.0, "gap": 5.0, "contributions": []}
+        "project_id": p["id"],
+        "project_name": "Demo project P",
+        "week": "2026-03-02",
+        "pool": "external",
+        "assigned": 25.0,
+        "capacity": 20.0,
+        "gap": 5.0,
+        "contributions": [],
+    }
 
 
 # ----------------------------------------------------------------------------- W5: without the subcontractor
 def test_w5_without_suppliers_the_numbers_are_the_old_ones(boss_client, boss_id):
     p = new_project(boss_client, "Demo project P")
     c_row = contract(boss_client, "Contract C_P", p["id"], [boss_id], 50.0, 100.0)
-    boss_client.post("/api/allocations", json={"user_id": boss_id, "project_id": p["id"], "start": "2026-03-02",
-                                               "end": "2026-03-27", "hours_per_week": 40.0})
+    boss_client.post(
+        "/api/allocations",
+        json={
+            "user_id": boss_id,
+            "project_id": p["id"],
+            "start": "2026-03-02",
+            "end": "2026-03-27",
+            "hours_per_week": 40.0,
+        },
+    )
     s = supplier(boss_client)
     accept_plan(boss_client, s["id"], p["id"], "2026-03-02", "2026-03-27", 20.0)
     body = {k: c_row[k] for k in ("title", "project_id", "start", "end", "hours_per_week", "rate")}
-    assert boss_client.put(f"/api/contracts/{c_row['id']}",
-                           json={**body, "user_ids": [boss_id, s["id"]], "status": "confirmed"}).status_code == 200
+    assert (
+        boss_client.put(
+            f"/api/contracts/{c_row['id']}", json={**body, "user_ids": [boss_id, s["id"]], "status": "confirmed"}
+        ).status_code
+        == 200
+    )
 
     fc = forecast(boss_client, 4, include_external=0)
     week = fc["weeks"][0]
     assert (week["capacity"], week["confirmed"], week["free_after_confirmed"], week["free_worst_case"]) == (
-        40.0, 50.0, -10.0, -10.0)
+        40.0,
+        50.0,
+        -10.0,
+        -10.0,
+    )
     assert (week["utilisation"], week["status"], week["gap"], week["gap_confirmed"]) == (125.0, "over", 10.0, 10.0)
     assert (week["external_capacity"], week["external_assigned"], week["external_gap"], week["external_cost"]) == (
-        0.0, 0.0, 0.0, 0.0)
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
     assert week["external_by_project"] == []
     row = p_row(week, p["id"])
     assert row["internal"] == {"capacity": 40.0, "assigned": 50.0, "gap": 10.0}
@@ -161,7 +229,12 @@ def test_w5_without_suppliers_the_numbers_are_the_old_ones(boss_client, boss_id)
     assert row["external_cost"] == 0.0
     t = fc["totals"]
     assert (t["gap"], t["external_capacity"], t["external_gap"], t["external_cost"], t["margin"]) == (
-        40.0, 0.0, 0.0, 0.0, 20000.0)
+        40.0,
+        0.0,
+        0.0,
+        0.0,
+        20000.0,
+    )
     assert t["revenue"] == 20000.0
 
 

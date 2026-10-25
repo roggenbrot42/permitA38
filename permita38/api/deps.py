@@ -20,11 +20,11 @@ from permita38.core.service.calendar.service import CalendarService, ResourceFet
 from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.plan_service import PlanningService
+from permita38.core.service.procurement import ProcurementService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.sanity import SanityService
 from permita38.core.service.settings import SettingsService
-from permita38.core.service.procurement import ProcurementService
 from permita38.core.service.suppliers import SupplierService
 from permita38.core.service.team_timeline import TeamTimelineService
 from permita38.core.service.time import TimeService

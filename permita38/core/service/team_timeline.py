@@ -111,8 +111,9 @@ class TeamTimelineService:
             s, e = _day(r.get("start")), _day(r.get("end"))
             if s is None or e is None:
                 continue
-            if r.get("status") == "cancelled" and _day(r.get("cancelled_from")):
-                e = min(e, _day(r["cancelled_from"]) - timedelta(days=1))
+            cut = _day(r.get("cancelled_from")) if r.get("status") == "cancelled" else None
+            if cut is not None:
+                e = min(e, cut - timedelta(days=1))
             if e < s or e < start or s > end:
                 continue
             groups[r["supplier_id"]].append({"start": s.isoformat(), "end": e.isoformat()})
@@ -120,7 +121,7 @@ class TeamTimelineService:
             {"supplier_id": sid, "name": names.get(sid, ""), "windows": sorted(ws, key=lambda w: w["start"])}
             for sid, ws in groups.items()
         ]
-        out.sort(key=lambda g: (g["name"].casefold(), g["supplier_id"]))
+        out.sort(key=lambda g: (str(g["name"]).casefold(), str(g["supplier_id"])))
         return out
 
     def _people(self, viewer: dict) -> list[dict]:

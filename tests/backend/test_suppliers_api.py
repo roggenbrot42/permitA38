@@ -28,9 +28,7 @@ def test_create_returns_stored_record_with_derived_fields(boss_client):
 def test_bad_iban_format_and_capacity_rules_are_422(boss_client):
     assert make_supplier(boss_client, iban="XX").status_code == 422
     assert make_supplier(boss_client, weekly_hours=10).status_code == 422  # capacity field on a company
-    cap = boss_client.post(
-        "/api/suppliers", json={"name": "Person Capacity", "kind": "person-capacity"}
-    )
+    cap = boss_client.post("/api/suppliers", json={"name": "Person Capacity", "kind": "person-capacity"})
     assert cap.status_code == 422  # weekly_hours required for a subcontractor
     assert make_supplier(boss_client, login_user_id="u1b2c3d4").status_code == 422
 
@@ -56,11 +54,24 @@ def test_list_filters_and_sort_by_name(boss_client):
 
 
 def test_employee_sees_the_limited_view_only(boss_client, member_client):
-    make_supplier(boss_client, name="Example Freelance Studio", kind="company", iban="DE89370400440532013000",
-                  contact="Secret Person", tags=["frontend"])
+    make_supplier(
+        boss_client,
+        name="Example Freelance Studio",
+        kind="company",
+        iban="DE89370400440532013000",
+        contact="Secret Person",
+        tags=["frontend"],
+    )
     rows = member_client.get("/api/suppliers").json()
-    assert rows == [{"id": rows[0]["id"], "name": "Example Freelance Studio", "kind": "company",
-                     "tags": ["frontend"], "active": True}]
+    assert rows == [
+        {
+            "id": rows[0]["id"],
+            "name": "Example Freelance Studio",
+            "kind": "company",
+            "tags": ["frontend"],
+            "active": True,
+        }
+    ]
     detail = member_client.get(f"/api/suppliers/{rows[0]['id']}").json()
     assert "iban" not in detail and "contact" not in detail
     # q matches the name only for the employee
@@ -122,9 +133,7 @@ def test_expense_links_are_checked(boss_client):
     s = make_supplier(boss_client).json()
     bad = boss_client.post("/api/expenses", json={"date": "2026-03-05", "net": 5, "supplier_id": "5d1c0aa2"})
     assert bad.status_code == 422 and bad.json() == {"detail": "Unknown supplier"}
-    no_sup = boss_client.post(
-        "/api/expenses", json={"date": "2026-03-05", "net": 5, "allocation_id": "5d1c0aa2x"}
-    )
+    no_sup = boss_client.post("/api/expenses", json={"date": "2026-03-05", "net": 5, "allocation_id": "5d1c0aa2x"})
     assert no_sup.status_code == 422 and no_sup.json() == {"detail": "allocation_id needs a supplier"}
     linked = boss_client.post(
         "/api/expenses", json={"date": "2026-03-05", "net": 5, "vendor": "typed", "supplier_id": s["id"]}
@@ -139,8 +148,9 @@ def test_delete_unreferenced_supplier_and_archive_referenced_one(boss_client):
     kept = make_supplier(boss_client, name="Used").json()
     expense(boss_client, "Used", 5, supplier_id=kept["id"])
     assert boss_client.delete(f"/api/suppliers/{kept['id']}").status_code == 409
-    archived = boss_client.put(f"/api/suppliers/{kept['id']}", json={"name": "Used", "kind": "company",
-                                                                     "active": False})
+    archived = boss_client.put(
+        f"/api/suppliers/{kept['id']}", json={"name": "Used", "kind": "company", "active": False}
+    )
     assert archived.status_code == 200 and archived.json()["active"] is False
 
 

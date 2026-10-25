@@ -95,7 +95,8 @@ class AllocationService:
         out.update(self.external_figures(row, supplier, cap, invoiced.get(row["id"], ZERO)))
         if days:
             out["days"] = [
-                {"date": x.isoformat(), "hours": round(h, 6)} for x, h in sorted(ext.allocation_days(supplier or {}, row, cap).items())
+                {"date": x.isoformat(), "hours": round(h, 6)}
+                for x, h in sorted(ext.allocation_days(supplier or {}, row, cap).items())
             ]
         return out
 

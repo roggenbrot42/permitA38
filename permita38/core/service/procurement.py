@@ -7,6 +7,7 @@ allocation come from ``external_capacity.allocation_days`` (the one spreading fu
 
 from __future__ import annotations
 
+import builtins
 from collections import defaultdict
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -119,10 +120,10 @@ class ProcurementService:
         if mode in NO_VAT_MODES:
             rate, vat = Decimal(0), ZERO
         else:
-            rate = data.get("vat_rate")
-            if rate is None:
-                rate = 19 if mode == "domestic" else 0
-            rate = dec(rate)
+            rate_value = data.get("vat_rate")
+            if rate_value is None:
+                rate_value = 19 if mode == "domestic" else 0
+            rate = dec(rate_value)
             vat = q2(net * rate / 100)
         return dict(
             hours=float(hours),
@@ -149,8 +150,8 @@ class ProcurementService:
                 raise ServiceError(422, "The contract is not a contract of this project")
         return supplier, project
 
-    def _warnings(self, rec: dict, supplier: dict) -> list[dict]:
-        out: list[dict] = []
+    def _warnings(self, rec: dict, supplier: dict) -> builtins.list[dict]:
+        out: builtins.list[dict] = []
         plan = rec.get("plan")
         if plan:
             planned = pw.plan_hours(plan)
@@ -294,9 +295,12 @@ class ProcurementService:
         contract_id = body.get("contract_id") or rec.get("contract_id")
         decision = body.get("decision_note") if body.get("decision_note") is not None else rec.get("decision_note")
         if supplier.get("kind") != CAPACITY_KIND:
-            saved = self.store.save("incoming_offers", self._stamp(
-                rec, "accepted", me, today, decision_note=decision, project_id=project_id, contract_id=contract_id
-            ))
+            saved = self.store.save(
+                "incoming_offers",
+                self._stamp(
+                    rec, "accepted", me, today, decision_note=decision, project_id=project_id, contract_id=contract_id
+                ),
+            )
             return {
                 "offer": self._present(saved, today),
                 "allocation": None,
@@ -339,7 +343,9 @@ class ProcurementService:
         row["rate"] = _rate_of(h_net, h_qty)
         warnings = self._accept_warnings(supplier, row, rec)
         blocking = list(
-            dict.fromkeys(w["code"] for w in warnings if w["confirmable"] and w["code"] not in body.get("confirm_warnings", []))
+            dict.fromkeys(
+                w["code"] for w in warnings if w["confirmable"] and w["code"] not in body.get("confirm_warnings", [])
+            )
         )
         if blocking:
             raise ServiceError(
@@ -374,7 +380,7 @@ class ProcurementService:
             "planning_warnings": warnings + nodemand,
         }
 
-    def _first_week_without_demand(self, alloc: dict, today: date) -> list[dict]:
+    def _first_week_without_demand(self, alloc: dict, today: date) -> builtins.list[dict]:
         """``allocation.no_demand`` for the first week of a new allocation whose project pool has capacity and no
         demand (the planner decides; docs/contracts/subcontractors.md, W1 and W14)."""
         from . import planning as eng  # local import: the planner is the heavy part of the engine
@@ -383,7 +389,11 @@ class ProcurementService:
         world = eng.load(self.store, today)
         rows, _ = eng.weeks_detail(world, week, 1, None, alloc["project_id"])
         for p in rows[0]["projects"] if rows else []:
-            if p["project_id"] == alloc["project_id"] and p["external"]["capacity"] > 1e-9 and p["external"]["assigned"] <= 1e-9:
+            if (
+                p["project_id"] == alloc["project_id"]
+                and p["external"]["capacity"] > 1e-9
+                and p["external"]["assigned"] <= 1e-9
+            ):
                 return [
                     pw.warning(
                         "allocation.no_demand",
@@ -403,10 +413,10 @@ class ProcurementService:
                 ]
         return []
 
-    def _accept_warnings(self, supplier: dict, row: dict, rec: dict) -> list[dict]:
+    def _accept_warnings(self, supplier: dict, row: dict, rec: dict) -> builtins.list[dict]:
         cap = self._cap()
         candidate = {**row, "id": "candidate", "status": "active"}
-        out: list[dict] = []
+        out: builtins.list[dict] = []
         days = ext.allocation_days(supplier, candidate, cap)
         sid = supplier["id"]
         if not days:
@@ -447,14 +457,14 @@ class ProcurementService:
             out.append(hint)
         return out
 
-    def _outside(self, supplier: dict, candidate: dict, cap: calc.Capacity) -> list[dict]:
+    def _outside(self, supplier: dict, candidate: dict, cap: calc.Capacity) -> builtins.list[dict]:
         """Unavailable workdays inside the plan (not holidays): the hours that would have been booked there are dropped."""
         start, end = calc.d(candidate["start"]), calc.d(candidate["end"])
         wd = set(ext.workdays(supplier))
         windows = ext.unavailable_windows(supplier)
         if not windows:
             return []
-        days: list[str] = []
+        days: builtins.list[str] = []
         x = start
         while x <= end:
             if x.weekday() in wd and not cap.holiday(x) and any(a <= x <= b for a, b in windows):
@@ -479,7 +489,7 @@ class ProcurementService:
             )
         ]
 
-    def _weekly(self, supplier: dict, candidate: dict, cap: calc.Capacity) -> list[dict]:
+    def _weekly(self, supplier: dict, candidate: dict, cap: calc.Capacity) -> builtins.list[dict]:
         limit = calc.fnum(supplier.get("weekly_hours"))
         rows = [
             r
@@ -533,8 +543,8 @@ class ProcurementService:
             for w, h in ext.weekly_hours(ext.allocation_days(supplier, r, cap)).items():
                 weeks[w] += h
         counting = sorted(w for w, h in weeks.items() if round(h, 6) >= threshold_h)
-        best: list[date] = []
-        run: list[date] = []
+        best: builtins.list[date] = []
+        run: builtins.list[date] = []
         for w in counting:
             run = run + [w] if run and w - run[-1] == timedelta(days=7) else [w]
             if len(run) > len(best):
@@ -552,7 +562,9 @@ class ProcurementService:
             "to": (best[-1] + timedelta(days=6)).isoformat() if best else None,
         }
 
-    def dependency_hint(self, supplier: dict, extra: dict | None = None, cap: calc.Capacity | None = None) -> dict | None:
+    def dependency_hint(
+        self, supplier: dict, extra: dict | None = None, cap: calc.Capacity | None = None
+    ) -> dict | None:
         res = self.dependency(supplier, extra, cap)
         if not res["raised"]:
             return None
@@ -581,8 +593,19 @@ class ProcurementService:
         if supplier.get("kind") != CAPACITY_KIND:
             raise ServiceError(409, "Not a subcontractor")
         res = self.dependency(supplier)
-        return {k: res[k] for k in ("supplier_id", "threshold_hours_per_week", "threshold_weeks", "raised",
-                                    "longest_run_weeks", "average_hours_per_week", "from", "to")}
+        return {
+            k: res[k]
+            for k in (
+                "supplier_id",
+                "threshold_hours_per_week",
+                "threshold_weeks",
+                "raised",
+                "longest_run_weeks",
+                "average_hours_per_week",
+                "from",
+                "to",
+            )
+        }
 
     def allocation(self, aid: str, me: dict) -> dict:
         """External rows with their days; employee rows only for callers who may plan (then without days)."""
@@ -607,14 +630,13 @@ class ProcurementService:
             if aid:
                 alloc = self.store.get("allocations", aid)
                 linked = self.store.find("expenses", allocation_id=aid)
-                started = bool(alloc) and calc.d(alloc.get("start")) is not None and calc.d(alloc["start"]) <= today
+                start = calc.d(alloc.get("start")) if alloc else None
+                started = start is not None and start <= today
                 if started or linked:
                     raise ServiceError(409, "The allocation has started or has linked expenses; cancel it instead")
                 if alloc:
                     self.store.delete("allocations", aid)
-            saved = self.store.save(
-                "incoming_offers", self._stamp(rec, "under_review", me, today, allocation_id=None)
-            )
+            saved = self.store.save("incoming_offers", self._stamp(rec, "under_review", me, today, allocation_id=None))
         return self._present(saved, today)
 
     def cancel_allocation(self, aid: str, body: dict, today: date | None = None) -> dict:
@@ -656,7 +678,7 @@ class ProcurementService:
         suppliers = {s["id"]: s for s in self.store.list("suppliers")}
         projects = {p["id"]: p for p in self.store.list("projects")}
         offers = {o["id"]: o for o in self.store.list("incoming_offers")}
-        items: list[dict] = []
+        items: builtins.list[dict] = []
         for row in self.store.list("allocations"):
             if not row.get("supplier_id") or row.get("user_id"):
                 continue
@@ -725,7 +747,7 @@ class ProcurementService:
             hints=self.hints(today),
         )
 
-    def expense_warnings(self, rec: dict) -> list[dict]:
+    def expense_warnings(self, rec: dict) -> builtins.list[dict]:
         """``allocation.invoiced_exceeds_planned``: the expenses linked to an external allocation (this one included)
         are more than its planned net (docs/contracts/subcontractors.md, W10)."""
         from .allocations import AllocationService  # local import, see above
@@ -774,10 +796,10 @@ class ProcurementService:
             out[row["project_id"]] += dec(svc.present_one(row).get("planned_net"))
         return {k: float(q2(v)) for k, v in out.items()}
 
-    def hints(self, today: date) -> list[dict]:
+    def hints(self, today: date) -> builtins.list[dict]:
         """``business.customer_dominance`` when one customer's share of the trailing-12-month revenue reaches the
         configured percentage (exact decimals)."""
-        out: list[dict] = []
+        out: builtins.list[dict] = []
         pct = Decimal(str(self._setting("customer_dominance_percent", 83.0)))
         settings = self.store.settings()
         accrual = settings.get("accounting", "eur") == "accrual"
@@ -829,14 +851,22 @@ class ProcurementService:
         return rights.scope_for(me, "planning") != Scope.NONE
 
 
-def _group(items: list[dict], key: str, name_key: str, out_name: str, none_name: str | None = None) -> list[dict]:
+def _group(
+    items: builtins.list[dict], key: str, name_key: str, out_name: str, none_name: str | None = None
+) -> builtins.list[dict]:
     groups: dict[Any, dict] = {}
     for i in items:
         gid = i.get(key)
         g = groups.setdefault(
             gid,
-            {key: gid, out_name: (i.get(name_key) if gid is not None else none_name), "planned": ZERO,
-             "invoiced": ZERO, "invoiced_seen": False, "open": ZERO},
+            {
+                key: gid,
+                out_name: (i.get(name_key) if gid is not None else none_name),
+                "planned": ZERO,
+                "invoiced": ZERO,
+                "invoiced_seen": False,
+                "open": ZERO,
+            },
         )
         g["planned"] += dec(i.get("planned_net"))
         if i.get("invoiced_net") is not None:
@@ -858,7 +888,7 @@ def _group(items: list[dict], key: str, name_key: str, out_name: str, none_name:
     return rows
 
 
-def _totals(items: list[dict]) -> dict:
+def _totals(items: builtins.list[dict]) -> dict:
     planned = sum((dec(i.get("planned_net")) for i in items), ZERO)
     invoiced = sum((dec(i["invoiced_net"]) for i in items if i.get("invoiced_net") is not None), ZERO)
     opened = sum((dec(i.get("open_net")) for i in items), ZERO)

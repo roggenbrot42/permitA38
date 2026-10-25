@@ -109,10 +109,22 @@ def test_w1_offer_figures_and_accept_creates_the_external_allocation(boss_client
     assert days == [
         {"date": d, "hours": 5.0}
         for d in [
-            "2026-03-02", "2026-03-03", "2026-03-04", "2026-03-05",
-            "2026-03-09", "2026-03-10", "2026-03-11", "2026-03-12",
-            "2026-03-16", "2026-03-17", "2026-03-18", "2026-03-19",
-            "2026-03-23", "2026-03-24", "2026-03-25", "2026-03-26",
+            "2026-03-02",
+            "2026-03-03",
+            "2026-03-04",
+            "2026-03-05",
+            "2026-03-09",
+            "2026-03-10",
+            "2026-03-11",
+            "2026-03-12",
+            "2026-03-16",
+            "2026-03-17",
+            "2026-03-18",
+            "2026-03-19",
+            "2026-03-23",
+            "2026-03-24",
+            "2026-03-25",
+            "2026-03-26",
         ]
     ]
     codes = {w["code"] for w in body["planning_warnings"]}
@@ -227,8 +239,13 @@ def test_w9_cancel_keeps_the_days_before_the_cut_and_w10_floors_the_open_net(bos
 
     e = boss_client.post(
         "/api/expenses",
-        json={"date": "2026-03-10", "net": 1600, "vendor": "Example Freelance Studio (Demo)",
-              "supplier_id": s["id"], "allocation_id": alloc["id"]},
+        json={
+            "date": "2026-03-10",
+            "net": 1600,
+            "vendor": "Example Freelance Studio (Demo)",
+            "supplier_id": s["id"],
+            "allocation_id": alloc["id"],
+        },
     )
     assert e.status_code == 200, e.text  # expenses answer 200 on create, as before
     assert e.json()["sanity_warnings"] == []  # 1600 is within the 3200 planned
@@ -242,14 +259,23 @@ def test_w9_cancel_keeps_the_days_before_the_cut_and_w10_floors_the_open_net(bos
 
     over = boss_client.post(
         "/api/expenses",
-        json={"date": "2026-03-11", "net": 1700, "vendor": "Example Freelance Studio (Demo)",
-              "supplier_id": s["id"], "allocation_id": alloc["id"]},
+        json={
+            "date": "2026-03-11",
+            "net": 1700,
+            "vendor": "Example Freelance Studio (Demo)",
+            "supplier_id": s["id"],
+            "allocation_id": alloc["id"],
+        },
     )
     assert over.status_code == 200, over.text
     warn = [w for w in over.json()["sanity_warnings"] if w["code"] == "allocation.invoiced_exceeds_planned"]
     assert len(warn) == 1
-    assert warn[0]["details"] == {"allocation_id": alloc["id"], "planned_net": 3200.0, "invoiced_net": 3300.0,
-                                  "excess": 100.0}
+    assert warn[0]["details"] == {
+        "allocation_id": alloc["id"],
+        "planned_net": 3200.0,
+        "invoiced_net": 3300.0,
+        "excess": 100.0,
+    }
     final = boss_client.get(f"/api/allocations/{alloc['id']}").json()
     assert (final["invoiced_net"], final["open_net"]) == (3300.0, 0.0)
 
@@ -292,8 +318,13 @@ def test_w11_second_allocation_over_the_weekly_hours_needs_confirmation(boss_cli
     weekly = [w for w in ok.json()["planning_warnings"] if w["code"] == "allocation.exceeds_weekly_hours"]
     first_week = weekly[0]
     assert first_week["confirmable"] is True
-    assert first_week["details"] == {"supplier_id": s["id"], "week": "2026-03-02", "allocated": 28.0,
-                                     "weekly_hours": 24.0, "over_by": 4.0}
+    assert first_week["details"] == {
+        "supplier_id": s["id"],
+        "week": "2026-03-02",
+        "allocated": 28.0,
+        "weekly_hours": 24.0,
+        "over_by": 4.0,
+    }
     assert first_week["message"] == (
         "Example Freelance Studio (Demo) would be allocated 28 h in the week of 2026-03-02, 4 h above the 24 h per "
         "week they can offer."
@@ -347,8 +378,11 @@ def test_dependency_of_a_company_is_409(boss_client):
 
 # ----------------------------------------------------------------------------- status machine (table driven)
 ALLOWED = {
-    ("received", "review"), ("received", "reject"), ("received", "accept"),
-    ("under_review", "accept"), ("under_review", "reject"),
+    ("received", "review"),
+    ("received", "reject"),
+    ("received", "accept"),
+    ("under_review", "accept"),
+    ("under_review", "reject"),
     ("rejected", "reopen"),
     ("accepted", "unaccept"),
 }
@@ -356,10 +390,16 @@ ACTIONS = ("review", "reject", "reopen", "accept", "unaccept")
 
 
 def _offer_in_status(c, project, supplier, status):
-    offer = post_offer(c, {
-        "supplier_id": supplier["id"], "received_on": "2026-02-20", "valid_until": "2026-03-31",
-        "lines": [{"quantity": 2, "unit": "h", "unit_price": 50.0}], "project_id": project["id"],
-    })
+    offer = post_offer(
+        c,
+        {
+            "supplier_id": supplier["id"],
+            "received_on": "2026-02-20",
+            "valid_until": "2026-03-31",
+            "lines": [{"quantity": 2, "unit": "h", "unit_price": 50.0}],
+            "project_id": project["id"],
+        },
+    )
     oid = offer["id"]
     if status == "under_review":
         assert c.post(f"/api/incoming-offers/{oid}/review").status_code == 200
@@ -393,7 +433,10 @@ def test_accepted_offer_locks_all_but_notes(boss_client, project):
     supplier = company_supplier(boss_client, name="Lock Test")
     oid = _offer_in_status(boss_client, project, supplier, "accepted")
     current = boss_client.get(f"/api/incoming-offers/{oid}").json()
-    body = {k: current.get(k) for k in ("supplier_id", "reference", "title", "received_on", "valid_until", "lines", "project_id")}
+    body = {
+        k: current.get(k)
+        for k in ("supplier_id", "reference", "title", "received_on", "valid_until", "lines", "project_id")
+    }
     body["lines"] = [{"quantity": 2, "unit": "h", "unit_price": 50.0}]
     bad = boss_client.put(f"/api/incoming-offers/{oid}", json={**body, "reference": "CHANGED"})
     assert bad.status_code == 409
@@ -412,8 +455,10 @@ def test_unaccept_of_a_flat_commitment_is_always_allowed(boss_client, project):
 
 def test_unaccept_rules_for_a_capacity_allocation(boss_client, project):
     s = capacity_supplier(boss_client)
-    future = post_offer(boss_client, offer_w1(s["id"], project["id"], plan={
-        "start": "2026-03-09", "end": "2026-03-27", "hours_per_week": 20.0}))
+    future = post_offer(
+        boss_client,
+        offer_w1(s["id"], project["id"], plan={"start": "2026-03-09", "end": "2026-03-27", "hours_per_week": 20.0}),
+    )
     acc = accept(boss_client, future["id"]).json()
     assert boss_client.post(f"/api/incoming-offers/{future['id']}/unaccept").status_code == 200
     assert boss_client.get(f"/api/allocations/{acc['allocation']['id']}").status_code == 404
@@ -434,10 +479,16 @@ def test_delete_of_a_referenced_supplier_is_409(boss_client, project):
 # ----------------------------------------------------------------------------- commitments
 def test_flat_commitment_of_an_accepted_plain_supplier_offer(boss_client, project):
     supplier = company_supplier(boss_client, name="Demo Print Shop GmbH")
-    offer = post_offer(boss_client, {
-        "supplier_id": supplier["id"], "reference": "L-77", "received_on": "2026-02-20",
-        "lines": [{"quantity": 37.5, "unit": "h", "unit_price": 82.45}], "vat_rate": 19,
-    })
+    offer = post_offer(
+        boss_client,
+        {
+            "supplier_id": supplier["id"],
+            "reference": "L-77",
+            "received_on": "2026-02-20",
+            "lines": [{"quantity": 37.5, "unit": "h", "unit_price": 82.45}],
+            "vat_rate": 19,
+        },
+    )
     r = accept(boss_client, offer["id"])
     assert r.status_code == 200
     assert r.json()["allocation"] is None

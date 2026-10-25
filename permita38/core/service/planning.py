@@ -529,7 +529,7 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
             if member is None and sub is None:
                 continue
             target = per_item if member is not None else per_ext
-            wdset = _workset(member) if member is not None else set(ext.workdays(sub))
+            wdset = _workset(member) if member is not None else set(ext.workdays(sub or {}))
             share = 1.0 / len(it.assignees)
             if it.hpw:
                 # spread over the days of the week the person can actually work (workdays that are neither a public
