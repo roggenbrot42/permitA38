@@ -260,7 +260,7 @@
     await SUP.load();
     Object.assign(AD, { groups: r.groups || [], preview: null, busy: false, use: null });
     modal(`<h2>Link expense vendors to suppliers</h2><div id="ad_body"></div><div class="actions"><button type="button" id="ad_close" data-a="supAdoptClose">Close</button><button type="button" id="ad_check" data-a="supAdoptRun" data-dry="1">Check</button><button type="button" class="primary" id="ad_go" data-a="supAdoptRun" data-dry="0" disabled>Link expenses</button></div>`, true);
-    $('#modal-root').onkeydown = e => { if (e.key === 'Escape') closeModal(); };
+    $('#modal-root').onkeydown = e => { if (e.key === 'Escape') A.supAdoptClose(); };   // same as Close: the list refreshes after linking
     adoptPaint();
   };
   A.supAdoptClose = () => { closeModal(); render(); };

@@ -230,7 +230,7 @@
     const sup = await api('GET', 'suppliers/' + encodeURIComponent(o.supplier_id)).catch(() => null);
     Object.assign(AC, { offer: o, supplier: sup, codes: [], error: '', result: null, busy: false, pid: undefined, cid: undefined, note: '', expired: false });
     modal('<div id="ac_box"></div>', true);
-    $('#modal-root').onkeydown = e => { if (e.key === 'Escape') closeModal(); };
+    $('#modal-root').onkeydown = e => { if (e.key === 'Escape') A.offAcceptClose(); };   // same as the Close button: the page refreshes when the offer was accepted
     acceptPaint();
   };
   A.offAcceptProject = el => { AC.pid = el.value; AC.cid = ''; AC.note = $('#ac_note')?.value; AC.expired = $('#ac_expired')?.checked; acceptPaint(); };
