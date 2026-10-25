@@ -219,12 +219,20 @@ class SupplierService:
 
     def adopt_vendors(self, items: builtins.list[dict], dry_run: bool, me: dict) -> dict:
         """Link expenses (``supplier_id`` null, ``vendor`` equal to one of the texts) to a supplier, creating it on
-        request. The expenses are written through the record rules (RecordService), ``vendor`` stays as typed. A real
-        run is one transaction; the selection is read inside it, so a concurrent change cannot be applied twice."""
-        if dry_run:
-            return self._adopt(items, True, me)
-        with self.store.transaction():
-            return self._adopt(items, False, me)
+        request. Every expense goes through the record rules (RecordService); an expense the rules refuse is skipped
+        and listed under ``skipped`` with the reason. ``vendor`` stays as typed. A real run is one transaction; a dry
+        run takes the same steps and rolls them back, so both answer alike."""
+        holder: dict = {}
+        try:
+            with self.store.transaction():
+                holder["out"] = self._adopt(items, dry_run, me)
+                if dry_run:
+                    raise _DryRunDone()
+        except _DryRunDone:
+            pass
+        out = holder["out"]
+        out["dry_run"] = dry_run
+        return out
 
     def _adopt(self, items: builtins.list[dict], dry_run: bool, me: dict) -> dict:
         from .records import RecordService  # local: records and suppliers are siblings
@@ -240,30 +248,45 @@ class SupplierService:
             ids = [e["id"] for e in self._unlinked() if e["vendor"] in texts and e["id"] not in claimed]
             claimed.update(ids)
             plan.append((item, ids))
+        records = RecordService(self.store)
+        skipped: builtins.list[dict] = []
         out_items = []
         changed = 0
         for item, ids in plan:
-            sid = item.get("supplier_id")
             creating = item.get("create") is not None
+            sid = item.get("supplier_id")
             created = False
-            if ids and creating and not dry_run:
-                sid = self.store.save("suppliers", self.prepare(item["create"]))["id"]
-                created = True
-            if ids and not dry_run:
-                records = RecordService(self.store)
-                for eid in ids:
-                    exp = self.store.get("expenses", eid)
-                    if exp and not exp.get("supplier_id") and sid:
-                        records.adopt_expense(me, exp, str(sid))
-            changed += len(ids)
+            applied: builtins.list[str] = []
+            for eid in ids:
+                exp = self.store.get("expenses", eid)
+                if not exp or exp.get("supplier_id"):
+                    continue
+                if creating and sid is None:  # created with the first expense that is accepted
+                    sid = self.store.save("suppliers", self.prepare(item["create"]))["id"]
+                    created = True
+                try:
+                    records.adopt_expense(me, exp, str(sid))
+                except ServiceError as err:
+                    skipped.append({"expense_id": eid, "reason": err.message})
+                    continue
+                applied.append(eid)
+            if created and not applied and sid:  # nothing was adopted: the supplier made for it is taken back
+                self.store.delete("suppliers", str(sid))
+                created, sid = False, None
+            changed += len(applied)
+            shown = None if (creating and dry_run) else sid
             out_items.append(
                 dict(
                     vendors=item["vendors"],
-                    supplier_id=sid if (sid or not creating) else None,
-                    supplier_created=created,
-                    would_create=bool(creating and ids),
-                    expense_ids=ids,
-                    count=len(ids),
+                    supplier_id=shown,
+                    supplier_created=created and not dry_run,
+                    would_create=bool(creating and applied),
+                    expense_ids=applied,
+                    count=len(applied),
                 )
             )
-        return dict(dry_run=dry_run, items=out_items, expenses_changed=changed)
+        return dict(items=out_items, expenses_changed=changed, skipped=skipped)
+
+
+class _DryRunDone(Exception):
+    """Leaves the dry run's transaction (rolled back)."""

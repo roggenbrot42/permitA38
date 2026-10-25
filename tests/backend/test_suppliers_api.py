@@ -158,3 +158,41 @@ def test_delete_unreferenced_supplier_and_archive_referenced_one(boss_client):
 def test_plain_suppliers_have_no_capacity(boss_client, kind):
     r = boss_client.post("/api/suppliers", json={"name": f"Plain {kind}", "kind": kind, "rate": 80.0})
     assert r.status_code == 422
+
+
+@pytest.fixture
+def store(app, boss_client):
+    return app.state.services.store
+
+
+def test_adopt_skips_an_expense_the_record_rules_refuse_and_dry_run_says_the_same(boss_client, store):
+    """An old expense with a VAT rate the rules do not allow is skipped (reported with a reason); the others are
+    adopted; a dry run reports the same; a supplier is created only when an expense is actually adopted."""
+    ok = expense(boss_client, "demo print shop", 10)
+    broken = store.save(
+        "expenses", {"date": "2026-03-05", "net": 10.0, "vat": 1.3, "vat_rate": 13.0, "vendor": "Broken Shop"}
+    )
+    items = [
+        {"vendors": ["Broken Shop", "demo print shop"], "create": {"name": "Print Shop", "kind": "company"}},
+    ]
+    dry = boss_client.post("/api/suppliers/adopt-vendors", json={"dry_run": True, "items": items}).json()
+    real = boss_client.post("/api/suppliers/adopt-vendors", json={"dry_run": False, "items": items}).json()
+    assert [s["expense_id"] for s in dry["skipped"]] == [broken["id"]]
+    assert dry["skipped"][0]["reason"]  # a reason is given
+    assert dry["skipped"] == real["skipped"]
+    assert dry["expenses_changed"] == real["expenses_changed"] == 1
+    assert dry["items"][0]["expense_ids"] == real["items"][0]["expense_ids"] == [ok["id"]]
+    assert (dry["items"][0]["supplier_created"], dry["items"][0]["supplier_id"]) == (False, None)
+    assert real["items"][0]["supplier_created"] is True and real["items"][0]["supplier_id"]
+    rows = {e["id"]: e for e in boss_client.get("/api/expenses").json()}
+    assert rows[ok["id"]]["supplier_id"] == real["items"][0]["supplier_id"]
+    assert "supplier_id" not in rows[broken["id"]] and rows[broken["id"]]["vendor"] == "Broken Shop"
+    assert [s["name"] for s in boss_client.get("/api/suppliers").json()].count("Print Shop") == 1
+
+    # only the refused expense selected: nothing is created, nothing is adopted, both runs say so
+    only_broken = [{"vendors": ["Broken Shop"], "create": {"name": "Other Shop", "kind": "company"}}]
+    dry2 = boss_client.post("/api/suppliers/adopt-vendors", json={"dry_run": True, "items": only_broken}).json()
+    real2 = boss_client.post("/api/suppliers/adopt-vendors", json={"dry_run": False, "items": only_broken}).json()
+    assert dry2["expenses_changed"] == real2["expenses_changed"] == 0
+    assert dry2["items"][0]["would_create"] is False and real2["items"][0]["supplier_created"] is False
+    assert [s["name"] for s in boss_client.get("/api/suppliers").json()].count("Other Shop") == 0

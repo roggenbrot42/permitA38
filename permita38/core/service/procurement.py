@@ -263,6 +263,10 @@ class ProcurementService:
 
     def update(self, rid: str, data: dict, today: date | None = None) -> dict:
         today = today or date.today()
+        with self.store.transaction():  # the status is read and checked in the same transaction as the write
+            return self._update(rid, data, today)
+
+    def _update(self, rid: str, data: dict, today: date) -> dict:
         old = self._offer(rid)
         supplier, project = self._checks(data)
         new = self.computed(data, supplier, project)
@@ -281,17 +285,17 @@ class ProcurementService:
         else:
             keep = {k: old.get(k) for k in ("status", "status_changed_at", "decided_by", "allocation_id")}
             rec = {**old, **client_fields(data), **new, **keep, "id": rid, "created": old.get("created")}
-        with self.store.transaction():
-            saved = self.store.save("incoming_offers", {**rec, "id": rid})
+        saved = self.store.save("incoming_offers", {**rec, "id": rid})
         out = self._present(saved, today)
         out["planning_warnings"] = self._warnings(saved, supplier)
         return out
 
     def delete(self, rid: str) -> None:
-        rec = self._offer(rid)
-        if rec.get("status") == "accepted":
-            raise ServiceError(409, "An accepted offer cannot be deleted; unaccept it first")
-        self.store.delete("incoming_offers", rid)
+        with self.store.transaction():  # re-read the status before deleting: a concurrent accept must not be lost
+            rec = self._offer(rid)
+            if rec.get("status") == "accepted":
+                raise ServiceError(409, "An accepted offer cannot be deleted; unaccept it first")
+            self.store.delete("incoming_offers", rid)
 
     # ------------------------------------------------------------------ status actions
     def _stamp(self, rec: dict, status: str, me: dict, today: date, **extra: Any) -> dict:
@@ -325,6 +329,8 @@ class ProcurementService:
 
     def _accept(self, rid: str, body: dict, me: dict, today: date) -> dict:
         rec = self._offer(rid)
+        if not self._lines_readable(rec):
+            raise ServiceError(422, "The lines of this offer are damaged; edit the offer before accepting it")
         if rec.get("status") not in OPEN:
             raise ServiceError(409, f"This action is not possible in status {rec.get('status')}")
         if self.effective_status(rec, today) == "expired" and not body.get("confirm_expired"):
@@ -423,6 +429,17 @@ class ProcurementService:
             "commitment": None,
             "planning_warnings": warnings + nodemand,
         }
+
+    @staticmethod
+    def _lines_readable(rec: dict) -> bool:
+        """Every line has a number quantity and unit price (a damaged row is refused, never a server error)."""
+        for ln in rec.get("lines") or []:
+            if not isinstance(ln, dict):
+                return False
+            for k in ("quantity", "unit_price"):
+                if not isinstance(ln.get(k), (int, float)) or isinstance(ln.get(k), bool):
+                    return False
+        return True
 
     def _contract_of(self, project_id: str | None, contract_id: str) -> None:
         contract = self.store.get("contracts", contract_id)
@@ -691,8 +708,12 @@ class ProcurementService:
             aid = rec.get("allocation_id")
             alloc = self.store.get("allocations", aid) if aid else None
             # only the allocation this offer created (same offer, same supplier, external) is ever deleted
-            if aid and alloc and alloc.get("incoming_offer_id") == rec["id"] and not alloc.get("user_id") and (
-                alloc.get("supplier_id") == rec.get("supplier_id")
+            if (
+                aid
+                and alloc
+                and alloc.get("incoming_offer_id") == rec["id"]
+                and not alloc.get("user_id")
+                and (alloc.get("supplier_id") == rec.get("supplier_id"))
             ):
                 start = calc.d(alloc.get("start"))
                 started = start is not None and start <= today

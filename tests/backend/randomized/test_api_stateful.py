@@ -1375,6 +1375,14 @@ class ApiMachine(RuleBasedStateMachine):
                 self.ext_allocs[aid] = oid
                 self.inc[oid] = dict(old, status="accepted", allocation_id=aid)
             else:
+                pid = old["project_id"]
+                project = self.m["projects"].get(pid) if pid else None
+                if pid and project is None:  # a named project must still exist (a flat offer may name none)
+                    assert r.status_code == 422 and r.json() == {"detail": "Unknown project"}
+                    return
+                if project is not None and project["status"] in ("done", "archived"):
+                    assert r.status_code == 409 and r.json() == {"detail": "The project is closed"}
+                    return
                 assert r.status_code == 200, r.text
                 assert r.json()["commitment"]["kind"] == "flat" and r.json()["allocation"] is None
                 self.inc[oid] = dict(old, status="accepted")

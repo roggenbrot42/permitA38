@@ -194,6 +194,13 @@ def _shape_problem(coll: str, rec: dict) -> str | None:
         lines = rec.get("lines")
         if lines is not None and not (isinstance(lines, list) and all(isinstance(ln, dict) for ln in lines)):
             return "lines must be a list of lines"
+        for ln in lines or []:
+            numbers = all(
+                isinstance(ln.get(k), (int, float)) and not isinstance(ln.get(k), bool)
+                for k in ("quantity", "unit_price")
+            )
+            if not numbers or ln.get("unit") not in ("h", "flat"):
+                return "each line needs a quantity, a unit (h or flat) and a unit_price"
         plan = rec.get("plan")
         if plan is not None and not (isinstance(plan, dict) and isinstance(plan.get("start"), str)):
             return "plan must be an object with a start date"

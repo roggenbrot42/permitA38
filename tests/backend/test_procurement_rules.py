@@ -380,3 +380,44 @@ def test_contract_user_ids_accept_active_subcontractors_only(boss_client, store)
     assert kept["user_ids"] == [boss_id, active["id"]]
     unknown = post(boss_client, "/api/contracts", {**contract, "user_ids": ["5d1c0aa2zz"]}, 200)
     assert unknown.status_code == 200  # unknown ids keep today's behaviour
+
+
+# ----------------------------------------------------------------------------- update and delete after an accept
+def test_update_and_delete_after_accept_keep_the_allocation(boss_client, store):
+    s = capacity_supplier(boss_client)
+    p = project(boss_client, "Demo project P")
+    offer = post(boss_client, "/api/incoming-offers", w1_offer(s["id"], p["id"]), 201).json()
+    acc = post(boss_client, f"/api/incoming-offers/{offer['id']}/accept", {}, 200).json()
+    alloc_id = acc["allocation"]["id"]
+    # a stale client still holds the received version: its PUT must not turn the accepted offer back into received
+    stale = w1_offer(s["id"], p["id"], reference="CHANGED")
+    r = boss_client.put(f"/api/incoming-offers/{offer['id']}", json=stale)
+    assert r.status_code == 409
+    assert r.json() == {"detail": "An accepted offer can only change notes, attachment and decision note"}
+    d = boss_client.delete(f"/api/incoming-offers/{offer['id']}")
+    assert d.status_code == 409
+    assert d.json() == {"detail": "An accepted offer cannot be deleted; unaccept it first"}
+    kept = store.get("incoming_offers", offer["id"])
+    assert kept["status"] == "accepted" and kept["allocation_id"] == alloc_id
+    assert store.get("allocations", alloc_id) is not None
+
+
+# ----------------------------------------------------------------------------- damaged stored lines: 422, never 500
+def test_accept_of_an_offer_with_a_damaged_line_is_422(boss_client, store):
+    sup = post(boss_client, "/api/suppliers", {"name": "Demo Print Shop GmbH", "kind": "company"}, 201).json()
+    offer = post(
+        boss_client,
+        "/api/incoming-offers",
+        {
+            "supplier_id": sup["id"],
+            "received_on": "2026-02-20",
+            "lines": [{"quantity": 2, "unit": "h", "unit_price": 50}],
+        },
+        201,
+    ).json()
+    stored = store.get("incoming_offers", offer["id"])
+    store.save("incoming_offers", {**stored, "lines": [{"quantity": 2, "unit": "h"}]})  # damaged: no price
+    r = post(boss_client, f"/api/incoming-offers/{offer['id']}/accept", {})
+    assert r.status_code == 422
+    assert r.json() == {"detail": "The lines of this offer are damaged; edit the offer before accepting it"}
+    assert store.get("incoming_offers", offer["id"])["status"] == "received"

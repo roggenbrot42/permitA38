@@ -113,3 +113,23 @@ def test_expense_duplicate_rule_with_and_without_supplier_id(boss_client):
     # one row without a supplier: the vendor text decides; the linked row's vendor is its supplier's name (snapshot)
     plain = boss_client.post("/api/expenses", json={**base, "vendor": "alpha gmbh"}).json()
     assert any(w["code"] == "expense.possible_duplicate" for w in plain["sanity_warnings"])
+
+
+def test_an_offer_line_without_price_is_refused_by_the_importer(src, dst, tmp_path):
+    import json
+
+    _, sc, _, _ = src
+    _, dc, dstore = dst
+    blob = export_archive(sc)
+
+    def damage(files):
+        name = next(n for n in files if n.endswith("incoming_offers.json"))
+        body = json.loads(files[name])
+        del body["records"][0]["lines"][0]["unit_price"]
+        files[name] = json.dumps(body).encode()
+
+    bad = rebuild(blob, tmp_path, edit=damage)
+    pre = preview(dc, bad)
+    assert pre.status_code == 200
+    assert "record_invalid" in [e["code"] for e in pre.json()["errors"]]
+    assert dstore.list("incoming_offers") == []
