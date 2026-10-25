@@ -228,8 +228,8 @@ class SupplierService:
                 holder["out"] = self._adopt(items, dry_run, me)
                 if dry_run:
                     raise _DryRunDone()
-        except _DryRunDone:
-            pass
+        except _DryRunDone:  # expected: the dry run is complete, its transaction is rolled back
+            holder["rolled_back"] = True
         out = holder["out"]
         out["dry_run"] = dry_run
         return out

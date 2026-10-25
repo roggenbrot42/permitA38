@@ -177,7 +177,9 @@ ScopeId = Annotated[str, StringConstraints(pattern=ID_PATTERN)]
 NonNegQty = Annotated[float, Field(ge=0, le=MAX_QTY, allow_inf_nan=False)]
 Country = Annotated[str, AfterValidator(_country)]
 Iban = Annotated[str | None, BeforeValidator(blank_to_none), AfterValidator(_optional(_iban))]  # None allowed
-Weekdays = Annotated[list[Annotated[int, Field(strict=True, ge=0, le=6)]], Field(min_length=1, max_length=7), AfterValidator(_weekdays)]
+Weekdays = Annotated[
+    list[Annotated[int, Field(strict=True, ge=0, le=6)]], Field(min_length=1, max_length=7), AfterValidator(_weekdays)
+]
 Tags = Annotated[list[Annotated[str, StringConstraints(max_length=200)]], Field(max_length=20), AfterValidator(_tags)]
 PayDays = Annotated[int, Field(ge=0, le=365)]
 Percent = Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)]

@@ -192,7 +192,7 @@ def test_second_accept_is_refused_and_creates_one_allocation(boss_client, store)
     s = capacity_supplier(boss_client)
     p = project(boss_client, "Demo project P")
     offer = post(boss_client, "/api/incoming-offers", w1_offer(s["id"], p["id"]), 201).json()
-    assert post(boss_client, f"/api/incoming-offers/{offer['id']}/accept", {}, 200)
+    post(boss_client, f"/api/incoming-offers/{offer['id']}/accept", {}, 200)  # the helper asserts the status
     again = post(boss_client, f"/api/incoming-offers/{offer['id']}/accept", {})
     assert again.status_code == 409 and again.json() == {"detail": "This action is not possible in status accepted"}
     created = [a for a in store.list("allocations") if a.get("incoming_offer_id") == offer["id"]]
@@ -375,7 +375,8 @@ def test_contract_user_ids_accept_active_subcontractors_only(boss_client, store)
     }
     refused = post(boss_client, "/api/contracts", {**contract, "user_ids": [company["id"]]})
     assert refused.status_code == 422, refused.text
-    assert post(boss_client, "/api/contracts", {**contract, "user_ids": [inactive["id"]]}).status_code == 422
+    reply = post(boss_client, "/api/contracts", {**contract, "user_ids": [inactive["id"]]})
+    assert reply.status_code == 422
     kept = post(boss_client, "/api/contracts", {**contract, "user_ids": [boss_id, active["id"]]}, 200).json()
     assert kept["user_ids"] == [boss_id, active["id"]]
     unknown = post(boss_client, "/api/contracts", {**contract, "user_ids": ["5d1c0aa2zz"]}, 200)

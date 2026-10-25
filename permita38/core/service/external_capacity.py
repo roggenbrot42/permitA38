@@ -13,14 +13,15 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Protocol
 
-from permita38.core import calc
+from permita38.core import values
 from permita38.core.money import dec, q2
 
 DEFAULT_WORKDAYS = (0, 1, 2, 3, 4)
 
 
 class HolidayCalendar(Protocol):
-    def holiday(self, day: date) -> Any: ...
+    def holiday(self, day: date) -> Any:
+        raise NotImplementedError  # implemented by calc.Capacity
 
 
 def week_start(x: date) -> date:
@@ -39,7 +40,7 @@ def unavailable_windows(supplier: dict) -> list[tuple[date, date]]:
     for w in supplier.get("unavailable") or []:
         if not isinstance(w, dict):
             continue
-        s, e = calc.d(w.get("from")), calc.d(w.get("to"))
+        s, e = values.d(w.get("from")), values.d(w.get("to"))
         if s and e and e >= s:
             out.append((s, e))
     return out
@@ -47,9 +48,9 @@ def unavailable_windows(supplier: dict) -> list[tuple[date, date]]:
 
 def effective_end(allocation: dict) -> date | None:
     """Last day with capacity: the day before ``cancelled_from`` for a cancelled allocation, else ``end``."""
-    end = calc.d(allocation.get("end"))
-    if allocation.get("status") == "cancelled" and calc.d(allocation.get("cancelled_from")):
-        cut = calc.d(allocation["cancelled_from"]) - timedelta(days=1)  # type: ignore[operator]
+    end = values.d(allocation.get("end"))
+    if allocation.get("status") == "cancelled" and values.d(allocation.get("cancelled_from")):
+        cut = values.d(allocation["cancelled_from"]) - timedelta(days=1)  # type: ignore[operator]
         return min(end, cut) if end else cut
     return end
 
@@ -70,12 +71,12 @@ def allocation_days(supplier: dict, allocation: dict, cap: HolidayCalendar) -> d
     """Hours per available day. ``hours_per_week``: a ceiling of hours_per_week / len(workdays) per available day, not
     moved to other days. ``total_hours``: spread evenly over the available days of the original period (a cancelled
     allocation keeps the days before the cut). No available day: empty."""
-    start, end = calc.d(allocation.get("start")), calc.d(allocation.get("end"))
+    start, end = values.d(allocation.get("start")), values.d(allocation.get("end"))
     last = effective_end(allocation)
     if not start or not end or end < start or not last:
         return {}
-    hpw = calc.fnum(allocation.get("hours_per_week"))
-    total = calc.fnum(allocation.get("total_hours"))
+    hpw = values.fnum(allocation.get("hours_per_week"))
+    total = values.fnum(allocation.get("total_hours"))
     if hpw:
         per_day = hpw / len(workdays(supplier))
         return {x: per_day for x in available_days(supplier, start, last, cap)}
@@ -119,9 +120,9 @@ def figures(supplier: dict, allocation: dict, cap: HolidayCalendar) -> Figures:
     days = allocation_days(supplier, allocation, cap)
     exact = round(sum(days.values()), 6)
     rate = dec(allocation.get("rate"))
-    total = calc.fnum(allocation.get("total_hours"))
-    if total and not calc.fnum(allocation.get("hours_per_week")):
-        start, end = calc.d(allocation.get("start")), calc.d(allocation.get("end"))
+    total = values.fnum(allocation.get("total_hours"))
+    if total and not values.fnum(allocation.get("hours_per_week")):
+        start, end = values.d(allocation.get("start")), values.d(allocation.get("end"))
         n = len(available_days(supplier, start, end, cap)) if start and end else 0  # type: ignore[arg-type]
         if n == 0:
             net = Decimal(0)

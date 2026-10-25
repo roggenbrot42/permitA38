@@ -181,8 +181,10 @@ def test_w6_expired_offer_needs_confirmation_and_valid_until_today_is_not_expire
     r = accept(boss_client, expired["id"])
     assert r.status_code == 409
     assert r.json() == {"detail": "The offer expired on 2026-03-01; confirm to accept it anyway"}
-    assert boss_client.get(f"/api/incoming-offers/{expired['id']}").json()["status"] == "received"
-    assert accept(boss_client, expired["id"], {"confirm_expired": True}).status_code == 200
+    stored = boss_client.get(f"/api/incoming-offers/{expired['id']}").json()
+    assert stored["status"] == "received"
+    reply = accept(boss_client, expired["id"], {"confirm_expired": True})
+    assert reply.status_code == 200
 
     today_offer = post_offer(boss_client, offer_w1(s["id"], project["id"], valid_until="2026-03-02"))
     assert today_offer["effective_status"] == "received"
@@ -300,7 +302,8 @@ def test_cancel_errors(boss_client, project):
     assert early.status_code == 422 and early.json() == {"detail": "effective_from must not be before the start"}
     late = boss_client.post(url, json={"effective_from": "2026-04-01"})
     assert late.status_code == 409 and late.json() == {"detail": "effective_from is after the end of the allocation"}
-    assert boss_client.post(url, json={"effective_from": "2026-03-13"}).status_code == 200
+    reply = boss_client.post(url, json={"effective_from": "2026-03-13"})
+    assert reply.status_code == 200
     again = boss_client.post(url, json={"effective_from": "2026-03-13"})
     assert again.status_code == 409 and again.json() == {"detail": "The allocation is already cancelled"}
 
@@ -309,7 +312,8 @@ def test_cancel_errors(boss_client, project):
 def test_w11_second_allocation_over_the_weekly_hours_needs_confirmation(boss_client, project):
     s = capacity_supplier(boss_client)  # weekly_hours 24, Mon-Thu
     first = post_offer(boss_client, offer_w1(s["id"], project["id"]))
-    assert accept(boss_client, first["id"]).status_code == 200
+    reply = accept(boss_client, first["id"])
+    assert reply.status_code == 200
     second = post_offer(
         boss_client,
         offer_w1(
@@ -324,7 +328,8 @@ def test_w11_second_allocation_over_the_weekly_hours_needs_confirmation(boss_cli
     assert blocked.status_code == 409
     assert blocked.json()["detail"] == "Confirm these warnings first: allocation.exceeds_weekly_hours"
     assert blocked.json()["codes"] == ["allocation.exceeds_weekly_hours"]
-    assert boss_client.get(f"/api/incoming-offers/{second['id']}").json()["status"] == "received"
+    stored = boss_client.get(f"/api/incoming-offers/{second['id']}").json()
+    assert stored["status"] == "received"
 
     ok = accept(boss_client, second["id"], {"confirm_warnings": ["allocation.exceeds_weekly_hours"]})
     assert ok.status_code == 200, ok.text
@@ -379,12 +384,14 @@ def test_w12_twelve_full_weeks_at_thirty_hours_raise_the_hint(boss_client, proje
 
 def test_w12_below_the_threshold_or_one_week_short_is_not_raised(boss_client, project):
     s, offer = _booked_supplier(boss_client, project, 29.9, "2026-06-08", "2026-08-28", "Example Hint B")
-    assert accept(boss_client, offer["id"]).status_code == 200
+    reply = accept(boss_client, offer["id"])
+    assert reply.status_code == 200
     dep = boss_client.get(f"/api/suppliers/{s['id']}/dependency").json()
     assert dep["raised"] is False and dep["longest_run_weeks"] == 0 and dep["from"] is None
 
     s2, offer2 = _booked_supplier(boss_client, project, 30.0, "2026-06-08", "2026-08-21", "Example Hint C")
-    assert accept(boss_client, offer2["id"]).status_code == 200
+    reply = accept(boss_client, offer2["id"])
+    assert reply.status_code == 200
     dep2 = boss_client.get(f"/api/suppliers/{s2['id']}/dependency").json()
     assert dep2["raised"] is False and dep2["longest_run_weeks"] == 11
 
@@ -421,11 +428,14 @@ def _offer_in_status(c, project, supplier, status):
     )
     oid = offer["id"]
     if status == "under_review":
-        assert c.post(f"/api/incoming-offers/{oid}/review").status_code == 200
+        reply = c.post(f"/api/incoming-offers/{oid}/review")
+        assert reply.status_code == 200
     elif status == "rejected":
-        assert c.post(f"/api/incoming-offers/{oid}/reject", json={}).status_code == 200
+        reply = c.post(f"/api/incoming-offers/{oid}/reject", json={})
+        assert reply.status_code == 200
     elif status == "accepted":
-        assert accept(c, oid).status_code == 200
+        reply = accept(c, oid)
+        assert reply.status_code == 200
     return oid
 
 
@@ -462,14 +472,16 @@ def test_accepted_offer_locks_all_but_notes(boss_client, project):
     assert bad.json() == {"detail": "An accepted offer can only change notes, attachment and decision note"}
     ok = boss_client.put(f"/api/incoming-offers/{oid}", json={**body, "notes": "call on Monday"})
     assert ok.status_code == 200 and ok.json()["notes"] == "call on Monday"
-    assert boss_client.delete(f"/api/incoming-offers/{oid}").status_code == 409
+    reply = boss_client.delete(f"/api/incoming-offers/{oid}")
+    assert reply.status_code == 409
 
 
 def test_unaccept_of_a_flat_commitment_is_always_allowed(boss_client, project):
     supplier = company_supplier(boss_client, name="Flat Unaccept")
     oid = _offer_in_status(boss_client, project, supplier, "accepted")
     r = boss_client.post(f"/api/incoming-offers/{oid}/unaccept")
-    assert r.status_code == 200 and r.json()["status"] == "under_review" and r.json().get("allocation_id") is None
+    body_back = r.json()
+    assert r.status_code == 200 and body_back["status"] == "under_review" and body_back.get("allocation_id") is None
 
 
 def test_unaccept_rules_for_a_capacity_allocation(boss_client, project):
@@ -479,8 +491,10 @@ def test_unaccept_rules_for_a_capacity_allocation(boss_client, project):
         offer_w1(s["id"], project["id"], plan={"start": "2026-03-09", "end": "2026-03-27", "hours_per_week": 20.0}),
     )
     acc = accept(boss_client, future["id"]).json()
-    assert boss_client.post(f"/api/incoming-offers/{future['id']}/unaccept").status_code == 200
-    assert boss_client.get(f"/api/allocations/{acc['allocation']['id']}").status_code == 404
+    reply = boss_client.post(f"/api/incoming-offers/{future['id']}/unaccept")
+    assert reply.status_code == 200
+    reply = boss_client.get(f"/api/allocations/{acc['allocation']['id']}")
+    assert reply.status_code == 404
 
     _, started, _ = _w1_allocation(boss_client, project)  # starts today: "start > today" is false
     r = boss_client.post(f"/api/incoming-offers/{started['id']}/unaccept")
@@ -522,4 +536,5 @@ def test_flat_commitment_of_an_accepted_plain_supplier_offer(boss_client, projec
 
 
 def test_commitments_need_procurement_read(member_client):
-    assert member_client.get("/api/finance/commitments").status_code == 403
+    reply = member_client.get("/api/finance/commitments")
+    assert reply.status_code == 403

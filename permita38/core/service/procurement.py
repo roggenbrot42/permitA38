@@ -723,14 +723,13 @@ class ProcurementService:
             saved = self.store.save("incoming_offers", self._stamp(rec, "under_review", me, today, allocation_id=None))
         return self._present(saved, today)
 
-    def cancel_allocation(self, aid: str, body: dict, today: date | None = None) -> dict:
+    def cancel_allocation(self, aid: str, body: dict) -> dict:
         with self.store.transaction():
-            return self._cancel_allocation(aid, body, today)
+            return self._cancel_allocation(aid, body)
 
-    def _cancel_allocation(self, aid: str, body: dict, today: date | None = None) -> dict:
+    def _cancel_allocation(self, aid: str, body: dict) -> dict:
         from .allocations import AllocationService  # local: the allocation views import the planner
 
-        today = today or date.today()
         row = self.store.get("allocations", aid) if ID_RE.match(aid) else None
         if not row:
             raise ServiceError(404, "Not found")
