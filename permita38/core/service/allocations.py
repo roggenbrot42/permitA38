@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import math
 from datetime import date, timedelta
+from decimal import Decimal
 
 from permita38.core import calc
 from permita38.core.errors import ServiceError
+from permita38.core.money import ZERO, dec, q2
 from permita38.core.repository import Repository
 
+from . import external_capacity as ext
 from . import planning as eng
 from . import planning_warnings as pw
 
@@ -55,6 +58,59 @@ class AllocationService:
                 total += per_day
             x += timedelta(days=1)
         return round(total, 2)
+
+    # ------------------------------------------------------------------ external rows (subcontractors)
+    def invoiced(self) -> dict[str, Decimal]:
+        """Net of the expenses linked to each allocation."""
+        out: dict[str, Decimal] = {}
+        for e in self.store.list("expenses"):
+            aid = e.get("allocation_id")
+            if aid:
+                out[aid] = out.get(aid, ZERO) + dec(e.get("net"))
+        return out
+
+    def external_figures(self, row: dict, supplier: dict | None, cap: calc.Capacity, invoiced: Decimal) -> dict:
+        f = ext.figures(supplier or {}, row, cap)
+        planned = f.planned_net
+        return dict(
+            planned_hours=f.planned_hours,
+            planned_net=float(planned),
+            invoiced_net=float(q2(invoiced)),
+            open_net=float(max(ZERO, planned - q2(invoiced))),
+        )
+
+    def present_external(
+        self, row: dict, cap: calc.Capacity, suppliers: dict, projects: dict, offers: dict, invoiced: dict, days=False
+    ) -> dict:
+        supplier = suppliers.get(row.get("supplier_id") or "")
+        project = projects.get(row.get("project_id") or "")
+        out = {k: v for k, v in row.items() if v is not None}
+        out["kind"] = "external"
+        out["status"] = row.get("status") or "active"
+        out["project_name"] = (project or {}).get("name")
+        out["supplier_name"] = (supplier or {}).get("name")
+        offer = offers.get(row.get("incoming_offer_id") or "")
+        if offer and offer.get("reference"):
+            out["offer_reference"] = offer["reference"]
+        out.update(self.external_figures(row, supplier, cap, invoiced.get(row["id"], ZERO)))
+        if days:
+            out["days"] = [
+                {"date": x.isoformat(), "hours": round(h, 6)} for x, h in sorted(ext.allocation_days(supplier or {}, row, cap).items())
+            ]
+        return out
+
+    def _external_context(self) -> tuple[dict, dict, dict]:
+        suppliers = {s["id"]: s for s in self.store.list("suppliers")}
+        offers = {o["id"]: o for o in self.store.list("incoming_offers")}
+        return suppliers, offers, self.invoiced()
+
+    def present_one(self, row: dict, days: bool = False) -> dict:
+        """One stored row as the API shows it (employee or external)."""
+        cap, users, projects = self._context()
+        if _is_external(row):
+            suppliers, offers, invoiced = self._external_context()
+            return self.present_external(row, cap, suppliers, projects, offers, invoiced, days)
+        return self._present(row, cap, users, projects)
 
     def _present(self, row: dict, cap: calc.Capacity, users: dict, projects: dict) -> dict:
         user = users.get(row.get("user_id") or "")
@@ -99,7 +155,13 @@ class AllocationService:
         rows.sort(key=lambda r: str(r.get("id") or ""))
         rows.sort(key=lambda r: str(r.get("start") or ""), reverse=True)
         cap, users, projects = self._context()
-        return [self._present(r, cap, users, projects) for r in rows]
+        suppliers, offers, invoiced = self._external_context() if any(_is_external(r) for r in rows) else ({}, {}, {})
+        return [
+            self.present_external(r, cap, suppliers, projects, offers, invoiced)
+            if _is_external(r)
+            else self._present(r, cap, users, projects)
+            for r in rows
+        ]
 
     # ------------------------------------------------------------------ writes
     def _check(self, body: dict) -> tuple[dict, dict]:
