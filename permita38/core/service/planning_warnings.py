@@ -11,6 +11,7 @@ Pure functions: they get the data they need as arguments and never touch the sto
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from decimal import Decimal
 
 from permita38.core import calc
@@ -218,3 +219,106 @@ def budget_warning(project: dict, tracked_hours: float) -> list[dict]:
             )
         ]
     return []
+
+
+# ---- allocations (docs/contracts/planner-per-project.md, "Warning codes") ---------------------------------------
+
+
+SAVE_WARNING_WEEKS = 10  # at most this many weeks per warning code when an allocation is saved
+
+
+def _monday(x: date) -> date:
+    return x - timedelta(days=x.weekday())
+
+
+def week_starts(start: date, end: date) -> list[date]:
+    """The Mondays of every week that touches ``start..end`` (earliest first)."""
+    out, ws = [], _monday(start)
+    while ws <= end:
+        out.append(ws)
+        ws += timedelta(days=7)
+    return out
+
+
+def overlaps_week(alloc: dict, ws: date) -> bool:
+    return alloc["start"] <= (ws + timedelta(days=6)).isoformat() and alloc["end"] >= ws.isoformat()
+
+
+def employee_over_allocated(
+    user_id: str,
+    name: str,
+    week: str,
+    allocated: float,
+    weekly_hours: float,
+    reason: str,
+    field_name: str = "weeks",
+) -> dict:
+    over_by = round(allocated - weekly_hours, 6)
+    if reason == "time_off":
+        text = (
+            f"Week of {week}: {name} is allocated {_fmt(allocated)} h but only {_fmt(weekly_hours)} h of capacity "
+            f"remain after holidays and time off (over by {_fmt(over_by)} h). The planner scales the allocations down."
+        )
+    else:
+        text = (
+            f"Week of {week}: {name} is allocated {_fmt(allocated)} h but works {_fmt(weekly_hours)} h per week "
+            f"(over by {_fmt(over_by)} h). The planner scales the allocations down."
+        )
+    return warning(
+        "allocation.employee_over_allocated",
+        "warning",
+        field_name,
+        text,
+        dict(
+            user_id=user_id,
+            week=week,
+            allocated=round(allocated, 6),
+            weekly_hours=round(weekly_hours, 6),
+            over_by=over_by,
+            reason=reason,
+        ),
+        confirmable=True,
+    )
+
+
+def over_allocation_on_save(user: dict, allocs: list[dict], start: str, end: str) -> list[dict]:
+    """``reason: "weekly_hours"`` warnings for the weeks of ``start..end`` in which the person's active employee
+    allocations (``allocs``, the saved row included) add up to more than their weekly hours. Earliest first, at most 10."""
+    weekly = calc.fnum(user.get("weekly_hours"))
+    out: list[dict] = []
+    for ws in week_starts(date.fromisoformat(start), date.fromisoformat(end)):
+        allocated = sum(calc.fnum(a.get("hours_per_week")) for a in allocs if overlaps_week(a, ws))
+        if allocated > weekly + 1e-9:
+            out.append(
+                employee_over_allocated(
+                    user["id"], user.get("name") or "?", ws.isoformat(), allocated, weekly, "weekly_hours", "allocations"
+                )
+            )
+            if len(out) >= SAVE_WARNING_WEEKS:
+                break
+    return out
+
+
+def overlap_same_project(
+    allocs: list[dict], user_id: str, project_id: str, start: str, end: str, project_name: str = ""
+) -> list[dict]:
+    """One info warning per week of ``start..end`` in which the person has two or more allocations to the project."""
+    mine = [a for a in allocs if a.get("user_id") == user_id and a.get("project_id") == project_id]
+    out: list[dict] = []
+    for ws in week_starts(date.fromisoformat(start), date.fromisoformat(end)):
+        ids = [a["id"] for a in mine if overlaps_week(a, ws)]
+        if len(ids) >= 2:
+            out.append(
+                warning(
+                    "allocation.overlap_same_project",
+                    "info",
+                    "allocations",
+                    f"Week of {ws.isoformat()}: {len(ids)} allocations of the same person to "
+                    f"{project_name or 'the same project'} overlap; their hours add up.",
+                    dict(user_id=user_id, project_id=project_id, week=ws.isoformat(), allocation_ids=ids),
+                    confirmable=False,
+                )
+            )
+            if len(out) >= SAVE_WARNING_WEEKS:
+                break
+    return out

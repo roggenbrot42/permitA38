@@ -17,6 +17,7 @@ from permita38.core.service.busy import BusyTimeProvider
 from permita38.core.service.calendar.busy_provider import CalendarBusyProvider
 from permita38.core.service.calendar.service import CalendarService, ResourceFetcher
 from permita38.core.service.importer import ImportService
+from permita38.core.service.allocations import AllocationService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.plan_service import PlanningService
 from permita38.core.service.records import RecordService
@@ -49,6 +50,7 @@ class Services:
     calendar: CalendarService
     busy: BusyTimeProvider
     planning: PlanningService
+    allocations: AllocationService
     sanity: SanityService
     trips: TripService
     team_timeline: TeamTimelineService
@@ -68,6 +70,7 @@ class Services:
         return cls(
             busy=busy,
             planning=PlanningService(store, busy),
+            allocations=AllocationService(store),
             sanity=SanityService(store),
             trips=TripService(store),
             config=config,

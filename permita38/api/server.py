@@ -18,6 +18,7 @@ from permita38.core.service.calendar.service import ResourceFetcher
 
 from .deps import AUDIT_SCOPE_KEY, Services, is_session_only, startup_services
 from .routers import (
+    allocations,
     auth,
     calendars,
     data_transfer,
@@ -58,6 +59,7 @@ def all_routers() -> list:
         users,
         time,
         planning,
+        allocations,
         finance,
         settings,
         team,

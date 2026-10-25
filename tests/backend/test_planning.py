@@ -247,6 +247,17 @@ def test_offer_that_fits_has_no_capacity_warning(repo):
     assert not [w for w in svc(repo).check_offer(draft, today=TODAY) if w["code"] == "capacity.offer_over"]
 
 
+def _no_delta(weeks):
+    """simulate adds a ``delta`` against its base to every week and project; without changes it is 0."""
+    out = []
+    for w in weeks:
+        w = dict(w)
+        assert w.pop("delta") == 0
+        w["projects"] = [{k: v for k, v in p.items() if k != "delta"} for p in w["projects"]]
+        out.append(w)
+    return out
+
+
 def test_simulate_without_changes_equals_forecast(repo):
     user = add_user(repo)
     add_contract(repo, user, MON, MON + timedelta(days=20), hpw=15)
@@ -254,7 +265,7 @@ def test_simulate_without_changes_equals_forecast(repo):
     s = svc(repo)
     a = s.forecast(6, None, True, today=MON)
     b = s.simulate({}, 6, MON, None, today=MON)
-    assert a["weeks"] == b["weeks"] and a["totals"] == b["totals"]
+    assert a["weeks"] == _no_delta(b["weeks"]) and a["totals"] == b["totals"]
 
 
 @settings(max_examples=25, deadline=None)
@@ -275,7 +286,7 @@ def test_simulate_equals_forecast_for_random_contracts(hpw, days, weeks):
             s = svc(r)
             assert (
                 s.forecast(weeks, None, True, today=MON)["weeks"]
-                == s.simulate({}, weeks, MON, None, today=MON)["weeks"]
+                == _no_delta(s.simulate({}, weeks, MON, None, today=MON)["weeks"])
             )
         finally:
             r.close()
