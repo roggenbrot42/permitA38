@@ -222,9 +222,59 @@ def _dup_sequence(recs):
     recs.append({**recs[0], "id": "ssssss01"})
 
 
+def _alloc_no_owner(recs):
+    recs[0].pop("user_id")
+
+
+def _alloc_two_owners(recs):
+    recs[0]["supplier_id"] = "supp0001"
+
+
+def _alloc_unassigned_project(recs):
+    recs[0]["project_id"] = "unassigned"
+
+
+def _alloc_no_project(recs):
+    recs[0].pop("project_id")
+
+
+def _alloc_bad_date(recs):
+    recs[0]["start"] = "02.03.2026"
+
+
+def _alloc_no_end(recs):
+    recs[0].pop("end")
+
+
+def _alloc_end_before_start(recs):
+    recs[0]["end"] = "2026-03-01"
+
+
+def _alloc_hours_too_big(recs):
+    recs[0]["hours_per_week"] = 81
+
+
+def _alloc_hours_too_small(recs):
+    recs[0]["hours_per_week"] = 0.1
+
+
+def _alloc_hours_text(recs):
+    recs[0]["hours_per_week"] = "many"
+
+
 @pytest.mark.parametrize(
     "coll,mutate",
     [
+        ("allocations", _alloc_no_owner),
+        ("allocations", _alloc_two_owners),
+        ("allocations", _alloc_unassigned_project),
+        ("allocations", _alloc_no_project),
+        ("allocations", _alloc_bad_date),
+        ("allocations", _alloc_no_end),
+        ("allocations", _alloc_end_before_start),
+        ("allocations", _alloc_hours_too_big),
+        ("allocations", _alloc_hours_too_small),
+        ("allocations", _alloc_hours_text),
         ("users", _dup_username),
         ("users", _bad_role),
         ("users", _no_username),
@@ -303,7 +353,10 @@ def _non_boss(store):
 
 def _row_in(table):
     def fill(store):
-        store.save(table, {"name": "x"})
+        row = {"name": "x"}
+        if table == "allocations":
+            row = {"user_id": "boss0001", "project_id": "proj0001"}  # the table needs exactly one owner
+        store.save(table, row)
         return f"{table}: 1"
 
     return fill
@@ -774,6 +827,7 @@ def test_exported_collections_and_excluded_tables_are_pinned():
         "number_sequences",
         "numbering_log",
         "import_batches",
+        "allocations",
     ]
     assert sorted(manifest.EXCLUDED_TABLES) == ["api_tokens", "audit_log", "calendar_events", "settings", "timers"]
     assert all(manifest.EXCLUDED_TABLES.values())  # every exclusion has a reason

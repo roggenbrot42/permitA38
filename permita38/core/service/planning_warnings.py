@@ -11,7 +11,9 @@ Pure functions: they get the data they need as arguments and never touch the sto
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from decimal import Decimal
+from typing import Iterable
 
 from permita38.core import calc
 from permita38.core.money import dec, q2
@@ -218,3 +220,146 @@ def budget_warning(project: dict, tracked_hours: float) -> list[dict]:
             )
         ]
     return []
+
+
+# ---- allocations (docs/contracts/planner-per-project.md, "Warning codes") ---------------------------------------
+
+
+SAVE_WARNING_WEEKS = 10  # at most this many weeks per warning code when an allocation is saved
+
+
+def _monday(x: date) -> date:
+    return x - timedelta(days=x.weekday())
+
+
+def week_starts(start: date, end: date) -> list[date]:
+    """The Mondays of every week that touches ``start..end`` (earliest first)."""
+    out, ws = [], _monday(start)
+    while ws <= end:
+        out.append(ws)
+        ws += timedelta(days=7)
+    return out
+
+
+def overlaps_week(alloc: dict, ws: date) -> bool:
+    start, end = alloc.get("start"), alloc.get("end")
+    if not isinstance(start, str) or not isinstance(end, str):
+        return False
+    return start <= (ws + timedelta(days=6)).isoformat() and end >= ws.isoformat()
+
+
+def employee_over_allocated(
+    user_id: str,
+    name: str,
+    week: str,
+    allocated: float,
+    weekly_hours: float,
+    reason: str,
+    field_name: str = "weeks",
+) -> dict:
+    over_by = round(allocated - weekly_hours, 6)
+    if reason == "time_off":
+        text = (
+            f"Week of {week}: {name} is allocated {_fmt(allocated)} h but only {_fmt(weekly_hours)} h of capacity "
+            f"remain after holidays and time off (over by {_fmt(over_by)} h). The planner scales the allocations down."
+        )
+    else:
+        text = (
+            f"Week of {week}: {name} is allocated {_fmt(allocated)} h but works {_fmt(weekly_hours)} h per week "
+            f"(over by {_fmt(over_by)} h). The planner scales the allocations down."
+        )
+    return warning(
+        "allocation.employee_over_allocated",
+        "warning",
+        field_name,
+        text,
+        dict(
+            user_id=user_id,
+            week=week,
+            allocated=round(allocated, 6),
+            weekly_hours=round(weekly_hours, 6),
+            over_by=over_by,
+            reason=reason,
+        ),
+        confirmable=True,
+    )
+
+
+def week_over_allocation(
+    user: dict, allocs: list[dict], ws: date, lost: Iterable[date] = ()
+) -> tuple[float, float, str] | None:
+    """Judged per day, like the planner computes: an allocation of ``hours_per_week`` is spread over the person's
+    available days of the week (workdays that are not in ``lost``), the real capacity of such a day is
+    ``weekly_hours / workdays``. A day is scaled when the allocations of that day add up to more than that.
+
+    Returns ``None`` when no day of the week is scaled. Otherwise ``(allocated, weekly_hours, reason)``:
+    ``allocated`` = the allocation hours of the week, ``weekly_hours`` = ``allocated`` minus the hours that are scaled
+    away (so ``over_by = allocated - weekly_hours``), ``reason`` = ``"time_off"`` when ``lost`` days were taken out,
+    else ``"weekly_hours"``."""
+    wd = calc._workdays(user)
+    per_day = calc.fnum(user.get("weekly_hours")) / len(wd)
+    lost_set = set(lost)
+    avail = [day for k in range(7) if (day := ws + timedelta(days=k)).weekday() in wd and day not in lost_set]
+    if not avail:
+        return None
+    allocated = scaled_away = 0.0
+    for day in avail:
+        iso = day.isoformat()
+        a = sum(calc.fnum(x.get("hours_per_week")) / len(avail) for x in allocs if x["start"] <= iso <= x["end"])
+        allocated += a
+        if a > per_day + 1e-9:
+            scaled_away += a - per_day
+    if scaled_away <= 1e-9:
+        return None
+    return allocated, allocated - scaled_away, "time_off" if lost_set else "weekly_hours"
+
+
+def over_allocation_on_save(user: dict, allocs: list[dict], start: str, end: str) -> list[dict]:
+    """``reason: "weekly_hours"`` warnings for the weeks of ``start..end`` in which a day of the person's active
+    employee allocations (``allocs``, the saved row included) is scaled down (holidays and time off are ignored on
+    save). Earliest first, at most 10."""
+    out: list[dict] = []
+    mine = [a for a in allocs if a.get("user_id") == user["id"]]
+    for ws in week_starts(date.fromisoformat(start), date.fromisoformat(end)):
+        hit = week_over_allocation(user, [a for a in mine if overlaps_week(a, ws)], ws)
+        if hit:
+            allocated, weekly, _ = hit
+            out.append(
+                employee_over_allocated(
+                    user["id"],
+                    user.get("name") or "?",
+                    ws.isoformat(),
+                    allocated,
+                    weekly,
+                    "weekly_hours",
+                    "allocations",
+                )
+            )
+            if len(out) >= SAVE_WARNING_WEEKS:
+                break
+    return out
+
+
+def overlap_same_project(
+    allocs: list[dict], user_id: str, project_id: str, start: str, end: str, project_name: str = ""
+) -> list[dict]:
+    """One info warning per week of ``start..end`` in which the person has two or more allocations to the project."""
+    mine = [a for a in allocs if a.get("user_id") == user_id and a.get("project_id") == project_id]
+    out: list[dict] = []
+    for ws in week_starts(date.fromisoformat(start), date.fromisoformat(end)):
+        ids = [a["id"] for a in mine if overlaps_week(a, ws)]
+        if len(ids) >= 2:
+            out.append(
+                warning(
+                    "allocation.overlap_same_project",
+                    "info",
+                    "allocations",
+                    f"Week of {ws.isoformat()}: {len(ids)} allocations of the same person to "
+                    f"{project_name or 'the same project'} overlap; their hours add up.",
+                    dict(user_id=user_id, project_id=project_id, week=ws.isoformat(), allocation_ids=ids),
+                    confirmable=False,
+                )
+            )
+            if len(out) >= SAVE_WARNING_WEEKS:
+                break
+    return out

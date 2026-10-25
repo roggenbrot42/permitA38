@@ -45,7 +45,7 @@ is session-only. There is no `limited` scope for allocations.
 | Route | area, op, full | token read-only |
 |---|---|---|
 | `GET /api/forecast` (changed) | planning, read | allowed |
-| `POST /api/plan/simulate` (changed) | planning, read | allowed (it is a POST that writes nothing) |
+| `POST /api/plan/simulate` (changed) | planning, read | 403 (read-write token only; the token guard refuses every unsafe method, a compute-only allow-list is a later deliberate change) |
 | `GET /api/plan/day-table` (new) | planning, read | allowed |
 | `GET /api/allocations` | planning, read | allowed |
 | `POST /api/allocations` | planning, write | 403 |
@@ -392,11 +392,13 @@ Shape of every warning (unchanged): `{code, severity, field, message, details, c
   the project and says that other projects' free hours do not cover it (example in the spec). `capacity.over` is
   emitted per week whose `unassigned` scope has status `over` (with `by_project=0`: per week whose team row has status
   `over` by the old utilisation rule, `scope: "team"`); with `project_id` filter only for the filtered scope.
-* `allocation.employee_over_allocated`: `allocated` = sum of `hours_per_week` of the person's active employee
-  allocations overlapping the week; `reason` is `"weekly_hours"` when `allocated > weekly_hours` (`weekly_hours` = the
-  person's contractual hours), `over_by = allocated - weekly_hours`; else `"time_off"` when `allocated` is above the
-  week's real capacity (`weekly_hours` minus the daily shares of public-holiday and absence days, busy time ignored), then
-  `weekly_hours` carries that real capacity and `over_by = allocated - real`. E4: `allocated 40, weekly_hours 32,
+* `allocation.employee_over_allocated`, judged **per day**: a day is scaled when the sum of the person's active
+  allocations of that day (`hours_per_week / available days of the week` each, available = workday without holiday or absence) is above the day's real capacity (`weekly_hours / workdays`,
+  0 on a public-holiday or absence day, busy time ignored). A week warns when at least one day is scaled. `allocated` =
+  the day-weighted allocation hours of the week, `over_by` = the hours scaled away (sum over the scaled days of
+  allocated minus real), `weekly_hours = allocated - over_by`. `reason` is `"weekly_hours"` when the week is already over-allocated without taking holidays and absences out (checked first), else `"time_off"` when it is over-allocated once they are taken out (the allocations are then spread over fewer available days). Without time off and with
+  allocations covering the whole week this is `allocated = sum of hours_per_week`, `weekly_hours` = contractual hours.
+  P Monday-Tuesday 40 h/week and Q Wednesday-Friday 40 h/week give no warning. E4: `allocated 40, weekly_hours 32,
   over_by 8, reason "time_off"`. **On save** (POST/PUT/bootstrap) only `reason: "weekly_hours"` is checked, for each
   offending week of the saved period, earliest first, at most 10 warnings; **in the forecast** both reasons, one per
   person and week, and only for the weeks shown (with `user_id` only that person).

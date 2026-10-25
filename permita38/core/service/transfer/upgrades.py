@@ -28,6 +28,7 @@ NO_UPGRADE_NEEDED: dict[str, str] = {
     "d8a69cde": "0008-expense_lines: adds a column; absent means no lines",
     "9897dd11": "0009-trips: adds a table",
     "c8af1eca": "0010-api_tokens: adds tables that are never exported",
+    "72306069": "0011-allocations: adds a table; without rows every person is entirely unassigned",
 }
 
 

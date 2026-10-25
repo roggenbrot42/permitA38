@@ -11,6 +11,7 @@ from permita38.core import rights
 from permita38.core.config import Config
 from permita38.core.netsafe import SafeFetcher
 from permita38.core.repository import Repository, auto_backup, create_repository
+from permita38.core.service.allocations import AllocationService
 from permita38.core.service.audit import AuditService
 from permita38.core.service.auth import AuthService
 from permita38.core.service.busy import BusyTimeProvider
@@ -49,6 +50,7 @@ class Services:
     calendar: CalendarService
     busy: BusyTimeProvider
     planning: PlanningService
+    allocations: AllocationService
     sanity: SanityService
     trips: TripService
     team_timeline: TeamTimelineService
@@ -68,6 +70,7 @@ class Services:
         return cls(
             busy=busy,
             planning=PlanningService(store, busy),
+            allocations=AllocationService(store),
             sanity=SanityService(store),
             trips=TripService(store),
             config=config,

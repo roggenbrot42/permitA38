@@ -37,6 +37,10 @@ REFERENCES: dict[str, str] = {
     "offer_id": "offers",
     "trip_id": "trips",
     "source_id": "calendar_sources",
+    "contract_id": "contracts",
+    # allocations of subcontractors (their collections arrive with that feature; until then the values are dangling)
+    "supplier_id": "suppliers",
+    "incoming_offer_id": "incoming_offers",
 }
 LIST_REFERENCES: dict[str, tuple[str, str]] = {  # (collection, column) -> target collection
     "projects.member_ids": ("projects", "users"),
@@ -207,6 +211,29 @@ def _validate_records(plan: Plan, coll: str, name: str, body: Any) -> list[dict]
     return out
 
 
+def _allocation_problem(a: dict) -> str | None:
+    """Why an allocation row is unusable (the planner would have to guess), or None."""
+    user, supplier = a.get("user_id"), a.get("supplier_id")
+    if bool(user) == bool(supplier):
+        return "exactly one of user_id and supplier_id is needed"
+    pid = a.get("project_id")
+    if not isinstance(pid, str) or not pid or pid == "unassigned":
+        return "project_id must be a project"
+    days = []
+    for key in ("start", "end"):
+        try:
+            days.append(date.fromisoformat(a.get(key)))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return f"{key} is not a valid date"
+    if days[1] < days[0]:
+        return "end is before start"
+    if user:
+        h = a.get("hours_per_week")
+        if isinstance(h, bool) or not isinstance(h, (int, float)) or not 0.25 <= h <= 80:
+            return "hours_per_week must be between 0.25 and 80"
+    return None
+
+
 def _check_semantics(plan: Plan) -> None:
     """Rules across a whole collection, after the upgrade hooks ran: unique indexes, roles, counters, settings."""
     for coll, recs in plan.records.items():
@@ -231,6 +258,10 @@ def _check_semantics(plan: Plan) -> None:
             plan.error("record_invalid", f"data/users.json record {i}: username is missing.", "data/users.json")
         if u.get("role") not in ROLES:
             plan.error("record_invalid", f"data/users.json record {i}: unknown role.", "data/users.json")
+    for i, a in enumerate(plan.records.get("allocations", [])):
+        problem = _allocation_problem(a)
+        if problem:
+            plan.error("record_invalid", f"data/allocations.json record {i}: {problem}.", "data/allocations.json")
     for i, r in enumerate(plan.records.get("number_sequences", [])):
         last = r.get("last_value", 0)
         if not isinstance(last, int) or not 0 <= last <= limits.MAX_SEQUENCE:

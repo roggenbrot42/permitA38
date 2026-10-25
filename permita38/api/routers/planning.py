@@ -9,6 +9,7 @@ from permita38.core import validation as v
 from permita38.core.errors import ServiceError
 from permita38.core.models import DocumentIn, PlanIn, ScenarioChanges, ScenarioIn
 
+OPT_ID_PATTERN = r"^(?:[0-9a-z]{6,32})?$"  # an empty value means "no filter"
 router = APIRouter(tags=["planning"])
 routers = [router]
 
@@ -18,6 +19,7 @@ class SimulateIn(v.CheckedBody):
     weeks: int = Field(26, ge=1, le=156)
     first: v.OptDate = None
     user_id: v.OptId = None
+    project_id: v.ScopeId | None = None
 
 
 class MoveCheckIn(v.CheckedBody):
@@ -36,6 +38,7 @@ class SuggestStartIn(v.CheckedBody):
     deadline: v.ISODate
     earliest: v.OptDate = None
     user_ids: v.IdList = []
+    project_id: v.OptId = None
 
 
 class ApplyIn(v.CheckedBody):
@@ -64,14 +67,38 @@ def forecast(
     weeks: int = Query(26, ge=1, le=156),
     user_id: str | None = None,
     offers: int = 1,
+    project_id: Annotated[
+        str | None, Query(pattern=OPT_ID_PATTERN, description="a project id or 'unassigned'; empty = no filter")
+    ] = None,
+    by_project: Annotated[int, Query(ge=0, le=1)] = 1,
 ) -> dict[str, Any]:
-    return services.planning.forecast(weeks, user_id or None, bool(offers))
+    return services.planning.forecast(
+        weeks, user_id or None, bool(offers), project_id=project_id or None, by_project=bool(by_project)
+    )
+
+
+@router.get("/plan/day-table", summary="capacity and demand per day, per project and pool")
+def day_table(
+    _: Annotated[dict, Needs("planning")],
+    services: ServicesDep,
+    from_: Annotated[v.ISODate, Query(alias="from")],
+    to: v.ISODate,
+    user_id: Annotated[str | None, Query(pattern=OPT_ID_PATTERN)] = None,
+    project_id: Annotated[
+        str | None, Query(pattern=OPT_ID_PATTERN, description="a project id or 'unassigned'; empty = no filter")
+    ] = None,
+) -> dict[str, Any]:
+    return services.planning.day_table(
+        date.fromisoformat(from_), date.fromisoformat(to), user_id or None, project_id or None
+    )
 
 
 @router.post("/plan/simulate", summary="what-if: recompute the weeks for a change set (writes nothing)")
 def simulate(body: SimulateIn, _: Annotated[dict, Needs("planning")], services: ServicesDep) -> dict[str, Any]:
     first = date.fromisoformat(body.first) if body.first else None
-    return services.planning.simulate(body.changes.model_dump(), body.weeks, first, body.user_id)
+    return services.planning.simulate(
+        body.changes.model_dump(), body.weeks, first, body.user_id, project_id=body.project_id
+    )
 
 
 @router.post("/plan/check-offer", summary="feasibility and consistency warnings for an offer draft")
@@ -102,6 +129,7 @@ def suggest_start(body: SuggestStartIn, _: Annotated[dict, Needs("planning")], s
         date.fromisoformat(body.deadline),
         date.fromisoformat(body.earliest) if body.earliest else None,
         body.user_ids or None,
+        project_id=body.project_id,
     )
 
 
