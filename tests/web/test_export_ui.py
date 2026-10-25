@@ -427,7 +427,11 @@ def test_preview_errors(browser, status, payload, shown):
 
 def test_run_refused_with_errors_422(browser):
     api = FakeExportApi(info=INFO_EMPTY)
-    err = {"code": "record_invalid", "message": "customers[3] is invalid: name is required.", "file": "data/customers.json"}
+    err = {
+        "code": "record_invalid",
+        "message": "customers[3] is invalid: name is required.",
+        "file": "data/customers.json",
+    }
     api.run_answer = (422, {"detail": "The archive was not imported: 1 errors.", "errors": [err]})
     ctx, pg, problems = open_app(browser, api)
     upload(pg)

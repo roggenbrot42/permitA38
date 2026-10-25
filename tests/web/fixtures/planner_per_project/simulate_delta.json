@@ -1,0 +1,14 @@
+{
+  "delta": {
+    "gap": 25.0,
+    "projects": [
+      {
+        "project_id": "a1b2c3d4",
+        "name": "Demo project P",
+        "base_gap": 20.0,
+        "gap": 45.0,
+        "delta": 25.0
+      }
+    ]
+  }
+}

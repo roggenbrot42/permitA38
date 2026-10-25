@@ -229,7 +229,9 @@ def test_clicking_a_bar_selects_and_focuses_it_and_the_keyboard_works_right_away
     box = ui.locator(".pln-bar.abs.draft").first.bounding_box()
     ui.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     assert ui.evaluate("() => document.activeElement.classList.contains('pln-bar')")
-    assert ui.locator(".pln-bar.sel").count() == 1  # a visible selection, also in browsers without :focus-visible on click
+    assert (
+        ui.locator(".pln-bar.sel").count() == 1
+    )  # a visible selection, also in browsers without :focus-visible on click
     ui.keyboard.press("ArrowRight")
     ui.wait_for_function("(b) => document.querySelector('.pln-bar.abs').getAttribute('aria-label') !== b", arg=before)
 

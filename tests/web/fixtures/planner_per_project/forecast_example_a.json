@@ -1,0 +1,135 @@
+{
+  "weeks": [
+    {
+      "week": "2026-03-02",
+      "capacity": 40.0,
+      "confirmed": 40.0,
+      "binding_offers": 0.0,
+      "free_after_confirmed": 0.0,
+      "free_worst_case": 0.0,
+      "utilisation": 100.0,
+      "status": "over",
+      "gap": 5.0,
+      "gap_confirmed": 5.0,
+      "gap_expected": 5.0,
+      "projects": [
+        {
+          "project_id": "a1b2c3d4",
+          "name": "Demo project P",
+          "capacity": 25.0,
+          "confirmed": 30.0,
+          "binding_offers": 0.0,
+          "expected_offers": 0.0,
+          "free_after_confirmed": -5.0,
+          "free_worst_case": -5.0,
+          "utilisation": 120.0,
+          "status": "over",
+          "gap": 5.0,
+          "gap_confirmed": 5.0,
+          "gap_expected": 5.0,
+          "internal": {
+            "capacity": 25.0,
+            "assigned": 30.0,
+            "gap": 5.0
+          },
+          "external": {
+            "capacity": 0.0,
+            "assigned": 0.0,
+            "gap": 0.0
+          },
+          "external_cost": 0.0
+        },
+        {
+          "project_id": "e5f6a7b8",
+          "name": "Demo project Q",
+          "capacity": 15.0,
+          "confirmed": 10.0,
+          "binding_offers": 0.0,
+          "expected_offers": 0.0,
+          "free_after_confirmed": 5.0,
+          "free_worst_case": 5.0,
+          "utilisation": 66.7,
+          "status": "ok",
+          "gap": 0.0,
+          "gap_confirmed": 0.0,
+          "gap_expected": 0.0,
+          "internal": {
+            "capacity": 15.0,
+            "assigned": 10.0,
+            "gap": 0.0
+          },
+          "external": {
+            "capacity": 0.0,
+            "assigned": 0.0,
+            "gap": 0.0
+          },
+          "external_cost": 0.0
+        },
+        {
+          "project_id": null,
+          "name": "Unassigned",
+          "capacity": 0.0,
+          "confirmed": 0.0,
+          "binding_offers": 0.0,
+          "expected_offers": 0.0,
+          "free_after_confirmed": 0.0,
+          "free_worst_case": 0.0,
+          "utilisation": 0.0,
+          "status": "ok",
+          "gap": 0.0,
+          "gap_confirmed": 0.0,
+          "gap_expected": 0.0,
+          "internal": {
+            "capacity": 0.0,
+            "assigned": 0.0,
+            "gap": 0.0
+          },
+          "external": {
+            "capacity": 0.0,
+            "assigned": 0.0,
+            "gap": 0.0
+          },
+          "external_cost": 0.0
+        }
+      ]
+    }
+  ],
+  "totals": {
+    "gap": 20.0,
+    "over_weeks": 4,
+    "gap_by_project": [
+      {
+        "project_id": "a1b2c3d4",
+        "name": "Demo project P",
+        "gap": 20.0
+      }
+    ]
+  },
+  "warnings": [
+    {
+      "code": "capacity.gap",
+      "severity": "warning",
+      "field": "weeks",
+      "confirmable": false,
+      "message": "Week of 2026-03-02, project Demo project P: 30 h are planned but only 25 h are allocated to it (gap 5 h). Other projects' free hours do not cover it.",
+      "details": {
+        "project_id": "a1b2c3d4",
+        "project_name": "Demo project P",
+        "week": "2026-03-02",
+        "pool": "internal",
+        "assigned": 30.0,
+        "capacity": 25.0,
+        "gap": 5.0,
+        "contributions": [
+          {
+            "kind": "contract",
+            "id": "d4e5f6a7",
+            "title": "Contract C_P",
+            "hours": 30.0,
+            "binding": false
+          }
+        ]
+      }
+    }
+  ]
+}

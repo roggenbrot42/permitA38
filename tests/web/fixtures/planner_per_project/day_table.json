@@ -1,0 +1,65 @@
+{
+  "from": "2026-03-02",
+  "to": "2026-03-03",
+  "scope_names": {
+    "a1b2c3d4": "Demo project P",
+    "e5f6a7b8": "Demo project Q",
+    "unassigned": "Unassigned"
+  },
+  "days": [
+    {
+      "date": "2026-03-02",
+      "cap": 8.0,
+      "busy": 0.0,
+      "vacation": 0.0,
+      "holiday": 0.0,
+      "absence_other": 0.0,
+      "confirmed": 8.0,
+      "binding": 0.0,
+      "expected": 0.0,
+      "names": [],
+      "scopes": {
+        "a1b2c3d4": {
+          "internal": {
+            "cap": 5.0,
+            "assigned": 6.0,
+            "confirmed": 6.0,
+            "binding": 0.0,
+            "expected": 0.0,
+            "gap": 1.0,
+            "gap_confirmed": 1.0
+          },
+          "external": {
+            "cap": 0.0,
+            "assigned": 0.0,
+            "confirmed": 0.0,
+            "binding": 0.0,
+            "expected": 0.0,
+            "gap": 0.0,
+            "gap_confirmed": 0.0
+          }
+        },
+        "e5f6a7b8": {
+          "internal": {
+            "cap": 3.0,
+            "assigned": 2.0,
+            "confirmed": 2.0,
+            "binding": 0.0,
+            "expected": 0.0,
+            "gap": 0.0,
+            "gap_confirmed": 0.0
+          },
+          "external": {
+            "cap": 0.0,
+            "assigned": 0.0,
+            "confirmed": 0.0,
+            "binding": 0.0,
+            "expected": 0.0,
+            "gap": 0.0,
+            "gap_confirmed": 0.0
+          }
+        }
+      }
+    }
+  ]
+}

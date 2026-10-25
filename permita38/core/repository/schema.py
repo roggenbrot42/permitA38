@@ -228,12 +228,24 @@ TABLES: dict[str, Table] = {
                 Index("idx_audit_log_at", ("at",)),
             ),
         ),
+        # hours per week of one resource given to one project (docs/contracts/planner-per-project.md); the
+        # CHECK "allocations_one_owner" (exactly one of user_id / supplier_id) lives in the migration SQL only
+        Table(
+            "allocations",
+            _cols(
+                _BASE + "user_id:id supplier_id:id incoming_offer_id:id project_id:id contract_id:id customer_id:id "
+                "start:str end:str hours_per_week:float total_hours:float rate:float status:str cancelled_from:str "
+                "cancel_reason:text" + _EXTRA
+            ),
+            (Index("idx_allocations_user", ("user_id",)), Index("idx_allocations_project", ("project_id",))),
+        ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
 }
 
 # internal per-user collections that are not exposed through the CRUD API
 INTERNAL_COLLECTIONS = [
+    "allocations",
     "api_tokens",
     "audit_log",
     "timers",

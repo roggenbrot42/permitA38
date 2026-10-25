@@ -130,6 +130,11 @@ Qty = Annotated[float, Field(ge=-MAX_QTY, le=MAX_QTY, allow_inf_nan=False)]
 Rate = Annotated[float, Field(ge=0, le=MAX_RATE, allow_inf_nan=False)]
 Hours = Annotated[float, Field(ge=0, le=168, allow_inf_nan=False)]
 TotalHours = Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False)]
+# hours per week of one allocation (docs/contracts/planner-per-project.md); stored as sent, no rounding
+AllocHours = Annotated[float, Field(ge=0.25, le=80, allow_inf_nan=False)]
+UNASSIGNED = "unassigned"
+# a planner scope: a project id or the literal "unassigned" (which also matches the id pattern)
+ScopeId = Annotated[str, StringConstraints(pattern=ID_PATTERN)]
 Percent = Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)]
 Minutes = Annotated[int, Field(ge=1, le=1440)]
 
