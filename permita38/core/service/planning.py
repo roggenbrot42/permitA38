@@ -41,6 +41,8 @@ STATUS_TIGHT = 90.0
 UNASSIGNED = "unassigned"
 DELETED_PROJECT = "(deleted project)"
 EPS = 1e-9
+MAX_ALLOCATION_DAYS = 1830
+CLOSED_PROJECT = ("done", "archived")
 
 
 def _key(kind: str, rid: str) -> str:
@@ -157,7 +159,7 @@ def apply_allocation_changes(
             old = base.get(rid)
             if old is None:
                 raise ServiceError(404, "Allocation not found")
-            if old.get("supplier_id") or not old.get("user_id"):
+            if old.get("supplier_id") or not old.get("user_id") or old.get("status", "active") != "active":
                 raise ServiceError(409, "This allocation cannot be changed here")
             if ch.get("delete"):
                 base.pop(rid)
@@ -176,18 +178,35 @@ def apply_allocation_changes(
                     if ch.get(k) is not None
                 },
             )
-        if ch.get("user_id") is not None and merged["user_id"] not in users:
+        if not all(isinstance(merged.get(k), str) and calc.d(merged.get(k)) for k in ("start", "end")):
+            raise ServiceError(422, "The allocation has no valid period")
+        user = users.get(merged.get("user_id") or "")
+        if user is None:
             raise ServiceError(404, "User not found")
-        if ch.get("project_id") is not None and merged["project_id"] not in projects:
+        project = projects.get(merged.get("project_id") or "")
+        if project is None:
             raise ServiceError(404, "Project not found")
-        if merged.get("end") and merged.get("start") and merged["end"] < merged["start"]:
-            raise ServiceError(422, "The end date is before the start date")
+        if merged["end"] < merged["start"]:
+            raise ServiceError(409, "The end date is before the start date")
+        if (date.fromisoformat(merged["end"]) - date.fromisoformat(merged["start"])).days > MAX_ALLOCATION_DAYS:
+            raise ServiceError(422, f"The period may be at most {MAX_ALLOCATION_DAYS} days")
+        if (project.get("status") or "active") in CLOSED_PROJECT:
+            raise ServiceError(409, "The project is closed")
+        if not user.get("active", True):
+            raise ServiceError(409, "The user is not active")
         base[merged["id"]] = merged
-    return [
-        r
-        for r in base.values()
-        if r.get("user_id") and not r.get("supplier_id") and r.get("status", "active") == "active"
-    ]
+    return [r for r in base.values() if usable_allocation(r) and r.get("status", "active") == "active"]
+
+
+def usable_allocation(row: dict) -> bool:
+    """An employee allocation the engine can use. A damaged row (from an older version or a hand-edited file) is
+    skipped instead of breaking every planner view."""
+    if not isinstance(row.get("user_id"), str) or not row["user_id"] or row.get("supplier_id"):
+        return False
+    if not isinstance(row.get("project_id"), str) or not row["project_id"]:
+        return False
+    s, e = calc.d(row.get("start")), calc.d(row.get("end"))
+    return bool(s and e and e >= s and isinstance(row.get("start"), str) and isinstance(row.get("end"), str))
 
 
 def load(
@@ -297,7 +316,7 @@ def load(
         absences=absences,
         settings=settings,
         expired_offers=expired,
-        allocations=apply_allocation_changes(store.list("allocations"), changes, users, projects),
+        allocations=apply_allocation_changes(store.list("allocations"), changes, ctx["users"], projects),
         project_names={pid: p.get("name") or DELETED_PROJECT for pid, p in projects.items()},
     )
 
@@ -449,13 +468,27 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
             wdset = _workset(member)
             share = 1.0 / len(it.assignees)
             if it.hpw:
+                # spread over the days of the week the person can actually work (workdays that are neither a public
+                # holiday nor an absence day), so a holiday does not push a day over capacity while the week fits.
+                # With no available day left the nominal spread over all workdays stays, so the overload is visible.
+                off_days = cap.absences[uid]
+                weeks_cache: dict[date, tuple[int, int]] = {}
                 for x in span:
                     if x.weekday() not in wdset:
                         continue
-                    week = [x - timedelta(days=x.weekday()) + timedelta(days=k) for k in range(7)]
-                    n = sum(1 for y in week if y.weekday() in wdset)
-                    if n:
-                        per_item[x] = per_item.get(x, 0.0) + it.hpw * share / n
+                    ws = x - timedelta(days=x.weekday())
+                    if ws not in weeks_cache:
+                        week = [ws + timedelta(days=k) for k in range(7)]
+                        work = [y for y in week if y.weekday() in wdset]
+                        avail = [y for y in work if not cap.holiday(y) and y not in off_days]
+                        weeks_cache[ws] = (len(work), len(avail))
+                    n_work, n_avail = weeks_cache[ws]
+                    if n_avail:
+                        if cap.holiday(x) or x in off_days:
+                            continue
+                        per_item[x] = per_item.get(x, 0.0) + it.hpw * share / n_avail
+                    elif n_work:
+                        per_item[x] = per_item.get(x, 0.0) + it.hpw * share / n_work
             elif it.total:
                 # spread over the days the person can actually work: workdays that are neither a public holiday nor an
                 # absence day. With none left the nominal spread over all workdays stays, so the overload is visible.

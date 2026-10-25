@@ -208,27 +208,18 @@ class PlanningService:
                 mine = [a for a in world.allocations if a["user_id"] == uid and pw.overlaps_week(a, ws)]
                 if not mine or (scope and not any(a["project_id"] == scope for a in mine)):
                     continue
-                allocated = sum(calc.fnum(a.get("hours_per_week")) for a in mine)
-                weekly = calc.fnum(user.get("weekly_hours"))
-                if allocated > weekly + 1e-9:
-                    out.append(
-                        pw.employee_over_allocated(
-                            uid, user.get("name") or "?", r["week"], allocated, weekly, "weekly_hours"
-                        )
-                    )
-                    continue
                 wd = calc._workdays(user)
-                per_day = weekly / len(wd)
-                lost = sum(
-                    per_day
+                lost = [
+                    day
                     for k in range(7)
                     if (day := ws + timedelta(days=k)).weekday() in wd
                     and (world.cap.holiday(day) or day in world.cap.absences[uid])
-                )
-                real = weekly - lost
-                if allocated > real + 1e-9:
+                ]
+                hit = pw.week_over_allocation(user, mine, ws, lost)
+                if hit:
+                    allocated, weekly, reason = hit
                     out.append(
-                        pw.employee_over_allocated(uid, user.get("name") or "?", r["week"], allocated, real, "time_off")
+                        pw.employee_over_allocated(uid, user.get("name") or "?", r["week"], allocated, weekly, reason)
                     )
             if not by_project:
                 continue

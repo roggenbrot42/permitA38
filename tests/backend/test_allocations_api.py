@@ -1,12 +1,36 @@
 """Employee allocations and the planner-per-project routes over HTTP (docs/contracts/planner-per-project.md):
 CRUD, validation bounds, rights, error codes, bootstrap, day table, forecast/simulate parameters, apply."""
 
+from datetime import date, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
+from permita38.core.holidays import holidays as de_holidays
+
 from permita38.core.service.plan_service import MAX_DAY_TABLE_DAYS
 
-START, END = "2026-03-02", "2026-03-27"
+
+def _clean_monday() -> date:
+    """The first Monday after today from which 8 weeks hold no national holiday (the hand numbers assume none)."""
+    x = date.today() + timedelta(days=(7 - date.today().weekday()) % 7 or 7)
+    while any(calc_holidays(x + timedelta(days=k)) for k in range(0, 56)):
+        x += timedelta(days=7)
+    return x
+
+
+def calc_holidays(x: date):
+    return de_holidays(x.year, "").get(x)
+
+
+MONDAY = _clean_monday()
+
+
+def day(offset: int) -> str:
+    return (MONDAY + timedelta(days=offset)).isoformat()
+
+
+START, END = day(0), day(25)
 
 
 @pytest.fixture
@@ -60,9 +84,7 @@ def test_create_list_update_delete(boss_client, boss_id, project, store):
     listing = boss_client.get("/api/allocations").json()
     assert [x["id"] for x in listing] == [row["id"]] and "planning_warnings" not in listing[0]
 
-    r = boss_client.put(
-        f"/api/allocations/{row['id']}", json=body(boss_id, project, hours_per_week=30.0, end="2026-03-13")
-    )
+    r = boss_client.put(f"/api/allocations/{row['id']}", json=body(boss_id, project, hours_per_week=30.0, end=day(11)))
     assert r.status_code == 200, r.text
     assert r.json()["hours_per_week"] == 30.0 and r.json()["planned_hours"] == 60.0 and r.json()["id"] == row["id"]
     assert r.json()["created"] == row["created"]
@@ -73,15 +95,15 @@ def test_create_list_update_delete(boss_client, boss_id, project, store):
 
 
 def test_planned_hours_skip_holidays_and_absence_days(boss_client, boss_id, project, store):
-    store.save("absences", {"user_id": boss_id, "kind": "vacation", "start": "2026-03-04", "end": "2026-03-04"})
+    store.save("absences", {"user_id": boss_id, "kind": "vacation", "start": day(2), "end": day(2)})
     r = boss_client.post("/api/allocations", json=body(boss_id, project))
     assert r.json()["planned_hours"] == 95.0  # 19 available days x 5 h; the vacation day carries no hours
 
 
 def test_list_filters_and_order(boss_client, boss_id, project):
     other = boss_client.post("/api/projects", json={"name": "Demo project Q"}).json()
-    a = boss_client.post("/api/allocations", json=body(boss_id, project, start="2026-03-02")).json()
-    b = boss_client.post("/api/allocations", json=body(boss_id, other, start="2026-04-06", end="2026-04-17")).json()
+    a = boss_client.post("/api/allocations", json=body(boss_id, project, start=day(0))).json()
+    b = boss_client.post("/api/allocations", json=body(boss_id, other, start=day(35), end=day(46))).json()
     assert [x["id"] for x in boss_client.get("/api/allocations").json()] == [b["id"], a["id"]]  # start descending
     assert [x["id"] for x in boss_client.get("/api/allocations", params={"project_id": project["id"]}).json()] == [
         a["id"]
@@ -95,14 +117,14 @@ def test_list_filters_and_order(boss_client, boss_id, project):
 
 def test_warnings_come_with_the_saved_row(boss_client, boss_id, project):
     boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=30.0))
-    r = boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=20.0, end="2026-03-13"))
+    r = boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=20.0, end=day(11)))
     assert r.status_code == 201
     codes = [(w["code"], w["details"]["week"]) for w in r.json()["planning_warnings"]]
     assert codes == [
-        ("allocation.employee_over_allocated", "2026-03-02"),
-        ("allocation.employee_over_allocated", "2026-03-09"),
-        ("allocation.overlap_same_project", "2026-03-02"),
-        ("allocation.overlap_same_project", "2026-03-09"),
+        ("allocation.employee_over_allocated", day(0)),
+        ("allocation.employee_over_allocated", day(7)),
+        ("allocation.overlap_same_project", day(0)),
+        ("allocation.overlap_same_project", day(7)),
     ]
     over = r.json()["planning_warnings"][0]
     assert over["details"]["allocated"] == 50.0 and over["details"]["over_by"] == 10.0 and over["confirmable"] is True
@@ -113,7 +135,7 @@ def test_warnings_are_capped_at_ten_weeks(boss_client, boss_id, project):
     boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=40.0, end="2026-12-31"))
     r = boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=10.0, end="2026-12-31"))
     over = [w for w in r.json()["planning_warnings"] if w["code"] == "allocation.employee_over_allocated"]
-    assert len(over) == 10 and over[0]["details"]["week"] == "2026-03-02"
+    assert len(over) == 10 and over[0]["details"]["week"] == day(0)
 
 
 # ------------------------------------------------------------------ errors
@@ -122,7 +144,7 @@ def test_error_codes(boss_client, boss_id, project, store):
     assert boss_client.post("/api/allocations", json=body(boss_id, {"id": "nothing0001"})).json() == {
         "detail": "Project not found"
     }
-    r = boss_client.post("/api/allocations", json=body(boss_id, project, start="2026-03-10", end="2026-03-02"))
+    r = boss_client.post("/api/allocations", json=body(boss_id, project, start=day(8), end=day(0)))
     assert r.status_code == 409 and r.json() == {"detail": "The end date is before the start date"}
     for status in ("done", "archived"):
         closed = store.save("projects", {"name": "Closed", "status": status})
@@ -222,7 +244,7 @@ def test_read_only_token_reads_but_never_writes(app, boss_client, boss_id, proje
     assert ro.get("/api/allocations").status_code == 200
     assert ro.get("/api/plan/day-table", params={"from": START, "to": START}).status_code == 200
     assert ro.get("/api/forecast").status_code == 200
-    assert ro.post("/api/plan/simulate", json={}).status_code == 403  # existing guard: read-only tokens never POST
+    assert ro.post("/api/plan/simulate", json={}).status_code == 403  # read-write tokens only (fail closed)
     row = boss_client.post("/api/allocations", json=body(boss_id, project)).json()
     for method, path, payload in [
         ("POST", "/api/allocations", body(boss_id, project)),
@@ -294,19 +316,47 @@ def test_bootstrap_over_500_proposals_is_a_409_and_writes_nothing(boss_client, b
 
 
 # ------------------------------------------------------------------ planner routes
-def test_forecast_parameters(boss_client, boss_id, project, store):
+def test_forecast_parameters_and_the_e1_numbers_over_http(boss_client, boss_id, project, store):
+    """E1 of the spec (two projects, one person, no netting) in the four weeks from the next clean Monday."""
+    other = boss_client.post("/api/projects", json={"name": "Demo project Q"}).json()
+    boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=25.0))
+    boss_client.post("/api/allocations", json=body(boss_id, other, hours_per_week=15.0))
     add_contract(store, boss_id, project, 30)
-    r = boss_client.get("/api/forecast", params={"weeks": 2})
-    assert r.status_code == 200
-    out = r.json()
-    assert all("projects" in w and "gap" in w for w in out["weeks"])
-    assert out["totals"]["gap_by_project"] == [] and out["totals"]["gap"] == 0.0  # gaps start with the next Monday
-    assert out["contracts"][0]["project_id"] == project["id"]
-    flat = boss_client.get("/api/forecast", params={"weeks": 2, "by_project": 0}).json()
-    assert all("projects" not in w for w in flat["weeks"])
-    one = boss_client.get("/api/forecast", params={"weeks": 2, "project_id": project["id"]}).json()
+    add_contract(store, boss_id, other, 10, title="Q")
+    out = boss_client.get("/api/forecast", params={"weeks": 8}).json()
+    rows = {w["week"]: w for w in out["weeks"]}
+    for k in range(4):
+        w = rows[day(7 * k)]
+        assert (w["capacity"], w["confirmed"], w["gap"], w["status"], w["utilisation"]) == (
+            40.0,
+            40.0,
+            5.0,
+            "over",
+            100.0,
+        )
+        by = {p["name"]: p for p in w["projects"]}
+        assert (by["Demo project P"]["capacity"], by["Demo project P"]["gap"], by["Demo project P"]["utilisation"]) == (
+            25.0,
+            5.0,
+            120.0,
+        )
+        assert (by["Demo project Q"]["free_worst_case"], by["Demo project Q"]["gap"]) == (5.0, 0.0)
+    assert out["totals"]["gap"] == 20.0
+    assert out["totals"]["gap_by_project"] == [{"project_id": project["id"], "name": "Demo project P", "gap": 20.0}]
+    assert {c["project_id"] for c in out["contracts"]} == {project["id"], other["id"]}
+    assert len([x for x in out["warnings"] if x["code"] == "capacity.gap"]) == 4
+    flat = boss_client.get("/api/forecast", params={"weeks": 8, "by_project": 0}).json()
+    assert all("projects" not in w for w in flat["weeks"]) and "gap_by_project" not in flat["totals"]
+    assert flat["totals"]["gap"] == 20.0
+    one = boss_client.get("/api/forecast", params={"weeks": 8, "project_id": project["id"]}).json()
     assert [p["project_id"] for p in one["weeks"][0]["projects"]] == [project["id"]]
+    assert one["totals"]["gap"] == 20.0 and {x["details"]["project_id"] for x in one["warnings"]} == {project["id"]}
     assert boss_client.get("/api/forecast", params={"project_id": "unassigned"}).status_code == 200
+    # an empty project_id is no filter, like an empty user_id
+    assert (
+        boss_client.get("/api/forecast", params={"weeks": 8, "project_id": "", "user_id": ""}).json()["totals"]
+        == out["totals"]
+    )
     r = boss_client.get("/api/forecast", params={"project_id": "nothing0001"})
     assert r.status_code == 404 and r.json() == {"detail": "Project not found"}
     assert boss_client.get("/api/forecast", params={"by_project": 2}).status_code == 422
@@ -315,20 +365,20 @@ def test_forecast_parameters(boss_client, boss_id, project, store):
 
 def test_day_table_route(boss_client, boss_id, project):
     boss_client.post("/api/allocations", json=body(boss_id, project))
-    r = boss_client.get("/api/plan/day-table", params={"from": "2026-03-02", "to": "2026-03-08"})
+    r = boss_client.get("/api/plan/day-table", params={"from": day(0), "to": day(6)})
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["from"] == "2026-03-02" and out["to"] == "2026-03-08" and len(out["days"]) == 7
+    assert out["from"] == day(0) and out["to"] == day(6) and len(out["days"]) == 7
     mon, sat = out["days"][0], out["days"][5]
     assert mon["cap"] == 8.0 and mon["scopes"][project["id"]]["internal"]["cap"] == 5.0
     assert mon["scopes"]["unassigned"]["internal"]["cap"] == 3.0
     assert out["scope_names"] == {project["id"]: "Demo project P", "unassigned": "Unassigned"}
     assert sat["cap"] == 0.0 and sat["scopes"] == {}
     only = boss_client.get(
-        "/api/plan/day-table", params={"from": "2026-03-02", "to": "2026-03-02", "project_id": "unassigned"}
+        "/api/plan/day-table", params={"from": day(0), "to": day(0), "project_id": "unassigned"}
     ).json()
     assert list(only["days"][0]["scopes"]) == ["unassigned"]
-    user = boss_client.get("/api/plan/day-table", params={"from": "2026-03-02", "to": "2026-03-02", "user_id": boss_id})
+    user = boss_client.get("/api/plan/day-table", params={"from": day(0), "to": day(0), "user_id": boss_id})
     assert user.status_code == 200
 
 
@@ -336,19 +386,15 @@ def test_day_table_errors(boss_client):
     def get(**p):
         return boss_client.get("/api/plan/day-table", params=p)
 
-    assert get(**{"from": "2026-03-02"}).status_code == 422
-    assert get(**{"from": "2026-13-02", "to": "2026-03-03"}).status_code == 422
-    r = get(**{"from": "2026-03-05", "to": "2026-03-02"})
+    assert get(**{"from": day(0)}).status_code == 422
+    assert get(**{"from": "2026-13-02", "to": day(1)}).status_code == 422
+    r = get(**{"from": day(3), "to": day(0)})
     assert r.status_code == 400 and r.json() == {"detail": "'to' is before 'from'"}
     assert get(**{"from": "2026-01-01", "to": "2026-07-09"}).status_code == 200  # exactly 190 days
     r = get(**{"from": "2026-01-01", "to": "2026-07-10"})
     assert r.status_code == 400 and r.json() == {"detail": f"The range may cover at most {MAX_DAY_TABLE_DAYS} days"}
-    assert get(**{"from": "2026-03-02", "to": "2026-03-03", "user_id": "nobody0001"}).json() == {
-        "detail": "User not found"
-    }
-    assert get(**{"from": "2026-03-02", "to": "2026-03-03", "project_id": "nobody0001"}).json() == {
-        "detail": "Project not found"
-    }
+    assert get(**{"from": day(0), "to": day(1), "user_id": "nobody0001"}).json() == {"detail": "User not found"}
+    assert get(**{"from": day(0), "to": day(1), "project_id": "nobody0001"}).json() == {"detail": "Project not found"}
 
 
 def test_simulate_with_allocation_changes_and_delta(boss_client, boss_id, project, store):
@@ -393,8 +439,8 @@ def test_apply_writes_allocation_rows_with_confirm(boss_client, boss_id, project
     new = {
         "user_id": boss_id,
         "project_id": project["id"],
-        "start": "2026-04-06",
-        "end": "2026-04-10",
+        "start": day(35),
+        "end": day(39),
         "hours_per_week": 20.0,
     }
     changes = {"allocations": [new, {"id": a["id"], "hours_per_week": 35.0}, {"id": gone["id"], "delete": True}]}
@@ -439,14 +485,14 @@ def test_check_offer_with_a_project_reports_the_project_gap(boss_client, boss_id
 
 
 def test_suggest_start_per_project(boss_client, boss_id, project):
-    payload = {"hours": 40, "deadline": "2026-03-27", "earliest": "2026-03-02", "user_ids": [boss_id]}
+    payload = {"hours": 40, "deadline": day(25), "earliest": day(0), "user_ids": [boss_id]}
     free = boss_client.post("/api/plan/suggest-start", json=payload).json()
-    assert free["feasible"] is True and free["start"] == "2026-03-02"
+    assert free["feasible"] is True and free["start"] == day(0)
     proj = boss_client.post("/api/plan/suggest-start", json={**payload, "project_id": project["id"]}).json()
     assert proj["feasible"] is False  # the project has no allocation: unassigned hours are not its hours
     boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=20.0))
     proj = boss_client.post("/api/plan/suggest-start", json={**payload, "project_id": project["id"]}).json()
-    assert proj["feasible"] is True and proj["start"] == "2026-03-02"
+    assert proj["feasible"] is True and proj["start"] == day(0)
     assert boss_client.post("/api/plan/suggest-start", json={**payload, "project_id": "nothing0001"}).status_code == 404
 
 

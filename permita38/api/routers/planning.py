@@ -9,6 +9,7 @@ from permita38.core import validation as v
 from permita38.core.errors import ServiceError
 from permita38.core.models import DocumentIn, PlanIn, ScenarioChanges, ScenarioIn
 
+OPT_ID_PATTERN = r"^(?:[0-9a-z]{6,32})?$"  # an empty value means "no filter"
 router = APIRouter(tags=["planning"])
 routers = [router]
 
@@ -66,11 +67,13 @@ def forecast(
     weeks: int = Query(26, ge=1, le=156),
     user_id: str | None = None,
     offers: int = 1,
-    project_id: Annotated[str | None, Query(pattern=v.ID_PATTERN, description="a project id or 'unassigned'")] = None,
+    project_id: Annotated[
+        str | None, Query(pattern=OPT_ID_PATTERN, description="a project id or 'unassigned'; empty = no filter")
+    ] = None,
     by_project: Annotated[int, Query(ge=0, le=1)] = 1,
 ) -> dict[str, Any]:
     return services.planning.forecast(
-        weeks, user_id or None, bool(offers), project_id=project_id, by_project=bool(by_project)
+        weeks, user_id or None, bool(offers), project_id=project_id or None, by_project=bool(by_project)
     )
 
 
@@ -80,10 +83,14 @@ def day_table(
     services: ServicesDep,
     from_: Annotated[v.ISODate, Query(alias="from")],
     to: v.ISODate,
-    user_id: Annotated[str | None, Query(pattern=v.ID_PATTERN)] = None,
-    project_id: Annotated[str | None, Query(pattern=v.ID_PATTERN, description="a project id or 'unassigned'")] = None,
+    user_id: Annotated[str | None, Query(pattern=OPT_ID_PATTERN)] = None,
+    project_id: Annotated[
+        str | None, Query(pattern=OPT_ID_PATTERN, description="a project id or 'unassigned'; empty = no filter")
+    ] = None,
 ) -> dict[str, Any]:
-    return services.planning.day_table(date.fromisoformat(from_), date.fromisoformat(to), user_id, project_id)
+    return services.planning.day_table(
+        date.fromisoformat(from_), date.fromisoformat(to), user_id or None, project_id or None
+    )
 
 
 @router.post("/plan/simulate", summary="what-if: recompute the weeks for a change set (writes nothing)")

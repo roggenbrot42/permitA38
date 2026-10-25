@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Iterable
 
 from permita38.core import calc
 from permita38.core.money import dec, q2
@@ -241,7 +242,10 @@ def week_starts(start: date, end: date) -> list[date]:
 
 
 def overlaps_week(alloc: dict, ws: date) -> bool:
-    return alloc["start"] <= (ws + timedelta(days=6)).isoformat() and alloc["end"] >= ws.isoformat()
+    start, end = alloc.get("start"), alloc.get("end")
+    if not isinstance(start, str) or not isinstance(end, str):
+        return False
+    return start <= (ws + timedelta(days=6)).isoformat() and end >= ws.isoformat()
 
 
 def employee_over_allocated(
@@ -281,14 +285,47 @@ def employee_over_allocated(
     )
 
 
+def week_over_allocation(
+    user: dict, allocs: list[dict], ws: date, lost: Iterable[date] = ()
+) -> tuple[float, float, str] | None:
+    """Judged per day: a day is scaled when the person's allocations of that day (``hours_per_week / workdays``
+    each) add up to more than the real capacity of the day (``weekly_hours / workdays``, 0 on a day in ``lost``).
+
+    Returns ``None`` when no day of the week is scaled. Otherwise ``(allocated, weekly_hours, reason)``:
+    ``allocated`` = the day-weighted allocation hours of the week, ``weekly_hours`` = ``allocated`` minus the hours
+    that are scaled away (so ``over_by = allocated - weekly_hours``), ``reason`` = ``"weekly_hours"`` when a regular
+    day is scaled, else ``"time_off"`` (only days without capacity are scaled)."""
+    wd = calc._workdays(user)
+    per_day = calc.fnum(user.get("weekly_hours")) / len(wd)
+    lost_set = set(lost)
+    allocated = scaled_away = 0.0
+    regular = False
+    for k in range(7):
+        day = ws + timedelta(days=k)
+        if day.weekday() not in wd:
+            continue
+        iso = day.isoformat()
+        a = sum(calc.fnum(x.get("hours_per_week")) / len(wd) for x in allocs if x["start"] <= iso <= x["end"])
+        r = 0.0 if day in lost_set else per_day
+        allocated += a
+        if a > r + 1e-9:
+            scaled_away += a - r
+            regular = regular or r > 0
+    if scaled_away <= 1e-9:
+        return None
+    return allocated, allocated - scaled_away, "weekly_hours" if regular else "time_off"
+
+
 def over_allocation_on_save(user: dict, allocs: list[dict], start: str, end: str) -> list[dict]:
-    """``reason: "weekly_hours"`` warnings for the weeks of ``start..end`` in which the person's active employee
-    allocations (``allocs``, the saved row included) add up to more than their weekly hours. Earliest first, at most 10."""
-    weekly = calc.fnum(user.get("weekly_hours"))
+    """``reason: "weekly_hours"`` warnings for the weeks of ``start..end`` in which a day of the person's active
+    employee allocations (``allocs``, the saved row included) is scaled down (holidays and time off are ignored on
+    save). Earliest first, at most 10."""
     out: list[dict] = []
+    mine = [a for a in allocs if a.get("user_id") == user["id"]]
     for ws in week_starts(date.fromisoformat(start), date.fromisoformat(end)):
-        allocated = sum(calc.fnum(a.get("hours_per_week")) for a in allocs if overlaps_week(a, ws))
-        if allocated > weekly + 1e-9:
+        hit = week_over_allocation(user, [a for a in mine if overlaps_week(a, ws)], ws)
+        if hit:
+            allocated, weekly, _ = hit
             out.append(
                 employee_over_allocated(
                     user["id"],
