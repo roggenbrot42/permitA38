@@ -464,3 +464,245 @@ def test_engine_scope_sums_equal_person_capacity(w):
     table = eng.day_table(world, TODAY, TODAY + timedelta(days=13))
     for d in table.days.values():
         assert sum(sd.cap for sd in d.scopes.values()) == pytest.approx(d.cap, abs=1e-9)
+
+
+# ------------------------------------------------------------------------------- holiday weeks (hours spread)
+HOL_WEEK = date(2026, 3, 30)  # Monday; Friday 2026-04-03 is Good Friday, Monday 2026-04-06 Easter Monday
+
+
+def hol_forecast(w, weeks=1):
+    return w.svc.forecast(weeks, today=HOL_WEEK)
+
+
+@pytest.mark.parametrize(
+    "hpw, util, status, gap",
+    # one 40 h person, 4 available days = 32 h of capacity: 20/32 = 62.5, 32/32 = 100.0, 40/32 = 125.0
+    # 40 h/week spread over 4 days = 10 h against 8 h: 2 h x 4 days = 8 h of gap
+    [(20, 62.5, "ok", 0.0), (32, 100.0, "tight", 0.0), (40, 125.0, "over", 8.0)],
+)
+def test_holiday_week_without_allocations_keeps_the_old_weekly_numbers(w, hpw, util, status, gap):
+    w.contract(w.boss, None, hpw=hpw, start="2026-03-30", end="2026-04-03")
+    out = hol_forecast(w)
+    week = out["weeks"][0]
+    assert pick(week, "capacity", "confirmed", "utilisation", "status", "gap") == dict(
+        capacity=32.0, confirmed=float(hpw), utilisation=util, status=status, gap=gap
+    )
+    warnings = [x["code"] for x in out["warnings"]]
+    assert warnings == (["capacity.over"] if status == "over" else [])
+    day = w.svc.day_table(date(2026, 4, 3), date(2026, 4, 3), today=HOL_WEEK)["days"][0]
+    assert day["holiday"] == 8.0 and day["confirmed"] == 0.0  # nothing is booked on Good Friday
+
+
+def test_bootstrap_in_holiday_weeks_leaves_no_gap(w):
+    """30 h/week contract over two holiday weeks (Good Friday, Easter Monday): 7.5 h on four days each."""
+    w.contract(w.boss, w.p, hpw=30, start="2026-03-30", end="2026-04-12")
+    res = AllocationService(w.repo).bootstrap(True, HOL_WEEK)
+    assert [a["hours_per_week"] for a in res["allocations"]] == [30.0]
+    out = hol_forecast(w, 2)
+    for i in range(2):
+        p, un = w.entry(out, i, w.p), w.entry(out, i, None)
+        # allocation 30 over 4 available days = 7.5 per day (real 8): capacity 30, the other 0.5 h x 4 stay unassigned
+        assert pick(p, "capacity", "confirmed", "gap", "status", "utilisation") == dict(
+            capacity=30.0, confirmed=30.0, gap=0.0, status="tight", utilisation=100.0
+        )
+        assert un["capacity"] == 2.0
+        assert out["weeks"][i]["capacity"] == 32.0
+    assert not [x for x in out["warnings"] if x["code"] in ("capacity.gap", "allocation.employee_over_allocated")]
+
+
+def test_allocation_in_a_holiday_week_is_spread_over_the_available_days(w):
+    w.alloc(w.boss, w.p, 20, start="2026-03-30", end="2026-04-03")
+    w.contract(w.boss, w.p, hpw=30, start="2026-03-30", end="2026-04-03")
+    out = hol_forecast(w)
+    # cap 20/4 = 5 per day, demand 30/4 = 7.5 per day: gap 2.5 x 4 = 10
+    assert pick(w.entry(out, 0, w.p), "capacity", "confirmed", "gap") == dict(capacity=20.0, confirmed=30.0, gap=10.0)
+    assert w.entry(out, 0, None)["capacity"] == 12.0  # (8 - 5) x 4
+
+
+# ------------------------------------------------------------------------------- over-allocation judged per day
+def test_allocations_on_different_days_of_a_week_do_not_warn(w):
+    w.repo.save(
+        "allocations",
+        dict(
+            user_id=w.boss["id"],
+            project_id=w.p["id"],
+            start="2026-03-02",
+            end="2026-03-03",
+            hours_per_week=40,
+            status="active",
+        ),
+    )
+    w.repo.save(
+        "allocations",
+        dict(
+            user_id=w.boss["id"],
+            project_id=w.q["id"],
+            start="2026-03-04",
+            end="2026-03-06",
+            hours_per_week=40,
+            status="active",
+        ),
+    )
+    out = w.forecast(1)
+    assert [x for x in out["warnings"] if x["code"] == "allocation.employee_over_allocated"] == []
+    svc = AllocationService(w.repo)
+    # the 5 h/week row books 1 h on Wednesday, where Q already has 8 of the 8 h: 9 > 8, one hour is scaled away
+    res = svc.create(
+        dict(user_id=w.boss["id"], project_id=w.p["id"], start="2026-03-04", end="2026-03-04", hours_per_week=5)
+    )
+    hit = [x["details"] for x in res["planning_warnings"] if x["code"].endswith("over_allocated")]
+    assert [(d["week"], d["allocated"], d["weekly_hours"], d["over_by"]) for d in hit] == [
+        ("2026-03-02", 41.0, 40.0, 1.0)
+    ]
+
+
+# ------------------------------------------------------------------------------- E5, internal-only variant
+def test_e5_internal_only_variant_and_a_supplier_row_does_not_leak(w):
+    w.alloc(w.boss, w.p, 40)
+    w.repo.save(
+        "allocations",
+        dict(
+            supplier_id="supp0001",
+            project_id=w.p["id"],
+            start=START,
+            end=END,
+            hours_per_week=20,
+            rate=80,
+            status="active",
+        ),
+    )
+    w.contract(w.boss, w.p, hpw=50)
+    out = w.forecast()
+    p = w.entry(out, 0, w.p)
+    assert p["internal"] == dict(capacity=40.0, assigned=50.0, gap=10.0)
+    assert p["external"] == dict(capacity=0.0, assigned=0.0, gap=0.0)
+    assert pick(p, "capacity", "gap", "utilisation", "status") == dict(
+        capacity=40.0, gap=10.0, utilisation=125.0, status="over"
+    )
+    assert out["weeks"][0]["capacity"] == 40.0
+
+
+# ------------------------------------------------------------------------------- bootstrap rules
+def bootstrap(w, confirm=False):
+    return AllocationService(w.repo).bootstrap(confirm, TODAY)
+
+
+def test_bootstrap_total_hours_contract_is_20_h_per_week(w):
+    erika = w.erika()
+    w.contract(erika, w.p, total=80)  # E8: 80 h over 16 available days = 5 per day, 20 per week
+    res = bootstrap(w)
+    assert [(a["user_id"], a["hours_per_week"]) for a in res["allocations"]] == [(erika["id"], 20.0)]
+
+
+def test_bootstrap_two_assignees_get_one_allocation_each(w):
+    erika = w.erika()
+    rec = w.contract(w.boss, w.p, hpw=40)
+    w.repo.save("contracts", {**rec, "user_ids": [w.boss["id"], erika["id"]]})
+    res = bootstrap(w)
+    # each has half: boss 20 h over 5 days, Erika 20 h over her 4 days
+    assert sorted((a["user_name"], a["hours_per_week"]) for a in res["allocations"]) == [
+        ("Demo Boss", 20.0),
+        ("Erika Beispiel", 20.0),
+    ]
+
+
+def test_bootstrap_partial_coverage_still_proposes(w):
+    w.alloc(w.boss, w.p, 30, start="2026-03-02", end="2026-03-13")  # does not contain the contract period
+    w.contract(w.boss, w.p, hpw=30)
+    res = bootstrap(w)
+    assert len(res["allocations"]) == 1 and res["skipped"] == []
+    codes = [x["code"] for x in res["warnings"]]
+    assert (
+        codes.count("allocation.overlap_same_project") == 2 and codes.count("allocation.employee_over_allocated") == 2
+    )
+
+
+def test_bootstrap_clamps_at_80_and_says_so(w):
+    w.contract(w.boss, w.p, hpw=100)
+    res = bootstrap(w)
+    assert [a["hours_per_week"] for a in res["allocations"]] == [80.0]
+    clamp = [x for x in res["warnings"] if x["code"] == "allocation.peak_clamped"]
+    assert len(clamp) == 1 and clamp[0]["details"]["peak"] == 100.0 and clamp[0]["details"]["hours_per_week"] == 80.0
+
+
+def test_bootstrap_inactive_assignee_falls_back_to_the_boss_like_the_planner(w):
+    gone = w.repo.save(
+        "users",
+        dict(username="gone", name="Gone", role="employee", weekly_hours=40, workdays=[0, 1, 2, 3, 4], active=False),
+    )
+    w.contract(gone, w.p, hpw=10)
+    assert [a["user_id"] for a in bootstrap(w)["allocations"]] == [w.boss["id"]]
+
+
+def test_bootstrap_skips_contracts_that_are_over(w):
+    w.contract(w.boss, w.p, hpw=10, start="2026-01-05", end="2026-02-27")  # ended before TODAY
+    res = bootstrap(w)
+    assert res["allocations"] == [] and res["skipped"] == []
+
+
+def test_bootstrap_warnings_are_the_same_in_preview_and_confirm(w):
+    w.contract(w.boss, w.p, hpw=30)
+    w.contract(w.boss, w.q, hpw=30)
+    pre = bootstrap(w)
+    assert len(pre["allocations"]) == 2
+    over = [x for x in pre["warnings"] if x["code"] == "allocation.employee_over_allocated"]
+    assert [x["details"]["week"] for x in over] == ["2026-03-02", "2026-03-09", "2026-03-16", "2026-03-23"]
+    assert (over[0]["details"]["allocated"], over[0]["details"]["over_by"]) == (60.0, 20.0)
+    done = bootstrap(w, True)
+    assert done["warnings"] == pre["warnings"]
+
+
+def test_bootstrap_warnings_are_bounded_to_ten_weeks(w):
+    w.contract(w.boss, w.p, hpw=30, start="2026-03-02", end="2026-12-31")
+    w.contract(w.boss, w.q, hpw=30, start="2026-03-02", end="2026-12-31")
+    over = [x for x in bootstrap(w)["warnings"] if x["code"] == "allocation.employee_over_allocated"]
+    assert len(over) == 10
+
+
+# ------------------------------------------------------------------------------- damaged rows never break a view
+@pytest.mark.parametrize(
+    "row",
+    [
+        dict(user_id="u1", project_id="p1", status="active"),  # no period
+        dict(user_id="u1", project_id="p1", start="garbage", end="2026-03-27", status="active"),
+        dict(user_id="u1", start="2026-03-02", end="2026-03-27", status="active"),  # no project
+        dict(user_id="u1", project_id="p1", start="2026-03-27", end="2026-03-02", status="active"),
+        dict(user_id="u1", project_id="p1", start=5, end=6, status="active"),
+    ],
+)
+def test_a_damaged_allocation_row_is_skipped_everywhere(w, row):
+    w.repo.save("allocations", {**row, "user_id": w.boss["id"]})
+    w.contract(w.boss, w.p, hpw=10)
+    out = w.forecast()
+    assert out["weeks"][0]["capacity"] == 40.0 and w.entry(out, 0, None)["capacity"] == 40.0
+    assert w.svc.simulate({}, 2, TODAY, None, today=TODAY)["weeks"]
+    assert w.svc.day_table(date(2026, 3, 2), date(2026, 3, 8), today=TODAY)["days"]
+    listed = AllocationService(w.repo).list()
+    assert len(listed) == 1
+    assert AllocationService(w.repo).bootstrap(False, TODAY)["allocations"][0]["hours_per_week"] == 10.0
+
+
+# ------------------------------------------------------------------------------- simulate = apply rules
+def test_simulate_enforces_the_same_rules_as_apply(w):
+    from permita38.core.errors import ServiceError
+
+    base = dict(user_id=w.boss["id"], project_id=w.p["id"], start=START, end=END, hours_per_week=10)
+
+    def sim(**kw):
+        return w.svc.simulate(dict(allocations=[{**base, **kw}]), 1, TODAY, None, today=TODAY)
+
+    sim()
+    done = w.repo.save("projects", dict(name="Done", status="done"))
+    gone = w.repo.save("users", dict(username="gone", name="Gone", role="employee", weekly_hours=40, active=False))
+    for kw, status, msg in [
+        (dict(project_id=done["id"]), 409, "The project is closed"),
+        (dict(user_id=gone["id"]), 409, "The user is not active"),
+        (dict(end="2032-01-01"), 422, "The period may be at most 1830 days"),
+    ]:
+        with pytest.raises(ServiceError) as exc:
+            sim(**kw)
+        assert (exc.value.status, exc.value.message) == (status, msg)
+    with pytest.raises(ServiceError) as exc:
+        w.svc.apply(dict(allocations=[{**base, "end": "2032-01-01"}]))
+    assert exc.value.status == 422
+    assert w.repo.list("allocations") == []
