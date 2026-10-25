@@ -27,11 +27,13 @@ from .routers import (
     health,
     imports,
     impressum,
+    incoming_offers,
     numbering,
     planning,
     records,
     sales,
     settings,
+    suppliers,
     team,
     time,
     tokens,
@@ -60,6 +62,8 @@ def all_routers() -> list:
         time,
         planning,
         allocations,
+        suppliers,
+        incoming_offers,
         finance,
         settings,
         team,
@@ -122,7 +126,7 @@ def get_app(config: Config, *, calendar_fetcher: ResourceFetcher | None = None) 
 
     @app.exception_handler(ServiceError)
     async def service_error_handler(_: Request, exc: ServiceError):
-        return JSONResponse({"detail": exc.message}, status_code=exc.status, headers=exc.headers)
+        return JSONResponse({"detail": exc.message, **exc.body}, status_code=exc.status, headers=exc.headers)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(_: Request, exc: RequestValidationError):

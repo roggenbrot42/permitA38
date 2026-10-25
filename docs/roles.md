@@ -50,6 +50,8 @@ and on your own row.
 | `invoices` | Invoices | all / all | none / none | all / none |
 | `expenses` | Expenses | all / all | none / none | all / all |
 | `trips` | Business trips: meal allowance, mileage and trip statements (own trips only for employees) | all / all | limited / limited | all / none |
+| `suppliers` | Suppliers and subcontractors (master data, vendor adoption) | all / all | limited / none | all / all |
+| `procurement` | Incoming offers, supplier allocations, commitments | all / all | none / none | all / none |
 | `finance` | Revenue, profit, VAT and project reports | all / all | none / none | all / none |
 | `templates` | Document templates | all / all | none / none | all / none |
 | `settings` | Business settings | all / all | limited / none | all / none |
@@ -61,6 +63,13 @@ Notes
 
 * Planning, scenarios, allocations (planner per project) and the vacation planner are boss only. Accepting offers, finalising and numbering invoices,
   billing tracked time and deleting documents belong to the *offers* / *invoices* write access (boss only).
+* **Suppliers and subcontractors** (`contracts/subcontractors.md`): `limited` read of `suppliers` is the limited view
+  `{id, name, kind, tags, active}` (no address, IBAN, tax numbers, rate, notes) on every `GET /api/suppliers*` route the
+  employee may call; `q` then matches the name only. The accountant keeps suppliers and adopts vendors but cannot accept,
+  reject, reopen, unaccept or cancel (`procurement` write is boss only). `GET /api/suppliers/vendor-suggestions` is
+  declared `suppliers` write although it is a GET (it exposes expense vendors). `GET /api/suppliers/{supplier_id}/dependency`,
+  `/api/incoming-offers*`, `GET /api/allocations/{allocation_id}`, `POST /api/allocations/{allocation_id}/cancel` and
+  `GET /api/finance/commitments` are `procurement`. The routes `/api/allocations` (list, create, change) stay `planning`.
 * The accountant can download PDFs of offers and invoices (read access) but not change their status.
 * Account-level endpoints (own password, own two-factor authentication, bootstrap, holidays) are open to every
   signed-in person; resetting someone else's two-factor authentication needs `team` write access.

@@ -20,6 +20,7 @@ class SimulateIn(v.CheckedBody):
     first: v.OptDate = None
     user_id: v.OptId = None
     project_id: v.ScopeId | None = None
+    include_external: bool = True  # subcontractors' hours (False = the world without any supplier)
 
 
 class MoveCheckIn(v.CheckedBody):
@@ -71,9 +72,15 @@ def forecast(
         str | None, Query(pattern=OPT_ID_PATTERN, description="a project id or 'unassigned'; empty = no filter")
     ] = None,
     by_project: Annotated[int, Query(ge=0, le=1)] = 1,
+    include_external: Annotated[int, Query(ge=0, le=1)] = 1,
 ) -> dict[str, Any]:
     return services.planning.forecast(
-        weeks, user_id or None, bool(offers), project_id=project_id or None, by_project=bool(by_project)
+        weeks,
+        user_id or None,
+        bool(offers),
+        project_id=project_id or None,
+        by_project=bool(by_project),
+        include_external=bool(include_external),
     )
 
 
@@ -87,9 +94,14 @@ def day_table(
     project_id: Annotated[
         str | None, Query(pattern=OPT_ID_PATTERN, description="a project id or 'unassigned'; empty = no filter")
     ] = None,
+    include_external: Annotated[int, Query(ge=0, le=1)] = 1,
 ) -> dict[str, Any]:
     return services.planning.day_table(
-        date.fromisoformat(from_), date.fromisoformat(to), user_id or None, project_id or None
+        date.fromisoformat(from_),
+        date.fromisoformat(to),
+        user_id or None,
+        project_id or None,
+        include_external=bool(include_external),
     )
 
 
@@ -97,7 +109,12 @@ def day_table(
 def simulate(body: SimulateIn, _: Annotated[dict, Needs("planning")], services: ServicesDep) -> dict[str, Any]:
     first = date.fromisoformat(body.first) if body.first else None
     return services.planning.simulate(
-        body.changes.model_dump(), body.weeks, first, body.user_id, project_id=body.project_id
+        body.changes.model_dump(),
+        body.weeks,
+        first,
+        body.user_id,
+        project_id=body.project_id,
+        include_external=body.include_external,
     )
 
 

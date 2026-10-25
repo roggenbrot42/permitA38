@@ -38,16 +38,23 @@ REFERENCES: dict[str, str] = {
     "trip_id": "trips",
     "source_id": "calendar_sources",
     "contract_id": "contracts",
-    # allocations of subcontractors (their collections arrive with that feature; until then the values are dangling)
     "supplier_id": "suppliers",
     "incoming_offer_id": "incoming_offers",
+    "allocation_id": "allocations",
+    "decided_by": "users",
+    "login_user_id": "users",
 }
 LIST_REFERENCES: dict[str, tuple[str, str]] = {  # (collection, column) -> target collection
     "projects.member_ids": ("projects", "users"),
     "contracts.user_ids": ("contracts", "users"),
 }
 #: attachment names referenced by a record
-ATTACHMENT_COLUMNS = (("expenses", "attachment"), ("invoices", "original_pdf"), ("offers", "original_pdf"))
+ATTACHMENT_COLUMNS = (
+    ("expenses", "attachment"),
+    ("invoices", "original_pdf"),
+    ("offers", "original_pdf"),
+    ("incoming_offers", "attachment"),
+)
 SHA_RE = re.compile(r"[0-9a-f]{64}")
 #: what core/service/auth.hash_password produces
 PASSWORD_HASH_RE = re.compile(r"pbkdf2_sha256\$[0-9]{1,8}\$(?:[0-9a-f]{2}){1,64}\$(?:[0-9a-f]{2}){16,128}")
@@ -170,6 +177,36 @@ def _check_type(col_type: str, value: Any) -> bool:
     return isinstance(value, str)
 
 
+def _shape_problem(coll: str, rec: dict) -> str | None:
+    """JSON columns of the subcontractor collections: the shapes the readers rely on (a damaged row is refused here,
+    never shown as a server error later)."""
+    if coll == "suppliers":
+        tags = rec.get("tags")
+        if tags is not None and not (isinstance(tags, list) and all(isinstance(t, str) for t in tags)):
+            return "tags must be a list of text"
+        days = rec.get("workdays")
+        if days is not None and not (isinstance(days, list) and all(isinstance(d, int) for d in days)):
+            return "workdays must be a list of numbers"
+        windows = rec.get("unavailable")
+        if windows is not None and not (isinstance(windows, list) and all(isinstance(w, dict) for w in windows)):
+            return "unavailable must be a list of periods"
+    if coll == "incoming_offers":
+        lines = rec.get("lines")
+        if lines is not None and not (isinstance(lines, list) and all(isinstance(ln, dict) for ln in lines)):
+            return "lines must be a list of lines"
+        for ln in lines or []:
+            numbers = all(
+                isinstance(ln.get(k), (int, float)) and not isinstance(ln.get(k), bool)
+                for k in ("quantity", "unit_price")
+            )
+            if not numbers or ln.get("unit") not in ("h", "flat"):
+                return "each line needs a quantity, a unit (h or flat) and a unit_price"
+        plan = rec.get("plan")
+        if plan is not None and not (isinstance(plan, dict) and isinstance(plan.get("start"), str)):
+            return "plan must be an object with a start date"
+    return None
+
+
 def _validate_records(plan: Plan, coll: str, name: str, body: Any) -> list[dict]:
     if not isinstance(body, dict) or not isinstance(body.get("records"), list):
         plan.error("json_invalid", f"{name} must be an object with a list 'records'.", name)
@@ -206,6 +243,10 @@ def _validate_records(plan: Plan, coll: str, name: str, body: Any) -> list[dict]
             bad = "extra"
         if bad is not None:
             plan.error("record_invalid", f"{where}: field {bad!r} has the wrong type.", name)
+            continue
+        shape = _shape_problem(coll, rec)
+        if shape is not None:
+            plan.error("record_invalid", f"{where}: {shape}.", name)
             continue
         out.append(rec)
     return out

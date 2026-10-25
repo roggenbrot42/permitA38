@@ -820,6 +820,8 @@ def test_exported_collections_and_excluded_tables_are_pinned():
         "offers",
         "invoices",
         "expenses",
+        "suppliers",
+        "incoming_offers",
         "trips",
         "users",
         "templates",

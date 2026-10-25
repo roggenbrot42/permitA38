@@ -364,3 +364,62 @@ def test_allocations_never_change_the_team_numbers(world):
     for x in t1.days:
         for f in ("cap", "confirmed", "binding", "expected"):
             assert abs(getattr(t1.days[x], f) - getattr(t2.days[x], f)) < 1e-9
+
+
+def _strip_ids(x):
+    """Random ids differ between two databases: they are dropped before the forecasts are compared."""
+    if isinstance(x, dict):
+        return {k: _strip_ids(v) for k, v in x.items() if k != "id"}
+    if isinstance(x, list):  # the order of records follows the random ids: compare them as multisets
+        return sorted((_strip_ids(v) for v in x), key=lambda v: json.dumps(v, sort_keys=True, default=str))
+    return x
+
+
+def _forecast_without_externals(world, with_suppliers: bool):
+    """The forecast with include_external=0 of the world, optionally with a subcontractor assigned to every contract
+    and holding an external allocation (the flag must make the two worlds equal)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = SQLiteRepository(Path(tmp) / "d")
+        repo.startup()
+        try:
+            build(repo, world)
+            if with_suppliers:
+                sup = repo.save(
+                    "suppliers",
+                    dict(
+                        name="Subcontractor",
+                        kind="person-capacity",
+                        active=True,
+                        weekly_hours=24.0,
+                        workdays=[0, 1, 2, 3],
+                        rate=80.0,
+                        country="DE",
+                        vat_mode="domestic",
+                    ),
+                )
+                for c in repo.list("contracts"):
+                    repo.save("contracts", dict(c, user_ids=[*c["user_ids"], sup["id"]]))
+                proj = repo.save("projects", dict(name="Ext project", status="active"))
+                repo.save(
+                    "allocations",
+                    dict(
+                        supplier_id=sup["id"],
+                        project_id=proj["id"],
+                        start="2026-02-02",
+                        end="2026-03-29",
+                        hours_per_week=20.0,
+                        status="active",
+                        rate=80.0,
+                    ),
+                )
+            out = _strip_ids(PlanningService(repo).forecast(10, None, True, today=MON, include_external=False))
+            out["expired_offers"] = len(out["expired_offers"])  # ids of the old offers: random
+            return out
+        finally:
+            repo.close()
+
+
+@given(worlds())
+@settings(max_examples=15, deadline=None)
+def test_include_external_off_equals_the_world_without_suppliers(world):
+    assert _forecast_without_externals(world, True) == _forecast_without_externals(world, False)

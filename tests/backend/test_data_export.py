@@ -166,11 +166,11 @@ def test_without_attachments_writes_no_attachment_entries(source):
 def test_master_data_archive(source):
     _, client, _, _ = source
     files = zip_files(export_archive(client, scope="master_data"))
-    assert sorted(n for n in files if n.startswith("data/")) == ["data/customers.json"]
-    assert sorted(n for n in files if n.startswith("csv/")) == ["csv/customers.csv"]
+    assert sorted(n for n in files if n.startswith("data/")) == ["data/customers.json", "data/suppliers.json"]
+    assert sorted(n for n in files if n.startswith("csv/")) == ["csv/customers.csv", "csv/suppliers.csv"]
     assert not [n for n in files if n.startswith("attachments/")]
     man = json.loads(files["manifest.json"])
-    assert man["scope"] == "master_data" and man["counts"] == {"customers": 1}
+    assert man["scope"] == "master_data" and man["counts"] == {"customers": 1, "suppliers": 0}
     for bad in ({"include_accounts": True}, {"include_attachments": False}):
         r = client.post("/api/data/export", json={"scope": "master_data", **bad})
         assert r.status_code == 422

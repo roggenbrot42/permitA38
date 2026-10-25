@@ -96,7 +96,13 @@ class RecordService:
             raise ServiceError(404, "Not found")
         return self._write(me, coll, {**data, "id": rid, "created": old.get("created")}, old)
 
-    def _write(self, me: dict, coll: str, data: dict, old: dict | None) -> dict:
+    def adopt_expense(self, me: dict, expense: dict, supplier_id: str) -> dict:
+        """adopt-vendors: the expense gets the supplier through the normal write rules; its vendor text stays as typed."""
+        data = {k: v for k, v in expense.items() if k not in RESPONSE_ONLY}
+        data["supplier_id"] = supplier_id
+        return self._write(me, "expenses", data, expense, keep_vendor=True)
+
+    def _write(self, me: dict, coll: str, data: dict, old: dict | None, keep_vendor: bool = False) -> dict:
         for k in RESPONSE_ONLY:  # advisory warnings are computed per response, never stored
             data.pop(k, None)
         sc = _scope(me, coll, "write")
@@ -127,12 +133,15 @@ class RecordService:
                 )
                 if not visible:
                     raise ServiceError(422, "Unknown trip")
+            self._link_supplier(data, keep_vendor)
             if data.get("lines"):
                 self._check_vat_rates(*(ln.get("vat_rate") for ln in data["lines"]))
                 data = calc.itemise_expense(data)  # server derives net/vat per line and overwrites the top level
             else:
                 data.pop("lines", None)
                 self._check_vat_rates(data.get("vat_rate"))
+        elif coll == "contracts":
+            self._check_contract_users(data)
         elif coll == "projects":  # the extension history is server-managed: never taken from the request
             data.pop("extensions", None)
             if old and old.get("extensions") is not None:
@@ -149,6 +158,37 @@ class RecordService:
             data.pop("created", None)
         saved = self.store.save(coll, data)
         return _expense_view(saved) if coll == "expenses" else saved
+
+    def _check_contract_users(self, data: dict) -> None:
+        """``user_ids`` of a contract: people, or active subcontractors (person-capacity). An id of another supplier
+        kind, or of an inactive one, is refused; any other unknown id keeps today's behaviour (the planner ignores it)."""
+        for uid in data.get("user_ids") or []:
+            supplier = self.store.get("suppliers", uid) if isinstance(uid, str) else None
+            if supplier is None:
+                continue
+            if supplier.get("kind") != "person-capacity" or not supplier.get("active", True):
+                raise ServiceError(422, "A contract can only list people or active subcontractors")
+
+    def _link_supplier(self, data: dict, keep_vendor: bool = False) -> None:
+        """Expense links (docs/contracts/subcontractors.md): the supplier must exist and gives ``vendor`` (a snapshot
+        of its name); an allocation needs a supplier and must be an external allocation of that supplier."""
+        if not data.get("reverse_charge"):
+            data.pop("reverse_charge", None)  # false is the default: not stored
+        sid, aid = data.get("supplier_id"), data.get("allocation_id")
+        if sid:
+            supplier = self.store.get("suppliers", sid)
+            if not supplier:
+                raise ServiceError(422, "Unknown supplier")
+            if not keep_vendor:
+                data["vendor"] = supplier.get("name") or data.get("vendor")
+        if aid:
+            if not sid:
+                raise ServiceError(422, "allocation_id needs a supplier")
+            alloc = self.store.get("allocations", aid)
+            if not alloc:
+                raise ServiceError(422, "Unknown allocation")
+            if alloc.get("supplier_id") != sid:
+                raise ServiceError(422, "The allocation belongs to another supplier")
 
     # -- sanity checks that need stored data or settings ---------------------------------------------
     def _check_vat_rates(self, *rates) -> None:
