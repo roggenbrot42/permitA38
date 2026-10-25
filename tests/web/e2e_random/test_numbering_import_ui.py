@@ -130,9 +130,7 @@ def test_hostile_file_content_is_escaped_in_the_import_report(make_page, live_se
     evil_name = '<img src=x onerror="window.__xss=1">'
     evil_header = "<script>window.__xss=2</script>"
     f = tmp_path / "evil.csv"
-    f.write_text(
-        f"Nummer;Datum;Kunde;Netto;{evil_header}\nEV-1;01.01.2026;{evil_name};10;<b>x</b>\n", encoding="utf-8"
-    )
+    f.write_text(f"Nummer;Datum;Kunde;Netto;{evil_header}\nEV-1;01.01.2026;{evil_name};10;<b>x</b>\n", encoding="utf-8")
     page.set_input_files("#i_file", str(f))
     page.wait_for_selector("text=evil.csv")
     page.click("button[data-a=impCheck]")

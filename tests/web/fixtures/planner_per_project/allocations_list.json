@@ -1,0 +1,18 @@
+[
+  {
+    "id": "9f3a1c20",
+    "kind": "employee",
+    "user_id": "u1b2c3d4",
+    "user_name": "Demo Boss",
+    "project_id": "a1b2c3d4",
+    "project_name": "Demo project P",
+    "customer_id": "c0ffee01",
+    "start": "2026-03-02",
+    "end": "2026-03-27",
+    "hours_per_week": 25.0,
+    "status": "active",
+    "planned_hours": 100.0,
+    "created": 1772400000,
+    "updated": 1772400000
+  }
+]

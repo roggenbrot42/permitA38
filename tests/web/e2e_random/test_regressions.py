@@ -85,7 +85,9 @@ def test_negative_expense_is_rejected_and_credit_notes_do_not_break_money_page(m
     r = api.http.post("/expenses", json={"date": today, "net": -5000.0, "vat": 0, "vendor": "Gutschrift"})
     assert r.status_code == 422, r.text
     cust = api.post("/customers", {"name": "Gutschrift GmbH"})
-    inv = api.post("/invoices", {"customer_id": cust["id"], "lines": [{"description": "Gutschrift", "qty": 1, "price": -5000}]})
+    inv = api.post(
+        "/invoices", {"customer_id": cust["id"], "lines": [{"description": "Gutschrift", "qty": 1, "price": -5000}]}
+    )
     inv = api.post(f"/invoices/{inv['id']}/finalize")
     inv["status"], inv["paid_date"] = "paid", today
     assert api.http.put(f"/invoices/{inv['id']}", json=inv).status_code == 200  # negative revenue this month
