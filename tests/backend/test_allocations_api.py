@@ -60,7 +60,9 @@ def test_create_list_update_delete(boss_client, boss_id, project, store):
     listing = boss_client.get("/api/allocations").json()
     assert [x["id"] for x in listing] == [row["id"]] and "planning_warnings" not in listing[0]
 
-    r = boss_client.put(f"/api/allocations/{row['id']}", json=body(boss_id, project, hours_per_week=30.0, end="2026-03-13"))
+    r = boss_client.put(
+        f"/api/allocations/{row['id']}", json=body(boss_id, project, hours_per_week=30.0, end="2026-03-13")
+    )
     assert r.status_code == 200, r.text
     assert r.json()["hours_per_week"] == 30.0 and r.json()["planned_hours"] == 60.0 and r.json()["id"] == row["id"]
     assert r.json()["created"] == row["created"]
@@ -81,7 +83,9 @@ def test_list_filters_and_order(boss_client, boss_id, project):
     a = boss_client.post("/api/allocations", json=body(boss_id, project, start="2026-03-02")).json()
     b = boss_client.post("/api/allocations", json=body(boss_id, other, start="2026-04-06", end="2026-04-17")).json()
     assert [x["id"] for x in boss_client.get("/api/allocations").json()] == [b["id"], a["id"]]  # start descending
-    assert [x["id"] for x in boss_client.get("/api/allocations", params={"project_id": project["id"]}).json()] == [a["id"]]
+    assert [x["id"] for x in boss_client.get("/api/allocations", params={"project_id": project["id"]}).json()] == [
+        a["id"]
+    ]
     assert boss_client.get("/api/allocations", params={"user_id": "nobody0001"}).json() == []
     assert len(boss_client.get("/api/allocations", params={"status": "active"}).json()) == 2
     assert boss_client.get("/api/allocations", params={"status": "cancelled"}).json() == []
@@ -188,7 +192,10 @@ def test_body_bounds_are_inclusive(boss_client, boss_id, project):
         b.pop(missing)
         assert boss_client.post("/api/allocations", json=b).status_code == 422
     assert boss_client.post("/api/allocations", json=body(boss_id, {"id": "unassigned"})).status_code == 422
-    assert boss_client.post("/api/allocations", content=b"[1]", headers={"content-type": "application/json"}).status_code == 422
+    assert (
+        boss_client.post("/api/allocations", content=b"[1]", headers={"content-type": "application/json"}).status_code
+        == 422
+    )
 
 
 # ------------------------------------------------------------------ rights
@@ -321,9 +328,7 @@ def test_day_table_route(boss_client, boss_id, project):
         "/api/plan/day-table", params={"from": "2026-03-02", "to": "2026-03-02", "project_id": "unassigned"}
     ).json()
     assert list(only["days"][0]["scopes"]) == ["unassigned"]
-    user = boss_client.get(
-        "/api/plan/day-table", params={"from": "2026-03-02", "to": "2026-03-02", "user_id": boss_id}
-    )
+    user = boss_client.get("/api/plan/day-table", params={"from": "2026-03-02", "to": "2026-03-02", "user_id": boss_id})
     assert user.status_code == 200
 
 
@@ -338,7 +343,9 @@ def test_day_table_errors(boss_client):
     assert get(**{"from": "2026-01-01", "to": "2026-07-09"}).status_code == 200  # exactly 190 days
     r = get(**{"from": "2026-01-01", "to": "2026-07-10"})
     assert r.status_code == 400 and r.json() == {"detail": f"The range may cover at most {MAX_DAY_TABLE_DAYS} days"}
-    assert get(**{"from": "2026-03-02", "to": "2026-03-03", "user_id": "nobody0001"}).json() == {"detail": "User not found"}
+    assert get(**{"from": "2026-03-02", "to": "2026-03-03", "user_id": "nobody0001"}).json() == {
+        "detail": "User not found"
+    }
     assert get(**{"from": "2026-03-02", "to": "2026-03-03", "project_id": "nobody0001"}).json() == {
         "detail": "Project not found"
     }
@@ -361,12 +368,15 @@ def test_simulate_with_allocation_changes_and_delta(boss_client, boss_id, projec
     new = {"user_id": boss_id, "project_id": project["id"], "start": START, "end": END, "hours_per_week": 5.0}
     assert boss_client.post("/api/plan/simulate", json={**base, "changes": {"allocations": [new]}}).status_code == 200
     assert len(store.list("allocations")) == 1  # simulate writes nothing
+
     # errors
     def sim_err(change):
         return boss_client.post("/api/plan/simulate", json={**base, "changes": {"allocations": [change]}})
 
     assert sim_err({"id": "nothing0001", "hours_per_week": 5}).json() == {"detail": "Allocation not found"}
-    ext = store.save("allocations", {"supplier_id": "supp0001", "project_id": project["id"], "start": START, "end": END})
+    ext = store.save(
+        "allocations", {"supplier_id": "supp0001", "project_id": project["id"], "start": START, "end": END}
+    )
     assert sim_err({"id": ext["id"], "hours_per_week": 5}).status_code == 409
     assert sim_err({**new, "user_id": "nobody0001"}).json() == {"detail": "User not found"}
     assert sim_err({**new, "project_id": "nobody0001"}).json() == {"detail": "Project not found"}
@@ -380,7 +390,13 @@ def test_simulate_with_allocation_changes_and_delta(boss_client, boss_id, projec
 def test_apply_writes_allocation_rows_with_confirm(boss_client, boss_id, project, store):
     a = boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=30.0)).json()
     gone = boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=5.0)).json()
-    new = {"user_id": boss_id, "project_id": project["id"], "start": "2026-04-06", "end": "2026-04-10", "hours_per_week": 20.0}
+    new = {
+        "user_id": boss_id,
+        "project_id": project["id"],
+        "start": "2026-04-06",
+        "end": "2026-04-10",
+        "hours_per_week": 20.0,
+    }
     changes = {"allocations": [new, {"id": a["id"], "hours_per_week": 35.0}, {"id": gone["id"], "delete": True}]}
     r = boss_client.post("/api/plan/apply", json={"changes": changes, "confirm": False})
     assert r.status_code == 400 and len(store.list("allocations")) == 2
@@ -396,7 +412,11 @@ def test_apply_writes_allocation_rows_with_confirm(boss_client, boss_id, project
 
 
 def test_scenarios_keep_allocation_changes(boss_client, boss_id, project):
-    ch = {"allocations": [{"user_id": boss_id, "project_id": project["id"], "start": START, "end": END, "hours_per_week": 8}]}
+    ch = {
+        "allocations": [
+            {"user_id": boss_id, "project_id": project["id"], "start": START, "end": END, "hours_per_week": 8}
+        ]
+    }
     r = boss_client.post("/api/plan/scenarios", json={"name": "What if", "changes": ch})
     assert r.status_code == 200 and r.json()["changes"]["allocations"][0]["hours_per_week"] == 8
     listed = boss_client.get("/api/plan/scenarios").json()
@@ -433,7 +453,14 @@ def test_suggest_start_per_project(boss_client, boss_id, project):
 def test_cancelled_rows_and_referenced_deletes_are_409(boss_client, boss_id, project, store):
     row = store.save(
         "allocations",
-        {"user_id": boss_id, "project_id": project["id"], "start": START, "end": END, "hours_per_week": 5, "status": "cancelled"},
+        {
+            "user_id": boss_id,
+            "project_id": project["id"],
+            "start": START,
+            "end": END,
+            "hours_per_week": 5,
+            "status": "cancelled",
+        },
     )
     assert boss_client.put(f"/api/allocations/{row['id']}", json=body(boss_id, project)).status_code == 409
     assert boss_client.delete(f"/api/allocations/{row['id']}").status_code == 409
@@ -441,7 +468,9 @@ def test_cancelled_rows_and_referenced_deletes_are_409(boss_client, boss_id, pro
     assert [x["status"] for x in listed] == ["cancelled"] and listed[0]["user_name"] == "Test Boss"
     r = boss_client.delete(f"/api/projects/{project['id']}")
     assert r.status_code == 409 and store.get("projects", project["id"]) is not None
-    emp = boss_client.post("/api/users", json={"username": "eva", "name": "Eva", "role": "employee", "password": "correct horse battery"}).json()
+    emp = boss_client.post(
+        "/api/users", json={"username": "eva", "name": "Eva", "role": "employee", "password": "correct horse battery"}
+    ).json()
     boss_client.post("/api/allocations", json=body(emp["id"], project))
     assert boss_client.delete(f"/api/users/{emp['id']}").status_code == 409
     assert store.get("users", emp["id"]) is not None
@@ -463,5 +492,9 @@ def test_simulate_scopes_its_base_by_project(boss_client, boss_id, project, stor
     out = boss_client.post("/api/plan/simulate", json={"weeks": 1, "first": START, "project_id": other["id"]}).json()
     assert [p["project_id"] for p in out["weeks"][0]["projects"]] == [other["id"]]
     assert out["weeks"][0]["gap"] == 10.0 and out["weeks"][0]["delta"] == 0.0
-    assert out["delta"] == {"gap": 0.0, "projects": [
-        {"project_id": other["id"], "name": "Demo project Q", "base_gap": 10.0, "gap": 10.0, "delta": 0.0}]}
+    assert out["delta"] == {
+        "gap": 0.0,
+        "projects": [
+            {"project_id": other["id"], "name": "Demo project Q", "base_gap": 10.0, "gap": 10.0, "delta": 0.0}
+        ],
+    }

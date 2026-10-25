@@ -284,9 +284,8 @@ def test_simulate_equals_forecast_for_random_contracts(hpw, days, weeks):
             user = add_user(r)
             add_contract(r, user, MON + timedelta(days=days // 2), MON + timedelta(days=days), hpw=round(hpw, 2))
             s = svc(r)
-            assert (
-                s.forecast(weeks, None, True, today=MON)["weeks"]
-                == _no_delta(s.simulate({}, weeks, MON, None, today=MON)["weeks"])
+            assert s.forecast(weeks, None, True, today=MON)["weeks"] == _no_delta(
+                s.simulate({}, weeks, MON, None, today=MON)["weeks"]
             )
         finally:
             r.close()

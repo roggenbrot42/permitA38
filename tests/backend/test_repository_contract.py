@@ -365,10 +365,30 @@ def test_audit_log_keeps_unknown_fields_and_filters_by_token_and_user(repo):
 
 
 def test_allocations_employee_and_supplier_rows_with_nullable_owner_columns(repo):
-    emp = repo.save("allocations", {"user_id": "u1", "project_id": "p1", "start": "2026-03-02", "end": "2026-03-27",
-                                    "hours_per_week": 25.0, "status": "active", "x_future": {"a": [1]}})
-    sup = repo.save("allocations", {"supplier_id": "s1", "project_id": "p1", "start": "2026-03-02", "end": "2026-03-27",
-                                    "total_hours": 10.0, "rate": 80.0, "status": "active"})
+    emp = repo.save(
+        "allocations",
+        {
+            "user_id": "u1",
+            "project_id": "p1",
+            "start": "2026-03-02",
+            "end": "2026-03-27",
+            "hours_per_week": 25.0,
+            "status": "active",
+            "x_future": {"a": [1]},
+        },
+    )
+    sup = repo.save(
+        "allocations",
+        {
+            "supplier_id": "s1",
+            "project_id": "p1",
+            "start": "2026-03-02",
+            "end": "2026-03-27",
+            "total_hours": 10.0,
+            "rate": 80.0,
+            "status": "active",
+        },
+    )
     got = repo.get("allocations", emp["id"])
     assert got == emp and got["x_future"] == {"a": [1]}
     assert "supplier_id" not in got and "user_id" not in repo.get("allocations", sup["id"])

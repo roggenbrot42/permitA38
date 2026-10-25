@@ -93,6 +93,65 @@ Every forecast week states where its revenue comes from:
 
 The planner splits the totals into contracted and assumed revenue, so you can see how much is not yet contracted.
 
+## Capacity per project (ring fence)
+
+Capacity belongs to projects. You give a person's hours to a project with an **allocation** (hours per week for a
+period, see Allocations below). Only the contracts and open offers of **that project** draw on it; hours a project
+does not use are **not** lent to another project, and a project's shortfall is a **gap of that project**.
+
+- A person's real capacity of a day (see Capacity) is shared out to the projects they are allocated to:
+  `hours per week / workdays` per allocation. If the allocations of one day add up to more than the real capacity
+  (over-allocation, or a holiday or vacation day), every allocation is scaled down pro rata: nothing is invented and
+  nothing goes to a third project. A holiday or absence day gives every allocation 0 hours.
+- What a person has beyond their allocations is **unassigned** capacity (a person with no allocation is entirely
+  unassigned). Contracts and offers **without a project** draw on unassigned capacity only.
+- The **gap** is `max(0, planned - capacity)` per project and **day**, summed over the week. Because the promise of an
+  `hours per week` contract is not reduced by holidays or time off (see Commitments), a holiday inside a booked week
+  shows up as a gap on that day even when the week as a whole has hours to spare.
+- The week row of the whole team keeps its fields (capacity, confirmed, utilisation, ...) and gains `gap` (the sum of
+  all project gaps) and `projects[]` with one entry per project and `unassigned`. The team status is `over` whenever
+  any project has a gap, even if the team total looks fine (`tight` at 100 % used to hide the gap).
+- Forecast parameters: `project_id` (a project id or `unassigned`) shows only that project; `by_project=0` omits
+  `projects[]`. `GET /api/plan/day-table?from=&to=` shows capacity, planned hours and gap per day, project and pool
+  (at most 190 days).
+- Subcontractors are a second pool (`external`) inside a project, not netted with the employees. Until that feature
+  exists the external pool is always zero.
+
+**After the upgrade** nobody has allocations, so every project with contracts or open offers shows a gap equal to its
+whole demand, while the team total is unchanged and project-less contracts behave as before. Press **Allocate my
+capacity** (`POST /api/allocations/bootstrap`): the preview lists one allocation per active contract with a project and
+assignee, with the contract's period and the assignee's peak weekly demand rounded up to 0.25 h; confirming creates
+them. A second run creates nothing. Open offers are not allocated automatically.
+
+### Allocations
+
+`GET/POST /api/allocations`, `PUT/DELETE /api/allocations/{id}` (boss only, area `planning`). Hours per week are
+0.25 to 80, a period is at most 1830 days, the project must not be done or archived and the person must be active.
+Over-allocation is never an error: the answer carries `planning_warnings`
+(`allocation.employee_over_allocated`, `allocation.overlap_same_project`). You cannot delete a person or a project
+that has allocations; deactivate the person instead.
+
+### Warnings per project
+
+| Code | Meaning |
+|---|---|
+| `capacity.gap` | a project (and pool) has a gap in a week; other projects' free hours do not cover it |
+| `capacity.over` | the unassigned capacity is overbooked in a week |
+| `allocation.employee_over_allocated` | a person is allocated more than their weekly hours (`weekly_hours`) or more than the week leaves after holidays and time off (`time_off`) |
+| `allocation.no_demand` | an allocation has capacity in a week but its project plans nothing (info) |
+| `allocation.overlap_same_project` | the same person has two overlapping allocations to one project (info) |
+| `offer.project_gap` | an offer of a project does not fit in that project's allocated hours (the whole gap of the week is reported) |
+
+Offers without a project are checked against the unassigned capacity (`capacity.offer_over`). The suggestions
+(earliest start, what must move) work per project; vacation suggestions count the resulting gaps of all projects.
+
+### What-if with allocations
+
+A draft can contain allocation changes (`changes.allocations`: new, changed hours or period, or deleted).
+`POST /api/plan/simulate` returns the same structure as the forecast plus `delta` (the change of the gap against the
+base, per week, project and in total). A change to one project's contract changes only that project's rows. Applying
+a draft writes allocation rows only with `confirm: true` and returns their warnings as `allocation_warnings`.
+
 ## Plan & vacation (what-if)
 
 Open **Planning → Plan & vacation**. The timeline shows, per week and per day: capacity, utilisation, public
@@ -138,5 +197,5 @@ It shows used, planned and remaining days for the year, and warns when the plann
 - The planner recomputes on the server for every change of a draft (a short delay per change). It does not keep a
   separate client-side copy of the rules; the browser shows what the server computes.
 - Calendar busy time comes from a provider that the calendar module will implement; until then it is zero.
-- Suggestions consider one person at a time. Contracts are never moved by suggestions; only open offers are.
+- Suggestions consider one person at a time and one project at a time. Contracts are never moved by suggestions; only open offers are.
 - Scenario comparison uses the base of the currently selected person or team.

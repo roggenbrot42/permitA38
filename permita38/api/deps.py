@@ -11,13 +11,13 @@ from permita38.core import rights
 from permita38.core.config import Config
 from permita38.core.netsafe import SafeFetcher
 from permita38.core.repository import Repository, auto_backup, create_repository
+from permita38.core.service.allocations import AllocationService
 from permita38.core.service.audit import AuditService
 from permita38.core.service.auth import AuthService
 from permita38.core.service.busy import BusyTimeProvider
 from permita38.core.service.calendar.busy_provider import CalendarBusyProvider
 from permita38.core.service.calendar.service import CalendarService, ResourceFetcher
 from permita38.core.service.importer import ImportService
-from permita38.core.service.allocations import AllocationService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.plan_service import PlanningService
 from permita38.core.service.records import RecordService

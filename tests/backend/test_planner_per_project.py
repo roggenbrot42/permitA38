@@ -33,7 +33,9 @@ class World:
         self.repo = repo
         self.boss = repo.save(
             "users",
-            dict(username="boss", name="Demo Boss", role="boss", weekly_hours=40, workdays=[0, 1, 2, 3, 4], active=True),
+            dict(
+                username="boss", name="Demo Boss", role="boss", weekly_hours=40, workdays=[0, 1, 2, 3, 4], active=True
+            ),
         )
         self.p = repo.save("projects", dict(name="Demo project P", status="active"))
         self.q = repo.save("projects", dict(name="Demo project Q", status="active"))
@@ -43,14 +45,21 @@ class World:
         return self.repo.save(
             "users",
             dict(
-                username="erika", name="Erika Beispiel", role="employee", weekly_hours=32, workdays=[0, 1, 2, 3], active=True
+                username="erika",
+                name="Erika Beispiel",
+                role="employee",
+                weekly_hours=32,
+                workdays=[0, 1, 2, 3],
+                active=True,
             ),
         )
 
     def alloc(self, user, project, hpw, start=START, end=END):
         return self.repo.save(
             "allocations",
-            dict(user_id=user["id"], project_id=project["id"], start=start, end=end, hours_per_week=hpw, status="active"),
+            dict(
+                user_id=user["id"], project_id=project["id"], start=start, end=end, hours_per_week=hpw, status="active"
+            ),
         )
 
     def contract(self, user, project, hpw=None, total=None, start=START, end=END, title="C"):
@@ -147,7 +156,9 @@ def test_e1_day_table(w):
     w.contract(w.boss, w.q, hpw=10)
     t = w.svc.day_table(date(2026, 3, 2), date(2026, 3, 2), today=TODAY)
     day = t["days"][0]
-    assert pick(day, "cap", "confirmed", "binding", "expected") == dict(cap=8.0, confirmed=8.0, binding=0.0, expected=0.0)
+    assert pick(day, "cap", "confirmed", "binding", "expected") == dict(
+        cap=8.0, confirmed=8.0, binding=0.0, expected=0.0
+    )
     zero = dict(cap=0.0, assigned=0.0, confirmed=0.0, binding=0.0, expected=0.0, gap=0.0, gap_confirmed=0.0)
     assert day["scopes"][w.p["id"]] == {
         "internal": dict(cap=5.0, assigned=6.0, confirmed=6.0, binding=0.0, expected=0.0, gap=1.0, gap_confirmed=1.0),
@@ -282,8 +293,12 @@ def test_e4_vacation_inside_allocations(w):
     w.contract(w.boss, w.p, hpw=20)
     out = w.forecast()
     p, q = w.entry(out, 0, w.p), w.entry(out, 0, w.q)
-    assert pick(p, "capacity", "confirmed", "gap", "status") == dict(capacity=16.0, confirmed=20.0, gap=4.0, status="over")
-    assert pick(q, "capacity", "confirmed", "free_worst_case") == dict(capacity=16.0, confirmed=0.0, free_worst_case=16.0)
+    assert pick(p, "capacity", "confirmed", "gap", "status") == dict(
+        capacity=16.0, confirmed=20.0, gap=4.0, status="over"
+    )
+    assert pick(q, "capacity", "confirmed", "free_worst_case") == dict(
+        capacity=16.0, confirmed=0.0, free_worst_case=16.0
+    )
     for i in (1, 2, 3):
         p = w.entry(out, i, w.p)
         assert pick(p, "capacity", "confirmed", "gap", "utilisation", "status") == dict(
@@ -436,9 +451,7 @@ def test_what_if_allocation_changes_move_hours_between_projects(w):
     assert sim["delta"]["projects"] == [
         dict(project_id=w.p["id"], name="Demo project P", base_gap=10.0, gap=6.0, delta=-4.0)
     ]
-    new = w.svc.simulate(
-        dict(allocations=[dict(id=a["id"], delete=True)]), 1, TODAY, None, today=TODAY
-    )
+    new = w.svc.simulate(dict(allocations=[dict(id=a["id"], delete=True)]), 1, TODAY, None, today=TODAY)
     assert w.entry(new, 0, w.p)["capacity"] == 0.0 and w.entry(new, 0, w.p)["gap"] == 30.0
     assert [r["hours_per_week"] for r in w.repo.list("allocations")] == [20, 20]  # nothing written
 

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import math
 from datetime import date, timedelta
-from typing import Any
 
 from permita38.core import calc
 from permita38.core.errors import ServiceError
@@ -23,6 +22,7 @@ CLOSED_PROJECT = ("done", "archived")
 MAX_BOOTSTRAP = 500
 MAX_PERIOD_DAYS = 1830
 MAX_HOURS = 80.0
+Rows = list[dict]  # alias: a method named `list` shadows the builtin inside the class body
 
 
 def _is_external(row: dict) -> bool:
@@ -82,7 +82,7 @@ class AllocationService:
         supplier_id: str | None = None,
         status: str | None = None,
         include_external: bool = False,
-    ) -> list[dict]:
+    ) -> Rows:
         rows = []
         for r in self.store.list("allocations"):
             if _is_external(r) and not include_external:
@@ -124,7 +124,7 @@ class AllocationService:
             row["customer_id"] = project["customer_id"]
         return row
 
-    def _employee_rows(self) -> list[dict]:
+    def _employee_rows(self) -> Rows:
         return [r for r in self.store.list("allocations") if not _is_external(r) and _active(r)]
 
     def _answer(self, saved: dict, user: dict, project: dict) -> dict:
@@ -166,7 +166,7 @@ class AllocationService:
         self.store.delete("allocations", rid)
 
     # ------------------------------------------------------------------ what-if rows written by plan/apply
-    def apply_change(self, ch: dict) -> list[dict]:
+    def apply_change(self, ch: dict) -> Rows:
         """Write one ``AllocationChange`` (create, update or delete); returns the D2 warnings of the row written."""
         rid = ch.get("id")
         if rid:
@@ -191,11 +191,11 @@ class AllocationService:
     def _round_up_quarter(x: float) -> float:
         return math.ceil(x * 4 - 1e-6) / 4
 
-    def _proposals(self, today: date) -> tuple[list[dict], list[dict]]:
+    def _proposals(self, today: date) -> tuple[Rows, Rows]:
         world = eng.load(self.store, today)
         existing = [r for r in self._employee_rows()]
-        proposals: list[dict] = []
-        skipped: list[dict] = []
+        proposals: Rows = []
+        skipped: Rows = []
         for it in world.items:
             if it.kind != "contract" or not it.project_id:
                 continue
@@ -261,7 +261,7 @@ class AllocationService:
             warnings=self._bootstrap_warnings(proposals),
         )
 
-    def _bootstrap_warnings(self, proposals: list[dict]) -> list[dict]:
+    def _bootstrap_warnings(self, proposals: Rows) -> Rows:
         """Warnings of the resulting set. Computed from the stored rows plus the proposals, so a preview and a
         confirmed run give the same list (the written rows are not counted twice)."""
         stored = self._employee_rows()
@@ -270,9 +270,13 @@ class AllocationService:
         for i, p in enumerate(proposals):
             if (p["user_id"], p["project_id"], p["start"], p["end"], p["hours_per_week"]) in known:
                 continue  # already written by this run
-            merged.append(dict(id=p.get("id") or f"proposal{i}", **{k: p[k] for k in (
-                "user_id", "project_id", "start", "end", "hours_per_week")}))
-        out: list[dict] = []
+            merged.append(
+                dict(
+                    id=p.get("id") or f"proposal{i}",
+                    **{k: p[k] for k in ("user_id", "project_id", "start", "end", "hours_per_week")},
+                )
+            )
+        out: Rows = []
         users = {u["id"]: u for u in self.store.list("users")}
         seen_over: set[str] = set()
         seen_overlap: set[tuple[str, str]] = set()

@@ -164,6 +164,7 @@ class ApiMachine(RuleBasedStateMachine):
         self.dirty: set[str] = set()
         self.steps = 0
         self.timers: dict[str, dict | None] = {}
+        self.allocs: dict[str, dict] = {}  # id -> {user_id, project_id, start, end, hours_per_week}
         self.m: dict[str, dict] = {c: {} for c in (*CRUD, "offers", "invoices", "users")}
         self.bodies: dict[str, dict] = {}  # last submitted body per document id
         self.settings = {"kleinunternehmer": False, "accounting": "eur"}
@@ -689,6 +690,9 @@ class ApiMachine(RuleBasedStateMachine):
             if not own:
                 assert r.status_code == 403
                 return
+        if coll == "projects" and old is not None and any(a["project_id"] == rid for a in self.allocs.values()):
+            assert r.status_code == 409  # a project with allocations cannot be deleted
+            return
         assert r.status_code == 204
         if old is None:
             return
@@ -1091,11 +1095,81 @@ class ApiMachine(RuleBasedStateMachine):
             assert r.status_code == 204
         elif rid == s.user_id:
             assert r.status_code == 400
+        elif any(a["user_id"] == rid for a in self.allocs.values()):
+            assert r.status_code == 409  # a person with allocations is deactivated, not deleted
         else:
             assert r.status_code == 204, r.text
             del self.m["users"][rid]
             self.timers.pop(rid, None)
             self.dirty.add("users")
+
+    # ------------------------------------------------------------------ rules: allocations (planner per project)
+    @precondition(lambda self: len(self.allocs) < 12)
+    @rule(
+        data=st.data(),
+        hpw=st.sampled_from([0.25, 10.0, 30.0, 80.0]),
+        span=st.integers(-3, 40),
+        project_ok=st.booleans(),
+    )
+    def allocation_create(self, data, hpw, span, project_ok):
+        self.tick()
+        s = data.draw(self.actor())
+        uid = data.draw(st.sampled_from(list(self.m["users"]) + [DEAD_ID]))
+        pid = data.draw(st.sampled_from(list(self.m["projects"]))) if project_ok and self.m["projects"] else DEAD_ID
+        start = TODAY + timedelta(days=data.draw(st.integers(0, 20)))
+        body = dict(user_id=uid, project_id=pid, start=start.isoformat(),
+                    end=(start + timedelta(days=span)).isoformat(), hours_per_week=hpw)  # fmt: skip
+        r = self.call("POST", "/allocations", s, json=body)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g
+            return
+        user, project = self.m["users"].get(uid), self.m["projects"].get(pid)
+        if user is None:
+            assert r.status_code == 404 and r.json()["detail"] == "User not found"
+        elif project is None:
+            assert r.status_code == 404 and r.json()["detail"] == "Project not found"
+        elif span < 0:
+            assert r.status_code == 409
+        elif project["status"] in ("done", "archived"):
+            assert r.status_code == 409 and r.json()["detail"] == "The project is closed"
+        elif not user["active"]:
+            assert r.status_code == 409 and r.json()["detail"] == "The user is not active"
+        else:
+            assert r.status_code == 201, r.text
+            got = r.json()
+            assert got["kind"] == "employee" and got["status"] == "active" and got["hours_per_week"] == hpw
+            assert got["planned_hours"] >= 0 and isinstance(got["planning_warnings"], list)
+            self.allocs[got["id"]] = {k: body[k] for k in body}
+            return
+        assert r.status_code in (404, 409)
+
+    @precondition(lambda self: self.allocs)
+    @rule(data=st.data())
+    def allocation_delete(self, data):
+        self.tick()
+        s = data.draw(self.actor())
+        rid = data.draw(st.sampled_from(list(self.allocs) + [DEAD_ID]))
+        r = self.call("DELETE", f"/allocations/{rid}", s)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g
+            return
+        if rid in self.allocs:
+            assert r.status_code == 204
+            del self.allocs[rid]
+        else:
+            assert r.status_code == 404
+
+    def allocations_match_model(self):
+        rows = self.call("GET", "/allocations", self._boss()).json()
+        assert {r["id"] for r in rows} == set(self.allocs)
+        for row in rows:
+            subset_eq(self.allocs[row["id"]], row)
+        # ring fence: whatever the allocations, the scopes of a week add up to the team row and the gaps to its gap
+        out = self.call("GET", "/forecast", self._boss(), params={"weeks": 6}).json()
+        for w in out["weeks"]:
+            assert abs(sum(p["capacity"] for p in w["projects"]) - w["capacity"]) < 0.01
+            assert abs(sum(p["gap"] for p in w["projects"]) - w["gap"]) < 0.01
+            assert (w["gap"] > 0.001) <= (w["status"] == "over")
 
     # ------------------------------------------------------------------ rules: API tokens
     def revoke_tokens_of(self, user_id):
@@ -1392,6 +1466,7 @@ class ApiMachine(RuleBasedStateMachine):
         self.sessions_match_model()
         self.tokens_match_model()
         self.lists_match_model()
+        self.allocations_match_model()
         self.dashboard_matches_model()
         self.finance_matches_model()
         self.dirty = set()

@@ -59,7 +59,7 @@ and on your own row.
 
 Notes
 
-* Planning, scenarios and the vacation planner are boss only. Accepting offers, finalising and numbering invoices,
+* Planning, scenarios, allocations (planner per project) and the vacation planner are boss only. Accepting offers, finalising and numbering invoices,
   billing tracked time and deleting documents belong to the *offers* / *invoices* write access (boss only).
 * The accountant can download PDFs of offers and invoices (read access) but not change their status.
 * Account-level endpoints (own password, own two-factor authentication, bootstrap, holidays) are open to every

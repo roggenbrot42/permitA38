@@ -11,7 +11,6 @@ from __future__ import annotations
 import time as _time
 from dataclasses import replace
 from datetime import date, timedelta
-from typing import Any
 
 from permita38.core import calc
 from permita38.core.errors import ServiceError
@@ -206,15 +205,17 @@ class PlanningService:
             for uid, user in world.users.items():
                 if user_id and uid != user_id:
                     continue
-                mine = [
-                    a for a in world.allocations if a["user_id"] == uid and pw.overlaps_week(a, ws)
-                ]
+                mine = [a for a in world.allocations if a["user_id"] == uid and pw.overlaps_week(a, ws)]
                 if not mine or (scope and not any(a["project_id"] == scope for a in mine)):
                     continue
                 allocated = sum(calc.fnum(a.get("hours_per_week")) for a in mine)
                 weekly = calc.fnum(user.get("weekly_hours"))
                 if allocated > weekly + 1e-9:
-                    out.append(pw.employee_over_allocated(uid, user.get("name") or "?", r["week"], allocated, weekly, "weekly_hours"))
+                    out.append(
+                        pw.employee_over_allocated(
+                            uid, user.get("name") or "?", r["week"], allocated, weekly, "weekly_hours"
+                        )
+                    )
                     continue
                 wd = calc._workdays(user)
                 per_day = weekly / len(wd)
@@ -226,7 +227,9 @@ class PlanningService:
                 )
                 real = weekly - lost
                 if allocated > real + 1e-9:
-                    out.append(pw.employee_over_allocated(uid, user.get("name") or "?", r["week"], allocated, real, "time_off"))
+                    out.append(
+                        pw.employee_over_allocated(uid, user.get("name") or "?", r["week"], allocated, real, "time_off")
+                    )
             if not by_project:
                 continue
             entries = {p["project_id"]: p for p in r["projects"]}
@@ -369,7 +372,7 @@ class PlanningService:
             base_gap = base.get(pid, {}).get("gap", 0.0)
             if gap <= 1e-9 and base_gap <= 1e-9:
                 continue
-            name = (now.get(pid) or base.get(pid))["name"]
+            name = (now.get(pid) or base.get(pid) or {})["name"]
             projects.append(
                 dict(
                     project_id=pid,

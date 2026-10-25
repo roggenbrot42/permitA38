@@ -42,7 +42,9 @@ def list_allocations(
     name="bootstrap_allocations",
     summary="preview (confirm false) or create one allocation per active contract with a project and assignee",
 )
-def bootstrap(body: models.AllocationBootstrapIn, _: Annotated[dict, Needs("planning", "write")], services: ServicesDep):
+def bootstrap(
+    body: models.AllocationBootstrapIn, _: Annotated[dict, Needs("planning", "write")], services: ServicesDep
+):
     return services.allocations.bootstrap(body.confirm)
 
 
@@ -54,9 +56,7 @@ def bootstrap(body: models.AllocationBootstrapIn, _: Annotated[dict, Needs("plan
     name="create_allocation",
     summary="give hours per week of a person to a project",
 )
-def create_allocation(
-    body: models.AllocationIn, _: Annotated[dict, Needs("planning", "write")], services: ServicesDep
-):
+def create_allocation(body: models.AllocationIn, _: Annotated[dict, Needs("planning", "write")], services: ServicesDep):
     return StoredJSON(services.allocations.create(body.model_dump()), status_code=201)
 
 

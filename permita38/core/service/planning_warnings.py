@@ -291,7 +291,13 @@ def over_allocation_on_save(user: dict, allocs: list[dict], start: str, end: str
         if allocated > weekly + 1e-9:
             out.append(
                 employee_over_allocated(
-                    user["id"], user.get("name") or "?", ws.isoformat(), allocated, weekly, "weekly_hours", "allocations"
+                    user["id"],
+                    user.get("name") or "?",
+                    ws.isoformat(),
+                    allocated,
+                    weekly,
+                    "weekly_hours",
+                    "allocations",
                 )
             )
             if len(out) >= SAVE_WARNING_WEEKS:

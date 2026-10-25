@@ -728,7 +728,11 @@ ALLOCATION_MAX_DAYS = 1830  # longest period of one allocation (about five years
 
 def _check_alloc_period(start: str | None, end: str | None) -> None:
     v.check_period(start, end)
-    if start and end and (datetime.strptime(end, "%Y-%m-%d") - datetime.strptime(start, "%Y-%m-%d")).days > ALLOCATION_MAX_DAYS:
+    if (
+        start
+        and end
+        and (datetime.strptime(end, "%Y-%m-%d") - datetime.strptime(start, "%Y-%m-%d")).days > ALLOCATION_MAX_DAYS
+    ):
         raise ValueError(f"the period may be at most {ALLOCATION_MAX_DAYS} days")
 
 

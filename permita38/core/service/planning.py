@@ -170,7 +170,11 @@ def apply_allocation_changes(
             merged = dict(
                 id=f"new{i}",
                 status="active",
-                **{k: ch[k] for k in ("user_id", "project_id", "start", "end", "hours_per_week") if ch.get(k) is not None},
+                **{
+                    k: ch[k]
+                    for k in ("user_id", "project_id", "start", "end", "hours_per_week")
+                    if ch.get(k) is not None
+                },
             )
         if ch.get("user_id") is not None and merged["user_id"] not in users:
             raise ServiceError(404, "User not found")
@@ -577,9 +581,7 @@ def _project_entry(world: World, key: str, sm: _Sum) -> dict:
         status = "over"
 
     def pool(i: int) -> dict:
-        return dict(
-            capacity=round(sm.cap[i], 6), assigned=round(sm.conf[i] + sm.bind[i], 6), gap=round(sm.gap[i], 6)
-        )
+        return dict(capacity=round(sm.cap[i], 6), assigned=round(sm.conf[i] + sm.bind[i], 6), gap=round(sm.gap[i], 6))
 
     return dict(
         project_id=None if key == UNASSIGNED else key,
