@@ -26,8 +26,11 @@ Capacity is never negative. Part-time workdays (for example Monday to Wednesday 
   gets its share of the full week.
 - **Binding offers** = offers that were sent, are not accepted yet, and whose validity date (`valid until`) has not
   passed. Until that date the offer is treated as binding.
-- Holidays and absences do **not** reduce what an `hours per week` contract promises. If you promised 40 h in a week
-  you take off, the week shows as over capacity. That is the point of the planner.
+- Holidays and absences do **not** reduce what an `hours per week` contract promises, but the hours move to the days
+  that can work: they are spread over the assignee's available days of the week (workdays that are neither a public
+  holiday nor a day off). If you promised 40 h in a week with a holiday, the week shows as over capacity; 32 h fit in
+  such a week (8 h on four days). Only when a week has no available day left the nominal spread over all workdays is
+  kept.
 
 ## Worst case and expected view
 
@@ -105,13 +108,13 @@ does not use are **not** lent to another project, and a project's shortfall is a
   nothing goes to a third project. A holiday or absence day gives every allocation 0 hours.
 - What a person has beyond their allocations is **unassigned** capacity (a person with no allocation is entirely
   unassigned). Contracts and offers **without a project** draw on unassigned capacity only.
-- The **gap** is `max(0, planned - capacity)` per project and **day**, summed over the week. Because the promise of an
-  `hours per week` contract is not reduced by holidays or time off (see Commitments), a holiday inside a booked week
-  shows up as a gap on that day even when the week as a whole has hours to spare.
+- The **gap** is `max(0, planned - capacity)` per project and **day**, summed over the week. Because the hours of a
+  contract are spread over the available days (see Commitments), a holiday or a day off alone does not create a gap;
+  real overload does, and a project's gap on one day is not covered by another day's free hours of the same week.
 - The week row of the whole team keeps its fields (capacity, confirmed, utilisation, ...) and gains `gap` (the sum of
   all project gaps) and `projects[]` with one entry per project and `unassigned`. The team status is `over` whenever
   any project has a gap, even if the team total looks fine (`tight` at 100 % used to hide the gap).
-- Forecast parameters: `project_id` (a project id or `unassigned`) shows only that project; `by_project=0` omits
+- Forecast parameters: `project_id` (a project id or `unassigned`; empty = no filter) shows only that project; `by_project=0` omits
   `projects[]`. `GET /api/plan/day-table?from=&to=` shows capacity, planned hours and gap per day, project and pool
   (at most 190 days).
 - Subcontractors are a second pool (`external`) inside a project, not netted with the employees. Until that feature
@@ -122,6 +125,13 @@ whole demand, while the team total is unchanged and project-less contracts behav
 capacity** (`POST /api/allocations/bootstrap`): the preview lists one allocation per active contract with a project and
 assignee, with the contract's period and the assignee's peak weekly demand rounded up to 0.25 h; confirming creates
 them. A second run creates nothing. Open offers are not allocated automatically.
+
+With `by_project=0` there is no project dimension: the team `capacity.over` warning uses the utilisation rule only
+(week utilisation above 100 %, `scope: "team"`), not the gaps.
+
+Before the bootstrap every project with contracts shows capacity 0 and a gap equal to its demand, and an offer of a
+project warns (`offer.project_gap`), because no hours are allocated to it yet. `what-must-move` takes no project in its
+body: the draft is treated as unassigned and only offers without a project are moved.
 
 ### Allocations
 
@@ -137,7 +147,7 @@ that has allocations; deactivate the person instead.
 |---|---|
 | `capacity.gap` | a project (and pool) has a gap in a week; other projects' free hours do not cover it |
 | `capacity.over` | the unassigned capacity is overbooked in a week |
-| `allocation.employee_over_allocated` | a person is allocated more than their weekly hours (`weekly_hours`) or more than the week leaves after holidays and time off (`time_off`) |
+| `allocation.employee_over_allocated` | judged per day: on some day the person's allocations add up to more than the real capacity of that day, because of too many hours (`weekly_hours`) or because a holiday or day off leaves none (`time_off`). Allocations to different days of a week (P Mon-Tue, Q Wed-Fri) do not warn. A person with allocations over several weeks of leave gets one `time_off` warning per week, which can be noisy |
 | `allocation.no_demand` | an allocation has capacity in a week but its project plans nothing (info) |
 | `allocation.overlap_same_project` | the same person has two overlapping allocations to one project (info) |
 | `offer.project_gap` | an offer of a project does not fit in that project's allocated hours (the whole gap of the week is reported) |
