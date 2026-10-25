@@ -81,3 +81,34 @@ def delete_allocation(
 ):
     services.allocations.delete(allocation_id)
     return Response(status_code=204)
+
+
+@router.get(
+    "/{allocation_id}",
+    response_model=models.Allocation,
+    response_model_exclude_none=True,
+    name="get_allocation",
+    summary="one allocation; external rows with their day list, employee rows only for planners",
+)
+def get_allocation(
+    allocation_id: AllocationId, user: Annotated[dict, Needs("procurement", "read")], services: ServicesDep
+):
+    return stored(models.Allocation, services.procurement.allocation(allocation_id, user))
+
+
+@router.post(
+    "/{allocation_id}/cancel",
+    response_model=models.Allocation,
+    response_model_exclude_none=True,
+    name="cancel_allocation",
+    summary="end an external allocation from a day on; the days before it keep their hours and cost",
+)
+def cancel_allocation(
+    allocation_id: AllocationId,
+    body: models.CancelAllocationIn,
+    _: Annotated[dict, Needs("procurement", "write")],
+    services: ServicesDep,
+):
+    return stored(
+        models.Allocation, services.procurement.cancel_allocation(allocation_id, body.model_dump())
+    )

@@ -101,3 +101,13 @@ def delete_supplier(supplier_id: SupplierId, _: Writer, services: ServicesDep):
     services.suppliers.delete(supplier_id)
     return Response(status_code=204)
 
+
+
+@router.get(
+    "/{supplier_id}/dependency",
+    response_model=dict,
+    name="supplier_dependency",
+    summary="the numbers behind the dependency hint of a subcontractor",
+)
+def supplier_dependency(supplier_id: SupplierId, _: Annotated[dict, Needs("procurement", "read")], services: ServicesDep):
+    return services.procurement.dependency_route(supplier_id)

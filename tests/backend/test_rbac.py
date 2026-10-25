@@ -268,6 +268,28 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("GET", "/api/templates/{rid}"): ("templates", "read", False),
     ("PUT", "/api/templates/{rid}"): ("templates", "write", False),
     ("DELETE", "/api/templates/{rid}"): ("templates", "write", False),
+    # suppliers and subcontractors (docs/contracts/subcontractors.md, "Rights"); vendor-suggestions is a GET declared as write
+    ("GET", "/api/suppliers"): ("suppliers", "read", False),
+    ("POST", "/api/suppliers"): ("suppliers", "write", False),
+    ("GET", "/api/suppliers/vendor-suggestions"): ("suppliers", "write", False),
+    ("POST", "/api/suppliers/adopt-vendors"): ("suppliers", "write", False),
+    ("GET", "/api/suppliers/{supplier_id}"): ("suppliers", "read", False),
+    ("PUT", "/api/suppliers/{supplier_id}"): ("suppliers", "write", False),
+    ("DELETE", "/api/suppliers/{supplier_id}"): ("suppliers", "write", False),
+    ("GET", "/api/suppliers/{supplier_id}/dependency"): ("procurement", "read", False),
+    ("GET", "/api/incoming-offers"): ("procurement", "read", False),
+    ("POST", "/api/incoming-offers"): ("procurement", "write", False),
+    ("GET", "/api/incoming-offers/{incoming_offer_id}"): ("procurement", "read", False),
+    ("PUT", "/api/incoming-offers/{incoming_offer_id}"): ("procurement", "write", False),
+    ("DELETE", "/api/incoming-offers/{incoming_offer_id}"): ("procurement", "write", False),
+    ("POST", "/api/incoming-offers/{incoming_offer_id}/review"): ("procurement", "write", False),
+    ("POST", "/api/incoming-offers/{incoming_offer_id}/accept"): ("procurement", "write", False),
+    ("POST", "/api/incoming-offers/{incoming_offer_id}/reject"): ("procurement", "write", False),
+    ("POST", "/api/incoming-offers/{incoming_offer_id}/reopen"): ("procurement", "write", False),
+    ("POST", "/api/incoming-offers/{incoming_offer_id}/unaccept"): ("procurement", "write", False),
+    ("GET", "/api/allocations/{allocation_id}"): ("procurement", "read", False),
+    ("POST", "/api/allocations/{allocation_id}/cancel"): ("procurement", "write", False),
+    ("GET", "/api/finance/commitments"): ("procurement", "read", False),
 }
 
 
