@@ -956,16 +956,16 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[0-9a-z]{6,32}$"
+                  "pattern": "^(?:[0-9a-z]{6,32})?$"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "a project id or 'unassigned'",
+              "description": "a project id or 'unassigned'; empty = no filter",
               "title": "Project Id"
             },
-            "description": "a project id or 'unassigned'"
+            "description": "a project id or 'unassigned'; empty = no filter"
           },
           {
             "name": "by_project",
@@ -1048,7 +1048,7 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[0-9a-z]{6,32}$"
+                  "pattern": "^(?:[0-9a-z]{6,32})?$"
                 },
                 {
                   "type": "null"
@@ -1065,16 +1065,16 @@
               "anyOf": [
                 {
                   "type": "string",
-                  "pattern": "^[0-9a-z]{6,32}$"
+                  "pattern": "^(?:[0-9a-z]{6,32})?$"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "a project id or 'unassigned'",
+              "description": "a project id or 'unassigned'; empty = no filter",
               "title": "Project Id"
             },
-            "description": "a project id or 'unassigned'"
+            "description": "a project id or 'unassigned'; empty = no filter"
           }
         ],
         "responses": {
