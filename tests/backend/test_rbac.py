@@ -162,6 +162,13 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("POST", "/api/plan/scenarios/{rid}/apply"): ("planning", "write", False),
     ("POST", "/api/projects/{rid}/extend"): ("planning", "write", False),
     ("GET", "/api/projects/{rid}/planning"): ("planning", "read", False),
+    # planner per project (docs/contracts/planner-per-project.md): boss only through the `planning` area
+    ("GET", "/api/plan/day-table"): ("planning", "read", False),
+    ("GET", "/api/allocations"): ("planning", "read", False),
+    ("POST", "/api/allocations"): ("planning", "write", False),
+    ("POST", "/api/allocations/bootstrap"): ("planning", "write", False),
+    ("PUT", "/api/allocations/{allocation_id}"): ("planning", "write", False),
+    ("DELETE", "/api/allocations/{allocation_id}"): ("planning", "write", False),
     ("GET", "/api/finance"): ("finance", "read", False),
     ("GET", "/api/project-report"): ("finance", "read", False),
     ("GET", "/api/settings"): ("settings", "read", True),

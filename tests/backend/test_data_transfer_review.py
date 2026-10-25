@@ -303,7 +303,10 @@ def _non_boss(store):
 
 def _row_in(table):
     def fill(store):
-        store.save(table, {"name": "x"})
+        row = {"name": "x"}
+        if table == "allocations":
+            row = {"user_id": "boss0001", "project_id": "proj0001"}  # the table needs exactly one owner
+        store.save(table, row)
         return f"{table}: 1"
 
     return fill

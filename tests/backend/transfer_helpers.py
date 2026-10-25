@@ -84,6 +84,11 @@ def seed(store, *, extras: bool = True) -> dict:
         },
     )
     store.save(
+        "allocations",
+        {"user_id": boss["id"], "project_id": proj["id"], "start": "2026-03-02", "end": "2026-03-27",
+         "hours_per_week": 25.0, "status": "active", **x},
+    )
+    store.save(
         "calendar_sources",
         {"user_id": boss["id"], "name": "Cal", "kind": "ics", "url": "https://example.invalid/secret-feed-token"},
     )

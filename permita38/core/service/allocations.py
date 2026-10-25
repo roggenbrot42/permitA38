@@ -62,9 +62,9 @@ class AllocationService:
         out = {k: v for k, v in row.items() if v is not None}
         out["kind"] = "external" if _is_external(row) else "employee"
         out["status"] = row.get("status") or "active"
-        out["project_name"] = (project or {}).get("name") or eng.DELETED_PROJECT
-        if user:
-            out["user_name"] = user.get("name") or user.get("username") or ""
+        out["project_name"] = (project or {}).get("name")  # null when the project is gone
+        if not _is_external(row):
+            out["user_name"] = (user.get("name") or user.get("username") or "") if user else None
         planned = self._planned_hours(cap, user, row)
         if planned is not None:
             out["planned_hours"] = planned
@@ -148,7 +148,7 @@ class AllocationService:
         old = self.store.get("allocations", rid)
         if not old:
             raise ServiceError(404, "Not found")
-        if _is_external(old):
+        if _is_external(old) or not _active(old):
             raise ServiceError(409, "This allocation cannot be changed here")
         user, project = self._check(body)
         with self.store.transaction():
@@ -161,7 +161,7 @@ class AllocationService:
         old = self.store.get("allocations", rid)
         if not old:
             raise ServiceError(404, "Not found")
-        if _is_external(old):
+        if _is_external(old) or not _active(old):
             raise ServiceError(409, "This allocation cannot be changed here")
         self.store.delete("allocations", rid)
 
@@ -173,7 +173,7 @@ class AllocationService:
             old = self.store.get("allocations", rid)
             if not old:
                 raise ServiceError(404, "Allocation not found")
-            if _is_external(old):
+            if _is_external(old) or not _active(old):
                 raise ServiceError(409, "This allocation cannot be changed here")
             if ch.get("delete"):
                 self.store.delete("allocations", rid)
