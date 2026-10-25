@@ -229,21 +229,24 @@
     return items;
   }
   function adoptHTML() {
-    if (!AD.groups.length) return '<div class="empty">All expense vendors are linked to a supplier.</div>';
     const known = SUP.options(null);
     const pv = AD.preview;
+    const resultBox = pv ? `<div class="banner info" role="status" id="ad_result">${pv.dry_run ? `Check: ${esc(String(pv.expenses_changed))} expense${pv.expenses_changed === 1 ? '' : 's'} would be linked, ${esc(String(pv.items.filter(x => x.would_create).length))} supplier${pv.items.filter(x => x.would_create).length === 1 ? '' : 's'} created.` : `Linked ${esc(String(pv.expenses_changed))} expense${pv.expenses_changed === 1 ? '' : 's'}.`}</div>` : '';
+    if (!AD.groups.length) return resultBox + '<div class="empty">All expense vendors are linked to a supplier.</div>';
     return `<div class="small muted">Expenses keep their vendor text. Linking only sets the supplier. Check first, then link.</div>
       <div class="table-wrap"><table class="sup-adopt"><tr><th scope="col">Link</th><th scope="col">Vendor</th><th scope="col" class="num">Bills</th><th scope="col">Supplier</th></tr>
       ${AD.groups.map((g, i) => `<tr><td><input type="checkbox" id="ad_use${i}" data-change="supAdoptChange" ${AD.use?.[i] === false ? '' : 'checked'} aria-label="Link ${esc(g.variants.join(', '))}"></td>
         <td>${g.variants.map(v => `<div>${esc(v)}</div>`).join('')}</td><td class="num">${esc(String(g.count))}<div class="small muted">${eur(g.net_total)}</div></td>
         <td><label class="sr-only" for="ad_sup${i}">Supplier for ${esc(g.variants[0])}</label><select id="ad_sup${i}" data-change="supAdoptChange"><option value="__new__" ${g.supplier ? '' : 'selected'}>Create a new supplier</option>${known.map(([id, n]) => `<option value="${esc(id)}" ${g.supplier && g.supplier.id === id ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
           <input id="ad_name${i}" type="text" maxlength="200" value="${esc(g.variants[0])}" aria-label="Name of the new supplier for ${esc(g.variants[0])}" data-change="supAdoptChange" ${g.supplier ? 'hidden' : ''}></td></tr>`).join('')}</table></div>
-      ${pv ? `<div class="banner info" role="status" id="ad_result">${pv.dry_run ? `Check: ${esc(String(pv.expenses_changed))} expense${pv.expenses_changed === 1 ? '' : 's'} would be linked, ${esc(String(pv.items.filter(x => x.would_create).length))} supplier${pv.items.filter(x => x.would_create).length === 1 ? '' : 's'} created.` : `Linked ${esc(String(pv.expenses_changed))} expense${pv.expenses_changed === 1 ? '' : 's'}.`}</div>` : ''}`;
+      ${resultBox}`;
   }
   function adoptPaint() {
     $('#ad_body').innerHTML = adoptHTML();
     $('#ad_check').disabled = AD.busy || !AD.groups.length;
     $('#ad_go').disabled = AD.busy || !(AD.preview && AD.preview.dry_run && AD.preview.expenses_changed > 0);
+    const a = document.activeElement;   // a button that just became disabled must not keep the focus: Escape would be lost
+    if (!a || a === document.body || a.disabled || !$('#modal-root .modal')?.contains(a)) $('#ad_close')?.focus();
   }
   A.supAdoptChange = el => {
     AD.use = AD.groups.map((_, i) => $('#ad_use' + i)?.checked !== false);

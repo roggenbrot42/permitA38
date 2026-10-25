@@ -159,7 +159,7 @@
           const f = $('#off_file').files[0];
           if (f) body.attachment = (await api.upload(f)).name;
         }
-        const r = await api.upsert('incoming-offers', { ...body, id: o.id });
+        const r = o.id ? await api.put('incoming-offers/' + encodeURIComponent(o.id), body) : await api.post('incoming-offers', body);
         toast('Offer saved');
         if (!o.id && r && r.id) location.hash = '#/incoming/' + r.id; else render();
       },
