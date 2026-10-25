@@ -45,9 +45,12 @@ class SanityService:
         if coll == "customers":
             return rules.check_identifiers(rec, owner="customer")
         if coll == "expenses":
-            return rules.check_expense(
+            from .procurement import ProcurementService  # local import: procurement imports the allocation views
+
+            found = rules.check_expense(
                 rec, old=old, settings=self._settings(), others=self.store.list("expenses"), today=today
             )
+            return found + ProcurementService(self.store).expense_warnings(rec)
         if coll in ("offers", "invoices"):
             return rules.check_document(
                 coll,

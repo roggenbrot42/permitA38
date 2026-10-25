@@ -435,14 +435,16 @@ def check_expense(rec: dict, *, old: dict | None, settings: dict, others: list[d
                 )
             )
     vendor = str(rec.get("vendor") or "").strip().lower()
-    if vendor and net > 0:
+    supplier = rec.get("supplier_id")
+    if (vendor or supplier) and net > 0:
         for o in others:
-            if (
-                o.get("id") != rec.get("id")
-                and str(o.get("vendor") or "").strip().lower() == vendor
-                and o.get("date") == rec.get("date")
-                and dec(o.get("net")) == net
-            ):
+            if o.get("id") == rec.get("id") or o.get("date") != rec.get("date") or dec(o.get("net")) != net:
+                continue
+            if supplier and o.get("supplier_id"):  # both rows have a supplier: that decides, not the spelling
+                same = o["supplier_id"] == supplier
+            else:
+                same = bool(vendor) and str(o.get("vendor") or "").strip().lower() == vendor
+            if same:
                 out.append(
                     _w(
                         "expense.possible_duplicate",

@@ -83,8 +83,14 @@ class PlanningService:
         self.allocs = AllocationService(store)
 
     # ------------------------------------------------------------------ views
-    def _world(self, today: date | None = None, changes: dict | None = None, include_offers: bool = True) -> eng.World:
-        return eng.load(self.store, today or date.today(), self.busy, changes, include_offers)
+    def _world(
+        self,
+        today: date | None = None,
+        changes: dict | None = None,
+        include_offers: bool = True,
+        include_external: bool = True,
+    ) -> eng.World:
+        return eng.load(self.store, today or date.today(), self.busy, changes, include_offers, include_external)
 
     def _rows(
         self, world: eng.World, first: date | None, weeks: int, user_id: str | None, scope: str | None = None
@@ -104,7 +110,11 @@ class PlanningService:
     def _totals(rows: list[dict], by_project: bool = True) -> dict:
         keys = ("capacity", "confirmed", "binding_offers", "free_after_confirmed", "free_worst_case")
         out = {k: round(sum(r[k] for r in rows), 2) for k in keys}
+        ext_cost = round(sum(r["external_cost"] for r in rows), 2)
         out.update(
+            external_capacity=round(sum(r["external_capacity"] for r in rows), 2),
+            external_gap=round(sum(r["external_gap"] for r in rows), 2),
+            external_cost=ext_cost,
             contracted_revenue=round(sum(r["contracted_revenue"] for r in rows), 2),
             offer_revenue=round(sum(r["offer_revenue"] for r in rows), 2),
             assumed_revenue=round(sum(r["intended_revenue"] for r in rows if r["basis"] == "intended"), 2),
@@ -112,6 +122,7 @@ class PlanningService:
             over_weeks=sum(1 for r in rows if r["status"] == "over"),
             gap=round(sum(r["gap"] for r in rows), 2),
         )
+        out["margin"] = round(out["revenue"] - ext_cost, 2)
         if by_project:
             per: dict[str | None, dict] = {}
             for r in rows:
@@ -227,6 +238,28 @@ class PlanningService:
             if not by_project:
                 continue
             entries = {p["project_id"]: p for p in r["projects"]}
+            for a in [] if user_id else world.external_allocations:  # subcontractor pool without demand
+                if not pw.overlaps_week(a, ws):
+                    continue
+                p = entries.get(a["project_id"])
+                if p and p["external"]["capacity"] > 1e-9 and p["external"]["assigned"] <= 1e-9:
+                    out.append(
+                        pw.warning(
+                            "allocation.no_demand",
+                            "info",
+                            "weeks",
+                            f"Week of {r['week']}: {_h(p['external']['capacity'])} h are bought for project "
+                            f"{p['name']} but nothing is planned there.",
+                            dict(
+                                allocation_id=a["id"],
+                                project_id=a["project_id"],
+                                project_name=p["name"],
+                                week=r["week"],
+                                capacity=p["external"]["capacity"],
+                            ),
+                            confirmable=False,
+                        )
+                    )
             for a in world.allocations:
                 if (user_id and a["user_id"] != user_id) or not pw.overlaps_week(a, ws):
                     continue
@@ -281,10 +314,11 @@ class PlanningService:
         today: date | None = None,
         project_id: str | None = None,
         by_project: bool = True,
+        include_external: bool = True,
     ) -> dict:
         today = today or date.today()
         scope = self._check_scope(project_id)
-        world = self._world(today, None, include_offers)
+        world = self._world(today, None, include_offers, include_external)
         view = self._view(world, eng.week_start(today), weeks, user_id, scope, by_project)
         rows = view.pop("_rows")
         details = []
@@ -329,14 +363,15 @@ class PlanningService:
         user_id: str | None,
         today: date | None = None,
         project_id: str | None = None,
+        include_external: bool = True,
     ) -> dict:
         today = today or date.today()
         scope = self._check_scope(project_id)
-        world = self._world(today, changes)
+        world = self._world(today, changes, include_external=include_external)
         start = first or eng.week_start(today)
         out = self._view(world, start, weeks, user_id, scope)
         rows = out.pop("_rows")
-        base_rows, _ = self._rows(self._world(today), start, weeks, user_id, scope)
+        base_rows, _ = self._rows(self._world(today, include_external=include_external), start, weeks, user_id, scope)
         base_gap = self._base_gaps(base_rows)
         for pub, base in zip(out["weeks"], base_rows):
             pub["delta"] = round(pub["gap"] - base["gap"], 6)
@@ -387,6 +422,7 @@ class PlanningService:
         user_id: str | None = None,
         project_id: str | None = None,
         today: date | None = None,
+        include_external: bool = True,
     ) -> dict:
         if hi < lo:
             raise ServiceError(400, "'to' is before 'from'")
@@ -395,7 +431,8 @@ class PlanningService:
         if user_id and not self.store.get("users", user_id):
             raise ServiceError(404, "User not found")
         scope = self._check_scope(project_id)
-        return eng.day_table_json(self._world(today or date.today()), lo, hi, user_id or None, scope)
+        world = self._world(today or date.today(), include_external=include_external)
+        return eng.day_table_json(world, lo, hi, user_id or None, scope)
 
     # ------------------------------------------------------------------ feasibility
     def _fit(self, world: eng.World, item: eng.Item) -> tuple[list[dict], eng.World]:

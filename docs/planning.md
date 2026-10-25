@@ -162,6 +162,29 @@ A draft can contain allocation changes (`changes.allocations`: new, changed hour
 base, per week, project and in total). A change to one project's contract changes only that project's rows. Applying
 a draft writes allocation rows only with `confirm: true` and returns their warnings as `allocation_warnings`.
 
+## Subcontractors
+
+Subcontractors (suppliers of kind `person-capacity`) are planned like people, but their hours are not part of the
+team's base capacity: they come from **external allocations** that an accepted incoming offer creates
+(`docs/contracts/subcontractors.md`, "Planner integration").
+
+* Hours per day: a supplier's `hours_per_week` (or the `total_hours` of the plan) is spread over its own workdays,
+  leaving out its unavailable windows and public holidays. A cancelled allocation keeps the days before the cut.
+* The external pool is per project. Demand of a contract whose assignee is a subcontractor draws on the pool of the
+  contract's project only; hours bought for project P never cover demand of project Q (the ring fence). A gap in the
+  external pool shows as `capacity.gap` with `pool: "external"`.
+* Week rows and totals carry `external_capacity`, `external_assigned`, `external_gap`, `external_cost` (the planned
+  cost of the external hours of the week, not invoiced cost) and `margin` (revenue minus external cost). Bought
+  capacity without demand is paid for and shows as `allocation.no_demand` (info).
+* `include_external=0` on `GET /api/forecast`, `GET /api/plan/day-table` and in `POST /api/plan/simulate` builds the
+  world without subcontractors; the numbers then equal those of a database without any supplier.
+* Archiving or deactivating a supplier with open allocations (v1 behaviour): the planner no longer counts its
+  capacity or its external cost in the forecast, while the commitments (`GET /api/finance/commitments`) still count
+  the allocation until it is cancelled or ends. Cancel the allocations first if the hours should leave the plan.
+* Expenses linked to an external allocation are compared with its planned cost
+  (`allocation.invoiced_exceeds_planned`). Commitments (`GET /api/finance/commitments`) are derived, never written as
+  expenses.
+
 ## Plan & vacation (what-if)
 
 Open **Planning → Plan & vacation**. The timeline shows, per week and per day: capacity, utilisation, public

@@ -7,42 +7,19 @@ never fails because of one bad record.
 """
 
 import logging
-import math
 from collections import defaultdict
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from . import tax
 from .holidays import holidays as de_holidays
 from .money import ZERO, dec, line_amount, q2, split_gross, to_float, vat_amount
+from .values import d, fnum  # noqa: F401  (re-exported: callers use calc.d and calc.fnum)
 
 log = logging.getLogger(__name__)
 
 WORKDAYS_DEFAULT = [0, 1, 2, 3, 4]
-
-
-def d(s):
-    """Parse ``YYYY-MM-DD``; ``None`` for empty or invalid values (logged)."""
-    if not isinstance(s, str) or not s:
-        return None
-    try:
-        return datetime.strptime(s, "%Y-%m-%d").date()
-    except ValueError:
-        log.warning("ignoring invalid date %r", s)
-        return None
-
-
-def fnum(x, default: float = 0.0) -> float:
-    """Float from a stored value; damaged values (text, NaN, infinity, overflow) count as ``default``."""
-    if x is None or x == "":
-        return default
-    try:
-        v = float(x)
-    except (TypeError, ValueError, OverflowError):
-        log.warning("ignoring invalid number %r", x)
-        return default
-    return v if math.isfinite(v) else default
 
 
 def iso(x):
