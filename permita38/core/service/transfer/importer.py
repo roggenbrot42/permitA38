@@ -38,9 +38,11 @@ REFERENCES: dict[str, str] = {
     "trip_id": "trips",
     "source_id": "calendar_sources",
     "contract_id": "contracts",
-    # allocations of subcontractors (their collections arrive with that feature; until then the values are dangling)
     "supplier_id": "suppliers",
     "incoming_offer_id": "incoming_offers",
+    "allocation_id": "allocations",
+    "decided_by": "users",
+    "login_user_id": "users",
 }
 LIST_REFERENCES: dict[str, tuple[str, str]] = {  # (collection, column) -> target collection
     "projects.member_ids": ("projects", "users"),

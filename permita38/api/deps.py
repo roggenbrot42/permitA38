@@ -24,6 +24,7 @@ from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.sanity import SanityService
 from permita38.core.service.settings import SettingsService
+from permita38.core.service.suppliers import SupplierService
 from permita38.core.service.team_timeline import TeamTimelineService
 from permita38.core.service.time import TimeService
 from permita38.core.service.tokens import PREFIX as TOKEN_PREFIX
@@ -51,6 +52,7 @@ class Services:
     busy: BusyTimeProvider
     planning: PlanningService
     allocations: AllocationService
+    suppliers: SupplierService
     sanity: SanityService
     trips: TripService
     team_timeline: TeamTimelineService
@@ -71,6 +73,7 @@ class Services:
             busy=busy,
             planning=PlanningService(store, busy),
             allocations=AllocationService(store),
+            suppliers=SupplierService(store),
             sanity=SanityService(store),
             trips=TripService(store),
             config=config,

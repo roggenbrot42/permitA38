@@ -127,6 +127,7 @@ class RecordService:
                 )
                 if not visible:
                     raise ServiceError(422, "Unknown trip")
+            self._link_supplier(data)
             if data.get("lines"):
                 self._check_vat_rates(*(ln.get("vat_rate") for ln in data["lines"]))
                 data = calc.itemise_expense(data)  # server derives net/vat per line and overwrites the top level
@@ -149,6 +150,26 @@ class RecordService:
             data.pop("created", None)
         saved = self.store.save(coll, data)
         return _expense_view(saved) if coll == "expenses" else saved
+
+    def _link_supplier(self, data: dict) -> None:
+        """Expense links (docs/contracts/subcontractors.md): the supplier must exist and gives ``vendor`` (a snapshot
+        of its name); an allocation needs a supplier and must be an external allocation of that supplier."""
+        if not data.get("reverse_charge"):
+            data.pop("reverse_charge", None)  # false is the default: not stored
+        sid, aid = data.get("supplier_id"), data.get("allocation_id")
+        if sid:
+            supplier = self.store.get("suppliers", sid)
+            if not supplier:
+                raise ServiceError(422, "Unknown supplier")
+            data["vendor"] = supplier.get("name") or data.get("vendor")
+        if aid:
+            if not sid:
+                raise ServiceError(422, "allocation_id needs a supplier")
+            alloc = self.store.get("allocations", aid)
+            if not alloc:
+                raise ServiceError(422, "Unknown allocation")
+            if alloc.get("supplier_id") != sid:
+                raise ServiceError(422, "The allocation belongs to another supplier")
 
     # -- sanity checks that need stored data or settings ---------------------------------------------
     def _check_vat_rates(self, *rates) -> None:

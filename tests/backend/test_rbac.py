@@ -248,6 +248,13 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("DELETE", "/api/expenses/{rid}"): ("expenses", "write", False),
     # business trips: employees see and change their own trips only (service check); accountants read all, change none;
     # reopening a final trip is boss only (full scope); preview needs write access (contract), nothing is saved
+    ("GET", "/api/suppliers"): ("suppliers", "read", False),
+    ("POST", "/api/suppliers"): ("suppliers", "write", False),
+    ("GET", "/api/suppliers/vendor-suggestions"): ("suppliers", "write", False),
+    ("POST", "/api/suppliers/adopt-vendors"): ("suppliers", "write", False),
+    ("GET", "/api/suppliers/{supplier_id}"): ("suppliers", "read", False),
+    ("PUT", "/api/suppliers/{supplier_id}"): ("suppliers", "write", False),
+    ("DELETE", "/api/suppliers/{supplier_id}"): ("suppliers", "write", False),
     ("GET", "/api/trips"): ("trips", "read", False),
     ("POST", "/api/trips"): ("trips", "write", False),
     ("POST", "/api/trips/preview"): ("trips", "write", False),
@@ -568,6 +575,13 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
         raw.executescript('DROP TABLE "api_tokens"; DROP TABLE "audit_log";')
     if "allocations" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         raw.executescript('DROP TABLE "allocations";')
+    if "suppliers" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.executescript(
+            'DROP TABLE "suppliers"; DROP TABLE "incoming_offers";'
+            ' DROP INDEX "idx_expenses_supplier"; DROP INDEX "idx_expenses_allocation";'
+            ' ALTER TABLE "expenses" DROP COLUMN "supplier_id"; ALTER TABLE "expenses" DROP COLUMN "allocation_id";'
+            ' ALTER TABLE "expenses" DROP COLUMN "reverse_charge";'
+        )
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)

@@ -92,6 +92,45 @@ def _color(value: str) -> str:
     return value
 
 
+_COUNTRY_RE = re.compile(r"^[A-Z]{2}$")
+_IBAN_RE = re.compile(r"^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$")
+
+
+def _country(value: str) -> str:
+    if not _COUNTRY_RE.match(value):
+        raise ValueError("must be a two-letter country code like DE")
+    return value
+
+
+def _iban(value: str) -> str:
+    """Spaces are removed and letters upper-cased; the format (not the checksum, that is a warning) is a hard bound."""
+    if len(value) > 60:
+        raise ValueError("is too long for an IBAN")
+    compact = "".join(value.split()).upper()
+    if len(compact) > 34 or not _IBAN_RE.match(compact):
+        raise ValueError("must be an IBAN like DE02120300000000202051 (spaces are allowed)")
+    return compact
+
+
+def _weekdays(value: list[int]) -> list[int]:
+    if len(set(value)) != len(value):
+        raise ValueError("must be unique weekday numbers 0 (Monday) to 6 (Sunday)")
+    return sorted(value)
+
+
+def _tags(value: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in value:
+        tag = raw.strip()
+        if not 1 <= len(tag) <= 50:
+            raise ValueError("each tag must have 1 to 50 characters")
+        if tag.casefold() not in seen:
+            seen.add(tag.casefold())
+            out.append(tag)
+    return out
+
+
 def _optional(fn: Callable[[str], str]) -> Callable[[str | None], str | None]:
     return lambda v: None if v is None else fn(v)
 
@@ -135,6 +174,12 @@ AllocHours = Annotated[float, Field(ge=0.25, le=80, allow_inf_nan=False)]
 UNASSIGNED = "unassigned"
 # a planner scope: a project id or the literal "unassigned" (which also matches the id pattern)
 ScopeId = Annotated[str, StringConstraints(pattern=ID_PATTERN)]
+NonNegQty = Annotated[float, Field(ge=0, le=MAX_QTY, allow_inf_nan=False)]
+Country = Annotated[str, AfterValidator(_country)]
+Iban = Annotated[str | None, BeforeValidator(blank_to_none), AfterValidator(_optional(_iban))]  # None allowed
+Weekdays = Annotated[list[Annotated[int, Field(strict=True, ge=0, le=6)]], Field(min_length=1, max_length=7), AfterValidator(_weekdays)]
+Tags = Annotated[list[Annotated[str, StringConstraints(max_length=200)]], Field(max_length=20), AfterValidator(_tags)]
+PayDays = Annotated[int, Field(ge=0, le=365)]
 Percent = Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)]
 Minutes = Annotated[int, Field(ge=1, le=1440)]
 
