@@ -257,12 +257,14 @@ incoming_offer_id project_id contract_id customer_id start end hours_per_week to
 cancel_reason` + base + extra). This spec adds the nullable column `user_id` (employee rows); `supplier_id` is nullable
 too, and a check requires exactly one of the two. Employee rows use `status: "active"` and `hours_per_week` only
 (`total_hours`, `rate`, `incoming_offer_id` and `cancelled_*` stay null). Index `allocations(user_id)`.
-Migrations use the id/requires chain of `docs/specs/migration-ids.md` (there is no `CURRENT_REVISION` to bump):
-whichever branch lands first creates the table with **both** nullable columns in one migration (`NNNN-allocations` or
-the subcontractor spec's `NNNN-suppliers`; `NNNN` = head + 1 at merge time, identical in `sqlite/`, `postgresql/` and
-`mariadb/`, `requires` = the head at merge time). The branch that lands second adds nothing, or, if the table already
-exists without `user_id`, one small migration adding the column and the check; it rebases its `requires` as described
-in AGENTS.md. Unknown fields round-trip in `extra`. No data migration is needed for the defaults (rule 4).
+Migrations use the id/requires chain of `docs/specs/migration-ids.md` (there is no `CURRENT_REVISION` to bump).
+**Order (decided by the architect, 2026-10-25): this spec lands first.** Its migration `NNNN-allocations` (head + 1 at
+merge time, identical in `sqlite/`, `postgresql/` and `mariadb/`, no `BEGIN`/`COMMIT`) creates the whole table with
+**both** nullable columns and every column listed above, so the subcontractor spec adds nothing to it; that spec's
+`NNNN-suppliers` migration then `requires` this one and only creates `suppliers`, `incoming_offers` and the expense
+columns. Only if the subcontractor spec must land first does the table move into its migration unchanged and this spec
+adds none. Neither migration rewrites a row. Unknown fields round-trip in `extra`. No data migration is needed for the
+defaults (rule 4).
 
 ## UI sketch
 
