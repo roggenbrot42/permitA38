@@ -566,6 +566,8 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
         raw.executescript('DROP TABLE "trips"; ALTER TABLE "expenses" DROP COLUMN "trip_id";')
     if "api_tokens" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         raw.executescript('DROP TABLE "api_tokens"; DROP TABLE "audit_log";')
+    if "allocations" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.executescript('DROP TABLE "allocations";')
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)

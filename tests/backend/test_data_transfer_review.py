@@ -777,6 +777,7 @@ def test_exported_collections_and_excluded_tables_are_pinned():
         "number_sequences",
         "numbering_log",
         "import_batches",
+        "allocations",
     ]
     assert sorted(manifest.EXCLUDED_TABLES) == ["api_tokens", "audit_log", "calendar_events", "settings", "timers"]
     assert all(manifest.EXCLUDED_TABLES.values())  # every exclusion has a reason
