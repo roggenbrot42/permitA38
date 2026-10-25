@@ -390,8 +390,8 @@ def test_e8_variant_vacation_on_tuesday(w):
     w.repo.save("absences", dict(user_id=erika["id"], kind="vacation", start="2026-03-10", end="2026-03-10"))
     out = w.forecast()
     gaps = [w.entry(out, i, w.p)["gap"] for i in range(4)]
-    assert gaps == pytest.approx([5.333333, 4.0, 5.333333, 5.333333], abs=1e-5)
-    assert sum(gaps) == pytest.approx(20.0, abs=1e-4)
+    assert gaps == pytest.approx([5.333333, 0.0, 5.333333, 5.333333], abs=1e-5)
+    assert sum(gaps) == pytest.approx(16.0, abs=1e-4)
     assert sum(w.entry(out, i, w.p)["confirmed"] for i in range(4)) == pytest.approx(80.0, abs=1e-4)
     day = next(d for d in w.svc.day_table(date(2026, 3, 10), date(2026, 3, 10), today=TODAY)["days"])
     assert w.p["id"] not in day["scopes"]  # no capacity and nothing booked on the vacation day

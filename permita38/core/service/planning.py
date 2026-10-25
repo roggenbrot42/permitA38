@@ -420,9 +420,10 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
         per_day = calc.fnum(u.get("weekly_hours")) / len(wd)
         busy = world.busy.busy_hours(u["id"], lo, hi) or {}
         allocs = [
-            (a["start"], a["end"], a["project_id"], calc.fnum(a.get("hours_per_week")) / len(wd))
+            (a["start"], a["end"], a["project_id"], calc.fnum(a.get("hours_per_week")))
             for a in by_user.get(u["id"], [])
         ]
+        avail_in_week: dict[date, int] = {}
         for x in days:
             if x.weekday() not in wd:
                 continue
@@ -442,9 +443,19 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
             days[x].busy += min(max(b, 0.0), per_day)
             real = max(per_day - b, 0.0)
             days[x].cap += real
-            # ring fence: the real capacity is shared out to the allocated projects (pro rata when over-allocated)
+            # ring fence: the real capacity is shared out to the allocated projects (pro rata when over-allocated).
+            # An allocation of hours per week is spread over the person's available days of the week, like a contract.
+            ws = x - timedelta(days=x.weekday())
+            if ws not in avail_in_week:
+                avail_in_week[ws] = sum(
+                    1
+                    for k in range(7)
+                    if (y := ws + timedelta(days=k)).weekday() in wd
+                    and not cap.holiday(y)
+                    and y not in cap.absences[u["id"]]
+                )
             iso = x.isoformat()
-            today_allocs = [(pid, h) for s, e, pid, h in allocs if s <= iso <= e]
+            today_allocs = [(pid, h / avail_in_week[ws]) for s_, e_, pid, h in allocs if s_ <= iso <= e_]
             total = sum(h for _, h in today_allocs)
             scale = real / total if total > real + EPS else 1.0
             for pid, h in today_allocs:

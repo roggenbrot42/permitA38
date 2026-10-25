@@ -288,32 +288,30 @@ def employee_over_allocated(
 def week_over_allocation(
     user: dict, allocs: list[dict], ws: date, lost: Iterable[date] = ()
 ) -> tuple[float, float, str] | None:
-    """Judged per day: a day is scaled when the person's allocations of that day (``hours_per_week / workdays``
-    each) add up to more than the real capacity of the day (``weekly_hours / workdays``, 0 on a day in ``lost``).
+    """Judged per day, like the planner computes: an allocation of ``hours_per_week`` is spread over the person's
+    available days of the week (workdays that are not in ``lost``), the real capacity of such a day is
+    ``weekly_hours / workdays``. A day is scaled when the allocations of that day add up to more than that.
 
     Returns ``None`` when no day of the week is scaled. Otherwise ``(allocated, weekly_hours, reason)``:
-    ``allocated`` = the day-weighted allocation hours of the week, ``weekly_hours`` = ``allocated`` minus the hours
-    that are scaled away (so ``over_by = allocated - weekly_hours``), ``reason`` = ``"weekly_hours"`` when a regular
-    day is scaled, else ``"time_off"`` (only days without capacity are scaled)."""
+    ``allocated`` = the allocation hours of the week, ``weekly_hours`` = ``allocated`` minus the hours that are scaled
+    away (so ``over_by = allocated - weekly_hours``), ``reason`` = ``"time_off"`` when ``lost`` days were taken out,
+    else ``"weekly_hours"``."""
     wd = calc._workdays(user)
     per_day = calc.fnum(user.get("weekly_hours")) / len(wd)
     lost_set = set(lost)
+    avail = [day for k in range(7) if (day := ws + timedelta(days=k)).weekday() in wd and day not in lost_set]
+    if not avail:
+        return None
     allocated = scaled_away = 0.0
-    regular = False
-    for k in range(7):
-        day = ws + timedelta(days=k)
-        if day.weekday() not in wd:
-            continue
+    for day in avail:
         iso = day.isoformat()
-        a = sum(calc.fnum(x.get("hours_per_week")) / len(wd) for x in allocs if x["start"] <= iso <= x["end"])
-        r = 0.0 if day in lost_set else per_day
+        a = sum(calc.fnum(x.get("hours_per_week")) / len(avail) for x in allocs if x["start"] <= iso <= x["end"])
         allocated += a
-        if a > r + 1e-9:
-            scaled_away += a - r
-            regular = regular or r > 0
+        if a > per_day + 1e-9:
+            scaled_away += a - per_day
     if scaled_away <= 1e-9:
         return None
-    return allocated, allocated - scaled_away, "weekly_hours" if regular else "time_off"
+    return allocated, allocated - scaled_away, "time_off" if lost_set else "weekly_hours"
 
 
 def over_allocation_on_save(user: dict, allocs: list[dict], start: str, end: str) -> list[dict]:

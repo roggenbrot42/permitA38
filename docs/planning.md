@@ -103,7 +103,7 @@ period, see Allocations below). Only the contracts and open offers of **that pro
 does not use are **not** lent to another project, and a project's shortfall is a **gap of that project**.
 
 - A person's real capacity of a day (see Capacity) is shared out to the projects they are allocated to:
-  `hours per week / workdays` per allocation. If the allocations of one day add up to more than the real capacity
+  `hours per week / available days of the week` per allocation (days without holiday or time off, like a contract). If the allocations of one day add up to more than the real capacity
   (over-allocation, or a holiday or vacation day), every allocation is scaled down pro rata: nothing is invented and
   nothing goes to a third project. A holiday or absence day gives every allocation 0 hours.
 - What a person has beyond their allocations is **unassigned** capacity (a person with no allocation is entirely

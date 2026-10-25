@@ -393,11 +393,10 @@ Shape of every warning (unchanged): `{code, severity, field, message, details, c
   emitted per week whose `unassigned` scope has status `over` (with `by_project=0`: per week whose team row has status
   `over` by the old utilisation rule, `scope: "team"`); with `project_id` filter only for the filtered scope.
 * `allocation.employee_over_allocated`, judged **per day**: a day is scaled when the sum of the person's active
-  allocations of that day (`hours_per_week / workdays` each) is above the day's real capacity (`weekly_hours / workdays`,
+  allocations of that day (`hours_per_week / available days of the week` each, available = workday without holiday or absence) is above the day's real capacity (`weekly_hours / workdays`,
   0 on a public-holiday or absence day, busy time ignored). A week warns when at least one day is scaled. `allocated` =
   the day-weighted allocation hours of the week, `over_by` = the hours scaled away (sum over the scaled days of
-  allocated minus real), `weekly_hours = allocated - over_by`. `reason` is `"weekly_hours"` when a regular day (real
-  capacity above 0) is scaled, else `"time_off"` (only holiday or absence days are scaled). Without time off and with
+  allocated minus real), `weekly_hours = allocated - over_by`. `reason` is `"weekly_hours"` when the week is already over-allocated without taking holidays and absences out (checked first), else `"time_off"` when it is over-allocated once they are taken out (the allocations are then spread over fewer available days). Without time off and with
   allocations covering the whole week this is `allocated = sum of hours_per_week`, `weekly_hours` = contractual hours.
   P Monday-Tuesday 40 h/week and Q Wednesday-Friday 40 h/week give no warning. E4: `allocated 40, weekly_hours 32,
   over_by 8, reason "time_off"`. **On save** (POST/PUT/bootstrap) only `reason: "weekly_hours"` is checked, for each

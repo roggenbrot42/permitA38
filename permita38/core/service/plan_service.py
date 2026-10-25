@@ -215,7 +215,9 @@ class PlanningService:
                     if (day := ws + timedelta(days=k)).weekday() in wd
                     and (world.cap.holiday(day) or day in world.cap.absences[uid])
                 ]
-                hit = pw.week_over_allocation(user, mine, ws, lost)
+                hit = pw.week_over_allocation(user, mine, ws) or (
+                    pw.week_over_allocation(user, mine, ws, lost) if lost else None
+                )
                 if hit:
                     allocated, weekly, reason = hit
                     out.append(
