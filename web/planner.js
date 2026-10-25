@@ -89,6 +89,7 @@
   }
   async function loadAllocs() {   // an older server (no allocations route) or a missing right: the allocation rows stay empty
     try { P.allocs = await api('GET', 'allocations?status=active'); } catch { P.allocs = []; }
+    try { P.extCancelled = (await api('GET', 'allocations?status=cancelled')).filter(a => a.kind === 'external'); } catch { P.extCancelled = []; }
   }
   async function loadHolidays() {
     const y = new Date().getFullYear();
@@ -194,15 +195,19 @@
   }
   /* subcontractor allocations (read-only: they are created by accepting an incoming offer) */
   function externalRows() {
-    if (!P.ext) return '';
-    const list = P.allocs.filter(a => a.kind === 'external' && (!P.project || a.project_id === P.project) && !userId());
-    if (!list.length) return '';
+    if (!P.ext || userId()) return '';   // subcontractors are not a person's hours: a chosen person hides them
+    const list = [...P.allocs.filter(a => a.kind === 'external' && a.status !== 'cancelled'), ...(P.extCancelled || [])]
+      .filter(a => !P.project || a.project_id === P.project);
     const rows = list.map(a => {
-      const label = `${a.supplier_name || 'Subcontractor'}: ${projName(a.project_id)}, ${a.hours_per_week != null ? num(a.hours_per_week, 2) + ' h/week' : num(a.total_hours, 2) + ' h total'}, ${fmtDate(a.start)} – ${fmtDate(a.end)}`;
-      return `<div class="pln-row pln-ext-row" data-ext="${esc(a.id)}"><div class="pln-label"><span>${esc(a.supplier_name || 'Subcontractor')}</span><div class="small muted">${esc(projName(a.project_id))}</div></div>
-        <div class="pln-lane" style="width:${horizon() * DW}px">${cells()}<div class="pln-bar ext" style="${barStyle(a.start, a.end)}" tabindex="0" role="group" aria-label="${esc(label)}" title="${esc(label)}"><span class="pln-bar-t">${esc(a.supplier_name || 'External')}</span></div></div></div>`;
+      // a cancelled allocation keeps the days before cancelled_from (the day itself and later are released)
+      const cancelled = a.status === 'cancelled';
+      const end = cancelled ? addDays(a.cancelled_from, -1) : a.end;
+      if (cancelled && (!a.cancelled_from || end < a.start)) return '';
+      const label = `${a.supplier_name || 'Subcontractor'}: ${projName(a.project_id)}, ${a.hours_per_week != null ? num(a.hours_per_week, 2) + ' h/week' : num(a.total_hours, 2) + ' h total'}, ${fmtDate(a.start)} – ${fmtDate(a.end)}${cancelled ? `, cancelled from ${fmtDate(a.cancelled_from)}` : ''}`;
+      return `<div class="pln-row pln-ext-row${cancelled ? ' cancelled' : ''}" data-ext="${esc(a.id)}"><div class="pln-label"><span>${esc(a.supplier_name || 'Subcontractor')}</span><div class="small muted">${esc(projName(a.project_id))}${cancelled ? `, cancelled from ${esc(fmtDate(a.cancelled_from))}` : ''}</div></div>
+        <div class="pln-lane" style="width:${horizon() * DW}px">${cells()}<div class="pln-bar ext${cancelled ? ' cancelled' : ''}" style="${barStyle(a.start, end)}" tabindex="0" role="group" aria-label="${esc(label)}" title="${esc(label)}"><span class="pln-bar-t">${esc(a.supplier_name || 'External')}</span></div></div></div>`;
     }).join('');
-    return `<div class="pln-row pln-group"><div class="pln-label"><b>External</b></div></div>${rows}`;
+    return rows ? `<div class="pln-row pln-group"><div class="pln-label"><b>External</b></div></div>${rows}` : '';
   }
   function weekRowsHtml() {
     const W = weekRows(); if (!W.length) return '';

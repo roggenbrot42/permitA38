@@ -77,5 +77,6 @@
 .pln-delta .better, td .better { color: var(--good); font-weight: 600; }
 .pln-day { margin-top: 12px; }
 
+.pln-bar.ext.cancelled { opacity: .55; }
 .pln-bar.ext { background: repeating-linear-gradient(45deg, var(--good) 0 6px, var(--good-soft) 6px 9px); color: var(--ink); cursor: default; }
 .pln-extkpi b { color: var(--accent); }

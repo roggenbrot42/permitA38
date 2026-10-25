@@ -327,7 +327,10 @@ class FakeApi:
             a = next(x for x in self.allocation_list if x["id"] == aid)
             return _json(route, 200, {**a, **fixture("allocation_days_w1")})
         if path == "allocations" and m == "GET":
-            return _json(route, 200, self.allocation_list)
+            rows = self.allocation_list
+            if query.get("status"):
+                rows = [a for a in rows if a["status"] == query["status"][0]]
+            return _json(route, 200, copy.deepcopy(rows))
         return _json(route, 200, [])
 
     def finance(self, query):
@@ -974,6 +977,45 @@ def test_plan_and_vacation_sends_include_external_false_when_off(browser):
     assert all(r[3]["include_external"] is False for r in last)
     assert problems == []
     ctx.close()
+
+
+def test_planner_hides_subcontractors_for_a_chosen_person_and_draws_cancelled_ones_short(browser):
+    api = FakeApi()
+    start = monday_for_test()
+    api.allocation_list.append(
+        {
+            "id": "c0ca0ce1",
+            "kind": "external",
+            "status": "cancelled",
+            "supplier_id": "5d1c0aa2",
+            "supplier_name": "Example Freelance Studio (Demo)",
+            "project_id": "a1b2c3d4",
+            "project_name": "Demo project P",
+            "start": start.isoformat(),
+            "end": (start + timedelta(days=27)).isoformat(),
+            "cancelled_from": (start + timedelta(days=7)).isoformat(),  # the first week is kept: 7 days
+            "hours_per_week": 20.0,
+            "planned_hours": 40.0,
+            "planned_net": 3200.0,
+            "open_net": 3200.0,
+        }
+    )
+    ctx, pg, problems = open_app(browser, api, page="plan/vacation", storage={"plnUser": "u1b2c3d4"})
+    pg.wait_for_selector("#plnWrap")
+    assert pg.locator(".pln-ext-row").count() == 0  # a chosen person: no subcontractor rows
+    pg.select_option("#plnWho", "")  # whole team
+    row = pg.locator(".pln-ext-row.cancelled")
+    expect(row).to_have_count(1)
+    expect(row).to_contain_text("cancelled from")
+    style = row.locator(".pln-bar.ext").get_attribute("style")
+    assert "width:82px" in style  # 7 days x 12 px - 2: the days before cancelled_from only
+    assert problems == []
+    ctx.close()
+
+
+def monday_for_test():
+    t = date.today()
+    return t - timedelta(days=t.weekday())
 
 
 def test_planner_shows_external_allocations_read_only(browser):
