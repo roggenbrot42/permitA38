@@ -143,7 +143,7 @@ function entryForm(e = {}, after) {
 /* ---------- layout + router ---------- */
 /* nav: [route, icon, label, area needed to see it, 'write' if it needs write access (or 'all' when the read scope must be all, not a restricted view)] */
 const NAV = [['today', '⏱', 'Today', 'timer'], ['time', '🗓', 'Timesheet', 'time', 'write'], ['timeoff', '🏖', 'Time off', 'absences'], ['plan', '📈', 'Planning', 'planning'], ['customers', '👥', 'Customers', 'customers'], ['projects', '📁', 'Projects', 'projects', 'all'],
-  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['trips', '🧳', 'Business trips', 'trips'], ['money', '💶', 'Money & Taxes', 'finance'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['timeline', '📅', 'Team timeline', 'team_timeline'], ['settings', '⚙️', 'Settings', 'settings', 'all'], ['tokens', '🔑', 'API tokens', '*']];
+  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['suppliers', '🏭', 'Suppliers', 'suppliers'], ['incoming', '📨', 'Incoming offers', 'procurement'], ['trips', '🧳', 'Business trips', 'trips'], ['money', '💶', 'Money & Taxes', 'finance'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['timeline', '📅', 'Team timeline', 'team_timeline'], ['settings', '⚙️', 'Settings', 'settings', 'all'], ['tokens', '🔑', 'API tokens', '*']];
 const navAllowed = ([, , , area, need]) => (area === '*' ? true : need === 'write' ? can(area, 'write') : need === 'all' ? scopeOf(area) === 'all' : can(area));
 const navFor = () => NAV.filter(n => navAllowed(n) && !(n[0] === 'timeoff' && can('planning')));
 /* which area (and, for the read-only lock, which write area) a page belongs to */
@@ -156,7 +156,7 @@ const ROLE_LABEL = { boss: 'Boss', employee: 'Employee', accountant: 'Accountant
 function route() { const [p, ...a] = (location.hash.replace(/^#\/?/, '') || 'today').split('/'); return [p, a]; }
 function deny() { toast('Not available for your role'); const first = navFor()[0]; location.hash = '#/' + (first ? first[0] : 'today'); }
 /* a page whose area the role may read but not write: take the write controls away */
-const WRITE_ACTIONS = ['editCustomer', 'newDoc', 'billTime', 'billTimeInto', 'editProject', 'editTask', 'docSave', 'docFinalize', 'docAccept', 'docToInvoice', 'addLine', 'saveSettings', 'editTemplate', 'editUser', 'delLine', 'docPdfDelete', 'newTrip'];
+const WRITE_ACTIONS = ['editCustomer', 'newDoc', 'billTime', 'billTimeInto', 'editProject', 'editTask', 'supNew', 'supEdit', 'supDelete', 'supAdopt', 'offNew', 'offEdit', 'offDelete', 'offReview', 'offAccept', 'offReject', 'offReopen', 'offUnaccept', 'allocCancel', 'docSave', 'docFinalize', 'docAccept', 'docToInvoice', 'addLine', 'saveSettings', 'editTemplate', 'editUser', 'delLine', 'docPdfDelete', 'newTrip'];
 function lockPage(root, p) {
   root.querySelectorAll('[data-a]').forEach(el => { if (WRITE_ACTIONS.includes(el.dataset.a)) { if (el.tagName === 'TR') { delete el.dataset.a; el.classList.remove('click'); } else el.remove(); } });
   root.querySelectorAll('[data-change="docStatus"]').forEach(el => el.remove());
