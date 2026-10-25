@@ -550,6 +550,28 @@ def test_vendor_banner_and_adoption_check_then_link(browser):
     ctx.close()
 
 
+def test_adoption_check_keeps_the_choices_that_link_then_sends(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api, page="expenses")
+    pg.locator(".sup-vendor-banner").get_by_role("button", name="Review and link").click()
+    dlg = pg.locator("#modal-root .modal")
+    expect(dlg.locator("#ad_sup0")).to_have_value("7a1b2c3d")
+    dlg.locator("#ad_sup0").select_option("__new__")
+    dlg.locator("#ad_name0").fill("Demo Print Studio")
+    dlg.locator("#ad_check").click()
+    expect(dlg.locator("#ad_result")).to_contain_text("created")
+    expect(dlg.locator("#ad_sup0")).to_have_value("__new__")  # the repaint after the check keeps the choice
+    expect(dlg.locator("#ad_name0")).to_have_value("Demo Print Studio")
+    dlg.locator("#ad_go").click()
+    expect(dlg.locator("#ad_result")).to_contain_text("Linked")
+    calls = api.calls("POST", "suppliers/adopt-vendors")
+    assert [c[3]["dry_run"] for c in calls] == [True, False]
+    assert calls[0][3]["items"] == calls[1][3]["items"]  # the link sends what the check showed
+    assert calls[0][3]["items"][0] == {"vendors": ["Demo Print Shop GmbH", "demo print shop"], "create": {"name": "Demo Print Studio", "kind": "company"}}
+    assert problems == []
+    ctx.close()
+
+
 def test_no_vendor_banner_for_the_employee_and_when_all_linked(browser):
     api = FakeApi()
     api.vendor_suggestions = {"groups": [], "unlinked_expenses": 0}

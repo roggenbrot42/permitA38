@@ -217,7 +217,7 @@
   };
 
   /* ---------- adoption of expense vendors ---------- */
-  const AD = { groups: [], preview: null, busy: false };
+  const AD = { groups: [], preview: null, busy: false, rows: null };   // rows: the user's choice per vendor group (kept across repaints)
   function adoptItems() {
     const items = [];
     AD.groups.forEach((g, i) => {
@@ -228,6 +228,13 @@
     });
     return items;
   }
+  // the choice of a group: the stored one after a repaint, else the server's suggestion
+  const rowOf = (g, i) => AD.rows?.[i] || { use: true, sup: g.supplier ? g.supplier.id : '__new__', name: g.variants[0] };
+  // read the DOM into AD.rows before it is rebuilt (only the groups of the current check are on the page)
+  function adoptSnapshot() {
+    if (!AD.groups.length || !$('#ad_sup0')) return;
+    AD.rows = AD.groups.map((g, i) => ({ use: $('#ad_use' + i)?.checked !== false, sup: $('#ad_sup' + i)?.value || '__new__', name: $('#ad_name' + i)?.value ?? g.variants[0] }));
+  }
   function adoptHTML() {
     const known = SUP.options(null);
     const pv = AD.preview;
@@ -235,13 +242,14 @@
     if (!AD.groups.length) return resultBox + '<div class="empty">All expense vendors are linked to a supplier.</div>';
     return `<div class="small muted">Expenses keep their vendor text. Linking only sets the supplier. Check first, then link.</div>
       <div class="table-wrap"><table class="sup-adopt"><tr><th scope="col">Link</th><th scope="col">Vendor</th><th scope="col" class="num">Bills</th><th scope="col">Supplier</th></tr>
-      ${AD.groups.map((g, i) => `<tr><td><input type="checkbox" id="ad_use${i}" data-change="supAdoptChange" ${AD.use?.[i] === false ? '' : 'checked'} aria-label="Link ${esc(g.variants.join(', '))}"></td>
+      ${AD.groups.map((g, i) => { const r = rowOf(g, i); return `<tr><td><input type="checkbox" id="ad_use${i}" data-change="supAdoptChange" ${r.use ? 'checked' : ''} aria-label="Link ${esc(g.variants.join(', '))}"></td>
         <td>${g.variants.map(v => `<div>${esc(v)}</div>`).join('')}</td><td class="num">${esc(String(g.count))}<div class="small muted">${eur(g.net_total)}</div></td>
-        <td><label class="sr-only" for="ad_sup${i}">Supplier for ${esc(g.variants[0])}</label><select id="ad_sup${i}" data-change="supAdoptChange"><option value="__new__" ${g.supplier ? '' : 'selected'}>Create a new supplier</option>${known.map(([id, n]) => `<option value="${esc(id)}" ${g.supplier && g.supplier.id === id ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
-          <input id="ad_name${i}" type="text" maxlength="200" value="${esc(g.variants[0])}" aria-label="Name of the new supplier for ${esc(g.variants[0])}" data-change="supAdoptChange" ${g.supplier ? 'hidden' : ''}></td></tr>`).join('')}</table></div>
+        <td><label class="sr-only" for="ad_sup${i}">Supplier for ${esc(g.variants[0])}</label><select id="ad_sup${i}" data-change="supAdoptChange"><option value="__new__" ${r.sup === '__new__' ? 'selected' : ''}>Create a new supplier</option>${known.map(([id, n]) => `<option value="${esc(id)}" ${r.sup === id ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+          <input id="ad_name${i}" type="text" maxlength="200" value="${esc(r.name)}" aria-label="Name of the new supplier for ${esc(g.variants[0])}" data-change="supAdoptChange" ${r.sup === '__new__' ? '' : 'hidden'}></td></tr>`; }).join('')}</table></div>
       ${resultBox}`;
   }
   function adoptPaint() {
+    adoptSnapshot();
     $('#ad_body').innerHTML = adoptHTML();
     $('#ad_check').disabled = AD.busy || !AD.groups.length;
     $('#ad_go').disabled = AD.busy || !(AD.preview && AD.preview.dry_run && AD.preview.expenses_changed > 0);
@@ -249,7 +257,6 @@
     if (!a || a === document.body || a.disabled || !$('#modal-root .modal')?.contains(a)) $('#ad_close')?.focus();
   }
   A.supAdoptChange = el => {
-    AD.use = AD.groups.map((_, i) => $('#ad_use' + i)?.checked !== false);
     AD.groups.forEach((g, i) => { const sel = $('#ad_sup' + i), nm = $('#ad_name' + i); if (sel && nm) nm.hidden = sel.value !== '__new__'; });
     AD.preview = null;
     $('#ad_go').disabled = true;
@@ -258,7 +265,7 @@
   A.supAdopt = async () => {
     const r = await api('GET', 'suppliers/vendor-suggestions');
     await SUP.load();
-    Object.assign(AD, { groups: r.groups || [], preview: null, busy: false, use: null });
+    Object.assign(AD, { groups: r.groups || [], preview: null, busy: false, rows: null });
     modal(`<h2>Link expense vendors to suppliers</h2><div id="ad_body"></div><div class="actions"><button type="button" id="ad_close" data-a="supAdoptClose">Close</button><button type="button" id="ad_check" data-a="supAdoptRun" data-dry="1">Check</button><button type="button" class="primary" id="ad_go" data-a="supAdoptRun" data-dry="0" disabled>Link expenses</button></div>`, true);
     $('#modal-root').onkeydown = e => { if (e.key === 'Escape') A.supAdoptClose(); };   // same as Close: the list refreshes after linking
     adoptPaint();
@@ -276,7 +283,8 @@
       if (!dry) {
         await SUP.load();
         AD.groups = (await api('GET', 'suppliers/vendor-suggestions')).groups || [];
-        AD.use = null;
+        AD.rows = null;
+        $('#ad_body').innerHTML = '';   // the rows on the page belong to the old groups: do not read them back
       }
       AD.preview = r;
     } finally { AD.busy = false; if (token === MODAL_SEQ) adoptPaint(); }
