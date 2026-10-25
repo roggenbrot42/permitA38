@@ -1,12 +1,10 @@
 """Suppliers and offers through the data archive (kind "suppliers"): the dry run (preview) and the real run agree,
 damaged JSON shapes are refused per record, and the expense duplicate rule compares supplier ids when both rows have one."""
 
-from pathlib import Path
-
 import pytest
 
-from .transfer_helpers import build_zip, export_archive, make_instance, seed, zip_files
 from .test_data_transfer_review import preview, rebuild, run
+from .transfer_helpers import export_archive, make_instance, seed
 
 
 @pytest.fixture
@@ -14,16 +12,47 @@ def src(tmp_path):
     app, client = make_instance(tmp_path, "src")
     store = app.state.services.store
     seed(store)
-    sup = store.save("suppliers", {"name": "Example Freelance Studio (Demo)", "kind": "person-capacity",
-                                   "weekly_hours": 24.0, "workdays": [0, 1, 2, 3], "tags": ["frontend"],
-                                   "country": "DE", "vat_mode": "domestic", "active": True})
-    store.save("suppliers", {"name": "Demo Print Shop GmbH", "kind": "company", "supplier_no": "K-1",
-                             "vat_mode": "domestic", "active": True})
+    sup = store.save(
+        "suppliers",
+        {
+            "name": "Example Freelance Studio (Demo)",
+            "kind": "person-capacity",
+            "weekly_hours": 24.0,
+            "workdays": [0, 1, 2, 3],
+            "tags": ["frontend"],
+            "country": "DE",
+            "vat_mode": "domestic",
+            "active": True,
+        },
+    )
+    store.save(
+        "suppliers",
+        {
+            "name": "Demo Print Shop GmbH",
+            "kind": "company",
+            "supplier_no": "K-1",
+            "vat_mode": "domestic",
+            "active": True,
+        },
+    )
     proj = store.list("projects")[0]
-    store.save("incoming_offers", {"supplier_id": sup["id"], "received_on": "2026-02-20", "lines": [
-        {"description": "Frontend", "quantity": 8, "unit": "h", "unit_price": 80.0}], "net_total": 640.0,
-        "vat_rate": 19.0, "vat": 121.6, "gross_total": 761.6, "vat_mode": "domestic", "hours": 8.0,
-        "status": "received", "project_id": proj["id"], "customer_id": proj.get("customer_id")})
+    store.save(
+        "incoming_offers",
+        {
+            "supplier_id": sup["id"],
+            "received_on": "2026-02-20",
+            "lines": [{"description": "Frontend", "quantity": 8, "unit": "h", "unit_price": 80.0}],
+            "net_total": 640.0,
+            "vat_rate": 19.0,
+            "vat": 121.6,
+            "gross_total": 761.6,
+            "vat_mode": "domestic",
+            "hours": 8.0,
+            "status": "received",
+            "project_id": proj["id"],
+            "customer_id": proj.get("customer_id"),
+        },
+    )
     return app, client, store, sup
 
 

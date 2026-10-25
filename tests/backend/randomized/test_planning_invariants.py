@@ -386,16 +386,31 @@ def _forecast_without_externals(world, with_suppliers: bool):
             if with_suppliers:
                 sup = repo.save(
                     "suppliers",
-                    dict(name="Subcontractor", kind="person-capacity", active=True, weekly_hours=24.0,
-                         workdays=[0, 1, 2, 3], rate=80.0, country="DE", vat_mode="domestic"),
+                    dict(
+                        name="Subcontractor",
+                        kind="person-capacity",
+                        active=True,
+                        weekly_hours=24.0,
+                        workdays=[0, 1, 2, 3],
+                        rate=80.0,
+                        country="DE",
+                        vat_mode="domestic",
+                    ),
                 )
                 for c in repo.list("contracts"):
                     repo.save("contracts", dict(c, user_ids=[*c["user_ids"], sup["id"]]))
                 proj = repo.save("projects", dict(name="Ext project", status="active"))
                 repo.save(
                     "allocations",
-                    dict(supplier_id=sup["id"], project_id=proj["id"], start="2026-02-02", end="2026-03-29",
-                         hours_per_week=20.0, status="active", rate=80.0),
+                    dict(
+                        supplier_id=sup["id"],
+                        project_id=proj["id"],
+                        start="2026-02-02",
+                        end="2026-03-29",
+                        hours_per_week=20.0,
+                        status="active",
+                        rate=80.0,
+                    ),
                 )
             out = _strip_ids(PlanningService(repo).forecast(10, None, True, today=MON, include_external=False))
             out["expired_offers"] = len(out["expired_offers"])  # ids of the old offers: random

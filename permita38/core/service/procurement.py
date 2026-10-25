@@ -691,12 +691,9 @@ class ProcurementService:
             aid = rec.get("allocation_id")
             alloc = self.store.get("allocations", aid) if aid else None
             # only the allocation this offer created (same offer, same supplier, external) is ever deleted
-            own = bool(alloc) and (
-                alloc.get("incoming_offer_id") == rec["id"]
-                and alloc.get("supplier_id") == rec.get("supplier_id")
-                and not alloc.get("user_id")
-            )
-            if own:
+            if aid and alloc and alloc.get("incoming_offer_id") == rec["id"] and not alloc.get("user_id") and (
+                alloc.get("supplier_id") == rec.get("supplier_id")
+            ):
                 start = calc.d(alloc.get("start"))
                 started = start is not None and start <= today
                 if started or self.store.find("expenses", allocation_id=aid):

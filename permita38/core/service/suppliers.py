@@ -253,8 +253,8 @@ class SupplierService:
                 records = RecordService(self.store)
                 for eid in ids:
                     exp = self.store.get("expenses", eid)
-                    if exp and not exp.get("supplier_id"):
-                        records.adopt_expense(me, exp, sid)
+                    if exp and not exp.get("supplier_id") and sid:
+                        records.adopt_expense(me, exp, str(sid))
             changed += len(ids)
             out_items.append(
                 dict(

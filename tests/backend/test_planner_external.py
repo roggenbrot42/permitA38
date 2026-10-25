@@ -286,11 +286,18 @@ def test_w2_easter_monday_is_not_made_up_in_the_weekly_figures(boss_client):
 # ----------------------------------------------------------------------------- W3: a contract spreads around S.unavailable
 def test_w3_contract_of_a_subcontractor_spreads_around_its_unavailable_window(boss_client):
     q = new_project(boss_client, "Demo project Q")
-    s = boss_client.post("/api/suppliers", json={
-        "name": "Example Freelance Studio (Demo)", "kind": "person-capacity", "workdays": [0, 1, 2, 3, 4],
-        "weekly_hours": 45, "rate": 75.0, "country": "DE",
-        "unavailable": [{"from": "2026-03-09", "to": "2026-03-11"}],
-    }).json()
+    s = boss_client.post(
+        "/api/suppliers",
+        json={
+            "name": "Example Freelance Studio (Demo)",
+            "kind": "person-capacity",
+            "workdays": [0, 1, 2, 3, 4],
+            "weekly_hours": 45,
+            "rate": 75.0,
+            "country": "DE",
+            "unavailable": [{"from": "2026-03-09", "to": "2026-03-11"}],
+        },
+    ).json()
     contract(boss_client, "Contract D_Q", q["id"], [s["id"]], 10.0, 75.0, end="2026-03-20")
     days = boss_client.get("/api/plan/day-table?from=2026-03-09&to=2026-03-13").json()["days"]
     by_date = {d["date"]: d for d in days}
@@ -307,8 +314,10 @@ def test_w9_after_the_cancel_the_released_hours_are_free(boss_client):
     p = new_project(boss_client, "Demo project P")
     s = supplier(boss_client)
     acc = accept_plan(boss_client, s["id"], p["id"], "2026-03-02", "2026-03-27", 20.0)
-    r = boss_client.post(f"/api/allocations/{acc['allocation']['id']}/cancel",
-                         json={"effective_from": "2026-03-13", "reason": "project paused"})
+    r = boss_client.post(
+        f"/api/allocations/{acc['allocation']['id']}/cancel",
+        json={"effective_from": "2026-03-13", "reason": "project paused"},
+    )
     assert r.status_code == 200, r.text
     weeks = forecast(boss_client, 4)["weeks"]
     assert [w["external_capacity"] for w in weeks] == [20.0, 20.0, 0.0, 0.0]
