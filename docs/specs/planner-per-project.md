@@ -87,7 +87,7 @@ ring fence) join the pool.
 8. **Team row** (what the planner shows first, unchanged field names): `capacity` = sum of all scopes (including
    `unassigned` and the unused surplus of projects), `confirmed`, `binding_offers`, `utilisation` as today. New:
    `gap` = sum of all scope gaps, never reduced by any surplus. The team `status` is `over` when `gap > 0` or as
-   today. The team total is therefore **no longer able to hide** a project gap (decision flagged below, D3).
+   today. The team total is therefore **no longer able to hide** a project gap (decision D3, decided 2026-10-25).
 9. **Unused capacity** stays in its scope's row as `free_*`; it is shown (so the owner sees which allocation is
    idle) but never counted for another scope. Info warning `allocation.no_demand` (as in the subcontractor spec).
 10. **Revenue and cost**: unchanged in meaning. Contracted/offer revenue is demand times rate and is independent of
@@ -107,20 +107,17 @@ and no allocation shows a gap equal to its whole demand**, while the team total 
 without a project behave as before. Nothing is lost or blocked; the planner only reports honestly that no capacity
 has been assigned to those projects yet.
 
-* **Recommended (decision D1, product decision, flagged):** keep rule 4 as written and give the owner a one-click
+* **Decided (D1, 2026-10-25):** keep rule 4 as written and give the owner a one-click
   bootstrap, `POST /api/allocations/bootstrap` (preview, then `confirm: true`), that creates, for every active
   contract with a project and every assignee, one allocation with the contract's period and
   `hours_per_week = the assignee's peak weekly demand of that contract` (rounded up to 0.25 h). Open offers are not
   bootstrapped (they stay a visible gap until accepted). A banner on the planner offers the bootstrap while any
   project has a gap and the person has no allocation rows.
-* **Simplest alternative (if the owner dislikes the first-run red):** the same bootstrap runs once automatically at
-  the first start after the upgrade (a service call at startup, guarded by a setting `planning_ring_fence_seeded`).
-  This writes rows without the owner asking, so it is **not** recommended; it is listed so the owner can pick.
 * Rejected: a legacy "pool" switch (it would keep two code paths alive and contradict the decision).
 
-### Over-allocation across projects (decision D2, flagged)
+### Over-allocation across projects (decision D2, decided 2026-10-25)
 
-Decided: allocations are **validated softly** and **computed safely**. On saving an allocation the service checks the
+Allocations are **validated softly** and **computed safely**. On saving an allocation the service checks the
 person's overlapping allocations per week: if `sum(hours_per_week)` > `weekly_hours` it returns the warning
 `allocation.employee_over_allocated` (severity `warning`, `confirmable: true`, never blocks) with `details`
 `{user_id, week, allocated, weekly_hours, over_by}`. The planner computes with rule 3 (pro rata scale-down) so the
@@ -350,17 +347,18 @@ subcontractor feature (external pool is simply empty); the subcontractor branch 
 * Time entries on a project without allocation: soft hint.
 * Percent-of-time allocations instead of hours per week; skills and roles per allocation.
 
-## Open questions for the product owner (the choices that remain)
+## Decisions (2026-10-25, product owner)
 
-1. **First run after the upgrade (D1).** Every project with demand and no allocation shows a gap until the owner
-   allocates capacity. Recommended: show it with a one-click bootstrap. Alternative: run the bootstrap automatically
-   once. Which one?
-2. **Over-allocation (D2).** Recommended: a warning that never blocks, and the planner scales the allocations down pro
-   rata so the numbers stay honest. Alternative: block saving (409) when an employee's allocations exceed their weekly
-   hours. Warning or block?
-3. **Team status (D3).** The team row now says `over` whenever any project has a gap, even when the pool as a whole
-   has free hours (E1). This is the intent of the ring fence but changes what existing users see in the headline.
-   Confirm, or keep the team status pool-based and show the gap only as its own column?
+1. **First run (D1).** A one-click "Allocate my capacity" bootstrap behind a banner. Nothing runs automatically; the
+   automatic first-start variant and the setting `planning_ring_fence_seeded` are dropped.
+2. **Over-allocation (D2).** A warning (`allocation.employee_over_allocated`) that never blocks the save; the planner
+   scales the allocations down pro rata (rule 3), as written above.
+3. **Team status (D3).** The team row says `over` whenever any project has a gap, even if the pool has free hours
+   (rule 8, example E1).
+
+## Open questions for the product owner
+
+None remain. Questions that come up in implementation go under "Open design decisions" in the implementer's report.
 
 ## Open design decisions (for the implementer's report)
 
