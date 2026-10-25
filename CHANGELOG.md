@@ -6,11 +6,42 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Fixed
+- Business trips: finalizing a trip with open checklist lines now asks first and sends one request (no refused `PUT`
+  with a `409` in the console); a new trip is saved as a draft before it is finalized.
+- Business trips: the cost centre choice "Charge to the customer or project" is kept when you pick the project
+  afterwards and is stored as soon as a customer or project is chosen.
+- The import and numbering pages no longer fail with a script error for a user who is not the boss (the helper that
+  shows the "only available to the boss" message was missing).
+
+## [0.4.0-alpha.3] - 2026-10-25
+
+Third alpha. Adds business trips (page, allowance, mileage, statement), the team timeline (page and API), personal
+API tokens with an audit log (`docs/api-tokens.md`), the data export and import page (`docs/data-export.md`), and fixes
+to the planner, the bill preview and request validation. Requires Python 3.12 or newer. Back up your data folder before
+upgrading (the app also does it automatically); the schema changes with the migrations `0009-trips` and
+`0010-api_tokens`, and an upgraded database can no longer be opened by alpha.2. Not for production bookkeeping yet; the
+tax rules marked *(verify)* in `docs/compliance.md` still need your tax adviser.
+
+Known limitations:
+- Business trips: only the 2026 rate table exists, and in it every country except Germany is a **placeholder** (nine
+  countries, not the BMF figures). A country that is not in the table is calculated with the Luxembourg row and the
+  trip shows a note. A trip with a day in a year other than 2026 is refused with "No rate table for year ...". Do not
+  use trips abroad for real statements yet.
+- The export is a copy for moving or safekeeping, not a legally compliant archive (GoBD). Calendar links, secrets,
+  API tokens and the audit log are not exported: reconnect the calendars after an import. An import needs an empty
+  instance.
+
+### Fixed
+- Request bodies: every write route now validates its body with the strict models and hard limits; a note with an
+  invalid character (timer note) no longer causes a server error (`500`).
+- Documents: a customer or project rate that reprices a new draft no longer drops the quantities you already typed.
 - Planner: a job with a total number of hours was spread over all workdays of its period, including vacation and
   holidays, so the week before a vacation looked overloaded although the work fitted before it. The hours are now
   spread over the available days (workdays that are neither a holiday nor time off); `docs/planning.md` has the rule.
 - Bill preview: a PDF or image that the browser downloads or shows blank now has a visible "Not showing? Open or download the bill" line.
 ### Added
+- **Team timeline page** (`#/timeline`): who is away and who has contracts, shown at the level the boss sets for the
+  role; read-only. The API is described below.
 - **Data export and import page** (Settings > Data export and import, boss only): download a full archive or customers and
   suppliers only, check an archive and import it into an empty instance with an explicit confirmation
   (`docs/contracts/data-export.md`).
@@ -30,13 +61,12 @@ All notable changes to this project are documented here. The format is based on
   `team_timeline_visibility` in the settings (`off`, `away`, `time-off`, `full`; defaults: employee `away`, accountant
   `off`). Hidden details are removed on the server. New permission area `team_timeline`. See
   `docs/contracts/team-timeline.md` and `docs/roles.md`.
-
-### Added
-- **Business trips (backend)**: trips with destinations per day, meal allowance (*Verpflegungsmehraufwand*) with
+- **Business trips** (page `#/trips`: trip dialog with a row per day and meal flags, checklist, link bills via the new
+  *Trip* field in the bill dialog, finalise, trip statement; migration `0009-trips`). The backend computes trips with destinations per day, meal allowance (*Verpflegungsmehraufwand*) with
   reductions for provided meals, the three-month limit, mileage at 0,30 € per km, linked bills, a checklist, and a
   printable trip statement (`/api/trips`). Figures are computed by the server and frozen when a trip is finalised.
   Allowance and mileage appear in the finance report as deductible lines. Tax rules marked *(verify)* in
-  `docs/compliance.md`; the 2026 country table is a placeholder. New rights area `trips`.
+  `docs/compliance.md`. New rights area `trips`.
 
 ## [0.4.0-alpha.2] - 2026-10-23
 

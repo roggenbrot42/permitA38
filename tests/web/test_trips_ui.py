@@ -244,7 +244,15 @@ class FakeTripApi:
             open_labels = [i["label"] for i in self.trip["checklist"] if i["state"] == "open"]
             if body["status"] == "final" and open_labels and force != "true":
                 return _json(route, 409, {"detail": "Checklist has open items: " + ", ".join(open_labels)})
-            self.trip = {**self.trip, "status": body["status"], "purpose": body["purpose"]}
+            if body.get("cost_centre") == "project" and not (body.get("project_id") or body.get("customer_id")):
+                return _json(route, 422, {"detail": "Choose a customer or project for the cost centre"})
+            self.trip = {
+                **self.trip,
+                "status": body["status"],
+                "purpose": body["purpose"],
+                "cost_centre": body.get("cost_centre"),
+                "project_id": body.get("project_id"),
+            }
             return _json(route, 200, self.trip)
         return _json(route, 405, {"detail": "Method not allowed"})
 
@@ -363,12 +371,12 @@ def open_trip_with_open_lines(browser):
     return api, ctx, pg, problems
 
 
-def test_finalize_409_asks_then_retries_with_force(browser):
+def test_finalize_with_open_lines_asks_first_and_sends_one_forced_request(browser):
     api, ctx, pg, problems = open_trip_with_open_lines(browser)
     pg.click("[data-a=tripFinalize]")
     expect(pg.locator("[data-a=tripFinalize]")).to_have_count(0)  # the stored trip is final now
     puts = [(r[2], r[3]["status"]) for r in api.requests if r[0] == "PUT"]
-    assert puts == [("", "final"), ("true", "final")]
+    assert puts == [("true", "final")]  # no first request the server has to refuse with 409
     assert api.dialogs == [
         "Checklist has open items: Hotel / accommodation, Transportation\n\nFinalize anyway? "
         "The open lines stay open in the statement."
@@ -378,13 +386,52 @@ def test_finalize_409_asks_then_retries_with_force(browser):
     ctx.close()
 
 
-def test_finalize_declined_sends_no_force(browser):
+def test_finalize_without_open_lines_sends_one_plain_request(browser):
+    api = FakeTripApi(ME, copy.deepcopy(CONTRACT_TRIP))
+    for item in api.trip["checklist"]:
+        if item["state"] == "open":
+            item["state"] = "added"
+    ctx, pg, problems = open_app(browser, api)
+    open_trips_page(pg)
+    pg.click("button[data-a=editTrip]")
+    pg.wait_for_selector("[data-a=tripFinalize]")
+    pg.click("[data-a=tripFinalize]")
+    expect(pg.locator("[data-a=tripFinalize]")).to_have_count(0)
+    assert [(r[2], r[3]["status"]) for r in api.requests if r[0] == "PUT"] == [("", "final")]
+    assert api.dialogs == []
+    assert problems == []
+    ctx.close()
+
+
+def test_finalize_declined_sends_nothing(browser):
     api, ctx, pg, problems = open_trip_with_open_lines(browser)
     api.confirm_answer = False
     pg.click("[data-a=tripFinalize]")
     expect(pg.locator("[data-a=tripFinalize]")).to_have_count(1)
-    assert [(r[2]) for r in api.requests if r[0] == "PUT"] == [""]
+    assert [r for r in api.requests if r[0] == "PUT"] == []
     assert api.trip["status"] == "draft"
+    ctx.close()
+
+
+def test_cost_centre_project_choice_survives_picking_the_project(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip.update({"cost_centre": None, "project_id": None, "customer_id": None})
+    api = FakeTripApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trips_page(pg)
+    pg.click("button[data-a=editTrip]")
+    pg.wait_for_selector("#t_cc_project")
+    pg.check("#t_cc_project")  # no customer or project yet: the choice is kept, nothing is sent
+    pg.wait_for_timeout(300)
+    assert pg.is_checked("#t_cc_project")
+    assert [r for r in api.requests if r[0] == "PUT"] == []
+    pg.select_option("#t_project", "p8d2m4qz7w")
+    pg.wait_for_function("() => document.querySelector('#t_cc_project').checked")
+    pg.wait_for_function("() => document.querySelector('#t_checklist').innerText.includes('Added')")
+    puts = [r for r in api.requests if r[0] == "PUT"]
+    assert len(puts) == 1 and puts[0][3]["cost_centre"] == "project" and puts[0][3]["project_id"] == "p8d2m4qz7w"
+    assert pg.is_checked("#t_cc_project")
+    assert problems == []
     ctx.close()
 
 
