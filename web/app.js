@@ -356,30 +356,33 @@ PAGES.plan = async (tab = 'forecast') => {
   if (tab === 'timeoff') return head + await timeoffView(true);
   const weeks = +(localStorage.fcWeeks || 26), uid = localStorage.fcUser || '';
   let pid = lsGet('fcProject');
-  const query = () => `forecast?weeks=${weeks}&user_id=${uid}${pid ? '&project_id=' + encodeURIComponent(pid) : ''}`;
+  const ext = lsGet('fcExternal', '1') !== '0';   // include subcontractors (the server default); off = the world without suppliers
+  const query = () => `forecast?weeks=${weeks}&user_id=${uid}${pid ? '&project_id=' + encodeURIComponent(pid) : ''}${ext ? '' : '&include_external=0'}`;
   let fc;
   try { fc = await api('GET', query()); }
   catch (e) { if (e.status !== 404 || !pid) throw e; pid = ''; lsSet('fcProject', ''); fc = await api('GET', query()); }   // the remembered project is gone
   const allocs = await ppAllocations();
   const W = fc.weeks, mx = Math.max(10, ...W.map(w => Math.max(w.capacity, w.confirmed + w.tentative)));
   const bw = 900 / W.length, H = 200, y = v => H - v / mx * H;
-  const chart = `<svg class="chart" viewBox="0 0 940 ${H + 30}"><g transform="translate(36,6)">
+  const chart = `<svg class="chart" viewBox="0 0 940 ${H + 30}"><defs><pattern id="fc-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="var(--good)" stroke-width="2"/></pattern></defs><g transform="translate(36,6)">
     ${[0, .5, 1].map(f => `<line x1="0" x2="900" y1="${y(mx * f)}" y2="${y(mx * f)}" stroke="var(--line)"/><text x="-6" y="${y(mx * f) + 4}" text-anchor="end">${Math.round(mx * f)}h</text>`).join('')}
-    ${W.map((w, i) => `<g><title>${fmtDate(w.date || w.week)}: ${w.confirmed}h booked, ${w.tentative}h offers, capacity ${w.capacity}h</title>
+    ${W.map((w, i) => `<g><title>${fmtDate(w.date || w.week)}: ${w.confirmed}h booked, ${w.tentative}h offers, capacity ${w.capacity}h${w.external_capacity ? ` (of which external ${w.external_capacity}h)` : ''}</title>
       <rect x="${i * bw + 2}" y="${y(w.confirmed)}" width="${bw - 4}" height="${H - y(w.confirmed)}" fill="var(--accent)" rx="2"/>
       <rect x="${i * bw + 2}" y="${y(w.confirmed + w.tentative)}" width="${bw - 4}" height="${y(w.confirmed) - y(w.confirmed + w.tentative)}" fill="var(--accent)" opacity=".35" rx="2"/>
+      ${w.external_capacity > 0 ? `<rect class="fc-ext" x="${i * bw + 2}" y="${y(w.capacity)}" width="${bw - 4}" height="${y(w.capacity - w.external_capacity) - y(w.capacity)}" fill="url(#fc-hatch)" opacity=".6"/>` : ''}
       <line x1="${i * bw}" x2="${(i + 1) * bw}" y1="${y(w.capacity)}" y2="${y(w.capacity)}" stroke="var(--good)" stroke-width="3"/>
       ${i % Math.ceil(W.length / 12) === 0 ? `<text x="${i * bw + bw / 2}" y="${H + 16}" text-anchor="middle">${fmtDate(w.week).slice(0, 5)}</text>` : ''}</g>`).join('')}</g></svg>`;
   const totals = W.reduce((a, w) => ({ cap: a.cap + w.capacity, conf: a.conf + w.confirmed, ten: a.ten + w.tentative, rev: a.rev + w.revenue, trev: a.trev + w.tentative_revenue }), { cap: 0, conf: 0, ten: 0, rev: 0, trev: 0 });
   return head + ppBanner(fc, allocs, uid, pid) + `<div class="row" style="margin-bottom:12px"><div class="auto"><label>Horizon</label><select data-change="fcWeeks">${[13, 26, 52].map(n => `<option value="${n}" ${n === weeks ? 'selected' : ''}>${n} weeks</option>`).join('')}</select></div>
     <div class="auto"><label>Who</label><select data-change="fcUser"><option value="">Whole team</option>${S.d.users.filter(u => u.active !== false).map(u => `<option value="${u.id}" ${u.id === uid ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
-    <div class="auto"><label>Project</label><select data-change="fcProject"><option value="">All projects</option>${S.d.projects.filter(p => p.status !== 'archived' || p.id === pid).map(p => `<option value="${esc(p.id)}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}<option value="unassigned" ${pid === 'unassigned' ? 'selected' : ''}>Unassigned</option></select></div></div>
-    ${ppSummary(fc)}
+    <div class="auto"><label>Project</label><select data-change="fcProject"><option value="">All projects</option>${S.d.projects.filter(p => p.status !== 'archived' || p.id === pid).map(p => `<option value="${esc(p.id)}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}<option value="unassigned" ${pid === 'unassigned' ? 'selected' : ''}>Unassigned</option></select></div>
+    <div class="auto"><label class="pp-check"><input type="checkbox" id="fc_ext" data-change="fcExternal" ${ext ? 'checked' : ''}> include subcontractors</label></div></div>
+    ${ppSummary(fc)}${ppExternalKpis(fc)}
     <div class="grid g4"><div class="card kpi"><div class="l">Capacity</div><div class="v">${num(totals.cap, 0)} h</div></div><div class="card kpi"><div class="l">Booked (contracts)</div><div class="v">${num(totals.conf, 0)} h</div></div>
       <div class="card kpi ${totals.cap - totals.conf > 0 ? 'good' : 'bad'}"><div class="l">Free capacity</div><div class="v">${num(totals.cap - totals.conf, 0)} h</div></div><div class="card kpi"><div class="l">Contracted revenue</div><div class="v">${eur(fc.totals.contracted_revenue)}</div><span class="small muted">assumed ${eur(fc.totals.assumed_revenue)} where no contract exists yet</span></div></div>
     <div class="card"><h2>Weekly load</h2>${chart}<div class="small muted"><span class="dot" style="background:var(--accent)"></span>booked <span class="dot" style="background:var(--accent);opacity:.35;margin-left:10px"></span>open offers <span class="dot" style="background:var(--good);margin-left:10px"></span>capacity (after holidays & time off)</div></div>
-    <div class="card"><h2>Week by week</h2><table><tr><th>Week of</th><th class="num">Capacity</th><th class="num">Booked</th><th class="num">Offers</th><th class="num">Free</th><th class="num">Gap</th><th class="num">Revenue</th><th>Notes</th></tr>
-    ${W.map(w => `<tr class="${w.status === 'over' ? 'pp-over' : ''}"><td class="nowrap">${w.projects ? `<button type="button" class="ghost sm pp-toggle" data-a="fcExpand" data-week="${esc(w.week)}" aria-expanded="${FC.open.has(w.week)}" aria-label="Projects in the week of ${esc(fmtDate(w.week))}">${FC.open.has(w.week) ? '▾' : '▸'}</button> ` : ''}${fmtDate(w.week)}</td><td class="num">${w.capacity}</td><td class="num">${w.confirmed}</td><td class="num muted">${w.tentative || ''}</td><td class="num ${w.free < 0 ? 'free-bad' : w.free > 0 ? 'free-good' : ''}">${w.free}</td><td class="num">${w.gap > 0 ? `<span class="pp-gap">${esc(ppH(w.gap))}</span>` : ''}</td><td class="num">${w.revenue ? eur(w.revenue) : ''} <span class="pill basis-${esc(w.basis)}">${esc({ contract: 'contract', 'offer-binding': 'offers', intended: 'assumed' }[w.basis] || w.basis)}</span></td><td class="small muted">${w.events.map(esc).join(', ')}</td></tr>${FC.open.has(w.week) && w.projects ? ppWeekDetail(w) : ''}`).join('')}</table></div>${ppWarnings(fc.warnings)}`;
+    <div class="card"><h2>Week by week</h2><table><tr><th>Week of</th><th class="num">Capacity</th><th class="num">Booked</th><th class="num">Offers</th><th class="num">Free</th><th class="num">Gap</th><th class="num">Revenue</th>${ppHasExt(W) ? '<th class="num">External</th>' : ''}<th>Notes</th></tr>
+    ${W.map(w => `<tr class="${w.status === 'over' ? 'pp-over' : ''}"><td class="nowrap">${w.projects ? `<button type="button" class="ghost sm pp-toggle" data-a="fcExpand" data-week="${esc(w.week)}" aria-expanded="${FC.open.has(w.week)}" aria-label="Projects in the week of ${esc(fmtDate(w.week))}">${FC.open.has(w.week) ? '▾' : '▸'}</button> ` : ''}${fmtDate(w.week)}</td><td class="num">${w.capacity}</td><td class="num">${w.confirmed}</td><td class="num muted">${w.tentative || ''}</td><td class="num ${w.free < 0 ? 'free-bad' : w.free > 0 ? 'free-good' : ''}">${w.free}</td><td class="num">${w.gap > 0 ? `<span class="pp-gap">${esc(ppH(w.gap))}</span>` : ''}</td><td class="num">${w.revenue ? eur(w.revenue) : ''} <span class="pill basis-${esc(w.basis)}">${esc({ contract: 'contract', 'offer-binding': 'offers', intended: 'assumed' }[w.basis] || w.basis)}</span></td>${ppHasExt(W) ? `<td class="num pp-extcell">${ppExtCell(w)}</td>` : ''}<td class="small muted">${w.events.map(esc).join(', ')}</td></tr>${FC.open.has(w.week) && w.projects ? ppWeekDetail(w, ppHasExt(W)) : ''}`).join('')}</table></div>${ppWarnings(fc.warnings)}`;
 };
 /* ---- planner per project: everything below only draws numbers computed by the server ---- */
 const FC = { open: new Set(), days: {} };
@@ -408,16 +411,28 @@ function ppSummary(fc) {
   return `<div class="banner bad pp-summary" role="status"><b>Not covered: ${esc(ppH(fc.totals.gap))}</b> in ${fc.totals.over_weeks} week${fc.totals.over_weeks === 1 ? '' : 's'}.
     ${list.length ? `<ul>${list.map(g => `<li>${esc(g.name)}: ${esc(ppH(g.gap))}</li>`).join('')}</ul>` : ''}</div>`;
 }
-function ppWeekDetail(w) {
+/* subcontractors: the server's external_* numbers, drawn as they are */
+const ppHasExt = W => W.some(w => w.external_capacity || w.external_assigned || w.external_gap || w.external_cost);
+const ppExtCell = w => !(w.external_capacity || w.external_assigned || w.external_cost) ? '' : `${esc(ppH(w.external_capacity))}${w.external_gap > 0 ? ` <span class="pp-gap">gap ${esc(ppH(w.external_gap))}</span>` : ''}<div class="small muted">${esc(eur(w.external_cost))}</div>`;
+function ppExternalKpis(fc) {
+  const t = fc.totals || {};
+  if (!(t.external_capacity || t.external_gap || t.external_cost)) return '';
+  return `<div class="grid g4 pp-ext" id="pp-ext"><div class="card kpi"><div class="l">External capacity</div><div class="v">${esc(num(t.external_capacity, 0))} h</div></div>
+    <div class="card kpi ${t.external_gap > 0 ? 'bad' : ''}"><div class="l">External gap</div><div class="v">${esc(num(t.external_gap, 0))} h</div></div>
+    <div class="card kpi"><div class="l">External cost</div><div class="v">${eur(t.external_cost)}</div></div>
+    <div class="card kpi ${t.margin < 0 ? 'bad' : ''}"><div class="l">Margin (revenue - external cost)</div><div class="v">${eur(t.margin)}</div></div></div>`;
+}
+A.fcExternal = el => { lsSet('fcExternal', el.checked ? '1' : '0'); FC.days = {}; render(); };
+function ppWeekDetail(w, hasExt) {
   const gapNames = w.projects.filter(p => p.gap > 0).map(p => p.name).join(', ');
   const rows = w.projects.map(p => {
     const planned = ppPlanned(p);
     const free = p.gap > 0 ? `<span class="pp-gap">${esc(ppH(p.gap))} not covered</span>`
       : p.free_worst_case > 0 && gapNames ? `<span class="pp-idle" title="${esc('Not available to project ' + gapNames)}">${esc(ppH(p.free_worst_case))} free</span>`
       : `<span class="muted">${esc(ppH(p.free_worst_case))} free</span>`;
-    return `<tr><td>${esc(p.name)}</td><td class="num">${esc(ppH(p.capacity))}</td><td class="num">${esc(ppH(planned))}</td><td class="num">${free}</td><td>${p.external && p.external.gap > 0 ? '<span class="small muted">subcontractors</span>' : ''}<span class="pill ${PP_PILL[p.status] || ''}">${esc(p.status)}</span></td></tr>`;
+    return `<tr><td>${esc(p.name)}</td><td class="num">${esc(ppH(p.capacity))}</td><td class="num">${esc(ppH(planned))}</td><td class="num">${free}</td><td>${p.external && p.external.gap > 0 ? '<span class="small muted">subcontractors</span>' : ''}${p.external && (p.external.capacity || p.external.assigned) ? `<div class="small muted pp-extrow">external ${esc(ppH(p.external.assigned))} of ${esc(ppH(p.external.capacity))}${p.external.gap > 0 ? `, <span class="pp-gap">gap ${esc(ppH(p.external.gap))}</span>` : ''}, ${esc(eur(p.external_cost))}</div>` : ''}<span class="pill ${PP_PILL[p.status] || ''}">${esc(p.status)}</span></td></tr>`;
   }).join('');
-  return `<tr class="pp-detail"><td colspan="8"><table class="pp-table"><tr><th>Project</th><th class="num">Allocated</th><th class="num">Planned</th><th class="num">Free / gap</th><th>Status</th></tr>${rows}</table>
+  return `<tr class="pp-detail"><td colspan="9"><table class="pp-table"><tr><th>Project</th><th class="num">Allocated</th><th class="num">Planned</th><th class="num">Free / gap</th><th>Status</th></tr>${rows}</table>
     <button type="button" class="ghost sm" data-a="fcDays" data-week="${esc(w.week)}">${FC.days[w.week] ? 'Hide days' : 'Show days'}</button>${FC.days[w.week] ? ppDays(FC.days[w.week]) : ''}</td></tr>`;
 }
 function ppDays(t) {
@@ -435,7 +450,7 @@ A.fcDays = async el => {
   const w = el.dataset.week;
   if (FC.days[w]) { delete FC.days[w]; return render(); }
   const uid = localStorage.fcUser || '', pid = lsGet('fcProject');
-  FC.days[w] = await api('GET', `plan/day-table?from=${w}&to=${addDays(w, 6)}${uid ? '&user_id=' + uid : ''}${pid ? '&project_id=' + encodeURIComponent(pid) : ''}`);
+  FC.days[w] = await api('GET', `plan/day-table?from=${w}&to=${addDays(w, 6)}${uid ? '&user_id=' + uid : ''}${pid ? '&project_id=' + encodeURIComponent(pid) : ''}${lsGet('fcExternal', '1') === '0' ? '&include_external=0' : ''}`);
   render();
 };
 A.fcProject = el => { lsSet('fcProject', el.value); FC.days = {}; render(); };
