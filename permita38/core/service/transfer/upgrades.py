@@ -29,6 +29,7 @@ NO_UPGRADE_NEEDED: dict[str, str] = {
     "9897dd11": "0009-trips: adds a table",
     "c8af1eca": "0010-api_tokens: adds tables that are never exported",
     "72306069": "0011-allocations: adds a table; without rows every person is entirely unassigned",
+    "c6d8d0be": "0012-suppliers: adds tables and nullable expense columns; absent means no supplier",
 }
 
 

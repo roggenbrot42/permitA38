@@ -136,6 +136,9 @@ class Expense(Record):
     import_batch: str | None = None
     lines: list[ExpenseLine] | None = None  # itemised bill; absent for a classic single-amount expense
     trip_id: str | None = None  # the bill belongs to this business trip (its figures are not in the expense)
+    supplier_id: str | None = None  # docs/contracts/subcontractors.md; `vendor` is then the supplier's name (snapshot)
+    allocation_id: str | None = None  # an external allocation of that supplier this bill is booked against
+    reverse_charge: bool | None = None  # stored as sent; the VAT figures are not changed (open decision 6)
 
 
 class Line(BaseModel):
@@ -311,6 +314,9 @@ class Settings(BaseModel):
     other_deductions: float = 0
     planning_min_rate: float = 0
     planning_default_win_probability: float = 100
+    subcontractor_hint_hours_per_week: float = 30
+    subcontractor_hint_weeks: int = 12
+    customer_dominance_percent: float = 83
 
 
 class TimelineAbsence(BaseModel):
@@ -482,6 +488,9 @@ class ExpenseIn(v.StrictRecord):
     attachment: v.OptAttachment = None
     lines: Annotated[list[ExpenseLineIn], Field(max_length=v.MAX_EXPENSE_LINES)] | None = None
     trip_id: v.OptId = None
+    supplier_id: v.OptId = None
+    allocation_id: v.OptId = None
+    reverse_charge: bool = False
 
     @model_validator(mode="after")
     def _net_or_lines(self):
@@ -611,6 +620,9 @@ class SettingsIn(v.StrictRecord):
     other_deductions: v.NonNegAmount = 0
     planning_min_rate: v.Rate = 0
     planning_default_win_probability: v.Percent = 100
+    subcontractor_hint_hours_per_week: Annotated[float, Field(ge=1, le=168, allow_inf_nan=False)] = 30
+    subcontractor_hint_weeks: Annotated[int, Field(ge=1, le=104)] = 12
+    customer_dominance_percent: Annotated[float, Field(ge=1, le=100, allow_inf_nan=False)] = 83
     team_timeline_visibility: TeamTimelineVisibilityIn = TeamTimelineVisibilityIn()
 
     @field_validator("state")
@@ -823,6 +835,12 @@ class Allocation(BaseModel):
     supplier_name: str | None = None
     planned_hours: float | None = None
     planning_warnings: list[dict] | None = None  # only in POST/PUT answers
+    # external allocations only (docs/contracts/subcontractors.md)
+    planned_net: float | None = None
+    invoiced_net: float | None = None
+    open_net: float | None = None
+    offer_reference: str | None = None
+    days: list[dict] | None = None  # GET /api/allocations/{allocation_id}
 
 
 class TimerStartIn(v.CheckedBody):
@@ -1107,3 +1125,233 @@ class AuditPage(BaseModel):
     items: list[AuditEntryOut]
     next: int | None = Field(None, description="`before` value for the next page, null at the end")
     next_id: str | None = Field(None, description="`before_id` value for the next page (with `next`), null at the end")
+
+
+# ---- suppliers, subcontractors and incoming offers (docs/contracts/subcontractors.md) ------------------------
+SupplierKind = Literal["company", "person", "person-capacity"]
+VatMode = Literal["domestic", "eu_reverse_charge", "third_country_reverse_charge", "small_business"]
+CAPACITY_FIELDS = ("weekly_hours", "workdays", "rate", "unavailable")
+
+
+class UnavailableIn(v.CheckedBody):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    start: v.ISODate = Field(alias="from")
+    end: v.ISODate = Field(alias="to")
+    note: v.Short | None = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        v.check_period(self.start, self.end)
+        return self
+
+
+class SupplierIn(v.StrictRecord):
+    name: v.Name
+    supplier_no: v.Short | None = None  # a duplicate is a warning
+    kind: SupplierKind = "company"
+    active: bool = True
+    street: v.Short | None = None
+    zip: Annotated[str, StringConstraints(max_length=20)] | None = None
+    city: v.Short | None = None
+    country: v.Country = "DE"
+    vat_id: Annotated[str, StringConstraints(max_length=30)] | None = None
+    tax_number: Annotated[str, StringConstraints(max_length=50)] | None = None
+    vat_mode: VatMode | None = None  # omitted: derived from the country and stored
+    contact: v.Short | None = None
+    email: Annotated[str, StringConstraints(max_length=254)] | None = None
+    phone: Annotated[str, StringConstraints(max_length=50)] | None = None
+    notes: v.Note | None = None
+    iban: v.Iban = None
+    bic: Annotated[str, StringConstraints(max_length=11)] | None = None
+    bank_name: v.Short | None = None
+    payment_terms_days: v.PayDays | None = None
+    payment_terms_note: v.Short | None = None
+    tags: v.Tags = []
+    # capacity attributes: only for kind "person-capacity"
+    weekly_hours: v.Hours | None = None
+    workdays: v.Weekdays | None = None
+    rate: v.Rate | None = None
+    unavailable: Annotated[list[UnavailableIn], Field(max_length=50)] = []
+    login_user_id: None = None  # reserved; any non-null value is 422
+
+    @model_validator(mode="after")
+    def _capacity(self):
+        if self.kind == "person-capacity":
+            if not self.weekly_hours:
+                raise ValueError("weekly_hours is required (and above 0) for a subcontractor")
+        else:
+            given = [k for k in CAPACITY_FIELDS if getattr(self, k) not in (None, [])]
+            if given:
+                raise ValueError("capacity fields are only for kind person-capacity: " + ", ".join(given))
+        return self
+
+
+class Supplier(Record):
+    """Lenient response."""
+
+    name: str
+    supplier_no: str | None = None
+    kind: str = "company"
+    active: bool = True
+    street: str | None = None
+    zip: str | None = None
+    city: str | None = None
+    country: str | None = None
+    vat_id: str | None = None
+    tax_number: str | None = None
+    vat_mode: str | None = None
+    contact: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    notes: str | None = None
+    iban: str | None = None
+    bic: str | None = None
+    bank_name: str | None = None
+    payment_terms_days: int | None = None
+    payment_terms_note: str | None = None
+    tags: list[str] = []
+    weekly_hours: float | None = None
+    workdays: list[int] | None = None
+    rate: float | None = None
+    unavailable: list[dict] | None = None
+    login_user_id: str | None = None
+    external_id: str | None = None
+    import_batch: str | None = None
+
+
+class SupplierResult(Supplier):
+    sanity_warnings: list[dict] | None = None  # POST/PUT only
+
+
+class SupplierLimited(BaseModel):
+    """The employee's view of a supplier."""
+
+    id: str
+    name: str
+    kind: str
+    tags: list[str] = []
+    active: bool = True
+
+
+class IncomingLineIn(v.CheckedBody):
+    model_config = ConfigDict(extra="forbid")
+    description: v.Desc = ""
+    quantity: v.NonNegQty
+    unit: Literal["h", "flat"]
+    unit_price: v.NonNegAmount
+
+
+INCOMING_MAX_DAYS = 1830
+
+
+class IncomingPlanIn(v.CheckedBody):
+    model_config = ConfigDict(extra="forbid")
+    start: v.ISODate
+    end: v.ISODate
+    hours_per_week: v.AllocHours | None = None
+    total_hours: Annotated[float, Field(gt=0, le=100_000, allow_inf_nan=False)] | None = None
+
+    @model_validator(mode="after")
+    def _rules(self):
+        _check_alloc_period(self.start, self.end)
+        if (self.hours_per_week is None) == (self.total_hours is None):
+            raise ValueError("give exactly one of hours_per_week and total_hours")
+        return self
+
+
+class IncomingOfferIn(v.StrictRecord):
+    supplier_id: v.Id
+    reference: v.Short | None = None
+    title: v.Short | None = None
+    received_on: v.ISODate
+    valid_until: v.OptDate = None
+    lines: Annotated[list[IncomingLineIn], Field(min_length=1, max_length=50)]
+    vat_rate: Literal[0, 5, 7, 16, 19] | None = None
+    vat_mode: VatMode | None = None
+    plan: IncomingPlanIn | None = None
+    project_id: v.OptId = None
+    contract_id: v.OptId = None
+    attachment: v.OptAttachment = None
+    decision_note: v.Note | None = None
+    notes: v.Note | None = None
+
+    @model_validator(mode="after")
+    def _period(self):
+        if self.valid_until and self.valid_until < self.received_on:
+            raise ValueError("valid_until must not be before received_on")
+        return self
+
+
+class IncomingOffer(Record):
+    """Lenient response."""
+
+    supplier_id: str
+    supplier_name: str | None = None
+    reference: str | None = None
+    title: str | None = None
+    received_on: str
+    valid_until: str | None = None
+    lines: list[dict] = []
+    hours: float = 0.0
+    net_total: float | None = None
+    vat_rate: float | None = None
+    vat: float | None = None
+    gross_total: float | None = None
+    vat_mode: str | None = None
+    plan: dict | None = None
+    project_id: str | None = None
+    project_name: str | None = None
+    contract_id: str | None = None
+    customer_id: str | None = None
+    attachment: str | None = None
+    status: str = "received"
+    effective_status: str = "received"
+    status_changed_at: str | None = None
+    decided_by: str | None = None
+    decision_note: str | None = None
+    allocation_id: str | None = None
+    notes: str | None = None
+    external_id: str | None = None
+    import_batch: str | None = None
+    planning_warnings: list[dict] | None = None  # POST/PUT only
+
+
+class AcceptIn(v.CheckedBody):
+    model_config = ConfigDict(extra="forbid")
+    confirm_expired: bool = False
+    confirm_warnings: Annotated[list[Annotated[str, StringConstraints(max_length=80)]], Field(max_length=20)] = []
+    project_id: v.OptId = None
+    contract_id: v.OptId = None
+    decision_note: v.Note | None = None
+
+
+class RejectIn(v.CheckedBody):
+    model_config = ConfigDict(extra="forbid")
+    reason: v.Note | None = None
+
+
+class CancelAllocationIn(v.CheckedBody):
+    model_config = ConfigDict(extra="forbid")
+    effective_from: v.ISODate
+    reason: v.Short | None = None
+
+
+class AdoptVendorItemIn(v.CheckedBody):
+    model_config = ConfigDict(extra="forbid")
+    vendors: Annotated[
+        list[Annotated[str, StringConstraints(min_length=1, max_length=200)]], Field(min_length=1, max_length=50)
+    ]
+    supplier_id: v.OptId = None
+    create: SupplierIn | None = None
+
+    @model_validator(mode="after")
+    def _one_of(self):
+        if bool(self.supplier_id) == (self.create is not None):
+            raise ValueError("give exactly one of supplier_id and create")
+        return self
+
+
+class AdoptVendorsIn(v.CheckedBody):
+    model_config = ConfigDict(extra="forbid")
+    dry_run: bool = True
+    items: Annotated[list[AdoptVendorItemIn], Field(min_length=1, max_length=200)]

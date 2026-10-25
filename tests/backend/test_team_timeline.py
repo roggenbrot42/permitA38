@@ -133,6 +133,7 @@ def test_boss_gets_everything_exactly(world):
         "start": "2026-11-02",
         "end": "2026-12-27",
         "holidays": {"2026-12-25": "1. Weihnachtstag", "2026-12-26": "2. Weihnachtstag"},
+        "external": [],  # subcontractor windows (none in this fixture)
         "people": [
             {
                 "id": ids["boss"], "name": "Test Boss", "color": "#2563eb", "weekly_hours": 40,  # setup default

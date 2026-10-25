@@ -136,9 +136,39 @@ TABLES: dict[str, Table] = {
             _cols(
                 _BASE + "date:str net:float vat:float vat_rate:float vendor:str description:text category:str "
                 "project_id:id deductible:float attachment:str vat_deductible:float external_id:str import_batch:str lines:json "
-                "trip_id:id" + _EXTRA
+                "trip_id:id supplier_id:id allocation_id:id reverse_charge:bool" + _EXTRA
             ),
-            (Index("idx_expenses_date", ("date",)), Index("idx_expenses_project", ("project_id",))),
+            (
+                Index("idx_expenses_date", ("date",)),
+                Index("idx_expenses_project", ("project_id",)),
+                Index("idx_expenses_supplier", ("supplier_id",)),
+                Index("idx_expenses_allocation", ("allocation_id",)),
+            ),
+        ),
+        # suppliers and subcontractors (docs/contracts/subcontractors.md); kind "person-capacity" sells hours
+        Table(
+            "suppliers",
+            _cols(
+                _BASE + "name:str supplier_no:str kind:str active:bool street:str zip:str city:str country:str "
+                "vat_id:str tax_number:str vat_mode:str contact:str email:str phone:str notes:text iban:str bic:str "
+                "bank_name:str payment_terms_days:int payment_terms_note:str tags:json weekly_hours:float "
+                "workdays:json rate:float unavailable:json login_user_id:id external_id:str import_batch:str" + _EXTRA
+            ),
+            (Index("idx_suppliers_name", ("name",)), Index("idx_suppliers_external_id", ("external_id",))),
+        ),
+        # offers received from suppliers (not the offers we issue)
+        Table(
+            "incoming_offers",
+            _cols(
+                _BASE + "supplier_id:id reference:str title:str received_on:str valid_until:str lines:json "
+                "net_total:float vat:float vat_rate:float vat_mode:str gross_total:float plan:json project_id:id "
+                "contract_id:id customer_id:id attachment:str status:str status_changed_at:str decided_by:id "
+                "decision_note:text allocation_id:id notes:text external_id:str import_batch:str" + _EXTRA
+            ),
+            (
+                Index("idx_incoming_offers_supplier", ("supplier_id",)),
+                Index("idx_incoming_offers_status", ("status",)),
+            ),
         ),
         # business trips (docs/specs/business-trips.md): the meal allowance and mileage are computed from these rows
         Table(
@@ -237,7 +267,12 @@ TABLES: dict[str, Table] = {
                 "start:str end:str hours_per_week:float total_hours:float rate:float status:str cancelled_from:str "
                 "cancel_reason:text" + _EXTRA
             ),
-            (Index("idx_allocations_user", ("user_id",)), Index("idx_allocations_project", ("project_id",))),
+            (
+                Index("idx_allocations_user", ("user_id",)),
+                Index("idx_allocations_project", ("project_id",)),
+                Index("idx_allocations_supplier", ("supplier_id",)),
+                Index("idx_allocations_status", ("status",)),
+            ),
         ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )

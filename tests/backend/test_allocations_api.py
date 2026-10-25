@@ -177,7 +177,8 @@ def test_external_rows_cannot_be_changed_here(boss_client, boss_id, project, sto
     assert r.status_code == 409 and r.json() == {"detail": "This allocation cannot be changed here"}
     deleted = boss_client.delete(f"/api/allocations/{ext['id']}")
     assert deleted.status_code == 409
-    assert boss_client.get("/api/allocations").json() == []  # a caller without `procurement` does not see them
+    listed = boss_client.get("/api/allocations").json()  # the boss has `procurement`: external rows are listed
+    assert [(r["id"], r["kind"]) for r in listed] == [(ext["id"], "external")]
     assert store.get("allocations", ext["id"]) is not None
 
 
