@@ -1,0 +1,6 @@
+{
+  "detail": "Confirm these warnings first: allocation.exceeds_weekly_hours",
+  "codes": [
+    "allocation.exceeds_weekly_hours"
+  ]
+}

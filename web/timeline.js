@@ -132,6 +132,21 @@ function tlPaint(data, n) {
     const conBars = conItems.map(it => tlBar(it, dayW, 38, 'contract')).join('');
     rows += `<div class="pln-row">${label}<div class="pln-lane tl-lane" data-person="${esc(p.id)}" style="width:${W}px;height:${h}px">${baseCells}${absBars}${conBars}</div></div>`;
   });
+  const ext = (data.external || []).map((x, xi) => {
+    const items = (x.windows || []).map(w => {
+      const s0 = Math.max(0, tlIdx(w.start)), e0 = Math.min(N - 1, tlIdx(w.end));
+      if (e0 < 0 || s0 > N - 1) return null;
+      const range = tlRange(w.start, w.end);
+      return tlAdd({ lane: data.people.length * 2 + xi, s: s0, e: e0, text: 'external', aria: `${x.name}, subcontractor, ${range}`, cls: 'external', title: x.name, lines: ['Subcontractor', `Dates: ${range}`], link: null });
+    }).filter(Boolean);
+    return { x, items };
+  }).filter(r => r.items.length);
+  if (ext.length) {
+    rows += `<div class="pln-row pln-group tl-extgroup"><div class="pln-label"><b>External</b></div></div>`;
+    for (const { x, items } of ext) {
+      rows += `<div class="pln-row tl-extrow" data-supplier="${esc(x.supplier_id)}"><div class="pln-label"><b>${esc(x.name)}</b> <span class="pill">subcontractor</span></div><div class="pln-lane tl-lane" style="width:${W}px;height:34px">${baseCells}${items.map(it => tlBar(it, dayW, 4, 'external')).join('')}</div></div>`;
+    }
+  }
   const today = todayISO();
   const todayLine = today >= data.start && today <= data.end ? `<div class="tl-today" style="left:${tlIdx(today) * dayW + dayW / 2}px" aria-hidden="true"></div>` : '';
   return { html: `<div class="pln-wrap tl-wrap" id="tlWrap" tabindex="0" role="region" aria-label="Team timeline. Tab moves between bars, arrow keys move between bars or scroll.">

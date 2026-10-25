@@ -1,0 +1,17 @@
+[
+  {
+    "detail": "The offer expired on 2026-03-01; confirm to accept it anyway"
+  },
+  {
+    "detail": "A capacity offer needs a project"
+  },
+  {
+    "detail": "The allocation has started or has linked expenses; cancel it instead"
+  },
+  {
+    "detail": "An accepted offer can only change notes, attachment and decision note"
+  },
+  {
+    "detail": "Supplier is used by incoming offers, allocations or expenses; archive it instead"
+  }
+]

@@ -1,0 +1,13 @@
+{
+  "id": "c04d77e1",
+  "kind": "external",
+  "status": "cancelled",
+  "cancelled_from": "2026-03-13",
+  "cancel_reason": "project paused",
+  "start": "2026-03-02",
+  "end": "2026-03-27",
+  "planned_hours": 40.0,
+  "planned_net": 3200.0,
+  "invoiced_net": 1600.0,
+  "open_net": 1600.0
+}

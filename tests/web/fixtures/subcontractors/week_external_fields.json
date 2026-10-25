@@ -1,0 +1,15 @@
+{
+  "external_capacity": 20.0,
+  "external_assigned": 25.0,
+  "external_gap": 5.0,
+  "external_cost": 1600.0,
+  "external_by_project": [
+    {
+      "project_id": "a1b2c3d4",
+      "external_capacity": 20.0,
+      "external_assigned": 25.0,
+      "external_gap": 5.0,
+      "external_cost": 1600.0
+    }
+  ]
+}

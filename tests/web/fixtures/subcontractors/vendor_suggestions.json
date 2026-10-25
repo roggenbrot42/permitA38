@@ -1,0 +1,27 @@
+{
+  "groups": [
+    {
+      "key": "demo print shop",
+      "variants": [
+        "Demo Print Shop GmbH",
+        "demo print shop"
+      ],
+      "count": 3,
+      "net_total": 120.5,
+      "supplier": {
+        "id": "7a1b2c3d",
+        "name": "Demo Print Shop GmbH"
+      }
+    },
+    {
+      "key": "example hosting",
+      "variants": [
+        "Example Hosting"
+      ],
+      "count": 1,
+      "net_total": 9.9,
+      "supplier": null
+    }
+  ],
+  "unlinked_expenses": 4
+}

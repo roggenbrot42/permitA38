@@ -1,0 +1,13 @@
+{
+  "code": "allocation.invoiced_exceeds_planned",
+  "severity": "warning",
+  "field": "allocation_id",
+  "confirmable": false,
+  "message": "The linked expenses (3300.00) are 100.00 above the planned cost of the allocation (3200.00).",
+  "details": {
+    "allocation_id": "c04d77e1",
+    "planned_net": 3200.0,
+    "invoiced_net": 3300.0,
+    "excess": 100.0
+  }
+}

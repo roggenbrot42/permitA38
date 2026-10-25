@@ -1,0 +1,14 @@
+{
+  "code": "allocation.exceeds_weekly_hours",
+  "severity": "warning",
+  "field": "plan",
+  "confirmable": true,
+  "message": "Example Freelance Studio (Demo) would be allocated 28 h in the week of 2026-03-02, 4 h above the 24 h per week they can offer.",
+  "details": {
+    "supplier_id": "5d1c0aa2",
+    "week": "2026-03-02",
+    "allocated": 28.0,
+    "weekly_hours": 24.0,
+    "over_by": 4.0
+  }
+}

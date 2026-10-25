@@ -474,7 +474,14 @@ class Monkey:
                 )
         if step_no % 12 == 0 and p.evaluate("() => document.querySelector('#modal-root').children.length > 0"):
             if p.query_selector("#m-cancel"):
-                p.click("#m-cancel", timeout=3000)
+                try:
+                    p.click("#m-cancel", timeout=3000)
+                except Exception:
+                    # the dialog left the page while we clicked: a navigation started by the previous move closes dialogs
+                    # (the app's render), so there was no Cancel to test. Anything else is a real failure.
+                    if p.query_selector("#m-cancel") or p.evaluate("() => document.querySelector('#modal-root').children.length > 0"):
+                        raise
+                    return
                 assert p.evaluate("() => document.querySelector('#modal-root').children.length === 0"), (
                     "modal does not close on Cancel"
                 )
