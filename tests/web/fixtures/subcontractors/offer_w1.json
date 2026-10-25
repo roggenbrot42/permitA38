@@ -1,0 +1,36 @@
+{
+  "id": "9b3e51c7",
+  "supplier_id": "5d1c0aa2",
+  "supplier_name": "Example Freelance Studio (Demo)",
+  "reference": "ANG-2026-117",
+  "title": "Frontend capacity, spring",
+  "received_on": "2026-02-20",
+  "valid_until": "2026-03-31",
+  "lines": [
+    {
+      "description": "Frontend development",
+      "quantity": 80,
+      "unit": "h",
+      "unit_price": 80.0
+    }
+  ],
+  "hours": 80.0,
+  "net_total": 6400.0,
+  "vat_rate": 19,
+  "vat": 1216.0,
+  "gross_total": 7616.0,
+  "vat_mode": "domestic",
+  "plan": {
+    "start": "2026-03-02",
+    "end": "2026-03-27",
+    "hours_per_week": 20.0
+  },
+  "project_id": "a1b2c3d4",
+  "project_name": "Demo project P",
+  "customer_id": "c0ffee01",
+  "attachment": "5c0ffee1.pdf",
+  "status": "received",
+  "effective_status": "received",
+  "allocation_id": null,
+  "planning_warnings": []
+}

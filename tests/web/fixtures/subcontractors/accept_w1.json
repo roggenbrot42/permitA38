@@ -1,0 +1,48 @@
+{
+  "offer": {
+    "id": "9b3e51c7",
+    "status": "accepted",
+    "effective_status": "accepted",
+    "allocation_id": "c04d77e1",
+    "status_changed_at": "2026-03-02",
+    "decided_by": "u1b2c3d4",
+    "project_id": "a1b2c3d4"
+  },
+  "allocation": {
+    "id": "c04d77e1",
+    "kind": "external",
+    "supplier_id": "5d1c0aa2",
+    "supplier_name": "Example Freelance Studio (Demo)",
+    "incoming_offer_id": "9b3e51c7",
+    "offer_reference": "ANG-2026-117",
+    "project_id": "a1b2c3d4",
+    "project_name": "Demo project P",
+    "customer_id": "c0ffee01",
+    "start": "2026-03-02",
+    "end": "2026-03-27",
+    "hours_per_week": 20.0,
+    "rate": 80.0,
+    "status": "active",
+    "planned_hours": 80.0,
+    "planned_net": 6400.0,
+    "invoiced_net": 0.0,
+    "open_net": 6400.0
+  },
+  "commitment": null,
+  "planning_warnings": [
+    {
+      "code": "allocation.no_demand",
+      "severity": "info",
+      "field": "weeks",
+      "confirmable": false,
+      "message": "Week of 2026-03-02: 20 h are allocated to project Demo project P but nothing is planned there.",
+      "details": {
+        "allocation_id": "c04d77e1",
+        "project_id": "a1b2c3d4",
+        "project_name": "Demo project P",
+        "week": "2026-03-02",
+        "capacity": 20.0
+      }
+    }
+  ]
+}

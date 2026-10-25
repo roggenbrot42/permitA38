@@ -1,0 +1,33 @@
+{
+  "dry_run": true,
+  "items": [
+    {
+      "vendors": [
+        "Demo Print Shop GmbH",
+        "demo print shop"
+      ],
+      "supplier_id": "7a1b2c3d",
+      "supplier_created": false,
+      "would_create": false,
+      "expense_ids": [
+        "e1000001",
+        "e1000002",
+        "e1000003"
+      ],
+      "count": 3
+    },
+    {
+      "vendors": [
+        "Example Hosting"
+      ],
+      "supplier_id": null,
+      "supplier_created": false,
+      "would_create": true,
+      "expense_ids": [
+        "e1000009"
+      ],
+      "count": 1
+    }
+  ],
+  "expenses_changed": 4
+}

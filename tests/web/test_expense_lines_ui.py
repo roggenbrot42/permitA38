@@ -309,6 +309,7 @@ def test_wheel_keyboard_and_drag(ui):
     choose(ui, "bill.png", PNG, "image/png")
     ui.wait_for_selector("#e_preview img")
     ui.click("#e_preview [data-a=zoom100]")
+    ui.locator("#e_preview").scroll_into_view_if_needed()  # the supplier fields sit above the preview: on a 1000 px window its centre is below the fold
     box = ui.locator("#e_preview").bounding_box()
     ui.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     ui.mouse.wheel(0, -200)

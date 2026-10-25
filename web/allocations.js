@@ -4,7 +4,7 @@
    that never blocks a save. Vanilla JS, no build step. */
 (() => {
   const SKIP = { already_allocated: 'already allocated', period_too_long: 'period longer than 1830 days' };
-  const Al = { projectId: null, userId: null, list: [], edit: undefined, error: '', notes: [], preview: null, created: null, changed: false, busy: false };
+  const Al = { cancel: null, projectId: null, userId: null, list: [], edit: undefined, error: '', notes: [], preview: null, created: null, changed: false, busy: false };
   const h2 = x => num(x, 2);
   const users = () => (S.d.users || []).filter(u => u.active !== false);
   const openProjects = () => (S.d.projects || []).filter(p => !['done', 'archived'].includes(p.status));
@@ -33,8 +33,8 @@
     return `<tr class="${readOnly ? '' : 'click'}" ${readOnly ? '' : `data-a="alEdit" data-id="${esc(a.id)}"`}>
       <td><b>${esc(who)}</b>${external ? ' <span class="pill">subcontractor</span>' : ''}</td><td>${esc(a.project_name || projectName(a.project_id))}</td>
       <td class="nowrap">${esc(fmtDate(a.start))} – ${esc(fmtDate(a.end))}</td>
-      <td class="num">${a.hours_per_week == null ? '' : esc(h2(a.hours_per_week)) + ' h/week'}</td><td class="num">${a.planned_hours == null ? '' : esc(h2(a.planned_hours)) + ' h'}</td>
-      <td>${cancelled ? '<span class="pill">cancelled</span> ' : ''}${readOnly ? '<span class="small muted">read-only</span>' : `<button type="button" class="ghost sm" data-a="alEdit" data-id="${esc(a.id)}" aria-label="Edit allocation of ${esc(who)} to ${esc(a.project_name || projectName(a.project_id))}">Edit</button>`}</td></tr>`;
+      <td class="num">${a.hours_per_week == null ? '' : esc(h2(a.hours_per_week)) + ' h/week'}</td><td class="num">${a.planned_hours == null ? '' : esc(h2(a.planned_hours)) + ' h'}${external && a.planned_net != null ? `<div class="small muted">${esc(eur(a.planned_net))} planned, ${esc(eur(a.open_net))} open</div>` : ''}</td>
+      <td>${cancelled ? `<span class="pill">cancelled${a.cancelled_from ? ' from ' + esc(fmtDate(a.cancelled_from)) : ''}</span> ` : ''}${external && !cancelled && can('procurement', 'write') ? `<button type="button" class="ghost sm" data-a="alCancelAlloc" data-id="${esc(a.id)}" aria-label="Cancel allocation of ${esc(who)} to ${esc(a.project_name || projectName(a.project_id))}">Cancel…</button> ` : ''}${readOnly ? '<span class="small muted">read-only</span>' : `<button type="button" class="ghost sm" data-a="alEdit" data-id="${esc(a.id)}" aria-label="Edit allocation of ${esc(who)} to ${esc(a.project_name || projectName(a.project_id))}">Edit</button>`}</td></tr>`;
   }
 
   function userOptions(uid) {   // a person who is no longer active stays selectable for their own row, so saving never reassigns it
@@ -60,6 +60,15 @@
       <div class="actions">${a.id ? '<button type="button" class="danger" data-a="alDelete" style="margin-right:auto">Delete</button>' : ''}<button type="button" data-a="alCancelEdit">Cancel</button><button type="button" class="primary" data-a="alSave" ${Al.busy ? 'disabled' : ''}>Save</button></div></form>`;
   }
 
+  function cancelForm() {
+    const a = Al.cancel;
+    if (!a) return '';
+    const day = todayISO() > a.start ? todayISO() : a.start;
+    return `<form class="card al-form al-cancel" novalidate><h3>Cancel the allocation of ${esc(a.supplier_name || 'the subcontractor')}</h3>
+      <div class="small muted">Hours from this day on are released; earlier days and linked expenses stay.</div>
+      <div class="row"><div class="auto"><label for="al_cfrom">Effective from</label><input id="al_cfrom" type="date" value="${esc(Al.cancelFrom || day)}"></div><div><label for="al_creason">Reason (optional)</label><input id="al_creason" type="text" maxlength="200" value="${esc(Al.cancelReason || '')}"></div></div>
+      <div class="actions"><button type="button" data-a="alCancelAbort">Keep allocation</button><button type="button" class="primary" data-a="alCancelDo" ${Al.busy ? 'disabled' : ''}>Cancel allocation</button></div></form>`;
+  }
   function previewBox() {
     const p = Al.preview;
     if (!p) return '';
@@ -82,7 +91,7 @@
     const notes = Al.notes.map(w => `<li data-code="${esc(w.code)}">${esc(w.message)}</li>`).join('');
     el.innerHTML = `${Al.error ? `<div class="banner bad" role="alert">${esc(Al.error)}</div>` : ''}
       ${notes ? `<div class="banner al-warn" role="status"><b>Saved. Please check:</b><ul class="small">${notes}</ul></div>` : ''}
-      ${previewBox()}${form()}
+      ${cancelForm()}${previewBox()}${form()}
       ${Al.list.length ? `<table><tr><th>Person</th><th>Project</th><th>Period</th><th class="num">Hours/week</th><th class="num">Planned</th><th></th></tr>${Al.list.map(row).join('')}</table>`
         : `<div class="empty">No allocations yet. An allocation gives a person's hours per week to a project; the planner counts only these hours for that project.</div>`}`;
     if (Al.focus) { Al.focus = false; focusFirst(); }
@@ -97,7 +106,7 @@
 
   function open(opts = {}) {
     Al.open = true;
-    Object.assign(Al, { projectId: opts.projectId || null, userId: opts.userId || null, list: [], edit: undefined, error: '', notes: [], preview: null, changed: false, busy: false });
+    Object.assign(Al, { cancel: null, projectId: opts.projectId || null, userId: opts.userId || null, list: [], edit: undefined, error: '', notes: [], preview: null, changed: false, busy: false });
     modal(`<div class="row" style="align-items:center"><h2 style="margin:0">${title()}</h2><div class="right auto"><button type="button" data-a="alBootstrap">Allocate my capacity</button> <button type="button" class="primary" data-a="alNew">+ Allocation</button></div></div><div id="al-body"><div class="empty">Loading…</div></div><div class="actions"><button type="button" id="al-close" data-a="alClose">Close</button></div>`, true);
     closeModal.onClose = () => { Al.open = false; if (Al.changed) { Al.changed = false; render(); } };   // every way of closing re-renders the page
     refresh().catch(e => { Al.error = e.message; paint(); });
@@ -115,7 +124,22 @@
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && Al.open && document.getElementById('al-body')) { e.preventDefault(); closeModal(); }
   });
-  A.alNew = () => { Al.edit = null; Al.error = ''; Al.notes = []; Al.focus = true; paint(); };
+  A.alCancelAlloc = el => { Al.cancel = Al.list.find(a => a.id === el.dataset.id) || null; Al.cancelFrom = ''; Al.cancelReason = ''; Al.edit = undefined; Al.error = ''; Al.notes = []; Al.focus = true; paint(); };
+  A.alCancelAbort = () => { Al.cancel = null; paint(); };
+  A.alCancelDo = async () => {
+    const a = Al.cancel;
+    if (!a || Al.busy) return;
+    Al.cancelFrom = document.getElementById('al_cfrom').value; Al.cancelReason = document.getElementById('al_creason').value.trim();
+    if (!Al.cancelFrom) { Al.error = 'Choose the effective date.'; return paint(); }
+    Al.busy = true; Al.error = '';
+    try {
+      await api.post(`allocations/${encodeURIComponent(a.id)}/cancel`, { effective_from: Al.cancelFrom, reason: Al.cancelReason || null });
+      Al.cancel = null; Al.changed = true; toast('Allocation cancelled');
+      await load();
+    } catch (e) { Al.error = e.message; }
+    Al.busy = false; Al.focus = true; paint();
+  };
+  A.alNew = () => { Al.edit = null; Al.cancel = null; Al.error = ''; Al.notes = []; Al.focus = true; paint(); };
   A.alEdit = el => { Al.edit = Al.list.find(a => a.id === el.dataset.id) || null; Al.error = ''; Al.notes = []; Al.focus = true; paint(); };
   A.alCancelEdit = () => { Al.edit = undefined; Al.error = ''; paint(); };
   A.alSave = async () => {
@@ -167,6 +191,6 @@
   document.addEventListener('keydown', e => {
     if (e.key !== 'Enter' || !e.target.closest) return;
     const f = e.target.matches('input, select') && e.target.closest('form.al-form');
-    if (f) { e.preventDefault(); guard(A.alSave)(); }
+    if (f) { e.preventDefault(); guard(f.classList.contains('al-cancel') ? A.alCancelDo : A.alSave)(); }
   });
 })();

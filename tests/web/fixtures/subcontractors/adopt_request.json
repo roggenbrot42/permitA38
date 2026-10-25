@@ -1,0 +1,21 @@
+{
+  "dry_run": true,
+  "items": [
+    {
+      "vendors": [
+        "Demo Print Shop GmbH",
+        "demo print shop"
+      ],
+      "supplier_id": "7a1b2c3d"
+    },
+    {
+      "vendors": [
+        "Example Hosting"
+      ],
+      "create": {
+        "name": "Example Hosting",
+        "kind": "company"
+      }
+    }
+  ]
+}

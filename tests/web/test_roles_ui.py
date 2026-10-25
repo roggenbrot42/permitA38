@@ -113,6 +113,8 @@ def test_employee_nav_is_unchanged(browser, srv):
         "🏖",
         "Time",
         "off",
+        "🏭",  # suppliers: the employee's limited view (docs/contracts/subcontractors.md, rights)
+        "Suppliers",
         "🧳",
         "Business",
         "trips",

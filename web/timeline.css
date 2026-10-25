@@ -31,3 +31,5 @@
   .tl-toolbar > div { flex: 1 1 100%; }
   .tl-wrap .pln-label { width: 150px; min-width: 150px; }
 }
+
+.tl-bar.external { background: repeating-linear-gradient(45deg, var(--good) 0 6px, var(--good-soft) 6px 9px); color: var(--ink); }
