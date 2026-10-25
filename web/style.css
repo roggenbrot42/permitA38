@@ -150,3 +150,18 @@ tr.pp-detail > td { background: var(--bg); padding: 8px 12px; }
 .pp-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .pp-summary ul { margin: 6px 0 0 18px; padding: 0; }
 .pp-warnings ul { margin: 0 0 0 18px; padding: 0; }
+
+/* suppliers (.sup-) and incoming offers (.proc-) */
+.sup-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.sup-actions .btn { text-decoration: none; }
+.sup-check { display: inline-flex; gap: 6px; align-items: center; margin: 0 10px 0 0; font-size: 14px; color: var(--ink); }
+.sup-days { display: flex; gap: 4px; flex-wrap: wrap; }
+.sup-cap { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
+.sup-cap legend { font-size: 13px; color: var(--muted); padding: 0 6px; }
+.sup-facts th { width: 11em; text-transform: none; letter-spacing: 0; font-size: 13px; vertical-align: top; }
+.sup-facts td { padding: 6px 10px; }
+.sup-tag { background: var(--accent-soft); color: var(--accent); }
+.sup-adopt select, .sup-adopt input[type=text] { min-width: 12em; }
+.pp-check { display: inline-flex; gap: 6px; align-items: center; color: var(--ink); font-size: 14px; }
+.proc-warnings { margin: 6px 0 0 18px; padding: 0; }
+.proc-hint { display: flex; gap: 10px; align-items: center; justify-content: space-between; }

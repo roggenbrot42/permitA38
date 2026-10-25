@@ -7,6 +7,7 @@
   const P = {
     weeks: +(localStorage.plnWeeks || 26),
     user: localStorage.plnUser ?? null,            // null = not chosen yet (default: me); '' = whole team
+    ext: lsGet('plnExternal', '1') !== '0',   // include subcontractors (server default); off = the world without suppliers
     project: lsGet('plnProject'),        // '' = all projects, 'unassigned', or a project id
     alloc: {}, allocs: [], dayWeek: null, day: null,   // draft allocation changes ("r:<id>" / "n:<token>"), stored allocations, day detail
     abs: {},                                       // draft absences: key -> change
@@ -72,7 +73,7 @@
   function schedule() { clearTimeout(P.timer); P.timer = setTimeout(simulate, 120); }
   async function simulate(retry = true) {
     try {
-      const scope = P.project ? { project_id: P.project } : {};
+      const scope = { ...(P.project ? { project_id: P.project } : {}), ...(P.ext ? {} : { include_external: false }) };
       const body = { changes: payload(), weeks: P.weeks, first: monday0(), user_id: userId() || null, ...scope };
       P.sim = await api('POST', 'plan/simulate', body);
       P.base = await api('POST', 'plan/simulate', { changes: { absences: [], commitments: [] }, weeks: P.weeks, first: monday0(), user_id: userId() || null, ...scope });
@@ -102,6 +103,9 @@
     const parts = [`Capacity ${h1(w.capacity)}`, `committed ${h1(w.confirmed)} (contracts)`, `open offers ${h1(w.binding_offers)} (worst case)`];
     if (w.vacation_hours) parts.push(`time off ${h1(w.vacation_hours)}`);
     if (w.holiday_hours) parts.push(`public holidays ${h1(w.holiday_hours)}`);
+    if (w.external_capacity > 0) parts.push(`of which subcontractors ${h1(w.external_capacity)}`);
+    if (w.external_cost > 0) parts.push(`planned external cost ${eur(w.external_cost)}`);
+    if (w.external_gap > 0) parts.push(`subcontractor gap ${h1(w.external_gap)}`);
     if (w.gap > 0) parts.push(`not covered by allocations ${h1(w.gap)}`);
     else if (w.status === 'over') parts.push(`over by ${h1(-w.free_worst_case)}`);
     return parts.join('; ') + '. Basis: ' + w.basis + '.';
@@ -187,6 +191,18 @@
     }
     for (const [key, a] of Object.entries(P.alloc)) if (key.startsWith('n:') && match(a)) row(key, a, true);
     return `<div class="pln-row pln-group"><div class="pln-label"><b>Allocations</b></div></div>${rows.join('') || '<div class="empty small">No allocations in this selection. Add a draft below, or use "Allocate my capacity" on the forecast tab.</div>'}`;
+  }
+  /* subcontractor allocations (read-only: they are created by accepting an incoming offer) */
+  function externalRows() {
+    if (!P.ext) return '';
+    const list = P.allocs.filter(a => a.kind === 'external' && (!P.project || a.project_id === P.project) && !userId());
+    if (!list.length) return '';
+    const rows = list.map(a => {
+      const label = `${a.supplier_name || 'Subcontractor'}: ${projName(a.project_id)}, ${a.hours_per_week != null ? num(a.hours_per_week, 2) + ' h/week' : num(a.total_hours, 2) + ' h total'}, ${fmtDate(a.start)} – ${fmtDate(a.end)}`;
+      return `<div class="pln-row pln-ext-row" data-ext="${esc(a.id)}"><div class="pln-label"><span>${esc(a.supplier_name || 'Subcontractor')}</span><div class="small muted">${esc(projName(a.project_id))}</div></div>
+        <div class="pln-lane" style="width:${horizon() * DW}px">${cells()}<div class="pln-bar ext" style="${barStyle(a.start, a.end)}" tabindex="0" role="group" aria-label="${esc(label)}" title="${esc(label)}"><span class="pln-bar-t">${esc(a.supplier_name || 'External')}</span></div></div></div>`;
+    }).join('');
+    return `<div class="pln-row pln-group"><div class="pln-label"><b>External</b></div></div>${rows}`;
   }
   function weekRowsHtml() {
     const W = weekRows(); if (!W.length) return '';
@@ -292,7 +308,8 @@
       <div class="auto"><label for="plnWho">Who</label><select id="plnWho" data-change="plnWho"><option value="">Whole team</option>${users.map(u => `<option value="${esc(u.id)}" ${u.id === userId() ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
       <div class="auto"><label for="plnProj">Project</label><select id="plnProj" data-change="plnProject"><option value="">All projects</option>${S.d.projects.filter(p => p.status !== 'archived' || p.id === P.project).map(p => `<option value="${esc(p.id)}" ${p.id === P.project ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}<option value="unassigned" ${P.project === 'unassigned' ? 'selected' : ''}>Unassigned</option></select></div>
       <div class="auto"><label for="plnHor">Horizon</label><select id="plnHor" data-change="plnHorizon">${[13, 26, 52].map(x => `<option value="${x}" ${x === P.weeks ? 'selected' : ''}>${x} weeks</option>`).join('')}</select></div>
-      <div class="pln-kpis small"><span>Free (worst case): <b>${num(tot.free_worst_case || 0, 0)} h</b></span><span>Over-capacity weeks: <b>${tot.over_weeks || 0}</b></span><span>Not covered: <b>${num(tot.gap || 0, 0)} h</b></span><span>Revenue: <b>${eur(tot.revenue || 0)}</b></span></div>
+      <div class="auto"><label class="pp-check"><input type="checkbox" id="plnExt" data-change="plnExternal" ${P.ext ? 'checked' : ''}> include subcontractors</label></div>
+      <div class="pln-kpis small"><span>Free (worst case): <b>${num(tot.free_worst_case || 0, 0)} h</b></span><span>Over-capacity weeks: <b>${tot.over_weeks || 0}</b></span><span>Not covered: <b>${num(tot.gap || 0, 0)} h</b></span><span>Revenue: <b>${eur(tot.revenue || 0)}</b></span>${tot.external_cost ? `<span class="pln-extkpi">External cost: <b>${eur(tot.external_cost)}</b></span><span class="pln-extkpi">Margin: <b>${eur(tot.margin || 0)}</b></span>` : ''}</div>
     </div>
     ${entBox()}
     <div class="pln-draftbar ${n ? 'on' : ''}" role="region" aria-label="Draft changes">
@@ -308,6 +325,7 @@
         ${weekRowsHtml()}
         ${laneTime('Time off', absenceBars())}
         ${allocRows()}
+        ${externalRows()}
         ${comBars()}
       </div>
     </div>
@@ -507,6 +525,7 @@
   });
   A.plnDiscardOne = el => { delete ({ abs: P.abs, alloc: P.alloc }[el.dataset.store] || P.com)[el.dataset.key]; schedule(); };
   A.plnDiscard = () => { P.abs = {}; P.com = {}; P.alloc = {}; P.sugg = null; schedule(); };
+  A.plnExternal = el => { P.ext = el.checked; lsSet('plnExternal', P.ext ? '1' : '0'); P.day = null; P.dayWeek = null; schedule(); };
   A.plnProject = el => { P.project = el.value; lsSet('plnProject', P.project); P.day = null; P.dayWeek = null; schedule(); };
   A.plnAllocHours = el => {
     const v = +el.value;
