@@ -351,6 +351,8 @@ class FakeApi:
 
     def accept(self, route, o, body):
         errs = fixture("errors")
+        if self.accept_mode == "project_422":
+            return _json(route, 422, {"detail": errs[1]["detail"]})
         if self.accept_mode == "expired" and not body.get("confirm_expired"):
             return _json(route, 409, {"detail": errs[0]["detail"]})
         if self.accept_mode == "confirm" and "allocation.exceeds_weekly_hours" not in body.get("confirm_warnings", []):
@@ -700,6 +702,7 @@ def test_accept_needs_confirmation_of_the_weekly_hours_warning(browser):
     dlg = pg.locator("#modal-root .modal")
     dlg.locator("#ac_submit").click()
     expect(dlg.locator("#ac_error")).to_contain_text("Confirm these warnings first: allocation.exceeds_weekly_hours")
+    expect(dlg.locator("#ac_error")).to_be_focused()  # the error is announced and focus stays inside the dialog
     box = dlg.locator("#ac_code0")
     expect(box).to_be_visible()
     assert box.get_attribute("data-code") == "allocation.exceeds_weekly_hours"
@@ -731,13 +734,29 @@ def test_expired_offer_needs_the_confirm_checkbox(browser):
 
 def test_accept_without_project_shows_the_server_error_and_keeps_the_dialog(browser):
     api = FakeApi()
-    api.offers[0]["project_id"] = None
-    api.offers[0]["project_name"] = None
+    api.accept_mode = "project_422"  # the server refuses the accept with a 422
     ctx, pg, problems = open_app(browser, api, page="incoming/9b3e51c7")
     pg.click("[data-a=offAccept]")
     dlg = pg.locator("#modal-root .modal")
     dlg.locator("#ac_submit").click()  # the first open project is preselected for a capacity offer
+    expect(dlg.locator("#ac_error")).to_contain_text("A capacity offer needs a project")
+    expect(dlg.locator("#ac_submit")).to_be_enabled()  # the dialog stays usable
     assert api.calls("POST", "incoming-offers/9b3e51c7/accept")[0][3]["project_id"] == "a1b2c3d4"
+    assert pg.locator("#modal-root .modal").count() == 1
+    assert problems == []
+    ctx.close()
+
+
+def test_escape_after_an_accept_error_closes_the_dialog(browser):
+    api = FakeApi()
+    api.accept_mode = "confirm"
+    ctx, pg, problems = open_app(browser, api, page="incoming/9b3e51c7")
+    pg.click("[data-a=offAccept]")
+    dlg = pg.locator("#modal-root .modal")
+    dlg.locator("#ac_submit").click()
+    expect(dlg.locator("#ac_error")).to_be_focused()
+    pg.keyboard.press("Escape")
+    expect(pg.locator("#modal-root .modal")).to_have_count(0)
     assert problems == []
     ctx.close()
 

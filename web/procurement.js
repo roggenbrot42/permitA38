@@ -209,7 +209,7 @@
     const projects = (S.d.projects || []).filter(p => !['done', 'archived'].includes(p.status));
     const pid = AC.pid ?? o.project_id ?? '';
     return `<h2>Accept offer ${esc(o.reference || '')}</h2>
-      ${AC.error ? `<div class="banner bad" role="alert" id="ac_error">${esc(AC.error)}</div>` : ''}
+      ${AC.error ? `<div class="banner bad" role="alert" id="ac_error" tabindex="-1">${esc(AC.error)}</div>` : ''}
       <table class="sup-facts"><tr><th scope="row">Supplier</th><td>${esc(o.supplier_name || '')}</td></tr><tr><th scope="row">Hours</th><td>${esc(hh(o.hours))}</td></tr><tr><th scope="row">Net</th><td>${eur(o.net_total)}</td></tr>${o.plan ? `<tr><th scope="row">Plan</th><td>${esc(planText(o.plan))}</td></tr>` : ''}</table>
       <p class="small muted">${cap ? 'The planned hours and cost are calculated by the server when you accept; the result is shown here.' : 'This supplier has no capacity: accepting books a flat commitment of the net amount and does not change the planner.'}</p>
       <div class="row"><div><label for="ac_project">Project${cap ? ' (required)' : ''}</label><select id="ac_project" data-change="offAcceptProject">${cap ? '' : '<option value="">— none —</option>'}${projects.map(p => `<option value="${esc(p.id)}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
