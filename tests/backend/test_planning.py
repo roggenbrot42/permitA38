@@ -252,7 +252,8 @@ def _no_delta(weeks):
     out = []
     for w in weeks:
         w = dict(w)
-        assert w.pop("delta") == 0
+        delta = w.pop("delta")
+        assert delta == 0
         w["projects"] = [{k: v for k, v in p.items() if k != "delta"} for p in w["projects"]]
         out.append(w)
     return out

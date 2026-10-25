@@ -88,9 +88,11 @@ def test_create_list_update_delete(boss_client, boss_id, project, store):
     assert r.json()["hours_per_week"] == 30.0 and r.json()["planned_hours"] == 60.0 and r.json()["id"] == row["id"]
     assert r.json()["created"] == row["created"]
 
-    assert boss_client.delete(f"/api/allocations/{row['id']}").status_code == 204
+    deleted = boss_client.delete(f"/api/allocations/{row['id']}")
+    assert deleted.status_code == 204
     assert boss_client.get("/api/allocations").json() == []
-    assert boss_client.delete(f"/api/allocations/{row['id']}").status_code == 404
+    deleted = boss_client.delete(f"/api/allocations/{row['id']}")
+    assert deleted.status_code == 404
 
 
 def test_planned_hours_skip_holidays_and_absence_days(boss_client, boss_id, project, store):
@@ -162,7 +164,8 @@ def test_closed_project_allocations_can_still_be_deleted(boss_client, boss_id, p
     row = boss_client.post("/api/allocations", json=body(boss_id, project)).json()
     store.save("projects", {**store.get("projects", project["id"]), "status": "done"})
     assert boss_client.put(f"/api/allocations/{row['id']}", json=body(boss_id, project)).status_code == 409
-    assert boss_client.delete(f"/api/allocations/{row['id']}").status_code == 204
+    deleted = boss_client.delete(f"/api/allocations/{row['id']}")
+    assert deleted.status_code == 204
 
 
 def test_external_rows_cannot_be_changed_here(boss_client, boss_id, project, store):
@@ -172,7 +175,8 @@ def test_external_rows_cannot_be_changed_here(boss_client, boss_id, project, sto
     )
     r = boss_client.put(f"/api/allocations/{ext['id']}", json=body(boss_id, project))
     assert r.status_code == 409 and r.json() == {"detail": "This allocation cannot be changed here"}
-    assert boss_client.delete(f"/api/allocations/{ext['id']}").status_code == 409
+    deleted = boss_client.delete(f"/api/allocations/{ext['id']}")
+    assert deleted.status_code == 409
     assert boss_client.get("/api/allocations").json() == []  # a caller without `procurement` does not see them
     assert store.get("allocations", ext["id"]) is not None
 
@@ -508,7 +512,8 @@ def test_cancelled_rows_and_referenced_deletes_are_409(boss_client, boss_id, pro
         },
     )
     assert boss_client.put(f"/api/allocations/{row['id']}", json=body(boss_id, project)).status_code == 409
-    assert boss_client.delete(f"/api/allocations/{row['id']}").status_code == 409
+    deleted = boss_client.delete(f"/api/allocations/{row['id']}")
+    assert deleted.status_code == 409
     listed = boss_client.get("/api/allocations").json()  # no status filter: every status
     assert [x["status"] for x in listed] == ["cancelled"] and listed[0]["user_name"] == "Test Boss"
     r = boss_client.delete(f"/api/projects/{project['id']}")
@@ -517,7 +522,8 @@ def test_cancelled_rows_and_referenced_deletes_are_409(boss_client, boss_id, pro
         "/api/users", json={"username": "eva", "name": "Eva", "role": "employee", "password": "correct horse battery"}
     ).json()
     boss_client.post("/api/allocations", json=body(emp["id"], project))
-    assert boss_client.delete(f"/api/users/{emp['id']}").status_code == 409
+    deleted = boss_client.delete(f"/api/users/{emp['id']}")
+    assert deleted.status_code == 409
     assert store.get("users", emp["id"]) is not None
 
 

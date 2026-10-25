@@ -19,7 +19,6 @@ from permita38.core.settings import effective_settings
 
 from . import planning as eng
 from . import planning_warnings as pw
-from .allocations import AllocationService
 from .busy import BusyTimeProvider, NullBusyProvider
 
 MAX_SCAN_DAYS = 400
@@ -79,6 +78,8 @@ class PlanningService:
     def __init__(self, store: Repository, busy: BusyTimeProvider | None = None):
         self.store = store
         self.busy: BusyTimeProvider = busy or NullBusyProvider()
+        from .allocations import AllocationService  # deferred: allocations builds on the engine, which builds on calc
+
         self.allocs = AllocationService(store)
 
     # ------------------------------------------------------------------ views

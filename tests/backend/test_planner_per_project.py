@@ -333,7 +333,8 @@ def test_e6_what_if_moving_a_contract_changes_only_its_project(w):
     assert [x["delta"] for x in sim["weeks"]] == [-5.0, 0.0, 0.0, 0.0, 30.0]
     for i in range(4):  # Q (allocation until 03-27) is bit-identical to the base apart from the delta
         a, b = dict(w.entry(sim, i, w.q)), dict(w.entry(base, i, w.q))
-        assert a.pop("delta") == 0.0 and b.pop("delta") == 0.0 and a == b
+        delta_a, delta_b = a.pop("delta"), b.pop("delta")
+        assert delta_a == 0.0 and delta_b == 0.0 and a == b
     for i in range(4):
         assert sim["weeks"][i]["capacity"] == 40.0
     assert w.repo.list("contracts") == before  # nothing was written
