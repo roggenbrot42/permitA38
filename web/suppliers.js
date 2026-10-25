@@ -279,6 +279,44 @@
     } finally { AD.busy = false; if (token === MODAL_SEQ) adoptPaint(); }
   };
 
+
+  /* ---------- expense dialog: supplier, allocation, reverse charge ---------- */
+  const fieldOf = k => $('#f_' + k)?.closest('.field');
+  SUP.bindExpense = e => {
+    const sel = $('#f_supplier_id'), alloc = $('#f_allocation_id'), vendor = $('#f_vendor'), rc = $('#f_reverse_charge');
+    if (!sel) return;
+    const rcBox = fieldOf('rc_vat');
+    if (rcBox) rcBox.insertAdjacentHTML('beforeend', '<button type="button" class="ghost sm" data-a="supRcPropose">Propose from the VAT % above</button>');
+    let seq = 0;
+    const sync = async (initial) => {
+      const s = SUP.byId(sel.value), mine = ++seq;
+      vendor.readOnly = !!s;
+      if (s && !initial) vendor.value = s.name;
+      const showRc = !!s && (isRC(s.vat_mode) || rc.checked);
+      fieldOf('reverse_charge').hidden = !showRc; rcBox.hidden = !showRc || !rc.checked;
+      if (s && isRC(s.vat_mode) && !initial && !rc.checked) { rc.checked = true; rcBox.hidden = false; }
+      const af = fieldOf('allocation_id');
+      af.hidden = true; alloc.innerHTML = '<option value="">— none —</option>';
+      if (!s || s.kind !== 'person-capacity' || !can('procurement')) return;
+      let c; try { c = await api('GET', 'finance/commitments?supplier_id=' + encodeURIComponent(s.id)); } catch { return; }
+      if (mine !== seq) return;
+      const items = c.items.filter(i => i.kind === 'allocation');
+      const cur = e.allocation_id;
+      alloc.innerHTML = '<option value="">— none —</option>' + items.map(i => `<option value="${esc(i.allocation_id)}">${esc((i.offer_reference || 'Allocation') + ' · ' + (i.project_name || '') + ' · ' + fmtDate(i.start) + ' – ' + fmtDate(i.end))}</option>`).join('');
+      if (cur && !items.some(i => i.allocation_id === cur)) alloc.insertAdjacentHTML('beforeend', `<option value="${esc(cur)}">(allocation no longer open)</option>`);
+      if (cur && sel.value === e.supplier_id) alloc.value = cur;
+      af.hidden = !items.length && !cur;
+    };
+    sel.onchange = () => sync(false);
+    rc.onchange = () => sync(true);
+    sync(true);
+  };
+  A.supRcPropose = () => {
+    const gross = $('#f_gross')?.value, rate = $('#f_vat_rate')?.value;
+    if (!gross) return toast('Enter the amount on the bill first', true);
+    $('#f_rc_vat').value = Money.toNumber(Money.vatCents(Money.lineCents(1, gross), rate));
+  };
+
   /* banner on the expenses page: how many bills have a vendor without a supplier */
   SUP.vendorBanner = async () => {
     if (!can('suppliers', 'write')) return '';
