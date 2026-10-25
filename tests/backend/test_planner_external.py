@@ -268,3 +268,47 @@ def test_w14_ring_fence_demand_of_another_project_draws_no_hours_from_p(boss_cli
     entry = next(c for c in week["contributions"] if c["id"] == d["id"])
     assert entry["external"] is True and entry["hours"] == 10.0  # every assignee is a subcontractor
     assert next(x for x in fc["contracts"] if x["id"] == d["id"])["hours_visible"] == 10.0
+
+
+# ----------------------------------------------------------------------------- W2: Easter Monday inside the window
+def test_w2_easter_monday_is_not_made_up_in_the_weekly_figures(boss_client):
+    p = new_project(boss_client, "Demo project P")
+    s = supplier(boss_client)
+    acc = accept_plan(boss_client, s["id"], p["id"], "2026-04-06", "2026-04-17", 20.0, net_hours=35)
+    assert (acc["allocation"]["planned_hours"], acc["allocation"]["planned_net"]) == (35.0, 2800.0)
+    weeks = forecast(boss_client, 7)["weeks"]
+    assert [w["week"] for w in weeks][5:] == ["2026-04-06", "2026-04-13"]
+    assert (weeks[5]["external_capacity"], weeks[5]["external_cost"]) == (15.0, 1200.0)
+    assert (weeks[6]["external_capacity"], weeks[6]["external_cost"]) == (20.0, 1600.0)
+    assert weeks[0]["external_capacity"] == 0.0  # no hours before the allocation starts
+
+
+# ----------------------------------------------------------------------------- W3: a contract spreads around S.unavailable
+def test_w3_contract_of_a_subcontractor_spreads_around_its_unavailable_window(boss_client):
+    q = new_project(boss_client, "Demo project Q")
+    s = boss_client.post("/api/suppliers", json={
+        "name": "Example Freelance Studio (Demo)", "kind": "person-capacity", "workdays": [0, 1, 2, 3, 4],
+        "weekly_hours": 45, "rate": 75.0, "country": "DE",
+        "unavailable": [{"from": "2026-03-09", "to": "2026-03-11"}],
+    }).json()
+    contract(boss_client, "Contract D_Q", q["id"], [s["id"]], 10.0, 75.0, end="2026-03-20")
+    days = boss_client.get("/api/plan/day-table?from=2026-03-09&to=2026-03-13").json()["days"]
+    by_date = {d["date"]: d for d in days}
+    # Monday to Wednesday are unavailable: no demand there, the week's 10 h go to Thursday and Friday (5 h each)
+    for day in ("2026-03-09", "2026-03-10", "2026-03-11"):  # (the boss's own unassigned hours stay in the table)
+        assert q["id"] not in by_date[day]["scopes"], day
+        assert all(sc["external"]["assigned"] == 0.0 for sc in by_date[day]["scopes"].values()), day
+    for day in ("2026-03-12", "2026-03-13"):
+        assert by_date[day]["scopes"][q["id"]]["external"]["assigned"] == 5.0, day
+
+
+# ----------------------------------------------------------------------------- W9: the forecast half of a cancel
+def test_w9_after_the_cancel_the_released_hours_are_free(boss_client):
+    p = new_project(boss_client, "Demo project P")
+    s = supplier(boss_client)
+    acc = accept_plan(boss_client, s["id"], p["id"], "2026-03-02", "2026-03-27", 20.0)
+    r = boss_client.post(f"/api/allocations/{acc['allocation']['id']}/cancel",
+                         json={"effective_from": "2026-03-13", "reason": "project paused"})
+    assert r.status_code == 200, r.text
+    weeks = forecast(boss_client, 4)["weeks"]
+    assert [w["external_capacity"] for w in weeks] == [20.0, 20.0, 0.0, 0.0]

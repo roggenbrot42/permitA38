@@ -127,10 +127,13 @@ def test_w1_offer_figures_and_accept_creates_the_external_allocation(boss_client
             "2026-03-26",
         ]
     ]
-    codes = {w["code"] for w in body["planning_warnings"]}
-    # open decision: W1 lists only allocation.no_demand, but plan_hours() of the plan gives 74.29 h against 80 h
-    assert codes <= {"incoming_offer.hours_mismatch", "allocation.no_demand"}
-    assert "allocation.exceeds_weekly_hours" not in codes
+    # W1: exactly the one info warning of the contract (the plan books the 80 h, so no hours mismatch)
+    assert body["planning_warnings"] == [{
+        "code": "allocation.no_demand", "severity": "info", "field": "weeks", "confirmable": False,
+        "message": "Week of 2026-03-02: 20 h are allocated to project Demo project P but nothing is planned there.",
+        "details": {"allocation_id": alloc["id"], "project_id": project["id"], "project_name": "Demo project P",
+                    "week": "2026-03-02", "capacity": 20.0},
+    }]
 
 
 # ----------------------------------------------------------------------------- W3: total hours and availability
@@ -352,10 +355,10 @@ def test_w12_twelve_full_weeks_at_thirty_hours_raise_the_hint(boss_client, proje
     assert r.status_code == 200, r.text
     assert any(w["code"] == "supplier.dependency_hint" for w in r.json()["planning_warnings"])
     dep = boss_client.get(f"/api/suppliers/{s['id']}/dependency").json()
-    assert dep["raised"] is True
-    assert dep["longest_run_weeks"] == 12
-    assert dep["average_hours_per_week"] == 30.0
-    assert dep["from"] == "2026-06-08"
+    assert dep == {  # the W12 fixture, the end is the last Sunday of the 12th week
+        "supplier_id": s["id"], "threshold_hours_per_week": 30.0, "threshold_weeks": 12, "raised": True,
+        "longest_run_weeks": 12, "average_hours_per_week": 30.0, "from": "2026-06-08", "to": "2026-08-30",
+    }
 
 
 def test_w12_below_the_threshold_or_one_week_short_is_not_raised(boss_client, project):
