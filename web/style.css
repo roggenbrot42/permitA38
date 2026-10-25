@@ -138,3 +138,15 @@ button:disabled { opacity: .6; cursor: progress; }
 .banner.bad { background: var(--bad-soft); color: var(--bad); }
 .dx-counts { max-width: 420px; margin-bottom: 12px; } .dx-warn ul, .banner.bad ul { margin: 6px 0 0 18px; padding: 0; }
 @media (prefers-reduced-motion: reduce) { .dx-spin { animation: none; } }
+
+/* planner per project (forecast tab) */
+.pp-gap { color: var(--bad); font-weight: 600; }
+.pp-idle { color: var(--muted); }
+tr.pp-over td:first-child { border-left: 3px solid var(--bad); }
+.pp-toggle { padding: 0 6px; min-width: 24px; }
+tr.pp-detail > td { background: var(--bg); padding: 8px 12px; }
+.pp-table { width: 100%; margin-bottom: 6px; }
+.pp-days { margin-top: 8px; }
+.pp-banner { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pp-summary ul { margin: 6px 0 0 18px; padding: 0; }
+.pp-warnings ul { margin: 0 0 0 18px; padding: 0; }
