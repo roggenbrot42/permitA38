@@ -91,6 +91,8 @@ def boss_row(store, hash_value: str) -> dict:
 def populate(store, data: dict) -> None:
     for coll, recs in data["records"].items():
         for rec in recs:
+            if coll == "allocations":  # exactly one owner: the instance's first user (no dangling reference)
+                rec = {**rec, "user_id": store.list("users")[0]["id"]}
             store.save(coll, rec)
     for u in data["users"]:
         store.save("users", u)

@@ -119,7 +119,9 @@ def iso_days(lo=-20, hi=7):
 
 
 DATES = st.one_of(iso_days(), iso_days(), iso_days(), st.sampled_from([f"{YEAR - 1}-12-31", f"{YEAR}-01-01"]))
-TEXT = st.text(alphabet=st.characters(blacklist_categories=("Cs", "Cc")), min_size=1, max_size=18)
+TEXT = st.text(alphabet=st.characters(blacklist_categories=("Cs", "Cc")), min_size=1, max_size=18).filter(
+    lambda t: t.strip()
+)  # names must not be blank
 RATE = st.sampled_from([0, 25, 60, 80, 95, 130, 42.5])
 QTY = st.integers(1, 160).map(lambda n: n / 4)  # quarter units: products are exact to the cent
 PRICE = st.integers(0, 300).map(float)
