@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from permita38.core.holidays import holidays as de_holidays
-
 from permita38.core.service.plan_service import MAX_DAY_TABLE_DAYS
 
 
@@ -544,3 +543,91 @@ def test_simulate_scopes_its_base_by_project(boss_client, boss_id, project, stor
             {"project_id": other["id"], "name": "Demo project Q", "base_gap": 10.0, "gap": 10.0, "delta": 0.0}
         ],
     }
+
+
+# ------------------------------------------------------------------ PUT keeps what it does not replace
+def test_put_changes_person_and_project_and_keeps_unknown_fields(boss_client, boss_id, project, store):
+    customer = boss_client.post("/api/customers", json={"name": "Demo Customer"}).json()
+    other = boss_client.post("/api/projects", json={"name": "Demo project Q", "customer_id": customer["id"]}).json()
+    emp = store.save(
+        "users", {"username": "eva", "name": "Eva", "role": "employee", "active": True, "workdays": [0, 1, 2, 3]}
+    )
+    row = boss_client.post("/api/allocations", json=body(boss_id, project)).json()
+    assert "customer_id" not in row
+    stored = store.get("allocations", row["id"])
+    store.save("allocations", {**stored, "x_future": {"a": [1]}})
+    r = boss_client.put(f"/api/allocations/{row['id']}", json=body(emp["id"], other, hours_per_week=12.0))
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert (got["user_id"], got["project_id"], got["customer_id"], got["hours_per_week"]) == (
+        emp["id"],
+        other["id"],
+        customer["id"],
+        12.0,
+    )
+    assert got["x_future"] == {"a": [1]} and got["user_name"] == "Eva" and got["project_name"] == "Demo project Q"
+    # back to a project without a customer: the customer follows the project
+    r = boss_client.put(f"/api/allocations/{row['id']}", json=body(boss_id, project))
+    assert "customer_id" not in r.json() and "customer_id" not in store.get("allocations", row["id"])
+    assert (
+        boss_client.put(
+            f"/api/allocations/{row['id']}", json={**body(boss_id, project), "status": "cancelled"}
+        ).status_code
+        == 422
+    )
+    assert store.get("allocations", row["id"])["status"] == "active"
+
+
+# ------------------------------------------------------------------ damaged rows never give a 500
+@pytest.mark.parametrize(
+    "row",
+    [
+        {"project_id": "{p}"},
+        {"project_id": "{p}", "start": "garbage", "end": "2026-03-01"},
+        {"start": "2026-03-01", "end": "2026-03-05"},
+        {"project_id": "{p}", "start": 5, "end": [1]},
+    ],
+)
+def test_damaged_allocation_rows_do_not_break_the_views(boss_client, boss_id, project, store, row):
+    row = {k: (project["id"] if v == "{p}" else v) for k, v in row.items()}
+    store.save("allocations", {"user_id": boss_id, "status": "active", **row})
+    add_contract(store, boss_id, project, 10)
+    assert boss_client.get("/api/allocations").status_code == 200
+    assert boss_client.get("/api/forecast", params={"weeks": 4}).status_code == 200
+    assert boss_client.post("/api/plan/simulate", json={"weeks": 2}).status_code == 200
+    assert boss_client.get("/api/plan/day-table", params={"from": START, "to": day(6)}).status_code == 200
+    assert boss_client.post("/api/allocations/bootstrap", json={}).status_code == 200
+
+
+# ------------------------------------------------------------------ empty filters, simulate rules over HTTP
+def test_empty_project_and_user_filters_mean_no_filter(boss_client, boss_id, project):
+    boss_client.post("/api/allocations", json=body(boss_id, project))
+    a = boss_client.get("/api/plan/day-table", params={"from": START, "to": START}).json()
+    b = boss_client.get(
+        "/api/plan/day-table", params={"from": START, "to": START, "project_id": "", "user_id": ""}
+    ).json()
+    assert a == b
+
+
+def test_simulate_refuses_what_apply_would_refuse(boss_client, boss_id, project, store):
+    closed = store.save("projects", {"name": "Closed", "status": "archived"})
+    gone = store.save("users", {"username": "gone", "name": "Gone", "role": "employee", "active": False})
+    new = {"user_id": boss_id, "project_id": project["id"], "start": START, "end": END, "hours_per_week": 5}
+
+    def sim(**kw):
+        return boss_client.post("/api/plan/simulate", json={"changes": {"allocations": [{**new, **kw}]}})
+
+    assert sim().status_code == 200
+    assert sim(project_id=closed["id"]).json() == {"detail": "The project is closed"}
+    assert sim(user_id=gone["id"]).json() == {"detail": "The user is not active"}
+    assert sim(end=day(2000)).status_code == 422
+    # a change of an existing row that would exceed 1830 days through the merge
+    row = boss_client.post("/api/allocations", json=body(boss_id, project)).json()
+    r = boss_client.post("/api/plan/simulate", json={"changes": {"allocations": [{"id": row["id"], "end": day(2000)}]}})
+    assert r.status_code == 422 and "1830" in r.json()["detail"]
+    assert (
+        boss_client.post(
+            "/api/plan/apply", json={"confirm": True, "changes": {"allocations": [{"id": row["id"], "end": day(2000)}]}}
+        ).status_code
+        == 422
+    )

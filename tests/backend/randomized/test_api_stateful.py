@@ -1161,6 +1161,30 @@ class ApiMachine(RuleBasedStateMachine):
         else:
             assert r.status_code == 404
 
+    @rule(data=st.data())
+    def allocation_bootstrap(self, data):
+        """Preview equals confirm, and a second confirm creates nothing (only the boss may call it)."""
+        self.tick()
+        s = data.draw(self.actor())
+        r = self.call("POST", "/allocations/bootstrap", s, json={})
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g
+            return
+        if r.status_code == 409:  # more than 500 proposals cannot happen here; nothing else is a 409
+            raise AssertionError(r.text)
+        assert r.status_code == 200, r.text
+        pre = r.json()
+        assert pre["created"] is False and len(self.allocs) == len(self.call("GET", "/allocations", s).json())
+        done = self.call("POST", "/allocations/bootstrap", s, json={"confirm": True})
+        assert done.status_code == 200, done.text
+        made = done.json()
+        strip = lambda rows: [{k: v for k, v in a.items() if k not in ("id", "kind")} for a in rows]  # noqa: E731
+        assert strip(made["allocations"]) == pre["allocations"] and made["warnings"] == pre["warnings"]
+        for a in made["allocations"]:
+            self.allocs[a["id"]] = {k: a[k] for k in ("user_id", "project_id", "start", "end", "hours_per_week")}
+        again = self.call("POST", "/allocations/bootstrap", s, json={"confirm": True}).json()
+        assert again["allocations"] == []
+
     def allocations_match_model(self):
         rows = self.call("GET", "/allocations", self._boss()).json()
         assert {r["id"] for r in rows} == set(self.allocs)

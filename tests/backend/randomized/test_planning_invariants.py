@@ -107,6 +107,22 @@ def dump(repo):
     return json.dumps({k: repo.list(k) for k in TABLES if k != "settings"}, sort_keys=True, default=str)
 
 
+def check_status_and_gap(w):
+    """Two-way: the gap covers every hour the week is over by, and the status is ``over`` exactly when the old
+    utilisation rule says so or a project has a gap."""
+    assert w["gap"] + 1e-6 >= max(0.0, -w["free_worst_case"])
+    old_over = eng.status_for(w["capacity"], w["confirmed"] + w["binding_offers"])[0] == "over"
+    assert (w["status"] == "over") == (old_over or w["gap"] > 1e-6)
+    assert w["gap_confirmed"] <= w["gap"] + 1e-6 and w["gap_expected"] <= w["gap"] + 1e-6
+    assert w["gap_confirmed"] <= w["gap_expected"] + 1e-6
+    for p in w.get("projects", []):
+        assert p["gap_confirmed"] <= p["gap_expected"] + 1e-6 <= p["gap"] + 2e-6
+        assert (p["status"] == "over") == (p["utilisation"] is None or p["utilisation"] > 100.0 or p["gap"] > 1e-6) or (
+            p["status"] != "over" and p["gap"] <= 1e-6
+        )
+        assert not (p["status"] == "ok" and p["gap"] > 1e-6)
+
+
 @given(worlds())
 def test_engine_invariants_hold_for_random_worlds(world):
     with tempfile.TemporaryDirectory() as tmp:
@@ -122,8 +138,7 @@ def test_engine_invariants_hold_for_random_worlds(world):
                 assert abs(w["free_worst_case"] - (w["capacity"] - w["confirmed"] - w["binding_offers"])) < 1e-5
                 assert w["status"] in ("ok", "tight", "over")
                 assert w["revenue"] >= 0 and w["contracted_revenue"] >= 0 and w["offer_revenue"] >= 0
-                if w["status"] == "over":  # a gap on a single day is enough (rule 7 of the per-project spec)
-                    assert w["free_worst_case"] < 0 or w["capacity"] <= 1e-9 or w["gap"] > 0
+                check_status_and_gap(w)
             before = dump(repo)
             change = {
                 "absences": [{"user_id": repo.list("users")[0]["id"], "start": "2026-02-10", "end": "2026-02-12"}],
@@ -169,11 +184,22 @@ def fenced_worlds(draw):
     absences = [
         (draw(st.integers(0, len(people) - 1)), draw(st.integers(0, 30))) for _ in range(draw(st.integers(0, 2)))
     ]
-    return people, allocs, contracts, absences
+    offers = [
+        dict(
+            user=draw(st.integers(0, len(people) - 1)),
+            project=draw(st.sampled_from(["P", "Q", None])),
+            start=draw(st.integers(0, 20)),
+            days=draw(st.integers(0, 40)),
+            hpw=draw(st.sampled_from([5, 10, 25])),
+            win=draw(st.sampled_from([0, 25, 50, 100])),
+        )
+        for _ in range(draw(st.integers(0, 2)))
+    ]
+    return people, allocs, contracts, absences, offers
 
 
-def build_fenced(repo, world, skip_contracts_of=None, extra_q_person=False):
-    people, allocs, contracts, absences = world
+def build_fenced(repo, world, skip_contracts_of=None, extra_q_person=False, with_allocations=True):
+    people, allocs, contracts, absences, offers = world
     proj = {k: repo.save("projects", dict(name=f"Project {k}", status="active"))["id"] for k in "PQ"}
     ids = [
         repo.save(
@@ -217,6 +243,20 @@ def build_fenced(repo, world, skip_contracts_of=None, extra_q_person=False):
         if c["project"]:
             rec["project_id"] = proj[c["project"]]
         repo.save("contracts", rec)
+    for o in offers:
+        if skip_contracts_of and o["project"] == skip_contracts_of:
+            continue
+        plan = dict(
+            start=day(o["start"]),
+            end=day(o["start"] + o["days"]),
+            hours_per_week=o["hpw"],
+            user_ids=[ids[o["user"]]],
+            win_probability=o["win"],
+        )
+        rec = dict(number="AN-1", status="sent", lines=[], valid_until="2099-12-31", plan=plan)
+        if o["project"]:
+            rec["project_id"] = proj[o["project"]]
+        repo.save("offers", rec)
     for uid, d in absences:
         repo.save("absences", dict(user_id=ids[uid], kind="vacation", start=day(d), end=day(d + 2)))
     if extra_q_person:  # new capacity for Q only: a new person who is allocated to Q alone
@@ -258,30 +298,69 @@ def forecast_of(world, **kw):
             repo.close()
 
 
+def oracle_week_capacity(world, monday):
+    """Independent oracle: sum over people and workdays that are neither a public holiday nor an absence day of
+    weekly_hours / len(workdays)."""
+    from permita38.core.holidays import holidays
+
+    people, _, _, absences, _ = world
+    total = 0.0
+    for i, p in enumerate(people):
+        off = {MON + timedelta(days=d + k) for ui, d in absences if ui == i for k in range(3)}
+        for k in range(7):
+            x = monday + timedelta(days=k)
+            if x.weekday() in p["workdays"] and x not in off and x not in holidays(x.year, ""):
+                total += p["weekly"] / len(p["workdays"])
+    return total
+
+
+NOT_COMPARED = ("status", "gap", "gap_confirmed", "gap_expected", "projects", "contributions")
+
+
 @settings(max_examples=60, deadline=None)
 @given(fenced_worlds())
 def test_ring_fence_properties(world):
     proj, out, _, w0 = forecast_of(world)
     for w in out["weeks"]:
-        # (a) nothing invented, nothing lost: the scopes add up to the team capacity
+        # (a) nothing invented, nothing lost: the scopes add up to the team capacity, and that equals the independent
+        # oracle (people x workdays that are not holiday or absence)
         assert abs(sum(p["capacity"] for p in w["projects"]) - w["capacity"]) < 1e-4
+        assert abs(w["capacity"] - oracle_week_capacity(world, date.fromisoformat(w["week"]))) < 1e-4
         # (b) the team gap is the sum of the scope gaps and never reduced by a surplus
         assert abs(sum(p["gap"] for p in w["projects"]) - w["gap"]) < 1e-4
         assert all(p["gap"] >= 0 and p["internal"]["gap"] >= 0 for p in w["projects"])
-        if w["gap"] > 1e-6:
-            assert w["status"] == "over"
+        check_status_and_gap(w)
         # demand is booked once, in the scope of its project
         assert abs(sum(p["confirmed"] for p in w["projects"]) - w["confirmed"]) < 1e-4
+        assert abs(sum(p["binding_offers"] for p in w["projects"]) - w["binding_offers"]) < 1e-4
     # (a) day level: per day the scopes add up to the day capacity
     table = eng.day_table(w0, MON, MON + timedelta(days=70))
     for d in table.days.values():
         assert abs(sum(sd.cap for sd in d.scopes.values()) - d.cap) < 1e-9
-    # (c) removing every contract of project Q leaves the rows of P and of the unassigned scope identical
+    # (c) removing every contract and offer of project Q leaves the rows of P and of the unassigned scope identical
     _, without_q, _, _ = forecast_of(world, skip_contracts_of="Q")
     for key in ("Project P", "Unassigned"):
         assert project_rows(out, key) == project_rows(without_q, key)
-    # (d) adding capacity to Q never changes P's gap
+    # (d) adding capacity to Q never changes P's row (not only its gap)
     _, more_q, _, _ = forecast_of(world, extra_q_person=True)
-    assert [r and r["gap"] for r in project_rows(out, "Project P")] == [
-        r and r["gap"] for r in project_rows(more_q, "Project P")
-    ]
+    assert project_rows(out, "Project P") == project_rows(more_q, "Project P")
+
+
+@settings(max_examples=60, deadline=None)
+@given(fenced_worlds())
+def test_allocations_never_change_the_team_numbers(world):
+    """Equivalence: the same data with and without allocations gives the same team capacity, demand, free hours,
+    utilisation, revenue and day-table cap/confirmed/binding; only status and gap may differ."""
+    _, with_a, _, w_with = forecast_of(world)
+    _, without_a, _, w_without = forecast_of(world, with_allocations=False)
+    for a, b in zip(with_a["weeks"], without_a["weeks"]):
+        strip = lambda cs: sorted((c["kind"], c["title"], c["hours"]) for c in cs)  # noqa: E731  (ids differ per run)
+        assert strip(a["contributions"]) == strip(b["contributions"])
+        assert {k: v for k, v in a.items() if k not in NOT_COMPARED} == {
+            k: v for k, v in b.items() if k not in NOT_COMPARED
+        }
+    t1 = eng.day_table(w_with, MON, MON + timedelta(days=70))
+    t2 = eng.day_table(w_without, MON, MON + timedelta(days=70))
+    for x in t1.days:
+        for f in ("cap", "confirmed", "binding", "expected"):
+            assert abs(getattr(t1.days[x], f) - getattr(t2.days[x], f)) < 1e-9
