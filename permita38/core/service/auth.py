@@ -222,6 +222,8 @@ class AuthService:
             raise ServiceError(400, "You cannot delete yourself")
         if rights.normalize_role(old.get("role")) == rights.BOSS and self._boss_count(excluding=user_id) == 0:
             raise ServiceError(400, "Cannot delete the only boss")
+        if any(a.get("user_id") == user_id for a in self.store.list("allocations")):
+            raise ServiceError(409, "This user has allocations; remove them first (or deactivate the user)")
         with self.store.transaction():
             self.store.delete_where("api_tokens", user_id=user_id)
             self.store.delete_where("audit_log", user_id=user_id)

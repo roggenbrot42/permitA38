@@ -208,6 +208,8 @@ class RecordService:
             raise ServiceError(
                 409, "A numbered invoice cannot be deleted; cancel it instead (keeps the numbers gapless)"
             )
+        if coll == "projects" and any(a.get("project_id") == rid for a in self.store.list("allocations")):
+            raise ServiceError(409, "This project has allocations; remove them first")
         sc = _scope(me, coll, "write")
         if sc != Scope.ALL:
             own = (

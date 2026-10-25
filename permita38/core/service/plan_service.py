@@ -11,7 +11,6 @@ from __future__ import annotations
 import time as _time
 from dataclasses import replace
 from datetime import date, timedelta
-from typing import Any
 
 from permita38.core import calc
 from permita38.core.errors import ServiceError
@@ -24,6 +23,8 @@ from .busy import BusyTimeProvider, NullBusyProvider
 
 MAX_SCAN_DAYS = 400
 MAX_WINDOW_DAYS = 120
+MAX_DAY_TABLE_DAYS = 190
+OFFER_GAP_OPTIONS = ["shorten", "start_later", "allocate_more", "reduce_scope"]
 
 
 def _cap_message(
@@ -46,7 +47,9 @@ def _h(x: float) -> str:
     return ("%.2f" % x).rstrip("0").rstrip(".")
 
 
-def _item_from_plan(kind: str, rid: str, title: str, plan: dict, world: eng.World, binding: bool) -> eng.Item | None:
+def _item_from_plan(
+    kind: str, rid: str, title: str, plan: dict, world: eng.World, binding: bool, project_id: str | None = None
+) -> eng.Item | None:
     start, end = calc.d(plan.get("start")), calc.d(plan.get("end"))
     hpw, total = calc.fnum(plan.get("hours_per_week")) or None, calc.fnum(plan.get("total_hours")) or None
     if not start or not end or end < start or not (hpw or total):
@@ -67,6 +70,7 @@ def _item_from_plan(kind: str, rid: str, title: str, plan: dict, world: eng.Worl
         rate=calc.fnum(plan.get("rate"), world.default_rate),
         binding=binding,
         win=win,
+        project_id=project_id or None,
     )
 
 
@@ -74,17 +78,30 @@ class PlanningService:
     def __init__(self, store: Repository, busy: BusyTimeProvider | None = None):
         self.store = store
         self.busy: BusyTimeProvider = busy or NullBusyProvider()
+        from .allocations import AllocationService  # deferred: allocations builds on the engine, which builds on calc
+
+        self.allocs = AllocationService(store)
 
     # ------------------------------------------------------------------ views
     def _world(self, today: date | None = None, changes: dict | None = None, include_offers: bool = True) -> eng.World:
         return eng.load(self.store, today or date.today(), self.busy, changes, include_offers)
 
-    def _rows(self, world: eng.World, first: date | None, weeks: int, user_id: str | None) -> list[dict]:
+    def _rows(
+        self, world: eng.World, first: date | None, weeks: int, user_id: str | None, scope: str | None = None
+    ) -> tuple[list[dict], dict]:
         first = first or world.today
-        return eng.weeks(world, first, weeks, user_id or None)
+        return eng.weeks_detail(world, first, weeks, user_id or None, scope)
+
+    def _check_scope(self, project_id: str | None) -> str | None:
+        """The scope key of a ``project_id`` query/body value; 404 for a project that does not exist."""
+        if not project_id:
+            return None
+        if project_id != eng.UNASSIGNED and not self.store.get("projects", project_id):
+            raise ServiceError(404, "Project not found")
+        return project_id
 
     @staticmethod
-    def _totals(rows: list[dict]) -> dict:
+    def _totals(rows: list[dict], by_project: bool = True) -> dict:
         keys = ("capacity", "confirmed", "binding_offers", "free_after_confirmed", "free_worst_case")
         out = {k: round(sum(r[k] for r in rows), 2) for k in keys}
         out.update(
@@ -93,14 +110,26 @@ class PlanningService:
             assumed_revenue=round(sum(r["intended_revenue"] for r in rows if r["basis"] == "intended"), 2),
             revenue=round(sum(r["revenue"] for r in rows), 2),
             over_weeks=sum(1 for r in rows if r["status"] == "over"),
+            gap=round(sum(r["gap"] for r in rows), 2),
         )
+        if by_project:
+            per: dict[str | None, dict] = {}
+            for r in rows:
+                for p in r.get("projects", []):
+                    e = per.setdefault(p["project_id"], dict(project_id=p["project_id"], name=p["name"], gap=0.0))
+                    e["gap"] += p["gap"]
+            lst = [dict(e, gap=round(e["gap"], 2)) for e in per.values() if e["gap"] > 1e-9]
+            lst.sort(key=lambda e: (-e["gap"], e["name"].lower()))
+            out["gap_by_project"] = lst
         return out
 
+    # ------------------------------------------------------------------ warnings of the weekly rows
     @staticmethod
-    def _capacity_warnings(rows: list[dict]) -> list[dict]:
+    def _team_over_warnings(rows: list[dict]) -> list[dict]:
+        """The old rule: one ``capacity.over`` per week whose utilisation is over (no project dimension)."""
         out = []
         for r in rows:
-            if r["status"] == "over":
+            if eng.status_for(r["capacity"], r["confirmed"] + r["binding_offers"])[0] == "over":
                 over = max(-r["free_worst_case"], 0.0)
                 out.append(
                     pw.warning(
@@ -109,17 +138,155 @@ class PlanningService:
                         "weeks",
                         f"Week of {r['week']}: {_h(r['confirmed'] + r['binding_offers'])} h committed for "
                         f"{_h(r['capacity'])} h of capacity (over by {_h(over)} h).",
-                        dict(week=r["week"], over_by=round(over, 2), contributions=r["contributions"]),
+                        dict(week=r["week"], over_by=round(over, 2), contributions=r["contributions"], scope="team"),
                     )
                 )
         return out
 
+    def _capacity_warnings(self, rows: list[dict], detail: dict, scope: str | None) -> list[dict]:
+        """``capacity.gap`` per project, week and pool; ``capacity.over`` for the unassigned scope."""
+        out = []
+        for r in rows:
+            for p in r["projects"]:
+                if p["project_id"] is None:
+                    if p["status"] == "over" and (scope is None or scope == eng.UNASSIGNED):
+                        over = max(-p["free_worst_case"], p["gap"], 0.0)
+                        contributions = detail.get((r["week"], eng.UNASSIGNED), [])
+                        out.append(
+                            pw.warning(
+                                "capacity.over",
+                                "warning",
+                                "weeks",
+                                f"Week of {r['week']}: {_h(p['confirmed'] + p['binding_offers'])} h committed for "
+                                f"{_h(p['capacity'])} h of unassigned capacity (over by {_h(over)} h).",
+                                dict(
+                                    week=r["week"],
+                                    over_by=round(over, 2),
+                                    contributions=contributions,
+                                    scope="unassigned",
+                                ),
+                            )
+                        )
+                    continue
+                for pool in ("internal", "external"):
+                    blk = p[pool]
+                    if blk["gap"] <= 1e-9:
+                        continue
+                    contributions = detail.get((r["week"], p["project_id"]), []) if pool == "internal" else []
+                    out.append(
+                        pw.warning(
+                            "capacity.gap",
+                            "warning",
+                            "weeks",
+                            f"Week of {r['week']}, project {p['name']}: {_h(blk['assigned'])} h are planned but only "
+                            f"{_h(blk['capacity'])} h are allocated to it (gap {_h(blk['gap'])} h). "
+                            "Other projects' free hours do not cover it.",
+                            dict(
+                                project_id=p["project_id"],
+                                project_name=p["name"],
+                                week=r["week"],
+                                pool=pool,
+                                assigned=blk["assigned"],
+                                capacity=blk["capacity"],
+                                gap=blk["gap"],
+                                contributions=contributions,
+                            ),
+                            confirmable=False,
+                        )
+                    )
+        return out
+
+    def _allocation_warnings(
+        self, world: eng.World, rows: list[dict], user_id: str | None, scope: str | None, by_project: bool
+    ) -> list[dict]:
+        """``allocation.employee_over_allocated`` (also without the project dimension) and ``allocation.no_demand``."""
+        out: list[dict] = []
+        for r in rows:
+            ws = date.fromisoformat(r["week"])
+            for uid, user in world.users.items():
+                if user_id and uid != user_id:
+                    continue
+                mine = [a for a in world.allocations if a["user_id"] == uid and pw.overlaps_week(a, ws)]
+                if not mine or (scope and not any(a["project_id"] == scope for a in mine)):
+                    continue
+                wd = calc._workdays(user)
+                lost = [
+                    day
+                    for k in range(7)
+                    if (day := ws + timedelta(days=k)).weekday() in wd
+                    and (world.cap.holiday(day) or day in world.cap.absences[uid])
+                ]
+                hit = pw.week_over_allocation(user, mine, ws) or (
+                    pw.week_over_allocation(user, mine, ws, lost) if lost else None
+                )
+                if hit:
+                    allocated, weekly, reason = hit
+                    out.append(
+                        pw.employee_over_allocated(uid, user.get("name") or "?", r["week"], allocated, weekly, reason)
+                    )
+            if not by_project:
+                continue
+            entries = {p["project_id"]: p for p in r["projects"]}
+            for a in world.allocations:
+                if (user_id and a["user_id"] != user_id) or not pw.overlaps_week(a, ws):
+                    continue
+                p = entries.get(a["project_id"])
+                if p and p["internal"]["capacity"] > 1e-9 and p["internal"]["assigned"] <= 1e-9:
+                    out.append(
+                        pw.warning(
+                            "allocation.no_demand",
+                            "info",
+                            "weeks",
+                            f"Week of {r['week']}: {_h(p['internal']['capacity'])} h are allocated to project "
+                            f"{p['name']} but nothing is planned there.",
+                            dict(
+                                allocation_id=a["id"],
+                                project_id=a["project_id"],
+                                project_name=p["name"],
+                                week=r["week"],
+                                capacity=p["internal"]["capacity"],
+                            ),
+                            confirmable=False,
+                        )
+                    )
+        return out
+
+    def _view(
+        self,
+        world: eng.World,
+        first: date,
+        weeks: int,
+        user_id: str | None,
+        scope: str | None,
+        by_project: bool = True,
+    ) -> dict:
+        rows, detail = self._rows(world, first, weeks, user_id, scope)
+        if by_project:
+            warnings = self._capacity_warnings(rows, detail, scope)
+        else:
+            warnings = self._team_over_warnings(rows)
+        warnings += self._allocation_warnings(world, rows, user_id, scope, by_project)
+        return dict(
+            weeks=[self._public_week(r, by_project) for r in rows],
+            totals=self._totals(rows, by_project),
+            warnings=warnings,
+            _rows=rows,
+        )
+
     def forecast(
-        self, weeks: int = 26, user_id: str | None = None, include_offers: bool = True, today: date | None = None
+        self,
+        weeks: int = 26,
+        user_id: str | None = None,
+        include_offers: bool = True,
+        today: date | None = None,
+        project_id: str | None = None,
+        by_project: bool = True,
     ) -> dict:
         today = today or date.today()
+        scope = self._check_scope(project_id)
         world = self._world(today, None, include_offers)
-        rows = self._rows(world, eng.week_start(today), weeks, user_id)
+        view = self._view(world, eng.week_start(today), weeks, user_id, scope, by_project)
+        rows = view.pop("_rows")
         details = []
         lo = date.fromisoformat(rows[0]["week"]) if rows else today
         hi = date.fromisoformat(rows[-1]["week_end"]) if rows else today
@@ -135,52 +302,111 @@ class PlanningService:
                     end=it.end.isoformat(),
                     hours_visible=round(sum(per.values()), 1),
                     rate=it.rate,
+                    project_id=it.project_id,
                 )
             )
-        return dict(
-            weeks=[self._public_week(r) for r in rows],
-            contracts=details,
-            totals=self._totals(rows),
-            expired_offers=world.expired_offers,
-            warnings=self._capacity_warnings(rows),
-        )
+        return dict(contracts=details, expired_offers=world.expired_offers, **view)
 
     @staticmethod
-    def _public_week(r: dict) -> dict:
+    def _public_week(r: dict, by_project: bool = True) -> dict:
         """Precise week values; the keys of the earlier forecast contract are kept as aliases."""
         legacy = eng.week_summary_free(r)
-        return {
+        out = {
             **legacy,
             **r,
             "free": r["free_after_confirmed"],
             "free_incl_tentative": r["free_worst_case"],
         }
+        if not by_project:
+            out.pop("projects", None)
+        return out
 
     def simulate(
-        self, changes: dict | None, weeks: int, first: date | None, user_id: str | None, today: date | None = None
+        self,
+        changes: dict | None,
+        weeks: int,
+        first: date | None,
+        user_id: str | None,
+        today: date | None = None,
+        project_id: str | None = None,
     ) -> dict:
         today = today or date.today()
+        scope = self._check_scope(project_id)
         world = self._world(today, changes)
-        rows = self._rows(world, first or eng.week_start(today), weeks, user_id)
-        out: dict[str, Any] = dict(
-            weeks=[self._public_week(r) for r in rows],
-            totals=self._totals(rows),
-            warnings=self._capacity_warnings(rows),
-        )
+        start = first or eng.week_start(today)
+        out = self._view(world, start, weeks, user_id, scope)
+        rows = out.pop("_rows")
+        base_rows, _ = self._rows(self._world(today), start, weeks, user_id, scope)
+        base_gap = self._base_gaps(base_rows)
+        for pub, base in zip(out["weeks"], base_rows):
+            pub["delta"] = round(pub["gap"] - base["gap"], 6)
+            before = {p["project_id"]: p["gap"] for p in base["projects"]}
+            for p in pub["projects"]:
+                p["delta"] = round(p["gap"] - before.get(p["project_id"], 0.0), 6)
+        out["delta"] = self._delta(rows, base_rows, base_gap)
         if user_id and user_id in world.users:
             out["entitlement"] = eng.entitlement(world, world.users[user_id], today.year)
             out["entitlement"]["over_entitlement"] = out["entitlement"]["over"]
         return out
 
+    @staticmethod
+    def _base_gaps(rows: list[dict]) -> dict[str | None, dict]:
+        per: dict[str | None, dict] = {}
+        for r in rows:
+            for p in r["projects"]:
+                e = per.setdefault(p["project_id"], dict(name=p["name"], gap=0.0))
+                e["gap"] += p["gap"]
+        return per
+
+    def _delta(self, rows: list[dict], base_rows: list[dict], base: dict[str | None, dict]) -> dict:
+        now = self._base_gaps(rows)
+        projects = []
+        for pid in set(now) | set(base):
+            gap = now.get(pid, {}).get("gap", 0.0)
+            base_gap = base.get(pid, {}).get("gap", 0.0)
+            if gap <= 1e-9 and base_gap <= 1e-9:
+                continue
+            name = (now.get(pid) or base.get(pid) or {})["name"]
+            projects.append(
+                dict(
+                    project_id=pid,
+                    name=name,
+                    base_gap=round(base_gap, 2),
+                    gap=round(gap, 2),
+                    delta=round(gap - base_gap, 2),
+                )
+            )
+        projects.sort(key=lambda e: (-e["gap"], e["name"].lower()))
+        total = sum(r["gap"] for r in rows) - sum(r["gap"] for r in base_rows)
+        return dict(gap=round(total, 2), projects=projects)
+
+    def day_table(
+        self,
+        lo: date,
+        hi: date,
+        user_id: str | None = None,
+        project_id: str | None = None,
+        today: date | None = None,
+    ) -> dict:
+        if hi < lo:
+            raise ServiceError(400, "'to' is before 'from'")
+        if (hi - lo).days + 1 > MAX_DAY_TABLE_DAYS:
+            raise ServiceError(400, f"The range may cover at most {MAX_DAY_TABLE_DAYS} days")
+        if user_id and not self.store.get("users", user_id):
+            raise ServiceError(404, "User not found")
+        scope = self._check_scope(project_id)
+        return eng.day_table_json(self._world(today or date.today()), lo, hi, user_id or None, scope)
+
     # ------------------------------------------------------------------ feasibility
     def _fit(self, world: eng.World, item: eng.Item) -> tuple[list[dict], eng.World]:
-        """Rows of the weeks the item touches, with the item added to the world (replacing an item with the same key)."""
+        """Rows of the weeks the item touches in ITS scope (its project, or ``unassigned``) that have a gap, with the
+        item added to the world (replacing an item with the same key). Other projects' free hours never count."""
         others = [i for i in world.items if not (i.kind == item.kind and i.id == item.id)]
         w2 = replace(world, items=others + [item])
         lo, hi = eng.week_start(item.start), eng.week_start(item.end) + timedelta(days=6)
         n = (hi - lo).days // 7 + 1
-        rows = eng.weeks(w2, lo, n, None)
-        return [r for r in rows if r["free_worst_case"] < -1e-6], w2
+        rows = eng.weeks(w2, lo, n, None, eng.scope_of(item))
+        return [r for r in rows if r["gap"] > 1e-6 or r["free_worst_case"] < -1e-6], w2
 
     def _fits(self, world: eng.World, item: eng.Item) -> bool:
         return not self._fit(world, item)[0]
@@ -189,9 +415,11 @@ class PlanningService:
         over, _ = self._fit(world, item)
         if not over:
             return []
+        if item.project_id:
+            return self._project_gap_warnings(over, item)
         hours = (item.total or 0.0) if item.total else (item.hpw or 0.0) * ((item.end - item.start).days + 1) / 7.0
         base = replace(world, items=[i for i in world.items if not (i.kind == item.kind and i.id == item.id)])
-        free = eng.free_hours_in_range(base, item.start, item.end)
+        free = eng.free_hours_in_range(base, item.start, item.end, scope=eng.UNASSIGNED)
         causes = []
         for r in over:
             for c in r["contributions"]:
@@ -207,7 +435,7 @@ class PlanningService:
             if r["holiday_hours"]:
                 causes.append(f"public holidays ({_h(r['holiday_hours'])} h in week of {r['week']})")
         causes = list(dict.fromkeys(causes))[:6]
-        over_pairs = [(r["week"], -r["free_worst_case"]) for r in over]
+        over_pairs = [(r["week"], -r["free_worst_case"] if r["free_worst_case"] < 0 else r["gap"]) for r in over]
         options = self._options(world, item, hours)
         msg = _cap_message(hours, free, item.start, item.end, over_pairs, causes)
         return [
@@ -225,6 +453,39 @@ class PlanningService:
                 ),
             )
         ]
+
+    @staticmethod
+    def _project_gap_warnings(over: list[dict], item: eng.Item) -> list[dict]:
+        """``offer.project_gap``: one per touched week and pool in which the item's project has a gap."""
+        out = []
+        for r in over:
+            for p in r["projects"]:
+                for pool in ("internal", "external"):
+                    blk = p[pool]
+                    if blk["gap"] <= 1e-9:
+                        continue
+                    out.append(
+                        pw.warning(
+                            "offer.project_gap",
+                            "warning",
+                            "weeks",
+                            f"Week of {r['week']}, project {p['name']}: with this item {_h(blk['assigned'])} h are "
+                            f"planned but only {_h(blk['capacity'])} h are allocated to the project "
+                            f"(gap {_h(blk['gap'])} h). Other projects' free hours do not cover it.",
+                            dict(
+                                project_id=p["project_id"],
+                                project_name=p["name"],
+                                week=r["week"],
+                                pool=pool,
+                                assigned=blk["assigned"],
+                                capacity=blk["capacity"],
+                                gap=blk["gap"],
+                                options=list(OFFER_GAP_OPTIONS),
+                            ),
+                            confirmable=False,
+                        )
+                    )
+        return out
 
     def _options(self, world: eng.World, item: eng.Item, hours: float) -> list[dict]:
         opts: list[dict] = []
@@ -248,6 +509,7 @@ class PlanningService:
             replace(world, items=[i for i in world.items if not (i.kind == item.kind and i.id == item.id)]),
             item.start,
             item.end,
+            scope=eng.scope_of(item),
         )
         if free > 0 and free < hours:
             opts.append(
@@ -263,7 +525,9 @@ class PlanningService:
         plan = draft.get("plan") or {}
         if plan:
             world = self._world(today)
-            item = _item_from_plan("offer", exclude_id or "draft", "Offer draft", plan, world, True)
+            item = _item_from_plan(
+                "offer", exclude_id or "draft", "Offer draft", plan, world, True, draft.get("project_id")
+            )
             if item:
                 out += self.feasibility(world, item)
         ref = self._reference_rate(draft.get("project_id"), draft.get("customer_id"), settings)
@@ -293,7 +557,9 @@ class PlanningService:
                             out += self.feasibility(world, it)
                 return out
             if rec.get("status") == "sent":
-                item = _item_from_plan("offer", rec["id"], "Offer", rec.get("plan") or {}, world, True)
+                item = _item_from_plan(
+                    "offer", rec["id"], "Offer", rec.get("plan") or {}, world, True, rec.get("project_id")
+                )
                 if item:
                     out += self.feasibility(world, item)
             ref = self._reference_rate(rec.get("project_id"), rec.get("customer_id"), settings)
@@ -433,12 +699,17 @@ class PlanningService:
         earliest: date | None = None,
         user_ids: list[str] | None = None,
         today: date | None = None,
+        project_id: str | None = None,
     ) -> dict:
-        """Earliest start for a new offer of ``hours`` (total) that is feasible until ``deadline``."""
+        """Earliest start for a new offer of ``hours`` (total) that is feasible until ``deadline``. The offer belongs
+        to ``project_id`` (none = the unassigned scope): only that scope's free hours count."""
         today = today or date.today()
         first = earliest or today
         if deadline < first:
             raise ServiceError(422, "The deadline is before the earliest start")
+        scope = self._check_scope(project_id) or eng.UNASSIGNED
+        if scope == eng.UNASSIGNED:
+            project_id = None
         world = self._world(today)
         ids = user_ids or ([world.boss] if world.boss else [])
         n_days = (deadline - first).days + 1
@@ -450,7 +721,9 @@ class PlanningService:
         suffix = 0.0
         x = deadline
         while x >= first:
-            suffix += table.days[x].cap - table.days[x].confirmed - table.days[x].binding
+            sd = table.days[x].scopes.get(scope)
+            if sd is not None:
+                suffix += sd.cap - sd.internal.assigned - sd.external.assigned
             free_from[x] = suffix
             x -= timedelta(days=1)
         for s in sorted(free_from):
@@ -468,6 +741,7 @@ class PlanningService:
                 rate=world.default_rate,
                 binding=True,
                 win=1.0,
+                project_id=project_id,
             )
             if ids and self._fits(world, item):
                 return dict(start=s.isoformat(), feasible=True, free_hours=round(free_from[s], 2))
@@ -493,8 +767,8 @@ class PlanningService:
         over_ids = {(r["week"]) for r in over}
         suggestions: list[dict] = []
         for other in world.items:
-            if other.kind != "offer" or not other.binding:
-                continue
+            if other.kind != "offer" or not other.binding or other.project_id != item.project_id:
+                continue  # only offers of the same project (or of none) compete for the same capacity
             touches = any(
                 eng.week_start(other.start) <= date.fromisoformat(w) <= eng.week_start(other.end) for w in over_ids
             )
@@ -525,7 +799,10 @@ class PlanningService:
                 )
         hours = (item.total or 0.0) if item.total else (item.hpw or 0.0) * ((item.end - item.start).days + 1) / 7.0
         free = eng.free_hours_in_range(
-            replace(world, items=[i for i in world.items if i.id != "draft"]), item.start, item.end
+            replace(world, items=[i for i in world.items if i.id != "draft"]),
+            item.start,
+            item.end,
+            scope=eng.scope_of(item),
         )
         suggestions.append(
             dict(
@@ -583,6 +860,7 @@ class PlanningService:
                     self.store.save("absences", new)
                 applied += 1
             converted = {c.get("offer_id") for c in self.store.list("contracts")}
+            alloc_warnings: list[dict] = []
             for c in changes.get("commitments") or []:
                 kind, rid = c["kind"], c["id"]
                 if kind == "contract":
@@ -608,7 +886,14 @@ class PlanningService:
                         raise ServiceError(422, "The end must not be before the start")
                     self.store.save("offers", {**old, "plan": plan})
                 applied += 1
-        return dict(applied=applied, warnings=self.simulate(None, 26, None, None, today)["warnings"])
+            for ch in changes.get("allocations") or []:
+                alloc_warnings += self.allocs.apply_change(ch)
+                applied += 1
+        return dict(
+            applied=applied,
+            warnings=self.simulate(None, 26, None, None, today)["warnings"],
+            allocation_warnings=alloc_warnings,
+        )
 
     def list_scenarios(self, me: dict) -> list[dict]:
         return [s for s in self.store.list("plan_scenarios") if s.get("user_id") == me["id"]]
