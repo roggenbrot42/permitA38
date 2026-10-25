@@ -110,6 +110,10 @@
     const p = o.plan || null;
     const vals = { received_on: todayISO(), supplier_id: presetSupplier, vat_mode: '', vat_rate: '', ...o,
       plan_on: !!p, plan_start: p?.start || '', plan_end: p?.end || '', plan_mode: p && p.total_hours != null ? 'total' : 'week', plan_hours: p ? (p.total_hours ?? p.hours_per_week) : '', project_id: o.project_id || '', contract_id: o.contract_id || '' };
+    // the VAT treatment the server reports is derived from the supplier: preselect it only when it differs from the supplier's setting
+    // (otherwise saving would pin the current treatment; '' keeps the supplier's setting)
+    const supMode = window.SUP.byId(vals.supplier_id)?.vat_mode ?? null;
+    if (!(o.vat_mode && o.vat_mode !== supMode)) { vals.vat_mode = ''; vals.vat_rate = ''; }
     LINES = (o.lines || [{ description: '', quantity: '', unit: 'h', unit_price: '' }]).map(l => ({ description: l.description ?? '', quantity: String(l.quantity ?? ''), unit: l.unit || 'h', unit_price: String(l.unit_price ?? '') }));
     const fields = locked ? [
       { k: 'notes', l: 'Notes', t: 'area' }, { k: 'decision_note', l: 'Decision note', t: 'area' },

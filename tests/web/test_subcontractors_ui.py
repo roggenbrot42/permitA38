@@ -831,6 +831,32 @@ def test_accepted_offer_edit_sends_only_the_allowed_changes(browser):
     ctx.close()
 
 
+def test_offer_edit_pins_no_vat_unless_it_differs_from_the_supplier(browser):
+    api = FakeApi()  # the offer says domestic, the supplier is domestic: the form keeps the supplier's setting
+    ctx, pg, problems = open_app(browser, api, page="incoming/9b3e51c7")
+    pg.click("[data-a=offEdit]")
+    dlg = pg.locator("#modal-root .modal")
+    expect(dlg.locator("#f_vat_mode")).to_have_value("")
+    expect(dlg.locator("#f_vat_rate")).to_have_value("")
+    dlg.get_by_role("button", name="Save").click()
+    pg.wait_for_selector("#modal-root .modal", state="detached")
+    body = api.calls("PUT", "incoming-offers/9b3e51c7")[0][3]
+    assert body["vat_mode"] is None and body["vat_rate"] is None
+    assert problems == []
+    ctx.close()
+
+
+def test_offer_edit_shows_a_vat_treatment_that_differs_from_the_supplier(browser):
+    api = FakeApi()
+    api.offers[0].update(vat_mode="eu_reverse_charge", vat_rate=0)  # the supplier is domestic: this offer differs
+    ctx, pg, problems = open_app(browser, api, page="incoming/9b3e51c7")
+    pg.click("[data-a=offEdit]")
+    dlg = pg.locator("#modal-root .modal")
+    expect(dlg.locator("#f_vat_mode")).to_have_value("eu_reverse_charge")
+    assert problems == []
+    ctx.close()
+
+
 def test_unaccept_asks_first(browser):
     api = FakeApi()
     api.offers[0].update(status="accepted", effective_status="accepted", allocation_id="c04d77e1")
