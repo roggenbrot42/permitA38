@@ -366,12 +366,42 @@ class ProcurementService:
 
         svc = AllocationService(self.store)
         allocation = svc.present_one(alloc)
+        nodemand = self._first_week_without_demand(alloc, today)
         return {
             "offer": self._present(saved, today),
             "allocation": allocation,
             "commitment": None,
-            "planning_warnings": warnings,
+            "planning_warnings": warnings + nodemand,
         }
+
+    def _first_week_without_demand(self, alloc: dict, today: date) -> list[dict]:
+        """``allocation.no_demand`` for the first week of a new allocation whose project pool has capacity and no
+        demand (the planner decides; docs/contracts/subcontractors.md, W1 and W14)."""
+        from . import planning as eng  # local import: the planner is the heavy part of the engine
+
+        week = eng.week_start(calc.d(alloc["start"]))
+        world = eng.load(self.store, today)
+        rows, _ = eng.weeks_detail(world, week, 1, None, alloc["project_id"])
+        for p in rows[0]["projects"] if rows else []:
+            if p["project_id"] == alloc["project_id"] and p["external"]["capacity"] > 1e-9 and p["external"]["assigned"] <= 1e-9:
+                return [
+                    pw.warning(
+                        "allocation.no_demand",
+                        "info",
+                        "weeks",
+                        f"Week of {week.isoformat()}: {_h(p['external']['capacity'])} h are allocated to project "
+                        f"{p['name']} but nothing is planned there.",
+                        dict(
+                            allocation_id=alloc["id"],
+                            project_id=alloc["project_id"],
+                            project_name=p["name"],
+                            week=week.isoformat(),
+                            capacity=p["external"]["capacity"],
+                        ),
+                        confirmable=False,
+                    )
+                ]
+        return []
 
     def _accept_warnings(self, supplier: dict, row: dict, rec: dict) -> list[dict]:
         cap = self._cap()

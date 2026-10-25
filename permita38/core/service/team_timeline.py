@@ -9,7 +9,7 @@ absences right). Contracts and weekly hours are shown at ``full`` only, weekly h
 """
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from permita38.core import rights
@@ -95,7 +95,33 @@ class TeamTimelineService:
             "end": end.isoformat(),
             "holidays": _holidays(settings.get("state") or "", start, end),
             "people": out,
+            "external": self._external(viewer, start, end),
         }
+
+    def _external(self, viewer: dict, start: date, end: date) -> list[dict]:
+        """Subcontractor windows (names and dates only, never rates, hours or money): active and cancelled external
+        allocations overlapping the window, grouped by supplier (docs/contracts/subcontractors.md)."""
+        if rights.scope_for(viewer, "suppliers") == rights.Scope.NONE:
+            return []
+        names = {s["id"]: s.get("name") or "" for s in self.store.list("suppliers")}
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for r in self.store.list("allocations"):
+            if not r.get("supplier_id") or r.get("user_id") or r.get("status", "active") not in ("active", "cancelled"):
+                continue
+            s, e = _day(r.get("start")), _day(r.get("end"))
+            if s is None or e is None:
+                continue
+            if r.get("status") == "cancelled" and _day(r.get("cancelled_from")):
+                e = min(e, _day(r["cancelled_from"]) - timedelta(days=1))
+            if e < s or e < start or s > end:
+                continue
+            groups[r["supplier_id"]].append({"start": s.isoformat(), "end": e.isoformat()})
+        out = [
+            {"supplier_id": sid, "name": names.get(sid, ""), "windows": sorted(ws, key=lambda w: w["start"])}
+            for sid, ws in groups.items()
+        ]
+        out.sort(key=lambda g: (g["name"].casefold(), g["supplier_id"]))
+        return out
 
     def _people(self, viewer: dict) -> list[dict]:
         active = [u for u in self.store.list("users") if u.get("active") is not False and u.get("id")]
