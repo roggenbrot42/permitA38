@@ -167,6 +167,9 @@ class ApiMachine(RuleBasedStateMachine):
         self.steps = 0
         self.timers: dict[str, dict | None] = {}
         self.allocs: dict[str, dict] = {}  # id -> {user_id, project_id, start, end, hours_per_week}
+        self.sup: dict[str, dict] = {}  # suppliers: id -> {name, kind, active}
+        self.inc: dict[str, dict] = {}  # incoming offers: id -> {supplier_id, project_id, status, allocation_id, ...}
+        self.ext_allocs: dict[str, str] = {}  # external allocations: id -> incoming offer id
         self.m: dict[str, dict] = {c: {} for c in (*CRUD, "offers", "invoices", "users")}
         self.bodies: dict[str, dict] = {}  # last submitted body per document id
         self.settings = {"kleinunternehmer": False, "accounting": "eur"}
@@ -1187,11 +1190,231 @@ class ApiMachine(RuleBasedStateMachine):
         again = self.call("POST", "/allocations/bootstrap", s, json={"confirm": True}).json()
         assert again["allocations"] == []
 
+    # ------------------------------------------------------------------ rules: suppliers and incoming offers
+    @rule(data=st.data(), kind=st.sampled_from(["company", "person-capacity"]), active=st.booleans())
+    def supplier_create(self, data, kind, active):
+        self.tick()
+        s = data.draw(self.actor())
+        name = data.draw(
+            st.sampled_from(["Demo Print Shop GmbH", "Example Freelance Studio (Demo)", "Example Hosting"])
+        )
+        body = {"name": name, "kind": kind, "active": active, "country": "DE"}
+        if kind == "person-capacity":
+            body.update(weekly_hours=40.0, workdays=[0, 1, 2, 3], rate=80.0)
+        r = self.call("POST", "/suppliers", s, json=body)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g, r.text
+            return
+        assert r.status_code == 201, r.text
+        got = r.json()
+        assert (got["kind"], got["active"], got["vat_mode"]) == (kind, active, "domestic")
+        self.sup[got["id"]] = dict(name=name, kind=kind, active=active)
+
+    @precondition(lambda self: self.sup)
+    @rule(data=st.data(), active=st.booleans())
+    def supplier_update(self, data, active):
+        self.tick()
+        s = data.draw(self.actor())
+        sid = data.draw(st.sampled_from(list(self.sup) + [DEAD_ID]))
+        old = self.sup.get(sid)
+        body = {"name": old["name"] if old else "Renamed", "kind": old["kind"] if old else "company", "active": active}
+        if old and old["kind"] == "person-capacity":
+            body.update(weekly_hours=40.0, workdays=[0, 1, 2, 3], rate=80.0)
+        r = self.call("PUT", f"/suppliers/{sid}", s, json=body)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g, r.text
+            return
+        if old is None:
+            assert r.status_code == 404 and r.json() == {"detail": "Not found"}
+            return
+        assert r.status_code == 200, r.text
+        self.sup[sid] = dict(old, active=active)
+
+    @precondition(lambda self: self.sup)
+    @rule(data=st.data())
+    def supplier_delete(self, data):
+        """409 while an incoming offer or an external allocation refers to the supplier (archive it instead)."""
+        self.tick()
+        s = data.draw(self.actor())
+        sid = data.draw(st.sampled_from(list(self.sup) + [DEAD_ID]))
+        r = self.call("DELETE", f"/suppliers/{sid}", s)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g, r.text
+            return
+        if sid not in self.sup:
+            assert r.status_code == 404
+        elif any(o["supplier_id"] == sid for o in self.inc.values()) or sid in self._ext_suppliers():
+            assert r.status_code == 409
+            assert r.json() == {
+                "detail": "Supplier is used by incoming offers, allocations or expenses; archive it instead"
+            }
+        else:
+            assert r.status_code == 204, r.text
+            del self.sup[sid]
+
+    def _ext_suppliers(self) -> set[str]:
+        return {self.inc[oid]["supplier_id"] for oid in self.ext_allocs.values()}
+
+    @precondition(lambda self: len(self.inc) < 10)
+    @rule(
+        data=st.data(),
+        hours=st.sampled_from([0.0, 4.0, 16.0]),
+        with_plan=st.booleans(),
+        expired=st.booleans(),
+        start_off=st.integers(-2, 10),
+    )
+    def offer_create(self, data, hours, with_plan, expired, start_off):
+        self.tick()
+        s = data.draw(self.actor())
+        sid = data.draw(st.sampled_from(list(self.sup) + [DEAD_ID]))
+        pid = data.draw(st.sampled_from(list(self.m["projects"]))) if self.m["projects"] else None
+        valid = TODAY - timedelta(days=3) if expired else TODAY + timedelta(days=30)
+        line = {"quantity": hours, "unit": "h", "unit_price": 80.0} if hours else {"quantity": 1, "unit": "flat",
+                                                                                 "unit_price": 500.0}  # fmt: skip
+        body = {"supplier_id": sid, "received_on": "2026-02-20", "valid_until": valid.isoformat(), "lines": [line]}
+        if pid:
+            body["project_id"] = pid
+        plan = None
+        if with_plan:
+            start = TODAY + timedelta(days=start_off)
+            plan = dict(start=start.isoformat(), end=(start + timedelta(days=13)).isoformat(), hours_per_week=5.0)
+            body["plan"] = plan
+        r = self.call("POST", "/incoming-offers", s, json=body)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g, r.text
+            return
+        sup = self.sup.get(sid)
+        if sup is None:
+            assert r.status_code == 422 and r.json() == {"detail": "Unknown supplier"}
+        elif not sup["active"]:
+            assert r.status_code == 409 and r.json() == {"detail": "The supplier is not active"}
+        else:
+            assert r.status_code == 201, r.text
+            got = r.json()
+            assert got["status"] == "received" and "allocation_id" not in got
+            assert got["effective_status"] == ("expired" if expired else "received")
+            assert (got["hours"], got["net_total"]) == (hours, round(hours * 80.0, 2) if hours else 500.0)
+            self.inc[got["id"]] = dict(supplier_id=sid, project_id=pid, status="received", allocation_id=None,
+                                       valid=valid, plan=plan, kind=sup["kind"], hours=hours)  # fmt: skip
+
+    @precondition(lambda self: self.inc)
+    @rule(
+        data=st.data(),
+        action=st.sampled_from(["review", "reject", "reopen", "accept", "unaccept", "delete"]),
+        confirm_expired=st.booleans(),
+    )
+    def offer_action(self, data, action, confirm_expired):
+        """Every status action against the table of the contract; accept checks in the contract's order."""
+        self.tick()
+        s = data.draw(self.actor())
+        oid = data.draw(st.sampled_from(list(self.inc) + [DEAD_ID]))
+        old = self.inc.get(oid)
+        if action == "delete":
+            r = self.call("DELETE", f"/incoming-offers/{oid}", s)
+        else:
+            body = None
+            if action == "accept":
+                body = {"confirm_expired": confirm_expired, "confirm_warnings": ["allocation.exceeds_weekly_hours"]}
+            elif action == "reject":
+                body = {"reason": "not this time"}
+            r = self.call("POST", f"/incoming-offers/{oid}/{action}", s, json=body)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g, r.text
+            return
+        if old is None:
+            assert r.status_code == 404 and r.json() == {"detail": "Not found"}
+            return
+        status = old["status"]
+        if action == "delete":
+            if status == "accepted":
+                assert r.status_code == 409
+                assert r.json() == {"detail": "An accepted offer cannot be deleted; unaccept it first"}
+            else:
+                assert r.status_code == 204, r.text
+                del self.inc[oid]
+            return
+        allowed = {"review": ("received",), "reject": ("received", "under_review"), "reopen": ("rejected",),
+                   "accept": ("received", "under_review"), "unaccept": ("accepted",)}  # fmt: skip
+        if status not in allowed[action]:
+            assert r.status_code == 409, r.text
+            assert r.json() == {"detail": f"This action is not possible in status {status}"}
+            return
+        if action == "accept":
+            expired = old["valid"] < TODAY
+            sup = self.sup[old["supplier_id"]]
+            if expired and not confirm_expired:
+                assert r.status_code == 409
+                assert r.json() == {
+                    "detail": f"The offer expired on {old['valid'].isoformat()}; confirm to accept it anyway"
+                }
+                return
+            if not sup["active"]:
+                assert r.status_code == 409 and r.json() == {"detail": "The supplier is not active"}
+                return
+            if sup["kind"] == "person-capacity":
+                pid = old["project_id"]
+                project = self.m["projects"].get(pid) if pid else None
+                if old["plan"] is None:
+                    assert r.status_code == 422 and r.json() == {"detail": "A capacity offer needs a plan"}
+                    return
+                if pid is None:
+                    assert r.status_code == 422 and r.json() == {"detail": "A capacity offer needs a project"}
+                    return
+                if project is None:  # the project was deleted after the offer named it
+                    assert r.status_code == 422 and r.json() == {"detail": "Unknown project"}
+                    return
+                if old["hours"] == 0:
+                    assert r.status_code == 422 and r.json() == {"detail": "A capacity offer needs an hour line"}
+                    return
+                if project["status"] in ("done", "archived"):
+                    assert r.status_code == 409 and r.json() == {"detail": "The project is closed"}
+                    return
+                assert r.status_code == 200, r.text
+                aid = r.json()["allocation"]["id"]
+                assert r.json()["allocation"]["kind"] == "external" and r.json()["commitment"] is None
+                self.ext_allocs[aid] = oid
+                self.inc[oid] = dict(old, status="accepted", allocation_id=aid)
+            else:
+                assert r.status_code == 200, r.text
+                assert r.json()["commitment"]["kind"] == "flat" and r.json()["allocation"] is None
+                self.inc[oid] = dict(old, status="accepted")
+        elif action == "unaccept":
+            if old["kind"] == "person-capacity":
+                started = old["plan"]["start"] <= TODAY.isoformat()
+                if started:
+                    assert r.status_code == 409
+                    assert r.json() == {
+                        "detail": "The allocation has started or has linked expenses; cancel it instead"
+                    }
+                    return
+                self.ext_allocs.pop(old["allocation_id"], None)
+            assert r.status_code == 200, r.text
+            self.inc[oid] = dict(old, status="under_review", allocation_id=None)
+        else:
+            new = {"review": "under_review", "reject": "rejected", "reopen": "under_review"}[action]
+            assert r.status_code == 200, r.text
+            self.inc[oid] = dict(old, status=new)
+
+    def suppliers_match_model(self):
+        boss = self._boss()
+        rows = self.call("GET", "/suppliers", boss).json()
+        assert {r["id"]: (r["name"], r["kind"], r["active"]) for r in rows} == {
+            k: (v["name"], v["kind"], v["active"]) for k, v in self.sup.items()
+        }
+        offers = self.call("GET", "/incoming-offers", boss).json()
+        assert {o["id"]: (o["status"], o.get("allocation_id")) for o in offers} == {
+            k: (v["status"], v["allocation_id"]) for k, v in self.inc.items()
+        }
+
     def allocations_match_model(self):
         rows = self.call("GET", "/allocations", self._boss()).json()
-        assert {r["id"] for r in rows} == set(self.allocs)
-        for row in rows:
+        employee = [r for r in rows if not r.get("supplier_id")]
+        external = {r["id"] for r in rows if r.get("supplier_id")}
+        assert {r["id"] for r in employee} == set(self.allocs)
+        for row in employee:
             subset_eq(self.allocs[row["id"]], row)
+        # an external allocation exists exactly while its offer is accepted (and not unaccepted)
+        assert external == set(self.ext_allocs)
         # ring fence: whatever the allocations, the scopes of a week add up to the team row and the gaps to its gap
         out = self.call("GET", "/forecast", self._boss(), params={"weeks": 6}).json()
         for w in out["weeks"]:
@@ -1495,6 +1718,7 @@ class ApiMachine(RuleBasedStateMachine):
         self.tokens_match_model()
         self.lists_match_model()
         self.allocations_match_model()
+        self.suppliers_match_model()
         self.dashboard_matches_model()
         self.finance_matches_model()
         self.dirty = set()
