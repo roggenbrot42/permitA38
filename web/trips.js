@@ -325,12 +325,15 @@ function tripChange(e) {
   const t = e.target;
   if (t.id === 't_start' || t.id === 't_end') { rebuildDays(); return scheduleTripPreview(); }
   if (t.dataset.not !== undefined || t.name === 't_cc') return persistChecklist();
+  if ((t.id === 't_project' || t.id === 't_customer') && document.querySelector('input[name="t_cc"]:checked')?.value === 'project') persistChecklist();
   scheduleTripPreview();
 }
 function tripInput(e) { if (TRIP_OPEN && !TRIP_OPEN.ro && e.target.closest('#t_form')) scheduleTripPreview(); }
 /** Not-needed and cost-centre decisions are stored at once (a saved trip), so the checklist states are the server's. */
 async function persistChecklist() {
   if (!TRIP_OPEN?.id || TRIP_OPEN.ro) return;   // a new trip keeps them until its first save
+  const cc = document.querySelector('input[name="t_cc"]:checked');
+  if (cc?.value === 'project' && !$('#t_project')?.value && !$('#t_customer')?.value) return;   // keep the choice until a customer or project is picked
   const focus = document.activeElement?.id || '';
   let t = null;
   try { t = await tripWrite(tripBody('draft')); }
@@ -380,11 +383,22 @@ A.tripSave = once(async () => {
   await tripAfterWrite(t);
 });
 A.tripFinalize = once(async () => {
+  if (!TRIP_OPEN.id) {   // a new trip is stored as a draft first, so the checklist below is the server's
+    const draft = await tripWrite(tripBody('draft'));
+    TRIP_OPEN.id = draft.id;
+    TRIP_OPEN.trip = draft;
+  }
   const body = tripBody('final');
+  const open = (TRIP_OPEN.trip?.checklist || []).filter(i => i.state === 'open').map(i => i.label);
+  let force = false;
+  if (open.length) {   // ask before sending: one request, with force when the boss confirms
+    if (!confirm(`Checklist has open items: ${open.join(', ')}\n\nFinalize anyway? The open lines stay open in the statement.`)) return;
+    force = true;
+  }
   let t;
-  try { t = await tripWrite(body); }
-  catch (e) {
-    if (e.status !== 409 || !/Checklist has open items/.test(e.message)) throw e;
+  try { t = await tripWrite(body, force); }
+  catch (e) {   // the stored checklist was stale: the server still decides
+    if (force || e.status !== 409 || !/Checklist has open items/.test(e.message)) throw e;
     if (!confirm(`${e.message}\n\nFinalize anyway? The open lines stay open in the statement.`)) return;
     t = await tripWrite(body, true);
   }

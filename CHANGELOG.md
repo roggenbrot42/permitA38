@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- Business trips: finalizing a trip with open checklist lines now asks first and sends one request (no refused `PUT`
+  with a `409` in the console); a new trip is saved as a draft before it is finalized.
+- Business trips: the cost centre choice "Charge to the customer or project" is kept when you pick the project
+  afterwards and is stored as soon as a customer or project is chosen.
+- The import and numbering pages no longer fail with a script error for a user who is not the boss (the helper that
+  shows the "only available to the boss" message was missing).
+
 ## [0.4.0-alpha.3] - 2026-10-25
 
 Third alpha. Adds business trips (page, allowance, mileage, statement), the team timeline (page and API), personal
