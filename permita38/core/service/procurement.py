@@ -23,6 +23,24 @@ from . import external_capacity as ext
 from . import planning_warnings as pw
 from .suppliers import CAPACITY_KIND, default_vat_mode
 
+# the fields a client may send for an offer; every other key (status, allocation_id, decided_by, totals, external_id ...)
+# is owned by the server and never taken from a request
+CLIENT_FIELDS = (
+    "supplier_id",
+    "reference",
+    "title",
+    "received_on",
+    "valid_until",
+    "lines",
+    "vat_rate",
+    "vat_mode",
+    "plan",
+    "project_id",
+    "contract_id",
+    "attachment",
+    "decision_note",
+    "notes",
+)
 NO_VAT_MODES = frozenset({"eu_reverse_charge", "third_country_reverse_charge", "small_business"})
 OPEN = ("received", "under_review")
 STORED = ("received", "under_review", "accepted", "rejected")
@@ -50,6 +68,10 @@ LOCKED_MESSAGE = "An accepted offer can only change notes, attachment and decisi
 MAX_WARNED_WEEKS = 10
 RATE_QUANT = Decimal("0.0001")
 LEGAL_HINT = "The customer share is an indicator only; check the bookkeeping rules (verify)."
+
+
+def client_fields(data: dict) -> dict:
+    return {k: data.get(k) for k in CLIENT_FIELDS}
 
 
 def _h(x: float) -> str:
@@ -150,11 +172,28 @@ class ProcurementService:
                 raise ServiceError(422, "The contract is not a contract of this project")
         return supplier, project
 
+    @staticmethod
+    def _plan_row(plan: dict) -> dict:
+        """The plan as an allocation row (what the spreading function reads)."""
+        row: dict = {"start": plan.get("start"), "end": plan.get("end"), "status": "active"}
+        if plan.get("total_hours"):
+            row["total_hours"] = plan["total_hours"]
+        else:
+            row["hours_per_week"] = plan.get("hours_per_week")
+        return row
+
+    def _planned_hours(self, plan: dict, supplier: dict) -> float:
+        """Capacity suppliers: the hours the plan books (the spreading of the external allocation). Others: the
+        plan's own hours (``planning_warnings.plan_hours``)."""
+        if supplier.get("kind") != CAPACITY_KIND:
+            return pw.plan_hours(plan) or 0.0
+        return round(sum(ext.allocation_days(supplier, self._plan_row(plan), self._cap()).values()), 6)
+
     def _warnings(self, rec: dict, supplier: dict) -> builtins.list[dict]:
         out: builtins.list[dict] = []
         plan = rec.get("plan")
         if plan:
-            planned = pw.plan_hours(plan)
+            planned = self._planned_hours(plan, supplier)
             if planned is not None and abs(planned - rec.get("hours", 0.0)) > 0.01:
                 out.append(
                     pw.warning(
@@ -215,8 +254,7 @@ class ProcurementService:
         supplier, project = self._checks(data)
         if not supplier.get("active", True):
             raise ServiceError(409, "The supplier is not active")
-        rec = {**data, **self.computed(data, supplier, project), "status": "received"}
-        rec = {k: v for k, v in rec.items() if k not in ("planning_warnings", "effective_status")}
+        rec = {**client_fields(data), **self.computed(data, supplier, project), "status": "received"}
         with self.store.transaction():
             saved = self.store.save("incoming_offers", rec)
         out = self._present(saved, today)
@@ -242,8 +280,7 @@ class ProcurementService:
             }
         else:
             keep = {k: old.get(k) for k in ("status", "status_changed_at", "decided_by", "allocation_id")}
-            rec = {**data, **new, **keep, "id": rid, "created": old.get("created")}
-        rec = {k: v for k, v in rec.items() if k not in ("planning_warnings", "effective_status", "supplier_name")}
+            rec = {**old, **client_fields(data), **new, **keep, "id": rid, "created": old.get("created")}
         with self.store.transaction():
             saved = self.store.save("incoming_offers", {**rec, "id": rid})
         out = self._present(saved, today)
@@ -268,19 +305,25 @@ class ProcurementService:
 
     def transition(self, rid: str, action: str, me: dict, body: dict | None = None, today: date | None = None) -> dict:
         today = today or date.today()
-        rec = self._offer(rid)
-        allowed, target = TRANSITIONS[action]
-        if rec.get("status") not in allowed:
-            raise ServiceError(409, f"This action is not possible in status {rec.get('status')}")
-        extra = {}
+        extra: dict = {}
         if action == "reject" and body and body.get("reason"):
             extra["decision_note"] = body["reason"]
-        with self.store.transaction():
+        with self.store.transaction():  # read, check and write in one transaction
+            rec = self._offer(rid)
+            allowed, target = TRANSITIONS[action]
+            if rec.get("status") not in allowed:
+                raise ServiceError(409, f"This action is not possible in status {rec.get('status')}")
             saved = self.store.save("incoming_offers", self._stamp(rec, target, me, today, **extra))
         return self._present(saved, today)
 
     def accept(self, rid: str, body: dict, me: dict, today: date | None = None) -> dict:
+        """``body`` is the request as sent (``exclude_unset``): an explicit null in ``project_id``/``contract_id``
+        clears the offer's link."""
         today = today or date.today()
+        with self.store.transaction():
+            return self._accept(rid, body, me, today)
+
+    def _accept(self, rid: str, body: dict, me: dict, today: date) -> dict:
         rec = self._offer(rid)
         if rec.get("status") not in OPEN:
             raise ServiceError(409, f"This action is not possible in status {rec.get('status')}")
@@ -291,14 +334,22 @@ class ProcurementService:
             raise ServiceError(422, "Unknown supplier")
         if not supplier.get("active", True):
             raise ServiceError(409, "The supplier is not active")
-        project_id = body.get("project_id") or rec.get("project_id")
-        contract_id = body.get("contract_id") or rec.get("contract_id")
+        project_id = body["project_id"] if "project_id" in body else rec.get("project_id")
+        contract_id = body["contract_id"] if "contract_id" in body else rec.get("contract_id")
         decision = body.get("decision_note") if body.get("decision_note") is not None else rec.get("decision_note")
         if supplier.get("kind") != CAPACITY_KIND:
+            project = self._linked_project(project_id, contract_id)
             saved = self.store.save(
                 "incoming_offers",
                 self._stamp(
-                    rec, "accepted", me, today, decision_note=decision, project_id=project_id, contract_id=contract_id
+                    rec,
+                    "accepted",
+                    me,
+                    today,
+                    decision_note=decision,
+                    project_id=project_id or None,
+                    contract_id=(contract_id or None) if project_id else None,
+                    customer_id=(project or {}).get("customer_id") or None,
                 ),
             )
             return {
@@ -308,35 +359,29 @@ class ProcurementService:
                 "planning_warnings": [],
             }
         plan = rec.get("plan")
-        if not plan:
+        if not isinstance(plan, dict) or not plan.get("start") or not plan.get("end"):
             raise ServiceError(422, "A capacity offer needs a plan")
-        project = self.store.get("projects", project_id) if project_id else None
         if not project_id:
             raise ServiceError(422, "A capacity offer needs a project")
+        project = self.store.get("projects", project_id)
         if not project:
             raise ServiceError(422, "Unknown project")
-        if (project.get("status") or "active") in ("done", "archived"):
-            raise ServiceError(409, "The project is closed")
         if not any(ln.get("unit") == "h" for ln in rec.get("lines") or []):
             raise ServiceError(422, "A capacity offer needs an hour line")
+        if (project.get("status") or "active") in ("done", "archived"):
+            raise ServiceError(409, "The project is closed")
         if contract_id:
-            contract = self.store.get("contracts", contract_id)
-            if not contract or contract.get("project_id") != project_id:
-                raise ServiceError(422, "The contract is not a contract of this project")
+            self._contract_of(project_id, contract_id)
         row = {
             "supplier_id": supplier["id"],
             "incoming_offer_id": rec["id"],
             "project_id": project_id,
             "contract_id": contract_id or None,
             "customer_id": project.get("customer_id") or None,
-            "start": plan["start"],
-            "end": plan["end"],
-            "status": "active",
+            **self._plan_row(plan),
         }
-        if plan.get("total_hours"):
-            row["total_hours"] = float(plan["total_hours"])
-        else:
-            row["hours_per_week"] = float(plan["hours_per_week"])
+        row.pop("status", None)
+        row["status"] = "active"
         hour_lines = [ln for ln in rec.get("lines") or [] if ln.get("unit") == "h"]
         h_net = sum((q2(dec(ln["quantity"]) * dec(ln["unit_price"])) for ln in hour_lines), ZERO)
         h_qty = sum((dec(ln["quantity"]) for ln in hour_lines), ZERO)
@@ -353,25 +398,24 @@ class ProcurementService:
                 "Confirm these warnings first: " + ", ".join(blocking),
                 body={"codes": blocking},
             )
-        with self.store.transaction():
-            alloc = self.store.save("allocations", row)
-            saved = self.store.save(
-                "incoming_offers",
-                self._stamp(
-                    rec,
-                    "accepted",
-                    me,
-                    today,
-                    allocation_id=alloc["id"],
-                    decision_note=decision,
-                    project_id=project_id,
-                    contract_id=contract_id,
-                ),
-            )
+        alloc = self.store.save("allocations", row)
+        saved = self.store.save(
+            "incoming_offers",
+            self._stamp(
+                rec,
+                "accepted",
+                me,
+                today,
+                allocation_id=alloc["id"],
+                decision_note=decision,
+                project_id=project_id,
+                contract_id=contract_id or None,
+                customer_id=project.get("customer_id") or None,
+            ),
+        )
         from .allocations import AllocationService  # local: the allocation views import the planner
 
-        svc = AllocationService(self.store)
-        allocation = svc.present_one(alloc)
+        allocation = AllocationService(self.store).present_one(alloc)
         nodemand = self._first_week_without_demand(alloc, today)
         return {
             "offer": self._present(saved, today),
@@ -379,6 +423,24 @@ class ProcurementService:
             "commitment": None,
             "planning_warnings": warnings + nodemand,
         }
+
+    def _contract_of(self, project_id: str | None, contract_id: str) -> None:
+        contract = self.store.get("contracts", contract_id)
+        if not contract or not project_id or contract.get("project_id") != project_id:
+            raise ServiceError(422, "The contract is not a contract of this project")
+
+    def _linked_project(self, project_id: str | None, contract_id: str | None) -> dict | None:
+        """Flat offers: a given project must exist and be open, a given contract must belong to it."""
+        project = None
+        if project_id:
+            project = self.store.get("projects", project_id)
+            if not project:
+                raise ServiceError(422, "Unknown project")
+            if (project.get("status") or "active") in ("done", "archived"):
+                raise ServiceError(409, "The project is closed")
+        if contract_id:
+            self._contract_of(project_id, contract_id)
+        return project
 
     def _first_week_without_demand(self, alloc: dict, today: date) -> builtins.list[dict]:
         """``allocation.no_demand`` for the first week of a new allocation whose project pool has capacity and no
@@ -622,24 +684,32 @@ class ProcurementService:
     # ------------------------------------------------------------------ unaccept, cancel
     def unaccept(self, rid: str, me: dict, today: date | None = None) -> dict:
         today = today or date.today()
-        rec = self._offer(rid)
-        if rec.get("status") != "accepted":
-            raise ServiceError(409, f"This action is not possible in status {rec.get('status')}")
-        aid = rec.get("allocation_id")
         with self.store.transaction():
-            if aid:
-                alloc = self.store.get("allocations", aid)
-                linked = self.store.find("expenses", allocation_id=aid)
-                start = calc.d(alloc.get("start")) if alloc else None
+            rec = self._offer(rid)
+            if rec.get("status") != "accepted":
+                raise ServiceError(409, f"This action is not possible in status {rec.get('status')}")
+            aid = rec.get("allocation_id")
+            alloc = self.store.get("allocations", aid) if aid else None
+            # only the allocation this offer created (same offer, same supplier, external) is ever deleted
+            own = bool(alloc) and (
+                alloc.get("incoming_offer_id") == rec["id"]
+                and alloc.get("supplier_id") == rec.get("supplier_id")
+                and not alloc.get("user_id")
+            )
+            if own:
+                start = calc.d(alloc.get("start"))
                 started = start is not None and start <= today
-                if started or linked:
+                if started or self.store.find("expenses", allocation_id=aid):
                     raise ServiceError(409, "The allocation has started or has linked expenses; cancel it instead")
-                if alloc:
-                    self.store.delete("allocations", aid)
+                self.store.delete("allocations", aid)
             saved = self.store.save("incoming_offers", self._stamp(rec, "under_review", me, today, allocation_id=None))
         return self._present(saved, today)
 
     def cancel_allocation(self, aid: str, body: dict, today: date | None = None) -> dict:
+        with self.store.transaction():
+            return self._cancel_allocation(aid, body, today)
+
+    def _cancel_allocation(self, aid: str, body: dict, today: date | None = None) -> dict:
         from .allocations import AllocationService  # local: the allocation views import the planner
 
         today = today or date.today()
@@ -656,25 +726,25 @@ class ProcurementService:
             raise ServiceError(409, "The allocation is already cancelled")
         if not row.get("supplier_id") or row.get("user_id"):
             raise ServiceError(409, "This allocation cannot be changed here")
-        with self.store.transaction():
-            self.store.save(
-                "allocations",
-                {
-                    **row,
-                    "status": "cancelled",
-                    "cancelled_from": body["effective_from"],
-                    "cancel_reason": body.get("reason"),
-                },
-            )
+        self.store.save(
+            "allocations",
+            {
+                **row,
+                "status": "cancelled",
+                "cancelled_from": body["effective_from"],
+                "cancel_reason": body.get("reason"),
+            },
+        )
         saved = self.store.get("allocations", aid) or row
         return AllocationService(self.store).present_one(saved, days=True)
 
-    # ------------------------------------------------------------------ commitments
     def commitments(self, supplier_id: str | None, project_id: str | None, today: date | None = None) -> dict:
         from .allocations import AllocationService  # local import, see above
 
         today = today or date.today()
         svc = AllocationService(self.store)
+        cap, _users, ctx_projects = svc._context()  # built once for all rows (not per allocation)
+        ext_suppliers, ext_offers, invoiced = svc._external_context()
         suppliers = {s["id"]: s for s in self.store.list("suppliers")}
         projects = {p["id"]: p for p in self.store.list("projects")}
         offers = {o["id"]: o for o in self.store.list("incoming_offers")}
@@ -684,7 +754,7 @@ class ProcurementService:
                 continue
             if row.get("status", "active") not in ("active", "cancelled"):
                 continue
-            view = svc.present_one(row)
+            view = svc.present_external(row, cap, ext_suppliers, ctx_projects, ext_offers, invoiced)
             if row.get("status") == "cancelled" and not (view.get("open_net") or 0) > 0:
                 continue
             offer = offers.get(row.get("incoming_offer_id") or "") or {}
@@ -787,13 +857,16 @@ class ProcurementService:
         from .allocations import AllocationService
 
         svc = AllocationService(self.store)
+        cap, _users, ctx_projects = svc._context()
+        ext_suppliers, ext_offers, invoiced = svc._external_context()
         out: dict[str, Decimal] = defaultdict(lambda: ZERO)
         for row in self.store.list("allocations"):
             if not row.get("supplier_id") or row.get("user_id") or not row.get("project_id"):
                 continue
             if row.get("status", "active") not in ("active", "cancelled"):
                 continue
-            out[row["project_id"]] += dec(svc.present_one(row).get("planned_net"))
+            view = svc.present_external(row, cap, ext_suppliers, ctx_projects, ext_offers, invoiced)
+            out[row["project_id"]] += dec(view.get("planned_net"))
         return {k: float(q2(v)) for k, v in out.items()}
 
     def hints(self, today: date) -> builtins.list[dict]:

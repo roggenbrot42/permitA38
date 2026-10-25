@@ -96,7 +96,13 @@ class RecordService:
             raise ServiceError(404, "Not found")
         return self._write(me, coll, {**data, "id": rid, "created": old.get("created")}, old)
 
-    def _write(self, me: dict, coll: str, data: dict, old: dict | None) -> dict:
+    def adopt_expense(self, me: dict, expense: dict, supplier_id: str) -> dict:
+        """adopt-vendors: the expense gets the supplier through the normal write rules; its vendor text stays as typed."""
+        data = {k: v for k, v in expense.items() if k not in RESPONSE_ONLY}
+        data["supplier_id"] = supplier_id
+        return self._write(me, "expenses", data, expense, keep_vendor=True)
+
+    def _write(self, me: dict, coll: str, data: dict, old: dict | None, keep_vendor: bool = False) -> dict:
         for k in RESPONSE_ONLY:  # advisory warnings are computed per response, never stored
             data.pop(k, None)
         sc = _scope(me, coll, "write")
@@ -127,7 +133,7 @@ class RecordService:
                 )
                 if not visible:
                     raise ServiceError(422, "Unknown trip")
-            self._link_supplier(data)
+            self._link_supplier(data, keep_vendor)
             if data.get("lines"):
                 self._check_vat_rates(*(ln.get("vat_rate") for ln in data["lines"]))
                 data = calc.itemise_expense(data)  # server derives net/vat per line and overwrites the top level
@@ -151,7 +157,7 @@ class RecordService:
         saved = self.store.save(coll, data)
         return _expense_view(saved) if coll == "expenses" else saved
 
-    def _link_supplier(self, data: dict) -> None:
+    def _link_supplier(self, data: dict, keep_vendor: bool = False) -> None:
         """Expense links (docs/contracts/subcontractors.md): the supplier must exist and gives ``vendor`` (a snapshot
         of its name); an allocation needs a supplier and must be an external allocation of that supplier."""
         if not data.get("reverse_charge"):
@@ -161,7 +167,8 @@ class RecordService:
             supplier = self.store.get("suppliers", sid)
             if not supplier:
                 raise ServiceError(422, "Unknown supplier")
-            data["vendor"] = supplier.get("name") or data.get("vendor")
+            if not keep_vendor:
+                data["vendor"] = supplier.get("name") or data.get("vendor")
         if aid:
             if not sid:
                 raise ServiceError(422, "allocation_id needs a supplier")

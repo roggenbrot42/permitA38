@@ -217,9 +217,18 @@ class SupplierService:
         groups.sort(key=lambda g: (-g["count"], g["key"]))
         return dict(groups=groups, unlinked_expenses=len(expenses))
 
-    def adopt_vendors(self, items: builtins.list[dict], dry_run: bool) -> dict:
+    def adopt_vendors(self, items: builtins.list[dict], dry_run: bool, me: dict) -> dict:
         """Link expenses (``supplier_id`` null, ``vendor`` equal to one of the texts) to a supplier, creating it on
-        request. ``vendor`` itself is never touched. A real run is one transaction."""
+        request. The expenses are written through the record rules (RecordService), ``vendor`` stays as typed. A real
+        run is one transaction; the selection is read inside it, so a concurrent change cannot be applied twice."""
+        if dry_run:
+            return self._adopt(items, True, me)
+        with self.store.transaction():
+            return self._adopt(items, False, me)
+
+    def _adopt(self, items: builtins.list[dict], dry_run: bool, me: dict) -> dict:
+        from .records import RecordService  # local: records and suppliers are siblings
+
         for item in items:
             sid = item.get("supplier_id")
             if sid and not (ID_RE.match(sid) and self.store.get("suppliers", sid)):
@@ -233,36 +242,28 @@ class SupplierService:
             plan.append((item, ids))
         out_items = []
         changed = 0
-
-        def run() -> None:
-            nonlocal changed
-            for item, ids in plan:
-                sid = item.get("supplier_id")
-                creating = item.get("create") is not None
-                created = False
-                if ids and creating and not dry_run:
-                    sid = self.store.save("suppliers", self.prepare(item["create"]))["id"]
-                    created = True
-                if ids and not dry_run:
-                    for eid in ids:
-                        exp = self.store.get("expenses", eid)
-                        if exp:
-                            self.store.save("expenses", {**exp, "supplier_id": sid})
-                changed += len(ids)
-                out_items.append(
-                    dict(
-                        vendors=item["vendors"],
-                        supplier_id=sid if (sid or not creating) else None,
-                        supplier_created=created,
-                        would_create=bool(creating and ids),
-                        expense_ids=ids,
-                        count=len(ids),
-                    )
+        for item, ids in plan:
+            sid = item.get("supplier_id")
+            creating = item.get("create") is not None
+            created = False
+            if ids and creating and not dry_run:
+                sid = self.store.save("suppliers", self.prepare(item["create"]))["id"]
+                created = True
+            if ids and not dry_run:
+                records = RecordService(self.store)
+                for eid in ids:
+                    exp = self.store.get("expenses", eid)
+                    if exp and not exp.get("supplier_id"):
+                        records.adopt_expense(me, exp, sid)
+            changed += len(ids)
+            out_items.append(
+                dict(
+                    vendors=item["vendors"],
+                    supplier_id=sid if (sid or not creating) else None,
+                    supplier_created=created,
+                    would_create=bool(creating and ids),
+                    expense_ids=ids,
+                    count=len(ids),
                 )
-
-        if dry_run:
-            run()
-        else:
-            with self.store.transaction():
-                run()
+            )
         return dict(dry_run=dry_run, items=out_items, expenses_changed=changed)

@@ -92,7 +92,7 @@ def review_offer(incoming_offer_id: OfferId, user: Writer, services: ServicesDep
     summary="accept an offer: a capacity supplier gets an external allocation, others a flat commitment",
 )
 def accept_offer(incoming_offer_id: OfferId, body: models.AcceptIn, user: Writer, services: ServicesDep):
-    return services.procurement.accept(incoming_offer_id, body.model_dump(), user, date.today())
+    return services.procurement.accept(incoming_offer_id, body.model_dump(exclude_unset=True), user, date.today())
 
 
 @router.post(

@@ -67,7 +67,7 @@ def vendor_suggestions(_: Writer, services: ServicesDep) -> Any:
     name="adopt_vendors",
     summary="link expenses to suppliers by vendor text (dry_run is on by default)",
 )
-def adopt_vendors(body: models.AdoptVendorsIn, _: Writer, services: ServicesDep) -> Any:
+def adopt_vendors(body: models.AdoptVendorsIn, user: Writer, services: ServicesDep) -> Any:
     items = [
         {
             "vendors": i.vendors,
@@ -76,7 +76,7 @@ def adopt_vendors(body: models.AdoptVendorsIn, _: Writer, services: ServicesDep)
         }
         for i in body.items
     ]
-    return services.suppliers.adopt_vendors(items, body.dry_run)
+    return services.suppliers.adopt_vendors(items, body.dry_run, user)
 
 
 @router.get(
