@@ -216,6 +216,8 @@ class FakeApi:
             return _json(route, 404, {"detail": "Not found"})
         if path in ("customers", "absences", "offers", "tasks", "entries", "invoices", "trips"):
             return _json(route, 200, [])
+        if path == "dashboard":  # the start page: an empty week (the subcontractor tests do not look at it)
+            return _json(route, 200, {"days": [], "worked": 0, "target": 0, "week": [], "days_worked": 0})
         if path == "holidays":
             return _json(route, 200, {})
         if path == "plan/scenarios":
@@ -577,11 +579,22 @@ def test_adoption_check_keeps_the_choices_that_link_then_sends(browser):
     ctx.close()
 
 
-def test_no_vendor_banner_for_the_employee_and_when_all_linked(browser):
+def test_no_vendor_banner_when_all_vendors_are_linked(browser):
     api = FakeApi()
     api.vendor_suggestions = {"groups": [], "unlinked_expenses": 0}
     ctx, pg, problems = open_app(browser, api, page="expenses")
     assert pg.locator(".sup-vendor-banner").count() == 0
+    assert problems == []
+    ctx.close()
+
+
+def test_employee_gets_no_vendor_banner_and_no_suggestions(browser):
+    # the employee may read projects (the start page needs them); no suppliers write right: no banner, no request
+    api = FakeApi(me={**EMPLOYEE, "permissions": {**EMPLOYEE["permissions"], "projects": {"read": "all", "write": "none"}}})
+    ctx, pg, problems = open_app(browser, api, page="expenses")
+    pg.wait_for_timeout(300)
+    assert pg.locator(".sup-vendor-banner").count() == 0
+    assert api.calls("GET", "suppliers/vendor-suggestions") == []
     assert problems == []
     ctx.close()
 
@@ -685,6 +698,8 @@ def test_accept_capacity_offer_shows_server_result_and_warnings_once(browser):
     dlg.locator("#ac_submit").click()
     expect(dlg.locator("#ac_result")).to_contain_text("80")
     expect(dlg.locator("#ac_result")).to_contain_text("6.400,00")
+    expect(dlg.locator("#ac_result")).to_contain_text("Demo project P")
+    expect(dlg.locator("#ac_result")).to_contain_text("02.03.2026 – 27.03.2026")
     expect(dlg.locator(".proc-warnings li[data-code='allocation.no_demand']")).to_contain_text("nothing is planned there")
     assert pg.locator("#plnWarn").count() == 0  # the dialog shows the warnings: no second banner behind it
     assert api.calls("POST", "incoming-offers/9b3e51c7/accept")[0][3] == {"confirm_warnings": [], "project_id": "a1b2c3d4"}
@@ -793,7 +808,7 @@ def test_record_offer_posts_lines_and_plan(browser):
     ctx, pg, problems = open_app(browser, api, page="incoming")
     pg.click("[data-a=offNew]")
     dlg = pg.locator("#modal-root .modal")
-    assert dlg.locator("#f_supplier_id option").count() == 3
+    expect(dlg.locator("#f_supplier_id option")).to_have_count(3)
     pg.select_option("#f_supplier_id", "5d1c0aa2")
     pg.fill("#f_reference", "ANG-NEW")
     pg.fill("#f_received_on", "2026-02-20")
@@ -834,6 +849,31 @@ def test_accepted_offer_edit_sends_only_the_allowed_changes(browser):
     ctx.close()
 
 
+OFFER_IN_FIELDS = {
+    "supplier_id", "reference", "title", "received_on", "valid_until", "lines", "vat_rate", "vat_mode", "plan",
+    "project_id", "contract_id", "attachment", "decision_note", "notes",
+}
+SUPPLIER_IN_FIELDS = {
+    "name", "supplier_no", "kind", "active", "street", "zip", "city", "country", "vat_id", "tax_number", "vat_mode", "contact",
+    "email", "phone", "notes", "iban", "bic", "bank_name", "payment_terms_days", "payment_terms_note", "tags", "weekly_hours",
+    "workdays", "rate", "unavailable",
+}
+
+
+def test_supplier_edit_sends_only_supplier_in_fields(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api, page="suppliers/5d1c0aa2")
+    pg.click("[data-a=supEdit]")
+    dlg = pg.locator("#modal-root .modal")
+    dlg.get_by_role("button", name="Save").click()
+    pg.wait_for_selector("#modal-root .modal", state="detached")
+    body = api.calls("PUT", "suppliers/5d1c0aa2")[0][3]
+    assert set(body) <= SUPPLIER_IN_FIELDS  # no id, sanity_warnings, created, updated ...
+    assert body["name"] == "Example Freelance Studio (Demo)" and body["weekly_hours"] == 24
+    assert problems == []
+    ctx.close()
+
+
 def test_offer_edit_pins_no_vat_unless_it_differs_from_the_supplier(browser):
     api = FakeApi()  # the offer says domestic, the supplier is domestic: the form keeps the supplier's setting
     ctx, pg, problems = open_app(browser, api, page="incoming/9b3e51c7")
@@ -845,6 +885,7 @@ def test_offer_edit_pins_no_vat_unless_it_differs_from_the_supplier(browser):
     pg.wait_for_selector("#modal-root .modal", state="detached")
     body = api.calls("PUT", "incoming-offers/9b3e51c7")[0][3]
     assert body["vat_mode"] is None and body["vat_rate"] is None
+    assert set(body) <= OFFER_IN_FIELDS  # only the fields of IncomingOfferIn: no hours, net_total, status, id ...
     assert problems == []
     ctx.close()
 
@@ -876,6 +917,9 @@ def test_accountant_reads_offers_without_buttons(browser):
     ctx, pg, problems = open_app(browser, api, page="incoming/9b3e51c7")
     expect(pg.locator("h1")).to_contain_text("ANG-2026-117")
     assert pg.locator("[data-a=offAccept], [data-a=offReject], [data-a=offEdit], [data-a=offDelete], [data-a=offReview]").count() == 0
+    pg.goto(f"{ORIGIN}/#/incoming")
+    expect(pg.locator("h1")).to_contain_text("Incoming offers")
+    assert pg.locator("[data-a=offNew]").count() == 0  # the accountant does not record offers
     pg.goto(f"{ORIGIN}/#/suppliers")
     expect(pg.locator("[data-a=supNew]")).to_be_visible()  # the accountant writes suppliers
     assert problems == []
@@ -1035,5 +1079,9 @@ def test_team_timeline_has_an_external_group(browser):
     row = pg.locator(".tl-extrow")
     expect(row).to_have_count(1)
     expect(row).to_contain_text("Example Freelance Studio (Demo)")
+    bar = row.locator(".tl-bar.external")
+    expect(bar).to_have_count(1)
+    assert "left:0px" in bar.get_attribute("style")  # the window starts on the first day shown
+    assert "subcontractor," in bar.get_attribute("aria-label")
     assert problems == []
     ctx.close()

@@ -102,7 +102,8 @@
   const contractOptions = pid => [['', '— no contract —'], ...(S.d.contracts || []).filter(c => c.project_id === pid).map(c => [c.id, c.title || 'Contract'])];
   const projectChoices = cur => [['', '— no project —'], ...(S.d.projects || []).filter(p => !['done', 'archived'].includes(p.status) || p.id === cur).map(p => [p.id, p.name + (['done', 'archived'].includes(p.status) ? ' (closed)' : '')])];
   const numOrNull = v => { const t = String(v ?? '').trim().replace(',', '.'); return t === '' ? NaN : Number(t); };
-  const RESPONSE_ONLY = ['id', 'supplier_name', 'hours', 'net_total', 'vat', 'gross_total', 'project_name', 'customer_id', 'status', 'effective_status', 'status_changed_at', 'decided_by', 'allocation_id', 'created', 'updated', 'planning_warnings', 'external_id', 'import_batch'];
+  // the fields of IncomingOfferIn: the response keys of the offer (hours, net_total, status, ...) are never sent back
+  const OFFER_IN = ['supplier_id', 'reference', 'title', 'received_on', 'valid_until', 'lines', 'vat_rate', 'vat_mode', 'plan', 'project_id', 'contract_id', 'attachment', 'decision_note', 'notes'];
 
   async function openOfferForm(o = {}, presetSupplier = '') {
     await ensureLists();
@@ -138,8 +139,7 @@
       title: o.id ? 'Edit incoming offer' : 'Record incoming offer', fields, vals, wide: true, extra: lower,
       note: locked ? '<div class="banner info" role="status">An accepted offer can only change its notes, attachment and decision note.</div>' : '',
       save: async v => {
-        const body = { ...o };
-        for (const k of RESPONSE_ONLY) delete body[k];
+        const body = Object.fromEntries(OFFER_IN.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
         if (locked) {
           body.notes = strOrNull(v.notes); body.decision_note = strOrNull(v.decision_note);
         } else {

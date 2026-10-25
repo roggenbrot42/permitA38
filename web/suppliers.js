@@ -15,6 +15,9 @@
   const hh = x => num(x, 2) + ' h';
   const strOrNull = v => { const t = String(v ?? '').trim(); return t === '' ? null : t; };
   const canWrite = () => can('suppliers', 'write');
+  const pick = (o, keys) => Object.fromEntries(keys.filter(k => o[k] !== undefined).map(k => [k, o[k]]));
+  const SUP_IN = ['name', 'supplier_no', 'kind', 'active', 'street', 'zip', 'city', 'country', 'vat_id', 'tax_number', 'vat_mode', 'contact', 'email', 'phone', 'notes',
+    'iban', 'bic', 'bank_name', 'payment_terms_days', 'payment_terms_note', 'tags', 'weekly_hours', 'workdays', 'rate', 'unavailable'];
   const isRC = m => m === 'eu_reverse_charge' || m === 'third_country_reverse_charge';
 
   /* shared with procurement.js and the expense dialog */
@@ -188,7 +191,7 @@
     openForm({
       title: s.id ? 'Edit supplier' : 'New supplier', fields, vals, wide: true, extra: capacityBlock(vals),
       save: async v => {
-        const body = { ...v };
+        const body = pick(v, SUP_IN);   // only SupplierIn fields: no response keys (id, sanity_warnings, created ...)
         for (const k of ['supplier_no', 'street', 'zip', 'city', 'contact', 'email', 'phone', 'vat_id', 'tax_number', 'iban', 'bic', 'bank_name', 'payment_terms_note', 'notes', 'vat_mode']) body[k] = strOrNull(v[k]);
         if (!strOrNull(v.name)) throw new Error('Enter a name');
         body.name = v.name.trim();
@@ -199,7 +202,7 @@
         else for (const k of ['weekly_hours', 'workdays', 'rate']) delete body[k];
         if (v.kind !== 'person-capacity') body.unavailable = [];
         delete body.sanity_warnings;
-        const r = await api.upsert('suppliers', body);
+        const r = s.id ? await api.put('suppliers/' + encodeURIComponent(s.id), body) : await api.post('suppliers', body);
         toast('Supplier saved');
         await SUP.load();
         if (!s.id && r && r.id) location.hash = '#/suppliers/' + r.id; else render();
