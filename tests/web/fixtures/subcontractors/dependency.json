@@ -1,0 +1,10 @@
+{
+  "supplier_id": "5d1c0aa2",
+  "threshold_hours_per_week": 30.0,
+  "threshold_weeks": 12,
+  "raised": true,
+  "longest_run_weeks": 12,
+  "average_hours_per_week": 30.0,
+  "from": "2026-06-08",
+  "to": "2026-08-23"
+}

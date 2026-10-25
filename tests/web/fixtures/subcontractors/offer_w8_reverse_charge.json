@@ -1,0 +1,8 @@
+{
+  "hours": 37.5,
+  "net_total": 3091.88,
+  "vat_rate": 0,
+  "vat": 0.0,
+  "gross_total": 3091.88,
+  "vat_mode": "eu_reverse_charge"
+}

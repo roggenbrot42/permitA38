@@ -1,0 +1,24 @@
+{
+  "capacity": 240.0,
+  "confirmed": 200.0,
+  "binding_offers": 0.0,
+  "free_after_confirmed": 40.0,
+  "free_worst_case": 40.0,
+  "contracted_revenue": 20000.0,
+  "offer_revenue": 0.0,
+  "assumed_revenue": 0.0,
+  "revenue": 20000.0,
+  "over_weeks": 4,
+  "gap": 20.0,
+  "gap_by_project": [
+    {
+      "project_id": "a1b2c3d4",
+      "name": "Demo project P",
+      "gap": 20.0
+    }
+  ],
+  "external_capacity": 80.0,
+  "external_gap": 20.0,
+  "external_cost": 6400.0,
+  "margin": 13600.0
+}

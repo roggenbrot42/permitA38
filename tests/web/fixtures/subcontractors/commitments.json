@@ -1,0 +1,63 @@
+{
+  "as_of": "2026-03-02",
+  "items": [
+    {
+      "kind": "allocation",
+      "allocation_id": "c04d77e1",
+      "incoming_offer_id": "9b3e51c7",
+      "offer_reference": "ANG-2026-117",
+      "supplier_id": "5d1c0aa2",
+      "supplier_name": "Example Freelance Studio (Demo)",
+      "project_id": "a1b2c3d4",
+      "project_name": "Demo project P",
+      "start": "2026-03-02",
+      "end": "2026-03-27",
+      "status": "active",
+      "planned_hours": 80.0,
+      "planned_net": 6400.0,
+      "invoiced_net": 0.0,
+      "open_net": 6400.0
+    },
+    {
+      "kind": "flat",
+      "allocation_id": null,
+      "incoming_offer_id": "9b3e51c8",
+      "offer_reference": "L-77",
+      "supplier_id": "7a1b2c3d",
+      "supplier_name": "Demo Print Shop GmbH",
+      "project_id": null,
+      "project_name": null,
+      "start": null,
+      "end": null,
+      "status": "accepted",
+      "planned_hours": null,
+      "planned_net": 3091.88,
+      "invoiced_net": null,
+      "open_net": 3091.88
+    }
+  ],
+  "by_supplier": [
+    {
+      "supplier_id": "5d1c0aa2",
+      "name": "Example Freelance Studio (Demo)",
+      "planned_net": 6400.0,
+      "invoiced_net": 0.0,
+      "open_net": 6400.0
+    }
+  ],
+  "by_project": [
+    {
+      "project_id": "a1b2c3d4",
+      "name": "Demo project P",
+      "planned_net": 6400.0,
+      "invoiced_net": 0.0,
+      "open_net": 6400.0
+    }
+  ],
+  "totals": {
+    "planned_net": 9491.88,
+    "invoiced_net": 0.0,
+    "open_net": 9491.88
+  },
+  "hints": []
+}
