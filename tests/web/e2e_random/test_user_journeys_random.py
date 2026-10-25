@@ -137,6 +137,7 @@ class Model:
     expenses: list[MExpense] = field(default_factory=list)
     absences: list[tuple[date, date]] = field(default_factory=list)
     contracts: int = 0
+    allocs: list[tuple[str, float, str, str]] = field(default_factory=list)  # (project id, h/week, start, end)
     counters: dict = field(default_factory=lambda: {"tag": 0, "name": 0, "offers": 0, "invoices": 0})
 
     def absent_days(self) -> set[date]:
@@ -598,6 +599,32 @@ class Journey:
         assert "Urlaub" in self.main_text()
         self.check_week_ui()
 
+    # -- planner per project: an employee allocation made in the allocations dialog of the project page
+    def alloc_supported(self) -> bool:
+        if not hasattr(self, "_alloc_ok"):  # an older backend has no allocations route: the step is simply not offered
+            self._alloc_ok = self.api.http.get("/allocations").status_code != 404
+        return self._alloc_ok
+
+    def a_allocate(self):
+        p = self.rng.choice(self.m.projects)
+        hours = self.rng.choice([5, 10, 12.5, 20])
+        start = week_start(self.today) + timedelta(days=7 * self.rng.randint(0, 3))
+        end = start + timedelta(days=self.rng.randint(6, 27))
+        self.nav(f"#/project/{p.id}")
+        self.page.click(f"[data-a=allocations][data-project='{p.id}']")
+        self.page.click("#modal-root [data-a=alNew]")
+        self.page.fill("#al_hours", str(hours))
+        self.page.fill("#al_start", start.isoformat())
+        self.page.fill("#al_end", end.isoformat())
+        self.page.click("form.al-form [data-a=alSave]")
+        self.page.wait_for_selector("#modal-root form.al-form", state="detached")
+        assert f"{hours:g}".replace(".", ",") + " h/week" in norm(self.page.inner_text("#al-body"))
+        self.m.allocs.append((p.id, float(hours), start.isoformat(), end.isoformat()))
+        self.say(f"allocation {hours} h/week to {p.name!r} {start}..{end}")
+        self.mark_old()
+        self.page.click("#al-close")
+        self.wait_render()
+
     # -- navigation / money
     def a_navigate(self):
         page = self.rng.choice(NAV_PAGES)
@@ -714,6 +741,9 @@ class Journey:
             ]
         assert len(api.get("/absences")) == len(m.absences)
         assert len(api.get("/contracts")) == m.contracts
+        if m.allocs:
+            rows = {(a["project_id"], a["hours_per_week"], a["start"], a["end"]) for a in api.get("/allocations")}
+            assert rows == set(m.allocs), (rows, m.allocs)
         fin = api.get("/finance", year=self.year)["totals"]
         revenue = sum((d.totals()[0] for d in m.paid_invoices()), Decimal(0))
         vat_out = sum((sum(d.totals()[1].values(), Decimal(0)) for d in m.paid_invoices()), Decimal(0))
@@ -744,6 +774,8 @@ class Journey:
             acts += [("add_project", 4), ("create_offer", 4)]
         if m.projects:
             acts += [("manual_time", 9), ("timer", 2)]
+            if self.alloc_supported():
+                acts.append(("allocate", 2))
         if self._this_week_editable():
             acts += [("edit_entry", 3), ("delete_entry", 2)]
         if any(d.kind == "offers" and d.status == "draft" for d in m.docs):
