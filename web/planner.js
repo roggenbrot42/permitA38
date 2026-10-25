@@ -67,14 +67,15 @@
       if (k.startsWith('r:')) out.id = k.slice(2);
       return out;
     });
-    return { absences, commitments, allocations };
+    return allocations.length ? { absences, commitments, allocations } : { absences, commitments };   // new keys only when used (older servers refuse unknown fields)
   }
   function schedule() { clearTimeout(P.timer); P.timer = setTimeout(simulate, 120); }
   async function simulate() {
     try {
-      const body = { changes: payload(), weeks: P.weeks, first: monday0(), user_id: userId() || null, project_id: P.project || null };
+      const scope = P.project ? { project_id: P.project } : {};
+      const body = { changes: payload(), weeks: P.weeks, first: monday0(), user_id: userId() || null, ...scope };
       P.sim = await api('POST', 'plan/simulate', body);
-      P.base = await api('POST', 'plan/simulate', { changes: { absences: [], commitments: [], allocations: [] }, weeks: P.weeks, first: monday0(), user_id: userId() || null, project_id: P.project || null });
+      P.base = await api('POST', 'plan/simulate', { changes: { absences: [], commitments: [] }, weeks: P.weeks, first: monday0(), user_id: userId() || null, ...scope });
     } catch (e) { toast(e.message, true); }
     paint();
   }
@@ -528,7 +529,7 @@
   };
   A.plnApply = guard(async () => {
     const body = payload();
-    const count = body.absences.length + body.commitments.length + body.allocations.length;
+    const count = body.absences.length + body.commitments.length + (body.allocations || []).length;
     if (!window.confirm(`Write ${count} change(s) to your real data? This cannot be undone with one click.`)) return;
     const r = await api('POST', 'plan/apply', { changes: body, confirm: true });
     toast(`Applied ${r.applied} change(s).`);
@@ -603,7 +604,7 @@
   A.plnCompare = guard(async el => {
     const s = P.scenarios.find(x => x.id === el.value);
     if (!s) { P.compare = null; return paint(); }
-    const r = await api('POST', 'plan/simulate', { changes: s.changes, weeks: P.weeks, first: monday0(), user_id: userId() || null, project_id: P.project || null });
+    const r = await api('POST', 'plan/simulate', { changes: s.changes, weeks: P.weeks, first: monday0(), user_id: userId() || null, ...(P.project ? { project_id: P.project } : {}) });
     P.compare = { name: s.name, totals: r.totals };
     paint();
   });

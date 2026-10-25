@@ -403,7 +403,7 @@ def open_planner(browser, api):
 def test_planner_project_selector_and_stacked_bars(browser):
     api = FakeApi()
     ctx, pg, problems = open_planner(browser, api)
-    assert api.calls("POST", "plan/simulate")[-1][3]["project_id"] is None
+    assert "project_id" not in api.calls("POST", "plan/simulate")[-1][3]  # old call shape when no project is chosen
     expect(pg.locator(".pln-pbar").first).to_have_attribute(
         "title", "Demo project P: allocated 25 h, planned 30 h, not covered 5 h"
     )
@@ -414,7 +414,7 @@ def test_planner_project_selector_and_stacked_bars(browser):
         "() => document.querySelector('#plnProj') && document.querySelector('#plnProj').value === 'a1b2c3d4'"
     )
     for _ in range(50):  # the simulation runs after a short debounce
-        if api.calls("POST", "plan/simulate")[-1][3]["project_id"] == "a1b2c3d4":
+        if api.calls("POST", "plan/simulate")[-1][3].get("project_id") == "a1b2c3d4":
             break
         pg.wait_for_timeout(100)
     assert api.calls("POST", "plan/simulate")[-1][3]["project_id"] == "a1b2c3d4"
@@ -446,7 +446,7 @@ def test_planner_allocation_draft_delta_discard_and_apply(browser):
     assert api.calls("POST", "plan/apply") == []  # a draft writes nothing
     pg.locator(".pln-draftlist").get_by_role("button", name="Discard").click()
     pg.wait_for_selector(".pln-bar.alloc.draft", state="detached")
-    assert api.calls("POST", "plan/simulate")[-1][3]["changes"]["allocations"] == []
+    assert "allocations" not in api.calls("POST", "plan/simulate")[-2][3]["changes"]
     # apply with a warning from the server
     api.apply_warnings = [
         {
