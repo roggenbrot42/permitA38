@@ -367,7 +367,10 @@ def test_tampered_challenge_is_rejected(app, boss_client, clock):
         b"="
     )
     c = TestClient(app)
-    for bad in (f"{head}.{forged_body.decode()}.{sig}", f"{head}.{body}.{sig[:-2]}AA"):
+    # change a character in the middle: the last base64 character carries padding bits, so altering only the
+    # tail could decode to the same signature bytes (about 1 run in 1000)
+    flipped = sig[:10] + ("A" if sig[10] != "A" else "B") + sig[11:]
+    for bad in (f"{head}.{forged_body.decode()}.{sig}", f"{head}.{body}.{flipped}"):
         r2 = c.post("/api/auth/login/totp", json={"mfa_token": bad, "code": code_at(secret, clock)})
         assert r2.status_code == 401
 
