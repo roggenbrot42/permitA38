@@ -338,7 +338,9 @@ class ProcurementService:
         h_qty = sum((dec(ln["quantity"]) for ln in hour_lines), ZERO)
         row["rate"] = _rate_of(h_net, h_qty)
         warnings = self._accept_warnings(supplier, row, rec)
-        blocking = [w["code"] for w in warnings if w["confirmable"] and w["code"] not in body.get("confirm_warnings", [])]
+        blocking = list(
+            dict.fromkeys(w["code"] for w in warnings if w["confirmable"] and w["code"] not in body.get("confirm_warnings", []))
+        )
         if blocking:
             raise ServiceError(
                 409,
@@ -692,6 +694,41 @@ class ProcurementService:
             totals=_totals(items),
             hints=self.hints(today),
         )
+
+    def expense_warnings(self, rec: dict) -> list[dict]:
+        """``allocation.invoiced_exceeds_planned``: the expenses linked to an external allocation (this one included)
+        are more than its planned net (docs/contracts/subcontractors.md, W10)."""
+        from .allocations import AllocationService  # local import, see above
+
+        aid = rec.get("allocation_id")
+        row = self.store.get("allocations", aid) if aid and ID_RE.match(aid) else None
+        if not row or not row.get("supplier_id") or row.get("user_id"):
+            return []
+        planned = dec(AllocationService(self.store).present_one(row).get("planned_net"))
+        others = sum(
+            (dec(e.get("net")) for e in self.store.find("expenses", allocation_id=aid) if e.get("id") != rec.get("id")),
+            ZERO,
+        )
+        invoiced = q2(others + dec(rec.get("net")))
+        excess = q2(invoiced - planned)
+        if excess <= Decimal("0.01"):
+            return []
+        return [
+            pw.warning(
+                "allocation.invoiced_exceeds_planned",
+                "warning",
+                "allocation_id",
+                f"The linked expenses ({invoiced:.2f}) are {excess:.2f} above the planned cost of the allocation "
+                f"({q2(planned):.2f}).",
+                {
+                    "allocation_id": aid,
+                    "planned_net": float(q2(planned)),
+                    "invoiced_net": float(invoiced),
+                    "excess": float(excess),
+                },
+                confirmable=False,
+            )
+        ]
 
     def committed_by_project(self) -> dict[str, float]:
         """Planned net of the external allocations per project (cancelled ones shortened), for the project report."""
