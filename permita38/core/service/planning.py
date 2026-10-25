@@ -24,6 +24,7 @@ Everything here is computed per day and summed into weeks, so ranges, weeks and 
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -35,6 +36,7 @@ from permita38.core.money import dec, q2
 from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
+from . import external_capacity as ext
 from .busy import BusyTimeProvider, NullBusyProvider
 
 STATUS_TIGHT = 90.0
@@ -93,6 +95,9 @@ class World:
     expired_offers: list[str] = field(default_factory=list)
     allocations: list[dict] = field(default_factory=list)  # active employee allocations (after what-if changes)
     project_names: dict[str, str] = field(default_factory=dict)
+    # subcontractors (docs/contracts/subcontractors.md): supplier id -> supplier row, kept out of ``users``
+    externals: dict[str, dict] = field(default_factory=dict)
+    external_allocations: list[dict] = field(default_factory=list)  # usable external rows, active and cancelled
 
     def user_list(self, user_id: str | None) -> list[dict]:
         return [u for u in self.users.values() if user_id is None or u["id"] == user_id]
@@ -198,6 +203,37 @@ def apply_allocation_changes(
     return [r for r in base.values() if usable_allocation(r) and r.get("status", "active") == "active"]
 
 
+def usable_external(row: dict) -> bool:
+    """An external (subcontractor) allocation the engine can use: a supplier and a project, a valid period, status
+    ``active`` or ``cancelled`` (a cancelled one keeps the days before ``cancelled_from``)."""
+    if not isinstance(row.get("supplier_id"), str) or not row["supplier_id"] or row.get("user_id"):
+        return False
+    if not isinstance(row.get("project_id"), str) or not row["project_id"]:
+        return False
+    if row.get("status", "active") not in ("active", "cancelled"):
+        return False
+    s, e = calc.d(row.get("start")), calc.d(row.get("end"))
+    return bool(s and e and e >= s and (e - s).days <= MAX_ALLOCATION_DAYS)
+
+
+def externals_of(store: Repository, cap: calc.Capacity, contracts: list[dict]) -> tuple[dict, list[dict]]:
+    """Active person-capacity suppliers with a usable external allocation or assigned to an open contract, and their
+    usable allocations. Unavailable windows of a supplier become days off in the capacity helper."""
+    suppliers = {
+        s["id"]: s for s in store.list("suppliers") if s.get("kind") == "person-capacity" and s.get("active", True)
+    }
+    rows = [r for r in store.list("allocations") if usable_external(r) and r["supplier_id"] in suppliers]
+    assigned = {x for c in contracts if c.get("status") != "done" for x in (c.get("user_ids") or [])}
+    externals: dict[str, dict] = {}
+    for sid in sorted({r["supplier_id"] for r in rows} | (assigned & set(suppliers))):
+        row = suppliers[sid]
+        externals[sid] = {**row, "external": True}
+        for a, b in ext.unavailable_windows(row):
+            for day in calc.daterange(a, min(b, a + timedelta(days=400))):
+                cap.absences[sid].add(day)
+    return externals, [r for r in rows if r["supplier_id"] in externals]
+
+
 def usable_allocation(row: dict) -> bool:
     """An employee allocation the engine can use. A damaged row (from an older version or a hand-edited file) is
     skipped instead of breaking every planner view."""
@@ -215,6 +251,7 @@ def load(
     busy: BusyTimeProvider | None = None,
     changes: dict | None = None,
     include_offers: bool = True,
+    include_external: bool = True,
 ) -> World:
     absences, overrides = apply_changes(store.list("absences"), changes)
     view = _View(store, absences)
@@ -229,6 +266,7 @@ def load(
     expired: list[str] = []
     contracts = store.list("contracts")
     converted = {c.get("offer_id") for c in contracts}
+    externals, external_allocs = externals_of(store, cap, contracts) if include_external else ({}, [])
 
     def make(kind: str, rid: str, src: dict, plan: dict, binding: bool, rate_src: Any, project_id, customer_id, title):
         ov = overrides.get(_key(kind, rid), {})
@@ -240,7 +278,8 @@ def load(
             return None
         if not calc.fnum(hpw) and not calc.fnum(total):
             return None
-        ids = [x for x in (plan.get("user_ids") or src.get("user_ids") or []) if x in users] or ([boss] if boss else [])
+        ids = [x for x in (plan.get("user_ids") or src.get("user_ids") or []) if x in users or x in externals]
+        ids = ids or ([boss] if boss else [])
         if not ids:
             return None
         project = projects.get(project_id)
@@ -318,6 +357,8 @@ def load(
         expired_offers=expired,
         allocations=apply_allocation_changes(store.list("allocations"), changes, ctx["users"], projects),
         project_names={pid: p.get("name") or DELETED_PROJECT for pid, p in projects.items()},
+        externals=externals,
+        external_allocations=external_allocs,
     )
 
 
@@ -462,6 +503,15 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
                 days[x].scope(pid).internal.cap += h * scale
             if real - total > EPS:
                 days[x].scope(UNASSIGNED).internal.cap += real - total
+    if user_id is None:  # subcontractor capacity: only the allocated project's pool, never the team's base hours
+        for a in world.external_allocations:
+            sup = world.externals.get(a["supplier_id"])
+            if sup is None:
+                continue
+            for x, h in ext.allocation_days(sup, a, cap).items():
+                if x in days:
+                    days[x].cap += h
+                    days[x].scope(a["project_id"]).external.cap += h
     item_hours: dict[str, dict[date, float]] = {}
     items = {}
     for it in world.items:
@@ -469,14 +519,17 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
         span = [x for x in _daterange(max(it.start, lo), min(it.end, hi))]
         if not span:
             continue
-        per_item: dict[date, float] = {}
+        per_item: dict[date, float] = {}  # the employees' share (internal pool)
+        per_ext: dict[date, float] = {}  # the subcontractors' share (external pool)
         for uid in it.assignees:
             if user_id and uid != user_id:
                 continue
             member = world.users.get(uid)
-            if member is None:
+            sub = None if member is not None else world.externals.get(uid)
+            if member is None and sub is None:
                 continue
-            wdset = _workset(member)
+            target = per_item if member is not None else per_ext
+            wdset = _workset(member) if member is not None else set(ext.workdays(sub))
             share = 1.0 / len(it.assignees)
             if it.hpw:
                 # spread over the days of the week the person can actually work (workdays that are neither a public
@@ -497,9 +550,9 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
                     if n_avail:
                         if cap.holiday(x) or x in off_days:
                             continue
-                        per_item[x] = per_item.get(x, 0.0) + it.hpw * share / n_avail
+                        target[x] = target.get(x, 0.0) + it.hpw * share / n_avail
                     elif n_work:
-                        per_item[x] = per_item.get(x, 0.0) + it.hpw * share / n_work
+                        target[x] = target.get(x, 0.0) + it.hpw * share / n_work
             elif it.total:
                 # spread over the days the person can actually work: workdays that are neither a public holiday nor an
                 # absence day. With none left the nominal spread over all workdays stays, so the overload is visible.
@@ -511,20 +564,24 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
                     chosen = set(days_used)
                     for x in span:
                         if x in chosen:
-                            per_item[x] = per_item.get(x, 0.0) + it.total * share / len(days_used)
-        if per_item:
-            item_hours[_key(it.kind, it.id)] = per_item
+                            target[x] = target.get(x, 0.0) + it.total * share / len(days_used)
+        if per_item or per_ext:
+            combined = dict(per_item)
+            for x, h in per_ext.items():
+                combined[x] = combined.get(x, 0.0) + h
+            item_hours[_key(it.kind, it.id)] = combined
             key = scope_of(it)
-            for x, h in per_item.items():
-                pool = days[x].scope(key).internal
-                if it.binding:
-                    days[x].binding += h
-                    days[x].expected += h * it.win
-                    pool.binding += h
-                    pool.expected += h * it.win
-                else:
-                    days[x].confirmed += h
-                    pool.confirmed += h
+            for part, pool_of in ((per_item, lambda sd: sd.internal), (per_ext, lambda sd: sd.external)):
+                for x, h in part.items():
+                    pool = pool_of(days[x].scope(key))
+                    if it.binding:
+                        days[x].binding += h
+                        days[x].expected += h * it.win
+                        pool.binding += h
+                        pool.expected += h * it.win
+                    else:
+                        days[x].confirmed += h
+                        pool.confirmed += h
     return DayTable(days=days, item_hours=item_hours, items=items)
 
 
@@ -617,7 +674,7 @@ class _Sum:
             self.gap_e[i] += p.gap_expected
 
 
-def _project_entry(world: World, key: str, sm: _Sum) -> dict:
+def _project_entry(world: World, key: str, sm: _Sum, external_cost: Decimal = Decimal(0)) -> dict:
     cap_h, conf, bind = sum(sm.cap), sum(sm.conf), sum(sm.bind)
     gap = sum(sm.gap)
     status, util = status_for(cap_h, conf + bind)
@@ -643,7 +700,7 @@ def _project_entry(world: World, key: str, sm: _Sum) -> dict:
         gap_expected=round(sum(sm.gap_e), 6),
         internal=pool(0),
         external=pool(1),
-        external_cost=0.0,
+        external_cost=float(q2(external_cost)),
     )
 
 
@@ -668,6 +725,12 @@ def weeks_detail(
     rows: list[dict] = []
     detail: dict[tuple[str, str], list[dict]] = {}
     allocs = [a for a in world.allocations if not user_id or a["user_id"] == user_id]
+    # subcontractor allocations: their hours per week (the day list of ext.allocation_days) and cost per scope
+    ext_rows = [] if user_id else world.external_allocations
+    ext_weeks = {
+        a["id"]: ext.weekly_hours(ext.allocation_days(world.externals[a["supplier_id"]], a, world.cap))
+        for a in ext_rows
+    }
     for i in range(count):
         ws = start + timedelta(days=7 * i)
         we = ws + timedelta(days=6)
@@ -676,7 +739,7 @@ def weeks_detail(
         for x in days:
             for key, sd in table.days[x].scopes.items():
                 sums.setdefault(key, _Sum()).add(sd)
-        for a in allocs:  # an allocation shows its project even in a week without capacity or demand
+        for a in [*allocs, *ext_rows]:  # an allocation shows its project even in a week without capacity or demand
             if a["start"] <= we.isoformat() and a["end"] >= ws.isoformat():
                 sums.setdefault(a["project_id"], _Sum())
         sums.setdefault(UNASSIGNED, _Sum())
@@ -712,6 +775,8 @@ def weeks_detail(
                 continue
             it = table.items[key]
             entry = dict(kind=it.kind, id=it.id, title=it.title, hours=round(h, 2), binding=it.binding)
+            if all(uid in world.externals for uid in it.assignees):
+                entry["external"] = True  # only when every assignee is a subcontractor
             per_scope.setdefault(scope_of(it), []).append(entry)
             if scope and scope_of(it) != scope:
                 continue
@@ -736,8 +801,28 @@ def weeks_detail(
         events = list(names)
         if abs_o or vac:
             events.append("%d h time off" % round(vac + abs_o))
-        projects = [_project_entry(world, key, sm) for key, sm in sums.items()]
+        cost_by_scope: dict[str, Decimal] = defaultdict(lambda: Decimal(0))
+        for a in ext_rows:
+            hours = ext_weeks[a["id"]].get(ws, 0.0)
+            if hours:
+                cost_by_scope[a["project_id"]] += ext.week_cost(hours, a.get("rate"))
+        projects = [_project_entry(world, key, sm, cost_by_scope.get(key, Decimal(0))) for key, sm in sums.items()]
         projects.sort(key=lambda p: (p["project_id"] is None, p["name"].lower(), p["project_id"] or ""))
+        ext_cap = sum(p["external"]["capacity"] for p in projects)
+        ext_asg = sum(p["external"]["assigned"] for p in projects)
+        ext_gap_w = sum(p["external"]["gap"] for p in projects)
+        ext_cost_w = sum(p["external_cost"] for p in projects)
+        ext_by_project = [
+            dict(
+                project_id=p["project_id"],
+                external_capacity=p["external"]["capacity"],
+                external_assigned=p["external"]["assigned"],
+                external_gap=p["external"]["gap"],
+                external_cost=p["external_cost"],
+            )
+            for p in projects
+            if any((p["external"]["capacity"], p["external"]["assigned"], p["external"]["gap"], p["external_cost"]))
+        ]
         rows.append(
             dict(
                 week=_iso(ws),
@@ -768,6 +853,11 @@ def weeks_detail(
                 tentative_revenue=float(q2(rev_bind_d)),
                 tentative_expected=round(exp, 6),
                 projects=projects,
+                external_capacity=round(ext_cap, 6),
+                external_assigned=round(ext_asg, 6),
+                external_gap=round(ext_gap_w, 6),
+                external_cost=round(ext_cost_w, 2),
+                external_by_project=ext_by_project,
             )
         )
     return rows, detail

@@ -276,11 +276,13 @@ class AllocationService:
         usable = [(it, pr) for it, pr in eligible if (it.end - it.start).days <= MAX_PERIOD_DAYS]
         if usable:
             lo, hi = min(it.start for it, _ in usable), max(it.end for it, _ in usable)
-            for uid in sorted({u for it, _ in usable for u in it.assignees}):
+            for uid in sorted({u for it, _ in usable for u in it.assignees if u in world.users}):
                 tables[uid] = eng.day_table(world, lo, hi, uid)
         for it, project in eligible:
             contract = self.store.get("contracts", it.id) or {}
             for uid in it.assignees:
+                if uid not in world.users:  # subcontractors are never proposed as employee allocations
+                    continue
                 base = dict(user_id=uid, project_id=it.project_id, source_contract_id=it.id)
                 if (it.end - it.start).days > MAX_PERIOD_DAYS:
                     skipped.append({**base, "reason": "period_too_long"})
