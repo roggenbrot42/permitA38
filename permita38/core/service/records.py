@@ -140,6 +140,8 @@ class RecordService:
             else:
                 data.pop("lines", None)
                 self._check_vat_rates(data.get("vat_rate"))
+        elif coll == "contracts":
+            self._check_contract_users(data)
         elif coll == "projects":  # the extension history is server-managed: never taken from the request
             data.pop("extensions", None)
             if old and old.get("extensions") is not None:
@@ -156,6 +158,16 @@ class RecordService:
             data.pop("created", None)
         saved = self.store.save(coll, data)
         return _expense_view(saved) if coll == "expenses" else saved
+
+    def _check_contract_users(self, data: dict) -> None:
+        """``user_ids`` of a contract: people, or active subcontractors (person-capacity). An id of another supplier
+        kind, or of an inactive one, is refused; any other unknown id keeps today's behaviour (the planner ignores it)."""
+        for uid in data.get("user_ids") or []:
+            supplier = self.store.get("suppliers", uid) if isinstance(uid, str) else None
+            if supplier is None:
+                continue
+            if supplier.get("kind") != "person-capacity" or not supplier.get("active", True):
+                raise ServiceError(422, "A contract can only list people or active subcontractors")
 
     def _link_supplier(self, data: dict, keep_vendor: bool = False) -> None:
         """Expense links (docs/contracts/subcontractors.md): the supplier must exist and gives ``vendor`` (a snapshot

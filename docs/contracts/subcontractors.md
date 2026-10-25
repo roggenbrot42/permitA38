@@ -443,7 +443,7 @@ sum is `>= threshold_hours_per_week`; the hint is raised when the longest run of
 
 ```json
 {"supplier_id": "5d1c0aa2", "threshold_hours_per_week": 30.0, "threshold_weeks": 12, "raised": true,
- "longest_run_weeks": 12, "average_hours_per_week": 30.0, "from": "2026-06-08", "to": "2026-08-23"}
+ "longest_run_weeks": 12, "average_hours_per_week": 30.0, "from": "2026-06-08", "to": "2026-08-30"}
 ```
 
 (`from`/`to` = first Monday and last Sunday of the longest run; both `null` and `longest_run_weeks` 0 without counting
@@ -474,8 +474,9 @@ today (`valid_until` equal to today is **not** expired), else the stored status.
 Create / update checks: the supplier exists (422 `"Unknown supplier"`) and, on create, is active (409 `"The supplier is
 not active"`); `project_id` exists (422 `"Unknown project"`); `contract_id` is a contract of `project_id` (422);
 `attachment` follows the existing `v.OptAttachment` rule. `project_id` is **not** required to save, only to accept.
-Warnings in `planning_warnings`: `incoming_offer.hours_mismatch` (plan hours as computed by the existing
-`planning_warnings.plan_hours`, against `hours`, difference > 0.01) and `incoming_offer.duplicate_reference` (same
+Warnings in `planning_warnings`: `incoming_offer.hours_mismatch` (for a capacity supplier: the hours the plan books,
+i.e. the sum of the external allocation's days, `external_capacity.allocation_days`; for other suppliers the plan hours
+of the existing `planning_warnings.plan_hours`; compared against `hours`, difference > 0.01) and `incoming_offer.duplicate_reference` (same
 non-empty `reference` for the same supplier on another offer).
 
 Locking: a `PUT` on an `accepted` offer may change only `notes`, `attachment` and `decision_note`; any other submitted
@@ -754,9 +755,14 @@ Planner warnings are in `planning_warnings`, expense warnings in `sanity_warning
   `weekly_hours` = the supplier's; `over_by = allocated - weekly_hours` (> 0.005).
 * `supplier.dependency_hint` is raised with the rule of `GET .../dependency`.
 * `business.customer_dominance`: revenue = the net of the invoices the existing `GET /api/finance` counts as revenue
-  (same selection), by invoice date in the trailing 12 months ending today (`today - 12 months < date <= today`);
+  (same selection: status not draft or cancelled; EUeR/cash accounting uses the paid date and only paid invoices,
+  accrual accounting the invoice date), in the trailing 12 months ending today (`today - 12 months < date <= today`);
   raised when `100 x customer >= customer_dominance_percent x total` (exact decimals, total > 0).
 * Dismissing a hint is a client convenience (localStorage); no server state.
+* Null response keys: the offer and allocation routes omit keys whose value is null (`response_model_exclude_none`);
+  the commitments, dependency and accept answers keep their null keys as shown in the examples.
+* Accepting an offer writes the project and contract given in the body back to the offer (decision confirmed); an
+  explicit `null` in the body clears the link.
 
 ## Errors (summary)
 
@@ -842,7 +848,7 @@ on other days.
 
 ### W3: `total_hours` with an unavailable window
 
-S Mon-Fri (`workdays` [0,1,2,3,4]), `rate` 75.0, `unavailable` [`{"from": "2026-03-09", "to": "2026-03-11"}`], plan
+S Mon-Fri (`workdays` [0,1,2,3,4]), `weekly_hours` 45 (the week of 03-02 books 41.67 h, so 45 is needed for no weekly warning; the example names no value), `rate` 75.0, `unavailable` [`{"from": "2026-03-09", "to": "2026-03-11"}`], plan
 2026-03-02 to 2026-03-20, `total_hours` 100. 15 weekdays - 3 = 12 available days; 100 / 12 = 8.333333 h per day.
 Weeks: 03-02: 5 days = 41.666667 h, 3 125.00; 03-09: Thu+Fri = 16.666667 h, 1 250.00; 03-16: 41.666667 h, 3 125.00.
 `planned_hours` 100.0, `planned_net` `q2(100 x 75)` = **7 500.00** (3 125.00 + 1 250.00 + 3 125.00 = 7 500.00 here;

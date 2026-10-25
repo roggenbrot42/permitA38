@@ -178,6 +178,9 @@ team's base capacity: they come from **external allocations** that an accepted i
   capacity without demand is paid for and shows as `allocation.no_demand` (info).
 * `include_external=0` on `GET /api/forecast`, `GET /api/plan/day-table` and in `POST /api/plan/simulate` builds the
   world without subcontractors; the numbers then equal those of a database without any supplier.
+* Archiving or deactivating a supplier with open allocations (v1 behaviour): the planner no longer counts its
+  capacity or its external cost in the forecast, while the commitments (`GET /api/finance/commitments`) still count
+  the allocation until it is cancelled or ends. Cancel the allocations first if the hours should leave the plan.
 * Expenses linked to an external allocation are compared with its planned cost
   (`allocation.invoiced_exceeds_planned`). Commitments (`GET /api/finance/commitments`) are derived, never written as
   expenses.

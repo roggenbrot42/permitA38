@@ -247,3 +247,22 @@ def test_read_only_token_reads_the_new_routes(app, boss_client, url):
     token = new_token(boss_client, read_only=True)["token"]
     r = bearer(app, token).get(url)
     assert r.status_code != 403, (url, r.text)  # 404/409 are fine: the ids above do not exist
+
+
+# ----------------------------------------------------------------------------- T8: contract assignees that are suppliers
+def test_contract_user_ids_accept_active_subcontractors_only(boss_client, store):
+    p = project(boss_client, "Demo project P")
+    boss_id = next(u["id"] for u in store.list("users") if u["role"] == "boss")
+    company = post(boss_client, "/api/suppliers", {"name": "Demo Print Shop GmbH", "kind": "company"}, 201).json()
+    active = capacity_supplier(boss_client)
+    inactive = capacity_supplier(boss_client, name="Archived Studio")
+    store.save("suppliers", {**store.get("suppliers", inactive["id"]), "active": False})
+    contract = {"title": "C_P", "project_id": p["id"], "start": "2026-03-02", "end": "2026-03-27",
+                "hours_per_week": 10.0, "rate": 100.0}
+    refused = post(boss_client, "/api/contracts", {**contract, "user_ids": [company["id"]]})
+    assert refused.status_code == 422, refused.text
+    assert post(boss_client, "/api/contracts", {**contract, "user_ids": [inactive["id"]]}).status_code == 422
+    kept = post(boss_client, "/api/contracts", {**contract, "user_ids": [boss_id, active["id"]]}, 200).json()
+    assert kept["user_ids"] == [boss_id, active["id"]]
+    unknown = post(boss_client, "/api/contracts", {**contract, "user_ids": ["5d1c0aa2zz"]}, 200)
+    assert unknown.status_code == 200  # unknown ids keep today's behaviour
