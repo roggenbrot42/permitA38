@@ -235,6 +235,8 @@ Errors: 401, 403, 404 (`"Not found"`, also malformed id and not visible).
 
 Full replacement of the editable fields, recomputing all figures. Errors: 401, 403, 404, 422, and
 
+* A PUT must send the item ids back to keep them: an item sent without an id gets a new one, and removing an item
+  that has bills is **422** `"Item has bills"`.
 * **409** `{"detail": "This trip is final; the boss can reopen it"}` if the stored trip is `final` (any body,
   including one that sends `status: "draft"`; only `reopen` changes a final trip).
 * **409** `{"detail": "Checklist has open items: Hotel / accommodation, Transportation"}` when the body has
