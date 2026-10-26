@@ -463,8 +463,8 @@ function contractsView() {
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Contracts</h2><div class="right auto"><button class="primary" data-a="editContract">+ New contract</button></div></div>
   ${cs.length ? `<table><tr><th>Contract</th><th>Customer</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${cs.sort((a, b) => a.start < b.start ? -1 : 1).map(c => `<tr class="click" data-a="editContract" data-id="${c.id}"><td><b>${esc(c.title)}</b></td><td>${esc(nameOf('customers', c.customer_id))}</td><td class="nowrap">${fmtDate(c.start)} – ${fmtDate(c.end)}</td><td class="num">${c.hours_per_week ? c.hours_per_week + ' h/week' : (c.total_hours || '') + ' h total'}</td><td class="num">${c.rate ? eur(c.rate) : ''}</td><td><span class="pill ${c.status === 'done' ? '' : 'good'}">${esc(c.status || 'confirmed')}</span></td></tr>`).join('')}</table>` : '<div class="empty">No contracts yet.</div>'}</div>`;
 }
-A.editContract = async el => {
-  const c = el.dataset.id ? S.d.contracts.find(x => x.id === el.dataset.id) : { status: 'confirmed', start: todayISO(), user_ids: [S.me.id] };
+A.editContract = el => {
+  const c = el.dataset.id ? S.d.contracts.find(x => x.id === el.dataset.id) : { status: 'confirmed', start: todayISO(), user_ids: [] };
   openForm({
     title: c.id ? 'Edit contract' : 'New contract', vals: c,
     fields: [{ k: 'title', l: 'Title' }, { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '—'], ...S.d.customers.map(x => [x.id, x.name])] },
