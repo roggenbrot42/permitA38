@@ -370,6 +370,7 @@ class Pool:
     confirmed: float = 0.0
     binding: float = 0.0
     expected: float = 0.0
+    alloc: float = 0.0  # internal pool only: the UNSCALED allocation hours of the day (rule 1), for ``used``
 
     @property
     def assigned(self) -> float:
@@ -501,6 +502,7 @@ def day_table(world: World, lo: date, hi: date, user_id: str | None = None) -> D
             scale = real / total if total > real + EPS else 1.0
             for pid, h in today_allocs:
                 days[x].scope(pid).internal.cap += h * scale
+                days[x].scope(pid).internal.alloc += h
             if real - total > EPS:
                 days[x].scope(UNASSIGNED).internal.cap += real - total
     if user_id is None:  # subcontractor capacity: only the allocated project's pool, never the team's base hours
@@ -662,6 +664,8 @@ class _Sum:
     gap: list[float] = field(default_factory=lambda: [0.0, 0.0])
     gap_c: list[float] = field(default_factory=lambda: [0.0, 0.0])
     gap_e: list[float] = field(default_factory=lambda: [0.0, 0.0])
+    alloc: float = 0.0  # unscaled internal allocation hours (the ``allocated`` field)
+    used_internal: float = 0.0  # sum over days of max(internal demand, internal allocation), decision D4
 
     def add(self, sd: ScopeDay) -> None:
         for i, (_, p) in enumerate(sd.pools()):
@@ -672,12 +676,20 @@ class _Sum:
             self.gap[i] += p.gap
             self.gap_c[i] += p.gap_confirmed
             self.gap_e[i] += p.gap_expected
+        self.alloc += sd.internal.alloc
+        # per DAY (decision D4): a day's used hours are the larger of its demand and its allocation
+        self.used_internal += max(sd.internal.assigned, sd.internal.alloc)
+
+    @property
+    def used(self) -> float:
+        """Hours used by the scope in the week: internal max(demand, allocation) per day, plus external demand."""
+        return self.used_internal + self.conf[1] + self.bind[1]
 
 
 def _project_entry(world: World, key: str, sm: _Sum, external_cost: Decimal = Decimal(0)) -> dict:
     cap_h, conf, bind = sum(sm.cap), sum(sm.conf), sum(sm.bind)
     gap = sum(sm.gap)
-    status, util = status_for(cap_h, conf + bind)
+    status, util = status_for(cap_h, sm.used)
     if gap > EPS:
         status = "over"
 
@@ -695,6 +707,7 @@ def _project_entry(world: World, key: str, sm: _Sum, external_cost: Decimal = De
         free_worst_case=round(cap_h - conf - bind, 6),
         utilisation=util,
         status=status,
+        allocated=round(sm.alloc, 6),
         gap=round(gap, 6),
         gap_confirmed=round(sum(sm.gap_c), 6),
         gap_expected=round(sum(sm.gap_e), 6),
@@ -795,7 +808,8 @@ def weeks_detail(
         elif bind > 1e-9:
             basis, revenue = "offer-binding", float(q2(rev_bind_d))
         demand = conf + bind
-        status, util = status_for(cap_h, demand)
+        used = sum(sm.used for sm in sums.values())  # decision D4: utilisation counts the allocations too
+        status, util = status_for(cap_h, used)
         if gap > EPS:
             status = "over"
         events = list(names)
@@ -836,6 +850,7 @@ def weeks_detail(
                 free_worst_case=round(cap_h - demand, 6),
                 utilisation=util,
                 status=status,
+                allocated=round(sum(sm.alloc for sm in sums.values()), 6),
                 gap=round(gap, 6),
                 gap_confirmed=round(gap_c, 6),
                 gap_expected=round(gap_e, 6),

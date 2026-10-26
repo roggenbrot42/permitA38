@@ -867,7 +867,7 @@ week 1 (the four weeks are identical; revenue = 50 h x 100.00 = 5 000.00 per wee
 ```json
 {
   "week": "2026-03-02", "capacity": 60.0, "confirmed": 50.0, "binding_offers": 0.0,
-  "free_after_confirmed": 10.0, "free_worst_case": 10.0, "utilisation": 83.3, "status": "over",
+  "free_after_confirmed": 10.0, "free_worst_case": 10.0, "utilisation": 108.3, "status": "over",
   "gap": 5.0, "gap_confirmed": 5.0, "gap_expected": 5.0,
   "revenue": 5000.0, "basis": "contract", "contracted_revenue": 5000.0,
   "external_capacity": 20.0, "external_assigned": 25.0, "external_gap": 5.0, "external_cost": 1600.0,
@@ -877,7 +877,7 @@ week 1 (the four weeks are identical; revenue = 50 h x 100.00 = 5 000.00 per wee
   "contributions": [{"kind": "contract", "id": "d4e5f6a7", "title": "Contract C_P", "hours": 50.0, "binding": false}],
   "projects": [
     {"project_id": "a1b2c3d4", "name": "Demo project P", "capacity": 60.0, "confirmed": 50.0, "binding_offers": 0.0,
-     "expected_offers": 0.0, "free_after_confirmed": 10.0, "free_worst_case": 10.0, "utilisation": 83.3, "status": "over",
+     "expected_offers": 0.0, "free_after_confirmed": 10.0, "free_worst_case": 10.0, "utilisation": 108.3, "status": "over",
      "gap": 5.0, "gap_confirmed": 5.0, "gap_expected": 5.0,
      "internal": {"capacity": 40.0, "assigned": 25.0, "gap": 0.0},
      "external": {"capacity": 20.0, "assigned": 25.0, "gap": 5.0}, "external_cost": 1600.0},

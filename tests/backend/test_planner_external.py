@@ -133,7 +133,8 @@ def test_w4_contract_split_to_the_subcontractor_leaves_an_external_gap(boss_clie
         10.0,
         10.0,
     )
-    assert (week["utilisation"], week["status"], week["gap"]) == (83.3, "over", 5.0)
+    # decision D4: internal used max(5, 8) per day = 40 (boss) plus external demand 25 (S) = 65 of 60 capacity
+    assert (week["utilisation"], week["status"], week["gap"]) == (108.3, "over", 5.0)
     assert (week["revenue"], week["basis"], week["contracted_revenue"]) == (5000.0, "contract", 5000.0)
     assert (week["external_capacity"], week["external_assigned"], week["external_gap"], week["external_cost"]) == (
         20.0,

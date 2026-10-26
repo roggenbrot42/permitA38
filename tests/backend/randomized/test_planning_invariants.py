@@ -109,10 +109,13 @@ def dump(repo):
 
 def check_status_and_gap(w):
     """Two-way: the gap covers every hour the week is over by, and the status is ``over`` exactly when the old
-    utilisation rule says so or a project has a gap."""
+    utilisation rule says so or a project has a gap. The utilisation counts the allocations (decision D4), so the rule
+    reads the row's one-decimal utilisation (a value within 0.05 of 100 is left out: rounding decides there)."""
     assert w["gap"] + 1e-6 >= max(0.0, -w["free_worst_case"])
-    old_over = eng.status_for(w["capacity"], w["confirmed"] + w["binding_offers"])[0] == "over"
-    assert (w["status"] == "over") == (old_over or w["gap"] > 1e-6)
+    util = w["utilisation"]
+    if util is None or abs(util - 100.0) > 0.06:
+        old_over = util is None or util > 100.0
+        assert (w["status"] == "over") == (old_over or w["gap"] > 1e-6)
     assert w["gap_confirmed"] <= w["gap"] + 1e-6 and w["gap_expected"] <= w["gap"] + 1e-6
     assert w["gap_confirmed"] <= w["gap_expected"] + 1e-6
     for p in w.get("projects", []):
@@ -216,7 +219,7 @@ def build_fenced(repo, world, skip_contracts_of=None, extra_q_person=False, with
         for i, p in enumerate(people)
     ]
     day = lambda n: (MON + timedelta(days=n)).isoformat()  # noqa: E731
-    for a in allocs:
+    for a in allocs if with_allocations else []:
         repo.save(
             "allocations",
             dict(
@@ -314,7 +317,16 @@ def oracle_week_capacity(world, monday):
     return total
 
 
-NOT_COMPARED = ("status", "gap", "gap_confirmed", "gap_expected", "projects", "contributions")
+NOT_COMPARED = (
+    "status",
+    "gap",
+    "gap_confirmed",
+    "gap_expected",
+    "projects",
+    "contributions",
+    "utilisation",
+    "allocated",
+)
 
 
 @settings(max_examples=60, deadline=None)
@@ -350,10 +362,16 @@ def test_ring_fence_properties(world):
 @given(fenced_worlds())
 def test_allocations_never_change_the_team_numbers(world):
     """Equivalence: the same data with and without allocations gives the same team capacity, demand, free hours,
-    utilisation, revenue and day-table cap/confirmed/binding; only status and gap may differ."""
+    revenue and day-table cap/confirmed/binding; only status, gap, utilisation and allocated may differ. Utilisation
+    counts the allocations as used (decision D4), so it never drops when allocations are added."""
     _, with_a, _, w_with = forecast_of(world)
     _, without_a, _, w_without = forecast_of(world, with_allocations=False)
     for a, b in zip(with_a["weeks"], without_a["weeks"]):
+        assert b["allocated"] == 0.0 and a["allocated"] >= 0.0
+        if a["utilisation"] is not None and b["utilisation"] is not None:
+            assert a["utilisation"] >= b["utilisation"] - 0.06
+        elif b["utilisation"] is not None:
+            assert a["utilisation"] is None  # cap 0 with used hours, only possible when allocations add used hours
         strip = lambda cs: sorted((c["kind"], c["title"], c["hours"]) for c in cs)  # noqa: E731  (ids differ per run)
         assert strip(a["contributions"]) == strip(b["contributions"])
         assert {k: v for k, v in a.items() if k not in NOT_COMPARED} == {

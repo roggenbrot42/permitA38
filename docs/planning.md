@@ -47,7 +47,8 @@ Each week shows:
 | binding offers | hours of open offers (worst case) |
 | free (after confirmed) | capacity minus contracts |
 | free (worst case) | capacity minus contracts minus open offers |
-| utilisation | (contracts + open offers) / capacity |
+| allocated | hours you allocated to projects in the week (the allocations, before any scaling down); shown red when above the capacity |
+| utilisation | used / capacity, where used is the larger of the hours committed and the hours allocated, day by day and per project (see Capacity per project). Allocated hours count as used even when no contract fills them, so the figure shows how much of your capacity is in use |
 | status | `ok` up to 90 %, `tight` up to 100 %, `over` above 100 % (or capacity 0 with work booked) |
 
 ## Offer feasibility
@@ -102,6 +103,10 @@ Capacity belongs to projects. You give a person's hours to a project with an **a
 period, see Allocations below). Only the contracts and open offers of **that project** draw on it; hours a project
 does not use are **not** lent to another project, and a project's shortfall is a **gap of that project**.
 
+- Utilisation counts the allocations (decision D4, 2026-10-26): on a day, each project's used hours are the larger of its
+  committed hours and its allocated hours. Example: 30 h/week allocated to project A and 25 h/week to B with 40 h of
+  capacity give 137.5 % (55 / 40), and "allocated 55 h of 40 h capacity: projects are scaled down to 73 %" in the
+  row's tooltip; the projects share the 40 h pro rata, as described below.
 - A person's real capacity of a day (see Capacity) is shared out to the projects they are allocated to:
   `hours per week / available days of the week` per allocation (days without holiday or time off, like a contract). If the allocations of one day add up to more than the real capacity
   (over-allocation, or a holiday or vacation day), every allocation is scaled down pro rata: nothing is invented and

@@ -140,14 +140,18 @@ class PlanningService:
         """The old rule: one ``capacity.over`` per week whose utilisation is over (no project dimension)."""
         out = []
         for r in rows:
-            if eng.status_for(r["capacity"], r["confirmed"] + r["binding_offers"])[0] == "over":
-                over = max(-r["free_worst_case"], 0.0)
+            util = r["utilisation"]
+            if util is None or util > 100.0:  # the row's utilisation counts the allocations (decision D4)
+                over = max(-r["free_worst_case"], r["allocated"] - r["capacity"], 0.0)
+                committed = f"{_h(r['confirmed'] + r['binding_offers'])} h committed"
+                if r["allocated"] > r["confirmed"] + r["binding_offers"] + 1e-9:
+                    committed = f"{_h(r['allocated'])} h allocated and {committed}"
                 out.append(
                     pw.warning(
                         "capacity.over",
                         "warning",
                         "weeks",
-                        f"Week of {r['week']}: {_h(r['confirmed'] + r['binding_offers'])} h committed for "
+                        f"Week of {r['week']}: {committed} for "
                         f"{_h(r['capacity'])} h of capacity (over by {_h(over)} h).",
                         dict(week=r["week"], over_by=round(over, 2), contributions=r["contributions"], scope="team"),
                     )

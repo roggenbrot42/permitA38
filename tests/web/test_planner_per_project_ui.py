@@ -7,6 +7,7 @@ import copy
 import json
 import mimetypes
 import pathlib
+import re
 from datetime import date, timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -427,6 +428,27 @@ def test_planner_project_selector_and_stacked_bars(browser):
         pg.wait_for_timeout(100)
     assert api.calls("POST", "plan/simulate")[-1][3]["project_id"] == "a1b2c3d4"
     expect(pg.locator("#pln")).to_contain_text("Not covered: 20 h")
+    assert problems == []
+    ctx.close()
+
+
+def test_week_table_shows_allocated_and_the_over_allocation_text(browser):
+    """Decision D4: the week table has an Allocated column after Capacity (red when above the capacity); the row tooltip
+    says that the allocations exceed the capacity and by how much the projects are scaled down (55 h of 40 h: 73 %)."""
+    f = forecast_a()
+    for w in f["weeks"]:
+        w["allocated"] = 55.0  # the unscaled allocations of the week; capacity 40 h (example A)
+    api = FakeApi(forecast=f)
+    ctx, pg, problems = open_planner(browser, api)
+    expect(pg.locator("#pln th", has_text="Allocated")).to_have_count(1)
+    headers = pg.locator("#pln tr", has=pg.locator("th", has_text="Allocated")).first.locator("th").all_inner_texts()
+    assert [h.strip().lower() for h in headers[:3]] == ["week of", "capacity", "allocated"]  # CSS may upper-case them
+    row = pg.locator("tr[title*='allocated 55 h of 40 h capacity']").first
+    expect(row.locator("td").nth(2)).to_have_text("55")
+    expect(row.locator("td").nth(2)).to_have_class(re.compile(r"\bfree-bad\b"))
+    expect(row).to_have_attribute(
+        "title", re.compile(r"allocated 55 h of 40 h capacity: projects are scaled down to 73 %")
+    )
     assert problems == []
     ctx.close()
 

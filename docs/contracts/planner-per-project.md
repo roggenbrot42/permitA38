@@ -198,8 +198,10 @@ Query: `weeks` (1..156, default 26), `user_id`, `offers` (int, default 1), **new
   contains only that scope, and warnings are only that scope's. `user_id` and `project_id` combine (intersection).
 * Every week row gains `gap`, `gap_confirmed`, `gap_expected` (sum of the scope gaps; hours) and, unless
   `by_project=0`, `projects[]`. The row's `status` is `over` when `gap > 0`, else `status_for(capacity, demand)`.
-  `utilisation` stays `(confirmed + binding_offers) / capacity` in percent (1 decimal; `null` for capacity 0 with work;
-  0.0 without work).
+  `utilisation` is `used / capacity` in percent (1 decimal; `null` for capacity 0 with work; 0.0 without work), where
+  `used` = per day and scope `max(confirmed + binding, allocation)` of the employees (the allocation is unscaled) plus
+  the subcontractors' confirmed + binding (decision D4, 2026-10-26). The team row sums `used` over the scopes.
+  Without allocations `used` equals `confirmed + binding_offers`, as before.
 * `projects[]` (one object per scope with any capacity, any demand, or any allocation overlapping the week, plus
   **always** the `unassigned` scope; sorted by `name` case-insensitive, then `project_id`; `unassigned` last). A project
   that no longer exists is named `"(deleted project)"`. Fields:
@@ -210,7 +212,8 @@ Query: `weeks` (1..156, default 26), `user_id`, `offers` (int, default 1), **new
 | `name` | string | project name, `"Unassigned"` for null |
 | `capacity`, `confirmed`, `binding_offers`, `expected_offers` | number | sums of the two pools |
 | `free_after_confirmed`, `free_worst_case` | number | `capacity - confirmed`, `capacity - confirmed - binding_offers` (may be negative) |
-| `utilisation` | number or null | as above |
+| `utilisation` | number or null | as above (decision D4) |
+| `allocated` | number >= 0 | the unscaled employee allocation hours of the scope in the week (hours; 0 without allocations) |
 | `status` | `ok` / `tight` / `over` | rule 7 |
 | `gap`, `gap_confirmed`, `gap_expected` | number >= 0 | `internal.gap + external.gap` (worst case / confirmed only / confirmed + expected) |
 | `internal`, `external` | `{capacity, assigned, gap}` | the pools; `assigned` = confirmed + binding |
@@ -430,7 +433,7 @@ cap P 25/5 = 5, Q 15/5 = 3 (sum 8 = real, no scaling); demand P 6, Q 2. P gap 1/
 {
   "weeks": [{
     "week": "2026-03-02", "capacity": 40.0, "confirmed": 40.0, "binding_offers": 0.0,
-    "free_after_confirmed": 0.0, "free_worst_case": 0.0, "utilisation": 100.0, "status": "over",
+    "free_after_confirmed": 0.0, "free_worst_case": 0.0, "utilisation": 112.5, "status": "over",
     "gap": 5.0, "gap_confirmed": 5.0, "gap_expected": 5.0,
     "projects": [
       {"project_id": "a1b2c3d4", "name": "Demo project P", "capacity": 25.0, "confirmed": 30.0, "binding_offers": 0.0,
@@ -439,8 +442,8 @@ cap P 25/5 = 5, Q 15/5 = 3 (sum 8 = real, no scaling); demand P 6, Q 2. P gap 1/
        "internal": {"capacity": 25.0, "assigned": 30.0, "gap": 5.0},
        "external": {"capacity": 0.0, "assigned": 0.0, "gap": 0.0}, "external_cost": 0.0},
       {"project_id": "e5f6a7b8", "name": "Demo project Q", "capacity": 15.0, "confirmed": 10.0, "binding_offers": 0.0,
-       "expected_offers": 0.0, "free_after_confirmed": 5.0, "free_worst_case": 5.0, "utilisation": 66.7,
-       "status": "ok", "gap": 0.0, "gap_confirmed": 0.0, "gap_expected": 0.0,
+       "expected_offers": 0.0, "free_after_confirmed": 5.0, "free_worst_case": 5.0, "utilisation": 100.0,
+       "status": "tight", "gap": 0.0, "gap_confirmed": 0.0, "gap_expected": 0.0,
        "internal": {"capacity": 15.0, "assigned": 10.0, "gap": 0.0},
        "external": {"capacity": 0.0, "assigned": 0.0, "gap": 0.0}, "external_cost": 0.0},
       {"project_id": null, "name": "Unassigned", "capacity": 0.0, "confirmed": 0.0, "binding_offers": 0.0,

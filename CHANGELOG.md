@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Planner utilisation counts the allocations.** The "Utilisation" of a week (and of each project) was committed hours
+  over capacity and ignored the allocations, so an over-allocated person never showed more than 100 %. Utilisation is
+  now the larger of committed and allocated hours per day and project. The week table has a new "Allocated" column
+  (red above the capacity) and the API rows a new `allocated` field. Without allocations the numbers are unchanged.
+  Weeks with allocations can show a higher utilisation and a `tight` or `over` status that they did not show before.
+
 ## [0.4.0-alpha.4] - 2026-10-26
 
 Fourth alpha. Adds the planner per project (each project gets its own ring-fenced share of your capacity, with
