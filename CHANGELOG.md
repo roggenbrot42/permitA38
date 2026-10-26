@@ -47,7 +47,6 @@ Not for production bookkeeping yet; the tax rules marked *(verify)* in `docs/com
 - Vendor adoption keeps the chosen supplier and name, skips refused expenses and keeps the dialog focus and result.
 - Accept and adoption dialogs close with Escape like their Close buttons.
 - Planner: the simulate fields are sent only when used, so older servers keep working.
-- Business trips and planner: fixes found by the browser test suite (a refused form no longer blocks later steps).
 
 ## [0.4.0-alpha.3] - 2026-10-25
 
