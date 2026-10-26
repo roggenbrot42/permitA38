@@ -40,6 +40,7 @@ class SuggestStartIn(v.CheckedBody):
     earliest: v.OptDate = None
     user_ids: v.IdList = []
     project_id: v.OptId = None
+    changes: ScenarioChanges = ScenarioChanges()  # the what-if draft of the planner counts too
 
 
 class ApplyIn(v.CheckedBody):
@@ -147,6 +148,7 @@ def suggest_start(body: SuggestStartIn, _: Annotated[dict, Needs("planning")], s
         date.fromisoformat(body.earliest) if body.earliest else None,
         body.user_ids or None,
         project_id=body.project_id,
+        changes=body.changes.model_dump(),
     )
 
 

@@ -348,13 +348,63 @@ def test_suggest_start_is_the_earliest_feasible_day(repo):
     user = add_user(repo)
     add_contract(repo, user, MON, MON + timedelta(days=11), hpw=40)  # two fully booked weeks
     res = svc(repo).suggest_start(50, date(2026, 2, 27), date(2026, 2, 2), [user["id"]], today=TODAY)
-    # the week of 9 Feb is fully booked; from Saturday 14 Feb the 50 h fit into the free workdays from Mon 16 Feb
-    assert res["feasible"] is True and res["start"] == "2026-02-14"
+    # the week of 9 Feb is fully booked; the 50 h fit into the free workdays from Mon 16 Feb. A Saturday start
+    # (14 Feb) moves to the next available workday, so the start is Mon 16 Feb
+    assert res["feasible"] is True and res["start"] == "2026-02-16"
 
 
 def test_suggest_start_reports_infeasible(repo):
     user = add_user(repo)
     res = svc(repo).suggest_start(500, date(2026, 2, 27), date(2026, 2, 2), [user["id"]], today=TODAY)
+    assert res["feasible"] is False and res["start"] is None
+
+
+def add_absence(repo, user, start, end, kind="vacation"):
+    return repo.save("absences", dict(user_id=user["id"], kind=kind, start=start.isoformat(), end=end.isoformat()))
+
+
+def test_suggest_start_skips_the_vacation_days(repo):
+    user = add_user(repo)
+    add_absence(repo, user, MON, MON + timedelta(days=4))  # Mon 2 - Fri 6 Feb away
+    res = svc(repo).suggest_start(20, date(2026, 2, 13), MON, [user["id"]], today=TODAY)
+    assert res == dict(start="2026-02-09", feasible=True, free_hours=pytest.approx(40.0, abs=0.01))
+
+
+def test_suggest_start_after_a_long_vacation_is_on_the_first_available_workday(repo):
+    user = add_user(repo)
+    add_absence(repo, user, MON, MON + timedelta(days=11))  # Mon 2 - Fri 13 Feb away (a weekend start is skipped too)
+    res = svc(repo).suggest_start(50, date(2026, 2, 27), MON, [user["id"]], today=TODAY)
+    assert res["feasible"] is True and res["start"] == "2026-02-16"  # 80 h free from Mon 16 Feb
+
+
+def test_suggest_start_skips_a_public_holiday(repo):
+    user = add_user(repo)
+    repo.save_settings({**repo.settings(), "state": "BY"})
+    # 2026-01-06 (Heilige Drei Könige, Bavaria) is a Tuesday: the offer starts on the next workday
+    res = svc(repo).suggest_start(10, date(2026, 1, 20), date(2026, 1, 6), [user["id"]], today=TODAY)
+    assert res["feasible"] is True and res["start"] == "2026-01-07"
+
+
+def test_a_draft_vacation_counts_only_through_changes(repo):
+    user = add_user(repo)
+    draft = {"absences": [{"user_id": user["id"], "kind": "vacation", "start": "2026-02-02", "end": "2026-02-13"}]}
+    with_draft = svc(repo).suggest_start(50, date(2026, 2, 27), MON, [user["id"]], today=TODAY, changes=draft)
+    assert with_draft["feasible"] is True and with_draft["start"] == "2026-02-16"
+    nothing_saved = svc(repo).suggest_start(50, date(2026, 2, 27), MON, [user["id"]], today=TODAY)
+    assert nothing_saved["start"] == "2026-02-02"
+    assert repo.list("absences") == []  # the draft is never written
+
+
+def test_suggest_start_on_a_monday_without_vacation_is_unchanged(repo):
+    user = add_user(repo)
+    res = svc(repo).suggest_start(10, date(2026, 2, 27), MON, [user["id"]], today=TODAY)
+    assert res["feasible"] is True and res["start"] == "2026-02-02"
+
+
+def test_vacation_until_the_deadline_is_infeasible(repo):
+    user = add_user(repo)
+    add_absence(repo, user, MON, date(2026, 2, 27))
+    res = svc(repo).suggest_start(10, date(2026, 2, 27), MON, [user["id"]], today=TODAY)
     assert res["feasible"] is False and res["start"] is None
 
 

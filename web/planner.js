@@ -258,7 +258,7 @@
     const s = P.sugg;
     if (!s) return '';
     if (s.kind === 'vacation') return `<div class="small"><b>Best windows for ${s.days} working days:</b><ol>${s.options.map((o, i) => `<li>${fmtDate(o.start)} – ${fmtDate(o.end)} · overload ${num(o.overload_hours, 1)} h · off days gained ${o.bridge_days} <button type="button" class="ghost sm" data-a="plnUseOption" data-i="${i}">Use</button></li>`).join('') || '<li>No window fits.</li>'}</ol></div>`;
-    if (s.kind === 'start') return `<div class="small">${s.result.feasible ? `Earliest feasible start: <b>${fmtDate(s.result.start)}</b> (${num(s.result.free_hours, 1)} h free until the deadline).` : `Not feasible before the deadline: at most ${num(s.result.max_hours_from_earliest || 0, 1)} h are free.`}</div>`;
+    if (s.kind === 'start') return `<div class="small">${s.result.feasible ? `Earliest feasible start: <b>${dayName(s.result.start)} ${fmtDate(s.result.start)}</b> (${num(s.result.free_hours, 1)} h free until the deadline).` : `Not feasible before the deadline: at most ${num(s.result.max_hours_from_earliest || 0, 1)} h are free.`}</div>`;
     if (s.kind === 'move') return `<div class="small">${s.result.fits ? 'It already fits.' : s.result.suggestions.map((x, i) => `<div>${esc(x.message)} ${x.type === 'move' ? `<button type="button" class="ghost sm" data-a="plnUseMove" data-i="${i}">Apply</button>` : ''}</div>`).join('')}</div>`;
     return '';
   }
@@ -581,7 +581,8 @@
     schedule();
   };
   A.plnStart = guard(async () => {
-    const body = { hours: +document.getElementById('plnHrs').value, deadline: document.getElementById('plnDead').value, earliest: todayISO(), user_ids: userId() ? [userId()] : [] };
+    // the what-if draft counts (changes = the same payload as simulate); the project filter scopes the offer
+    const body = { hours: +document.getElementById('plnHrs').value, deadline: document.getElementById('plnDead').value, earliest: todayISO(), user_ids: userId() ? [userId()] : [], changes: payload(), ...(P.project ? { project_id: P.project } : {}) };
     const res = await api('POST', 'plan/suggest-start', body);
     P.sugg = { kind: 'start', result: res };
     paint();

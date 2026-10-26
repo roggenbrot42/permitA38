@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- Planner: "Earliest start for an offer" skips vacation, sick and other absence days and public holidays of the
+  assignee (a weekend start moves to the next workday), and counts a vacation drafted in the planner that is not yet
+  applied. The result shows the weekday.
+
 ## [0.4.0-alpha.4] - 2026-10-26
 
 Fourth alpha. Adds the planner per project (each project gets its own ring-fenced share of your capacity, with

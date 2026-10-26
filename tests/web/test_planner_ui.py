@@ -284,3 +284,23 @@ def test_creating_and_resizing_show_live_feedback_while_the_mouse_is_down(srv, u
     assert "End +3 days" in ui.inner_text("#plnDrag")
     ui.mouse.up()
     ui.wait_for_function("() => !document.querySelector('#plnDrag').offsetParent")
+
+
+def test_earliest_start_counts_a_draft_vacation_and_shows_the_weekday(srv, ui, seeded):
+    import re
+
+    today = date.today()
+    # a draft vacation (not applied) from today to Friday of this week
+    drag_vacation(ui, today.isoformat(), (monday(today) + timedelta(days=4)).isoformat())
+    ui.fill("#plnHrs", "8")
+    with ui.expect_request(lambda r: "suggest-start" in r.url) as req:
+        ui.click("[data-a=plnStart]")
+    sent = req.value.post_data_json
+    assert len(sent["changes"]["absences"]) == 1  # the draft travels with the request, nothing is saved
+    assert srv.app.state.services.store.list("absences") == []
+    ui.wait_for_selector("#plnSugg :text('Earliest feasible start')")
+    m = re.search(r"(Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\d{2})\.(\d{2})\.(\d{4})", ui.inner_text("#plnSugg"))
+    assert m, "the result shows the weekday and the date"
+    found = date(int(m.group(4)), int(m.group(3)), int(m.group(2)))
+    assert found > monday(today) + timedelta(days=4)  # after the draft vacation
+    assert found.weekday() < 5
