@@ -5,6 +5,36 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0-alpha.4] - 2026-10-26
+
+Fourth alpha. Adds the planner per project (each project gets its own ring-fenced share of your capacity, with
+allocations and an "Allocate my capacity" bootstrap), suppliers and subcontractors (supplier master data, incoming
+offers you accept or unaccept, external allocations in the planner, forecast and team timeline, a commitments report,
+and adoption of vendors from expenses). Adds migrations `0011-allocations` and `0012-suppliers`; an upgraded database
+can no longer be opened by alpha.3. Back up your data folder before upgrading (the app also does it automatically).
+Not for production bookkeeping yet; the tax rules marked *(verify)* in `docs/compliance.md` still need your tax adviser.
+
+### Added
+- **Planner per project**: the planner shows the capacity of each person split into ring-fenced shares per project,
+  with allocations (planned hours per project and week), per-day over-allocation warnings, a project filter and a
+  week detail in the forecast. "Allocate my capacity" bootstraps the allocations from your working time, with a
+  preview before anything is saved. Hours are spread over the available days of each allocation.
+- **Suppliers**: a supplier master data list, detail page and form, visible to the roles allowed by the rights table
+  (`docs/roles.md`).
+- **Incoming offers from subcontractors**: offers can be accepted and unaccepted again; accepting shows a warning
+  when the first week has no demand. Offers follow a status workflow.
+- **External allocations**: subcontractor time is allocated to projects like employee time and shows in the planner,
+  the forecast (external capacity, gap, cost and a subcontractor toggle) and the team timeline. Allocations can be
+  cancelled from the allocations dialog; planned, invoiced and open net figures are shown per allocation.
+- **Commitments**: a block on the offers and a commitments report of what is committed to subcontractors; an expense
+  that overruns its commitment shows a warning.
+- **Vendor adoption**: expenses can be linked to a supplier, and suppliers can be suggested and adopted from existing
+  expenses.
+
+### Changed
+- Team timeline and planner show subcontractor windows and cancelled subcontractor allocations up to the day before
+  the cancellation.
+
 ### Fixed
 - Business trips: finalizing a trip with open checklist lines now asks first and sends one request (no refused `PUT`
   with a `409` in the console); a new trip is saved as a draft before it is finalized.
@@ -12,6 +42,12 @@ All notable changes to this project are documented here. The format is based on
   afterwards and is stored as soon as a customer or project is chosen.
 - The import and numbering pages no longer fail with a script error for a user who is not the boss (the helper that
   shows the "only available to the boss" message was missing).
+- Offers: saving keeps only the client fields, and accept, unaccept and status actions run in one transaction; a
+  damaged offer line is refused instead of being stored.
+- Vendor adoption keeps the chosen supplier and name, skips refused expenses and keeps the dialog focus and result.
+- Accept and adoption dialogs close with Escape like their Close buttons.
+- Planner: the simulate fields are sent only when used, so older servers keep working.
+- Business trips and planner: fixes found by the browser test suite (a refused form no longer blocks later steps).
 
 ## [0.4.0-alpha.3] - 2026-10-25
 
@@ -274,7 +310,9 @@ limitations and what is planned for the next alphas. Not for production bookkeep
 ## [0.1.0]
 - Initial version as *Timely*: time tracking, weekly goal, forecast, offers, invoices, expenses, tax estimates.
 
-[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.2...HEAD
+[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.4...HEAD
+[0.4.0-alpha.4]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.3...v0.4.0-alpha.4
+[0.4.0-alpha.3]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.2...v0.4.0-alpha.3
 [0.4.0-alpha.2]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.1...v0.4.0-alpha.2
 [0.4.0-alpha.1]: https://github.com/roggenbrot42/permitA38/releases/tag/v0.4.0-alpha.1
 [0.2.0]: https://github.com/roggenbrot42/permitA38/releases/tag/v0.2.0
