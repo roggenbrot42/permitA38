@@ -631,10 +631,32 @@ class ApiMachine(RuleBasedStateMachine):
         self.tick()
         self.op_create(data.draw(self.actor()), coll, data.draw(self.body_st(coll)))
 
+    def mismatch(self, coll, body, old=None) -> bool:
+        """Mirror of the project/customer rule: a write of offers, invoices or contracts is refused (422) when both
+        customer and project are set, the project has a customer, and the customer or project changed vs the record.
+        A field the request leaves out (or sends as null) keeps the stored value."""
+        if coll not in ("offers", "invoices", "contracts"):
+            return False
+        old = old or {}
+        cid = body.get("customer_id") if body.get("customer_id") is not None else old.get("customer_id")
+        pid = body.get("project_id") if body.get("project_id") is not None else old.get("project_id")
+        if not cid or not pid:
+            return False
+        if old and old.get("customer_id") == cid and old.get("project_id") == pid:
+            return False
+        proj = self.m["projects"].get(pid)
+        return bool(proj and proj.get("customer_id") and proj["customer_id"] != cid)
+
+    def assert_refused_by_rule(self, r):
+        assert r.status_code == 422 and r.json() == {"detail": "Project belongs to another customer"}, r.text
+
     def op_create(self, s, coll, body):
         r = self.call("POST", f"/{coll}", s, json=body)
         if (g := self.gate(s, boss_only=coll not in MEMBER_OWN)) is not None:
             assert r.status_code == g, (coll, r.status_code, r.text)
+            return
+        if self.mismatch(coll, body):
+            self.assert_refused_by_rule(r)
             return
         assert r.status_code == 200, r.text
         exp = self.expected(coll, body, None, self.m["users"][s.user_id]) | {"id": r.json()["id"]}
@@ -667,6 +689,9 @@ class ApiMachine(RuleBasedStateMachine):
             return
         if coll == "entries" and old.get("invoice_id") and me["role"] != "boss":
             assert r.status_code == 403
+            return
+        if self.mismatch(coll, body, old):
+            self.assert_refused_by_rule(r)
             return
         assert r.status_code == 200, r.text
         exp = self.expected(coll, body, old, me) | {"id": rid}
@@ -758,6 +783,9 @@ class ApiMachine(RuleBasedStateMachine):
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
+        if self.mismatch(coll, body):
+            self.assert_refused_by_rule(r)
+            return
         assert r.status_code == 200, r.text
         exp = self.doc_expected(coll, body, None) | {"id": r.json()["id"]}
         self.check_record(coll, exp, r.json())
@@ -788,6 +816,9 @@ class ApiMachine(RuleBasedStateMachine):
         r = self.call("PUT", f"/{coll}/{rid}", s, json=body)
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
+            return
+        if self.mismatch(coll, body, self.m[coll][rid]):
+            self.assert_refused_by_rule(r)
             return
         assert r.status_code == 200, r.text
         exp = self.doc_expected(coll, body, self.m[coll][rid]) | {"id": rid}
@@ -921,6 +952,18 @@ class ApiMachine(RuleBasedStateMachine):
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
+        offer0 = self.m["offers"][rid]
+        plan0 = offer0.get("plan") or {}
+        if (
+            plan0.get("start")
+            and plan0.get("end")
+            and self.mismatch(
+                "contracts", {"customer_id": offer0.get("customer_id"), "project_id": offer0.get("project_id")}
+            )
+        ):
+            # the contract would take another customer's project: the whole accept is rolled back
+            self.assert_refused_by_rule(r)
+            return
         assert r.status_code == 200, r.text
         out, offer = r.json(), self.m["offers"][rid]
         assert out["offer"]["status"] == "accepted"
@@ -967,7 +1010,6 @@ class ApiMachine(RuleBasedStateMachine):
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
-        assert r.status_code == 200, r.text
         o = self.m["offers"][rid]
         body = {
             k: o[k]
@@ -975,6 +1017,10 @@ class ApiMachine(RuleBasedStateMachine):
             if k in o
         }
         body.update(date=TODAY.isoformat(), offer_id=rid)
+        if self.mismatch("invoices", body):  # a legacy offer whose project moved to another customer
+            self.assert_refused_by_rule(r)
+            return
+        assert r.status_code == 200, r.text
         exp = self.doc_expected("invoices", body, None) | {"id": r.json()["id"]}
         self.check_record("invoices", exp, r.json())
         self.m["invoices"][exp["id"]] = exp
