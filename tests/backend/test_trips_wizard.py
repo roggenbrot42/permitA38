@@ -174,6 +174,25 @@ def test_trip_item_of_a_foreign_trip_is_422(boss_client):
     assert "Unknown trip item" in r.text
 
 
+def test_bill_with_nonexistent_trip_id_is_422(boss_client):
+    r = boss_client.post(
+        "/api/expenses",
+        json={"date": "2026-11-09", "net": 80, "vat": 0, "trip_id": "nosuchtrip1"},
+    )
+    assert r.status_code == 422
+    assert "Unknown trip" in r.text
+
+
+def test_bill_with_nonexistent_trip_item_id_on_a_real_trip_is_422(boss_client):
+    trip = make_trip(boss_client, items=[item()])
+    r = boss_client.post(
+        "/api/expenses",
+        json={"date": "2026-11-09", "net": 80, "vat": 0, "trip_id": trip["id"], "trip_item_id": "nosuchitem1"},
+    )
+    assert r.status_code == 422
+    assert "Unknown trip item" in r.text
+
+
 def test_trip_item_without_trip_id_is_422(boss_client):
     trip = make_trip(boss_client, items=[item()])
     r = boss_client.post(
