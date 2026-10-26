@@ -213,7 +213,7 @@ PAGES.doc = async (coll, id) => {
   const plan = d.plan || {};
   return `<div class="head"><div><a href="#/sales/${coll}" class="small">← ${isInv ? 'Invoices' : 'Offers'}</a><h1>${isInv ? 'Invoice' : 'Offer'} ${esc(d.number || '')} ${d.id ? statusPill(coll, d) : '<span class="pill warn">draft – not saved yet</span>'}</h1></div>
     <div class="row tight" style="flex:none">${d.id ? `<button data-a="docPdf">Preview PDF</button>` : ''}<button class="${d.number ? '' : 'primary'}" data-a="docSave">${d.status === 'draft' ? 'Save draft' : 'Save'}</button>
-    ${d.id && !d.number ? `<button class="primary" data-a="docFinalize">Finalize & number</button>` : ''}${d.id && d.number ? `<select style="width:auto" data-change="docStatus"><option value="">Set status…</option>${opt(statuses, '')}</select>` : ''}
+    ${d.id && !d.number ? `<button class="primary" data-a="docFinalize">Finalize & number</button>` : ''}${d.id && !d.number ? `<button class="danger" data-a="docDelete">Delete draft</button>` : ''}${d.id && d.number ? `<select style="width:auto" data-change="docStatus"><option value="">Set status…</option>${opt(statuses, '')}</select>` : ''}
     ${d.id && !isInv && d.number && d.status !== 'accepted' ? `<button data-a="docAccept">✓ Accepted → create project</button>` : ''}${d.id && !isInv ? `<button data-a="docToInvoice">→ Invoice</button>` : ''}</div></div>
   ${d.status === 'draft' && !d.number ? `<div class="banner info">This is a <b>draft</b>: it has no number yet, is not counted in revenue or planning, and the PDF is marked as a draft. It gets its ${isInv ? 'invoice' : 'offer'} number when you press <b>Finalize &amp; number</b>.</div>` : ''}
   ${locked ? '<div class="banner">This document has a number and was probably sent. Changing it now changes the PDF – only edit for corrections.</div>' : ''}
@@ -298,6 +298,13 @@ async function persistDoc() {
 }
 A.docSave = async () => { const wasNew = !DOC.id; const r = await persistDoc(); toast('Saved'); if (wasNew) location.hash = `#/doc/${DOC.coll}/${r.id}`; else render(); };
 A.docFinalize = async () => { await persistDoc(); const r = await api('POST', `${DOC.coll}/${DOC.id}/finalize`); DOC = { coll: DOC.coll, ...stripWarnings({ ...r }) }; toast('Finalized as ' + r.number); await loadAll([DOC.coll]); location.hash = `#/doc/${DOC.coll}/${r.id}`; render(); };
+A.docDelete = async () => {
+  if (!window.confirm('Delete this draft? This cannot be undone.')) return;
+  const coll = DOC.coll;
+  await api('DELETE', `${coll}/${DOC.id}`);
+  await loadAll([coll]);
+  location.hash = `#/sales/${coll}`;
+};
 A.docPdf = async () => { await persistDoc(); window.open(api.url(`${DOC.coll}/${DOC.id}/pdf`), '_blank'); };
 A.docStatus = async el => {
   if (!el.value) return;

@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 - The planner timeline no longer has the per-project row of stacked bars (allocated / planned / gap); it was unreadable with more than three projects. The week table and the project filter are unchanged.
+### Fixed
+- A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
 
 ## [0.4.0-alpha.4] - 2026-10-26
 
