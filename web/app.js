@@ -281,7 +281,6 @@ PAGES.today = async () => {
   await loadAll(['entries']);
   const now = todayISO(), entries = S.d.entries.filter(e => e.date === now && e.user_id === S.me.id);
   const pct = dash.target ? Math.min(100, dash.worked / dash.target * 100) : 0;
-  const t = S.timer, run = t?.running;
   const projects = by(S.d.projects);
   const hello = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Hello' : 'Good evening';
   let extras = '';
@@ -300,14 +299,9 @@ PAGES.today = async () => {
     const st = S.settings, steps = [[numLog.length > 0 || S.d.invoices.some(i => i.number), 'Check your document numbering (start number, pattern)', '#/numbering'], [batches.length > 0 || S.d.invoices.some(i => i.imported), 'Import existing offers and invoices (optional)', '#/import'], [!!st.company_name && !!(st.tax_number || st.vat_id), 'Fill in your business details (address, tax number, bank)', '#/settings'], [S.d.customers.length > 0, 'Add your first customer', '#/customers'], [S.d.projects.length > 0, 'Create a project (customer work or personal)', '#/projects'], [entries.length > 0 || S.d.entries.length > 0, 'Track your first hour with the Start button above', '#/today']];
     extras = `<div class="card" style="border-color:var(--accent)"><h2>👋 Getting started</h2><div class="muted small" style="margin-bottom:8px">Four steps to your first tracked hour. Full guide: <code>docs/getting-started.md</code></div>${steps.map(([done, t, h]) => `<div style="padding:4px 0">${done ? '✅' : '⬜'} <a href="${h}">${t}</a></div>`).join('')}</div>` + extras;
   }
-  if (run) render.after = () => { render.tick = setInterval(() => { const c = $('#clock'); if (c) c.textContent = clockStr(timerElapsed()); }, 1000); };
+  render.after = () => { timerUpd(); timerTick(); };
   return `<div class="head"><div><h1>${hello}, ${esc(S.me.name.split(' ')[0])}</h1><div class="muted">${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</div></div><button data-a="addTime">+ Add time manually</button></div>
-  <div class="card"><div class="timer">${run ? `<div class="clock" id="clock">${clockStr(timerElapsed())}</div>
-      <div style="flex:1;min-width:200px"><div><b>${esc(projects[t.project_id]?.name || 'No project')}</b></div><input id="t_note" value="${esc(t.note || '')}" placeholder="What are you working on?" style="margin-top:6px"></div>
-      <button class="stop big" data-a="timerStop">■ Stop</button>`
-      : `<div style="flex:1;min-width:200px"><div class="row"><div><label>Project</label><select id="t_proj" data-change="timerProj">${projectOptions().map(([v, l]) => `<option value="${v}" ${v === localStorage.lastProj ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
-      <div><label>Task</label><select id="t_task">${taskOptions(localStorage.lastProj || '').map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></div></div>
-      <input id="t_note" placeholder="What are you working on? (optional)" style="margin-top:8px"></div><button class="primary big" data-a="timerStart">▶ Start</button>`}</div></div>
+  ${timerCard()}
   <div class="card"><div class="row" style="align-items:center"><div><h2 style="margin:0">This week</h2><div class="muted">${hm(dash.worked)} of ${hm(dash.target)} h</div></div>
     <div class="right" style="flex:2"><div style="font-size:26px;font-weight:700" class="${dash.remaining ? '' : 'free-good'}">${dash.remaining ? hm(dash.remaining) + ' h to go' : '🎉 Weekly goal reached' + (dash.overtime ? ' (+' + hm(dash.overtime) + ')' : '')}</div>
     <div class="muted small">${dash.remaining && dash.remaining_days ? `≈ ${hm(dash.per_day_needed)} h per remaining working day (${dash.remaining_days} day${dash.remaining_days > 1 ? 's' : ''} incl. today)` : dash.remaining ? 'No working days left this week' : ''}</div></div></div>
@@ -324,8 +318,91 @@ function entryRow(e, projects) {
 }
 A.addTime = () => entryForm({}, render);
 A.editEntry = el => entryForm(S.d.entries.find(e => e.id === el.dataset.id), render);
-A.timerProj = el => { localStorage.lastProj = el.value; $('#t_task').innerHTML = taskOptions(el.value).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join(''); };
-A.timerStart = async () => { S.timer = await api('POST', 'timer/start', { project_id: $('#t_proj').value || null, task_id: $('#t_task').value || null, note: $('#t_note').value }); render(); };
+A.timerProj = () => { localStorage.lastProj = projIdOf(); $('#t_task').innerHTML = taskOptions(localStorage.lastProj).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join(''); timerUpd(); };
+A.timerTask = () => timerUpd();
+A.timerStart = async () => { S.timer = await api('POST', 'timer/start', { project_id: projIdOf() || null, task_id: $('#t_task').value || null, note: $('#t_note').value }); render(); };
+/* ---- time tracking card (Today page) ---- */
+let moneyView = false;   // per view, not stored: tracker shows money earned instead of the clock
+const hasRate = v => v !== null && v !== undefined && v !== '';
+const projLabel = p => p.name + (p.personal ? ' (personal)' : '');
+const labelById = id => { const p = (S.d.projects || []).find(x => x.id === id); return p ? projLabel(p) : ''; };
+/* Project id from the typed label or name (case-insensitive); '' when nothing matches. */
+function projIdOf() {
+  const v = ($('#t_proj')?.value || '').trim().toLowerCase();
+  if (!v) return '';
+  return (S.d.projects || []).find(p => p.status !== 'archived' && (projLabel(p).toLowerCase() === v || p.name.toLowerCase() === v))?.id || '';
+}
+/* Hourly rate: the task's rate if set, else the project's rate; null when the client knows none. */
+function rateOf(pid, tid) {
+  if (!pid) return null;
+  const task = tid && (S.d.tasks || []).find(x => x.id === tid);
+  if (task && hasRate(task.rate)) return task.rate;
+  const p = (S.d.projects || []).find(x => x.id === pid);
+  return p && hasRate(p.rate) ? p.rate : null;
+}
+/* Elapsed whole seconds x hourly rate, exact decimals, rounded half-up to cents. */
+function earned(rate) {
+  const r = Money.parse(rate);
+  return eur(Money.toNumber(Money.roundDiv(BigInt(Math.floor(timerElapsed())) * r.n * 100n, 3600n * 10n ** BigInt(r.s))));
+}
+const activePid = () => (S.timer?.running ? S.timer.project_id : projIdOf());
+const activeTid = () => (S.timer?.running ? S.timer.task_id : ($('#t_task')?.value || ''));
+const hhmm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+const toMin = s => { const m = /^(\d{1,2}):(\d{2})$/.exec(s || ''); return m ? +m[1] * 60 + +m[2] : null; };
+/* Refresh the hint and the clock/money text in place (no re-render, so typed values stay). */
+function timerUpd() {
+  const pid = activePid(), rate = rateOf(pid, activeTid());
+  if (rate === null) moneyView = false;
+  const h = $('#t_hint'); if (h) h.textContent = pid && rate === null ? 'no rate on this project' : '';
+  const c = $('#clock'); if (c) c.textContent = moneyView ? earned(rate) : !S.timer?.running ? '0:00' : clockStr(timerElapsed());
+}
+function timerTick() { clearInterval(render.tick); if (S.timer?.running) render.tick = setInterval(timerUpd, 1000); }
+function timerModeHtml() {
+  if (localStorage.timeMode !== 'tracker') return `<div class="field" style="margin:0"><label for="t_date">Date</label><input type="date" id="t_date" value="${todayISO()}"></div>
+    <div class="field" style="margin:0"><label for="t_start">Start</label><input type="time" id="t_start" data-change="timerTimes"></div>
+    <div class="field" style="margin:0"><label for="t_end">Stop</label><input type="time" id="t_end" data-change="timerTimes"></div>
+    <div class="field" style="margin:0"><label for="t_dur">Duration</label><input id="t_dur" placeholder="hh:mm" style="width:90px" data-change="timerDur"></div>
+    <button class="primary" data-a="timerAdd">Add</button>`;
+  const run = S.timer?.running;
+  return `<button type="button" class="clock" id="clock" data-a="timerMoney" aria-label="Show time or money earned">${run ? clockStr(timerElapsed()) : '0:00'}</button>
+    <div class="small muted" id="t_hint"></div>
+    ${run ? '<button class="stop big" data-a="timerStop">■ Stop</button>' : '<button class="primary big" data-a="timerStart">▶ Start</button>'}`;
+}
+function timerCard() {
+  const t = S.timer, run = !!t?.running, tracker = localStorage.timeMode === 'tracker';
+  const pid = run ? t.project_id : (localStorage.lastProj || ''), tid = run ? t.task_id : '';
+  const modeBtn = (m, glyph, label) => `<button type="button" class="ghost" data-a="timeMode" data-mode="${m}" aria-label="${label}" title="${label}" aria-pressed="${tracker === (m === 'tracker')}">${glyph}</button>`;
+  return `<div class="card"><div class="timer">
+    <div class="field" style="flex:2;min-width:200px;margin:0"><label for="t_note">Description</label><input id="t_note" value="${esc(run ? t.note || '' : '')}" placeholder="What are you working on?"></div>
+    <div class="field" style="margin:0"><label for="t_proj">Project</label><input id="t_proj" list="t_proj_list" value="${esc(labelById(pid))}" placeholder="Search projects" autocomplete="off" data-change="timerProj"><datalist id="t_proj_list">${projectOptions(false).map(([, l]) => `<option value="${esc(l)}"></option>`).join('')}</datalist></div>
+    <div class="field" style="margin:0"><label for="t_task">Task</label><select id="t_task" data-change="timerTask">${taskOptions(pid).map(([v, l]) => `<option value="${v}" ${v === tid ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+    <div id="t_mode_area" class="timer" style="flex:none">${timerModeHtml()}</div>
+    <div class="row tight" style="flex:none">${modeBtn('manual', '✎', 'Manual')}${modeBtn('tracker', '⏱', 'Time tracker')}</div>
+  </div></div>`;
+}
+A.timeMode = el => {
+  localStorage.timeMode = el.dataset.mode;
+  $('#t_mode_area').innerHTML = timerModeHtml();
+  document.querySelectorAll('[data-a="timeMode"]').forEach(b => b.setAttribute('aria-pressed', String(b === el)));
+  timerUpd(); timerTick();
+};
+A.timerMoney = () => { if (rateOf(activePid(), activeTid()) === null) return; moneyView = !moneyView; timerUpd(); };
+A.timerTimes = () => { const s = toMin($('#t_start').value), e = toMin($('#t_end').value); $('#t_dur').value = s !== null && e !== null && e > s ? hm((e - s) / 60) : ''; };
+A.timerDur = () => {
+  const s = toMin($('#t_start').value), d = parseDur($('#t_dur').value);
+  if (s === null) { toast('Enter a start time first', true); return; }
+  if (!d || d <= 0 || isNaN(d)) { toast('Enter a duration like 1:30', true); return; }
+  if (s + d >= 1440) { toast('An entry must end on the same day', true); return; }
+  $('#t_end').value = hhmm(s + d); $('#t_dur').value = hm(d / 60);
+};
+A.timerAdd = async () => {
+  const date = $('#t_date').value, s = toMin($('#t_start').value), e = toMin($('#t_end').value);
+  if (!date) throw new Error('Pick a date');
+  if (s === null || e === null) throw new Error('Enter start and stop times');
+  if (e <= s) throw new Error('Stop must be after start');
+  await save('entries', { date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOf() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: true });
+  render();
+};
 A.timerStop = async () => { const r = await api('POST', 'timer/stop', { note: $('#t_note').value }); S.timer = { running: false }; toast('Saved ' + hm((r.entry?.minutes || 0) / 60) + ' h'); await loadAll(['entries']); render(); };
 
 /* ================= TIMESHEET ================= */
