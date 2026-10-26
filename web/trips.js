@@ -21,7 +21,7 @@ const TRIP_ITEM_CATEGORY = { hotel: 'Accommodation', train: 'Transportation', fl
 let TRIP_PAGE = null;          // the open trip page: {trip (last stored Trip), step, ro, legs (working itinerary), rate}
 let TRIP_PREVIEW_TIMER = null, TRIP_PREVIEW_SEQ = 0;
 let TRIP_REGION = null, TRIP_COUNTRY_OPTS = null;
-let TRIP_BUSY = false;
+let TRIP_QUEUE = Promise.resolve();   // the trip writes run one after the other
 
 const countryName = c => { try { TRIP_REGION ||= new Intl.DisplayNames(['en'], { type: 'region' }); return TRIP_REGION.of(c) || c; } catch { return c; } };
 const countryLabel = c => `${countryName(c)} (${c})`;
@@ -61,7 +61,10 @@ const eurC = c => eur(Money.toNumber(c));
 const billCents = b => tripCents(b.net || 0) + tripCents(b.vat || 0);
 /** Private car: km x rate, exact cents, half up. The rate comes from the server (preview). */
 const kmCost = (km, rate) => { const a = Money.parse(km), b = Money.parse(rate); return Money.toNumber(Money.roundDiv(a.n * b.n * 100n, 10n ** BigInt(a.s + b.s))); };
-const once = fn => async (...a) => { if (TRIP_BUSY) return; TRIP_BUSY = true; try { return await fn(...a); } finally { TRIP_BUSY = false; } };
+/** A trip write waits for the writes already started: a Back, Next or inline edit is queued, never dropped. */
+const tripWrite = fn => { const run = TRIP_QUEUE.then(fn); TRIP_QUEUE = run.catch(() => {}); return run; };
+/** A button that starts a write: a second click while its own write is queued or running is ignored. */
+const once = fn => { let pending = false; return (...a) => { if (pending) return; pending = true; return tripWrite(() => fn(...a)).finally(() => { pending = false; }); }; };
 
 /* ---------- list page ---------- */
 PAGES.trips = async (id, step) => {
@@ -142,9 +145,14 @@ function tripProjectOptions(customerId) {
 }
 
 /* ---------- body of the trip (PUT replaces the whole trip) ---------- */
-/** The stored trip as a TripIn: response-only fields left out. */
+/** Fields the server only sends back: never part of a PUT. Every other stored field (also unknown ones) is kept. */
+const TRIP_RESPONSE_ONLY = ['id', 'created', 'updated', 'user_id', 'days', 'bills', 'checklist', 'allowance_total', 'mileage_km',
+  'mileage_total', 'rules_version', 'items_expected_total', 'items_actual_total'];
+/** The stored trip as a TripIn: the stored fields first (unknown ones survive), then the known fields overwrite them. */
 function tripIn(t) {
+  const kept = Object.fromEntries(Object.entries(t).filter(([k]) => !TRIP_RESPONSE_ONLY.includes(k)));
   return {
+    ...kept,
     title: t.title || '', purpose: t.purpose || '', customer_id: t.customer_id || null, project_id: t.project_id || null,
     start: t.start, end: t.end, origin: t.origin || '', destination: t.destination || '', destination_country: t.destination_country || 'DE',
     places: (t.places || []).map(p => ({ ...p })), meals_provided: (t.meals_provided || []).map(m => ({ ...m })),
@@ -171,7 +179,7 @@ function tripPageHTML() {
     ${banner}
     ${step === 'plan' ? '' : tripSummaryHTML(t)}
     <nav aria-label="Trip steps"><ol class="stepper">${TRIP_STEPS.map(([k, l], i) => `<li><a href="#/trips/${esc(t.id)}/${k}"${k === step ? ' aria-current="step"' : ''}><span class="stepper-no">${i + 1}</span> ${esc(l)}</a></li>`).join('')}</ol></nav>
-    <p id="t_error" class="banner bad" role="alert" hidden></p>
+    <p id="t_error" class="banner bad" role="alert" tabindex="-1" hidden></p>
     <section class="card trip-step" id="t_step" aria-label="${esc(TRIP_STEPS[idx][1])}">${body}</section>
     <div class="trip-nav">${idx > 0 ? `<button type="button" data-a="tripMove" data-step="${TRIP_STEPS[idx - 1][0]}">← Back</button>` : '<span></span>'}${idx < TRIP_STEPS.length - 1 ? `<button type="button" class="primary" data-a="tripMove" data-step="${TRIP_STEPS[idx + 1][0]}">Next →</button>` : '<span></span>'}</div>`;
 }
@@ -212,8 +220,10 @@ A.tripMove = once(async el => {
 });
 async function tripSaveStep() {
   const values = tripStepValues(TRIP_PAGE.step);
+  // meals of days the shorter period no longer has are dropped by tripPlanValues: the user is told how many
+  const dropped = TRIP_PAGE.step === 'plan' && values.meals_provided ? (TRIP_PAGE.trip.meals_provided || []).length - values.meals_provided.length : 0;
   await tripPutPartial(values);
-  toast('Saved');
+  toast(dropped ? `Saved. ${dropped} ${dropped === 1 ? 'meal entry' : 'meal entries'} outside the new period ${dropped === 1 ? 'was' : 'were'} removed.` : 'Saved');
 }
 /** The fields of the current step as a partial TripIn. Throws a plain message for what the user must complete first. */
 function tripStepValues(step) {
@@ -226,6 +236,10 @@ function tripStepValues(step) {
     // same rule as the server: a departure lies in [start, end] (datetime-local strings compare in time order)
     const late = legs.find(l => l.depart < t.start || l.depart > t.end);
     if (late) throw new Error(`The departure ${fmtDT(late.depart)} is outside the trip (${fmtDT(t.start)} to ${fmtDT(t.end)})`);
+    // the rows keep their order: a row may not depart before the row above it
+    for (let i = 1; i < legs.length; i++) {
+      if (legs[i].depart < legs[i - 1].depart) throw new Error(`The times must not go backwards: ${fmtDT(legs[i].depart)} is before the row above it (${fmtDT(legs[i - 1].depart)})`);
+    }
     TRIP_PAGE.legs = legs;
     return { itinerary: legs, places: placesFromLegs(legs, t.start) };
   }
@@ -247,12 +261,38 @@ function tripPlanValues(t) {
     start, end, origin, destination, destination_country: val('t_dest_country') || 'DE',
     cost_centre: document.querySelector('input[name="t_cc"]:checked')?.value || null,
   };
-  // the places of the itinerary follow the plan when the user agrees; nothing else changes
-  const legs = (t.itinerary || []).length && (t.origin !== origin || t.destination !== destination)
-    && confirm('The start place or the destination changed. Use the new places in the itinerary rows too?')
-    ? (t.itinerary || []).map(l => ({ ...l, from: mapPlace(l.from, t, origin, destination), to: mapPlace(l.to, t, origin, destination) }))
-    : null;
-  if (legs) Object.assign(values, { itinerary: legs, places: placesFromLegs(legs, start) });
+  const dest_c = values.destination_country;
+  const stored = t.itinerary || [];
+  // a place not of the period any more: the rows must lie inside the new period (the server refuses them otherwise)
+  const late = stored.find(l => l.depart < start || l.depart > end);
+  if (late) throw new Error(`The itinerary has a row departing ${fmtDT(late.depart)}, outside the new period: correct the times on the Itinerary step first`);
+  // mileage rows outside the period: removed only when the user asks for it
+  const sd = start.slice(0, 10), ed = end.slice(0, 10);
+  const outsideKm = (t.mileage || []).filter(m => m.date < sd || m.date > ed);
+  if (outsideKm.length) {
+    const n = outsideKm.length;
+    if (!confirm(`${n} mileage ${n === 1 ? 'row lies' : 'rows lie'} outside the new period. Remove ${n === 1 ? 'it' : 'them'}?`)) {
+      throw new Error('Mileage outside the new period: remove it on the Expenses step, or change the period back');
+    }
+    values.mileage = (t.mileage || []).filter(m => m.date >= sd && m.date <= ed);
+  }
+  // meals of days outside the period are dropped (the save toast names how many)
+  const meals = t.meals_provided || [];
+  const keptMeals = meals.filter(m => m.date >= sd && m.date <= ed);
+  if (keptMeals.length !== meals.length) values.meals_provided = keptMeals;
+  // the places of the allowance follow the plan (origin, destination, its country) and the period
+  const changed = t.origin !== origin || t.destination !== destination || (t.destination_country || 'DE') !== dest_c;
+  if (!changed && start === t.start && end === t.end) return values;   // nothing of the place or the period moved: places (and day corrections) stay
+  // stored legs: the user decides whether their places follow the plan; without legs the two default legs are used
+  const useNew = stored.length > 0 && changed && confirm('The start place, the destination or its country changed. Use the new places in the itinerary rows too?');
+  if (useNew) values.itinerary = stored.map(l => {
+    const x = { ...l, from: mapPlace(l.from, t, origin, destination), to: mapPlace(l.to, t, origin, destination) };
+    if (l.to === t.destination) x.country = dest_c;
+    return x;
+  });
+  const legs = values.itinerary || stored;
+  const planLegs = legs.length ? legs : defaultLegs({ start, end, origin, destination, destination_country: dest_c });
+  values.places = placesFromLegs(planLegs, start);
   return values;
 }
 const mapPlace = (p, t, origin, destination) => p === t.origin ? origin : p === t.destination ? destination : p;
@@ -283,7 +323,7 @@ function itineraryHTML(t, ro) {
       <td class="nowrap small">${esc(fmtDT(legs[j - 1].depart))}</td>
       <td><input type="datetime-local" data-f="until" value="${esc(legs[j].depart)}" aria-label="Stay ${j}: until" ${dis}></td>
       <td>${modeSel(legs[j].mode, `Stay ${j}: travel on by`)}</td>
-      <td>${ro ? '' : `<button type="button" class="ghost sm" data-a="tripStayDel" data-i="${j}" aria-label="Remove stay ${j}">Remove</button>`}</td></tr>`);
+      <td>${ro || n <= 2 ? '' : `<button type="button" class="ghost sm" data-a="tripStayDel" data-i="${j}" aria-label="Remove stay ${j}">Remove</button>`}</td></tr>`);
   }
   rows.push(`<tr data-row="ret"><th scope="row">Return</th>
     <td><input data-f="place" value="${esc(legs[n - 1].to || '')}" maxlength="200" aria-label="Return: place" ${dis}></td>
@@ -312,21 +352,30 @@ function tripLegsFromDOM() {
   }
   return legs;
 }
-function rerenderItinerary() {
+/** Draws the itinerary again; the focus goes to the place of the stay at index focusStay (0 = the first stay). */
+function rerenderItinerary(focusStay) {
   $('#t_step').innerHTML = itineraryHTML(TRIP_PAGE.trip, TRIP_PAGE.ro);
+  const stays = document.querySelectorAll('#t_step tr[data-row="stay"] [data-f="place"]');
+  if (focusStay != null && stays.length) stays[Math.min(focusStay, stays.length - 1)].focus();
 }
 A.tripStayAdd = () => {
   // a new stay at the place of the last stay: the last leg is split in two (the times are set in the row)
   const legs = tripLegsFromDOM(), n = legs.length;
+  if (n < 2) return;
   const last = legs[n - 1], x = legs[n - 2].to;
-  TRIP_PAGE.legs = [...legs.slice(0, n - 1), { ...last, to: x, country: legs[n - 2].country || 'DE' }, { ...last, from: x }];
-  rerenderItinerary();
+  // the mode and the note stay with the leg that goes on (the original leg); the arriving leg gets neither
+  const arrive = { ...last, to: x, country: legs[n - 2].country || 'DE' };
+  delete arrive.mode;
+  delete arrive.note;
+  TRIP_PAGE.legs = [...legs.slice(0, n - 1), arrive, { ...last, from: x }];
+  rerenderItinerary(n - 1);   // the new stay is the last one before Return
 };
 A.tripStayDel = el => {
-  // the stay j is removed: the leg before it and the leg after it become one leg
+  // the stay j is removed: the leg before it and the leg after it become one leg; a trip keeps at least two legs
   const j = +el.dataset.i, legs = tripLegsFromDOM();
+  if (legs.length <= 2 || j < 1 || j >= legs.length) return;
   TRIP_PAGE.legs = [...legs.slice(0, j - 1), { ...legs[j - 1], to: legs[j].to, country: legs[j].country }, ...legs.slice(j + 1)];
-  rerenderItinerary();
+  rerenderItinerary(j - 1);   // the stay that takes the place of the removed one
 };
 /** The places of the allowance from the legs: the place in force from the day it is reached (one entry per change). */
 function placesFromLegs(legs, start) {
@@ -371,7 +420,6 @@ function expensesHTML(t, ro) {
   (t.mileage || []).forEach((m, k) => rows.push({ date: m.date, html: carRowHTML(m, k) }));
   for (const b of bills.filter(b => !b.trip_item_id || !planned.has(b.trip_item_id))) rows.push({ date: b.date, html: unplannedRowHTML(b, t, canBill) });
   rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-  const expC = tripCents(t.items_expected_total ?? 0), actC = tripCents(t.items_actual_total ?? 0);
   const addSel = ro ? '' : `<div class="trip-add"><label for="t_add_item">Add item</label>
       <select id="t_add_item" data-change="tripAddItem"><option value="">Choose a type…</option>${TRIP_ITEM_TYPES.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></div>`;
   return `<h2>Planned costs and bills</h2>
@@ -380,11 +428,17 @@ function expensesHTML(t, ro) {
     <div class="table-wrap"><table class="lines trip-items"><caption class="sr-only">Planned costs of the trip, with the bills booked against them</caption>
       <thead><tr><th scope="col">Date</th><th scope="col">Category</th><th scope="col">Description</th><th scope="col" class="num">Expected</th><th scope="col" class="num">Actual</th><th scope="col">Receipt</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>${rows.length ? rows.map(r => r.html).join('') : '<tr><td colspan="7" class="muted">No planned costs or bills yet.</td></tr>'}</tbody></table></div>
-    <div class="trip-totals"><div><span>Expected total</span><b>${eurC(expC)}</b></div><div><span>Actual total</span><b>${eurC(actC)}</b></div><div><span>Difference (actual − expected)</span><b>${eurC(actC - expC)}</b></div></div>
+    <div class="trip-totals">${tripTotalsHTML(t)}</div>
     <h2>Mileage with a private car</h2>
     ${mileageTableHTML(t, ro)}`;
 }
-const itemDesc = i => [i.from && i.to ? `${i.from} → ${i.to}` : '', i.text || ''].filter(Boolean).join(' · ');
+/** The footer: the server's totals (planning figures, exact cents here). The expected total has no mileage when car rows are listed. */
+function tripTotalsHTML(t) {
+  const expC = tripCents(t.items_expected_total ?? 0), actC = tripCents(t.items_actual_total ?? 0);
+  const label = (t.mileage || []).length ? 'Expected total (without mileage)' : 'Expected total';
+  return `<div><span>${esc(label)}</span><b>${eurC(expC)}</b></div><div><span>Actual total</span><b>${eurC(actC)}</b></div><div><span>Difference (actual − expected)</span><b>${eurC(actC - expC)}</b></div>`;
+}
+const itemDesc = i =>[i.from && i.to ? `${i.from} → ${i.to}` : '', i.text || ''].filter(Boolean).join(' · ');
 function receiptHTML(bills) {
   return bills.length ? bills.map(b => `<span class="pill ${b.attachment ? 'good' : 'warn'}">${b.attachment ? 'attached' : 'missing'}</span>`).join(' ') : '<span class="muted">—</span>';
 }
@@ -454,9 +508,11 @@ A.tripExpected = once(async el => {
     const { expected, ...rest } = i;
     return raw === '' ? rest : { ...rest, expected: Number(raw) };
   });
-  await tripPutPartial({ items });
+  const t = await tripPutPartial({ items });
+  // a local update: the footer from the server's answer, no page render (the focus and the other rows stay)
+  const box = document.querySelector('#t_step .trip-totals');
+  if (box) box.innerHTML = tripTotalsHTML(t);
   toast('Saved');
-  render();
 });
 /** One planned item of a type; the fields depend on the type (docs/specs/business-trips-wizard.md, section 4). */
 function tripItemDialog(type, item) {
@@ -487,7 +543,9 @@ function tripItemDialog(type, item) {
 function tripItemFrom(type, o, item) {
   const date = String(o.date || '');
   if (!date) throw new Error('Enter the date');
-  const it = { ...(item ? { id: item.id } : {}), category: type, date, text: String(o.text ?? '').trim() };
+  // the stored fields this dialog does not show stay (also unknown ones); the fields it shows are set or removed below
+  const it = { ...(item || {}), category: type, date, text: String(o.text ?? '').trim() };
+  delete it.date_to; delete it.from; delete it.to; delete it.expected;
   if (type === 'hotel') {
     const to = String(o.date_to || '');
     if (to) { if (to < date) throw new Error('Check-out is before check-in'); it.date_to = to; }

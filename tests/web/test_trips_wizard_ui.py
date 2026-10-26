@@ -33,6 +33,14 @@ class WizardApi(FakeTripApi):
         super().__init__(me, trip)
         self.bills: list[dict] = []
         self.seq = 0
+        self.hold_next_put = False  # the next trip PUT is kept until release(): a write still running in the browser
+        self.held: list = []
+
+    def release(self):
+        """Answers the held PUTs now (they are logged when answered)."""
+        held, self.held = self.held, []
+        for route in held:
+            self.handle(route)
 
     def _id(self, prefix):
         self.seq += 1
@@ -61,6 +69,10 @@ class WizardApi(FakeTripApi):
         path = urlparse(req.url).path.split("/api/", 1)[1]
         if path != "expenses" and path != "trips" and not path.startswith("trips/"):
             return super().handle(route)
+        if self.hold_next_put and req.method == "PUT":
+            self.hold_next_put = False
+            self.held.append(route)
+            return None
         body = json.loads(req.post_data) if req.post_data else None
         self.requests.append((req.method, path, "", body))
         if path == "expenses":
@@ -389,5 +401,368 @@ def test_stepper_is_keyboard_operable_with_aria_current(browser):
     pg.wait_for_selector("#t_step #t_breakdown")
     assert pg.evaluate("location.hash") == "#/trips/t7f3k2m9qa/review"
     expect(pg.locator("nav[aria-label='Trip steps'] [aria-current=step]")).to_contain_text("Review")
+    assert problems == []
+    ctx.close()
+
+
+THREE_LEGS = [
+    {"depart": "2026-11-09T08:00", "from": "Berlin", "to": "Hamburg", "country": "DE"},
+    {"depart": "2026-11-10T09:00", "from": "Hamburg", "to": "Bremen", "country": "DE"},
+    {"depart": "2026-11-11T18:00", "from": "Bremen", "to": "Berlin", "country": "DE"},
+]
+
+
+def row_kinds(pg):
+    return pg.locator("#t_step tr[data-row]").evaluate_all("rows => rows.map(r => r.dataset.row)")
+
+
+def active_label(pg):
+    return pg.evaluate("document.activeElement.getAttribute('aria-label') || document.activeElement.id")
+
+
+def test_a_single_stay_has_no_remove_button_and_removing_one_of_three_keeps_two_legs(browser):
+    api = WizardApi(ME, copy.deepcopy(CONTRACT_TRIP))
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "itinerary")
+    assert pg.locator("[data-a=tripStayDel]").count() == 0  # the one stay of a plain trip cannot be removed
+    pg.click("[data-a=tripMove][data-step=expenses]")
+    pg.wait_for_selector("#t_add_item")
+    assert len(puts(api)[0][3]["itinerary"]) == 2
+    assert problems == []
+    ctx.close()
+
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["itinerary"] = copy.deepcopy(THREE_LEGS)
+    api = WizardApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "itinerary")
+    assert row_kinds(pg) == ["dep", "stay", "stay", "ret"]
+    expect(pg.locator("[data-a=tripStayDel]")).to_have_count(2)
+    pg.click("[data-a=tripStayDel][data-i='1']")
+    assert row_kinds(pg) == ["dep", "stay", "ret"]
+    expect(pg.locator("[data-a=tripStayDel]")).to_have_count(0)  # back to one stay: no more Remove
+    pg.click("[data-a=tripMove][data-step=expenses]")
+    pg.wait_for_selector("#t_add_item")
+    legs = puts(api)[0][3]["itinerary"]
+    assert [leg["to"] for leg in legs] == ["Bremen", "Berlin"]
+    assert problems == []
+    ctx.close()
+
+
+def test_a_plan_change_of_destination_rebuilds_the_places_when_the_itinerary_is_empty(browser):
+    api = WizardApi(ME, copy.deepcopy(CONTRACT_TRIP))
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "plan")
+    pg.fill("#t_destination", "Bremen")
+    pg.select_option("#t_dest_country", "AT")
+    pg.click("[data-a=tripMove][data-step=itinerary]")
+    pg.wait_for_selector("#t_step tr[data-row]")
+    saved = puts(api)
+    assert len(saved) == 1
+    assert saved[0][3]["places"] == [
+        {"from_date": "2026-11-09", "country": "AT", "city": "Bremen"},
+        {"from_date": "2026-11-11", "country": "DE", "city": "Berlin"},
+    ]
+    assert api.dialogs == []  # no legs to ask about
+    assert problems == []
+    ctx.close()
+
+
+def test_a_declined_update_keeps_the_legs_and_derives_the_places_from_them(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["itinerary"] = [
+        {"depart": "2026-11-09T08:00", "from": "Berlin", "to": "Hamburg", "country": "DE"},
+        {"depart": "2026-11-11T18:00", "from": "Hamburg", "to": "Berlin", "country": "DE"},
+    ]
+    api = WizardApi(ME, trip)
+    api.confirm_answer = False
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "plan")
+    pg.fill("#t_destination", "Bremen")
+    pg.click("[data-a=tripMove][data-step=itinerary]")
+    pg.wait_for_selector("#t_step tr[data-row]")
+    assert len(api.dialogs) == 1 and "destination" in api.dialogs[0]
+    saved = puts(api)[0][3]
+    assert saved["itinerary"] == trip["itinerary"]  # the rows stay as they were
+    assert saved["places"] == [
+        {"from_date": "2026-11-09", "country": "DE", "city": "Hamburg"},
+        {"from_date": "2026-11-11", "country": "DE", "city": "Berlin"},
+    ]
+    assert problems == []
+    ctx.close()
+
+
+def test_shortening_the_period_drops_the_meals_outside_and_says_how_many(browser):
+    api = WizardApi(ME, copy.deepcopy(CONTRACT_TRIP))  # a breakfast on 2026-11-10
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "plan")
+    pg.fill("#t_end", "2026-11-09T18:00")
+    pg.click("[data-a=tripMove][data-step=itinerary]")
+    pg.wait_for_selector("#t_step tr[data-row]")
+    saved = puts(api)
+    assert len(saved) == 1 and saved[0][3]["meals_provided"] == []
+    expect(pg.locator("#toast")).to_contain_text("1 meal entry")
+    assert problems == []
+    ctx.close()
+
+
+def test_mileage_outside_the_shorter_period_is_asked_for_and_a_refusal_stays_on_the_step(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["mileage"].append({"date": "2026-11-11", "from": "Hamburg", "to": "Berlin", "km": 290, "purpose": "Return"})
+    api = WizardApi(ME, trip)
+    api.confirm_answer = False
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "plan")
+    pg.fill("#t_end", "2026-11-10T18:00")
+    pg.click("[data-a=tripMove][data-step=itinerary]")
+    expect(pg.locator("#t_error")).to_contain_text("Mileage outside the new period")
+    assert active_label(pg) == "t_error"  # the message takes the focus
+    assert pg.evaluate("location.hash") == "#/trips/t7f3k2m9qa/plan"
+    assert puts(api) == [] and len(api.dialogs) == 1
+    api.confirm_answer = True
+    pg.click("[data-a=tripMove][data-step=itinerary]")
+    pg.wait_for_selector("#t_step tr[data-row]")
+    saved = puts(api)
+    assert len(saved) == 1
+    assert [m["date"] for m in saved[0][3]["mileage"]] == ["2026-11-09"]  # removed only after the yes
+    assert problems == []
+    ctx.close()
+
+
+def test_itinerary_times_must_not_go_backwards_and_a_departure_outside_the_trip_is_named(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["itinerary"] = copy.deepcopy(THREE_LEGS)
+    api = WizardApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "itinerary")
+    pg.fill("input[aria-label='Stay 2: until']", "2026-11-10T08:00")  # before the row above departs (09:00)
+    pg.click("[data-a=tripMove][data-step=expenses]")
+    expect(pg.locator("#t_error")).to_contain_text("must not go backwards")
+    assert puts(api) == []
+    pg.fill("input[aria-label='Stay 2: until']", "2026-11-12T08:00")  # after the trip ends
+    pg.click("[data-a=tripMove][data-step=expenses]")
+    expect(pg.locator("#t_error")).to_contain_text("is outside the trip")
+    assert puts(api) == []
+    assert problems == []
+    ctx.close()
+
+
+def test_adding_a_stay_keeps_mode_and_note_on_one_leg_and_focuses_the_new_stay(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["itinerary"] = [
+        {"depart": "2026-11-09T08:00", "from": "Berlin", "to": "Hamburg", "country": "DE"},
+        {
+            "depart": "2026-11-11T18:00",
+            "from": "Hamburg",
+            "to": "Berlin",
+            "country": "DE",
+            "mode": "train",
+            "note": "ICE 123",
+        },
+    ]
+    api = WizardApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "itinerary")
+    pg.click("[data-a=tripStayAdd]")
+    assert row_kinds(pg) == ["dep", "stay", "stay", "ret"]
+    assert active_label(pg) == "Stay 2: place"
+    pg.click("[data-a=tripMove][data-step=expenses]")
+    pg.wait_for_selector("#t_add_item")
+    legs = puts(api)[0][3]["itinerary"]
+    assert len(legs) == 3
+    assert sum(1 for leg in legs if leg.get("note") == "ICE 123") == 1
+    assert sum(1 for leg in legs if leg.get("mode") == "train") == 1
+    assert problems == []
+    ctx.close()
+
+
+def test_a_removed_stay_moves_the_focus_to_the_stay_that_takes_its_place(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["itinerary"] = copy.deepcopy(THREE_LEGS)
+    api = WizardApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "itinerary")
+    pg.click("[data-a=tripStayDel][data-i='1']")
+    assert active_label(pg) == "Stay 1: place"
+    assert pg.input_value("input[aria-label='Stay 1: place']") == "Bremen"
+    assert problems == []
+    ctx.close()
+
+
+def test_the_footer_names_the_expected_total_without_mileage_when_car_rows_are_listed(browser):
+    api = WizardApi(ME, copy.deepcopy(CONTRACT_TRIP))  # one car row
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    expect(pg.locator(".trip-totals")).to_contain_text("Expected total (without mileage)")
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["mileage"] = []
+    api2 = WizardApi(ME, trip)
+    ctx2, pg2, problems2 = open_app(browser, api2)
+    open_trip(pg2, "t7f3k2m9qa", "expenses")
+    expect(pg2.locator(".trip-totals")).to_contain_text("Expected total")
+    expect(pg2.locator(".trip-totals")).not_to_contain_text("without mileage")
+    assert problems == [] and problems2 == []
+    ctx.close()
+    ctx2.close()
+
+
+def test_an_inline_expected_edit_does_not_swallow_the_next_click(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["items"] = [
+        {"id": "i0000000001", "date": "2026-11-09", "category": "hotel", "text": "Hotel Hamburg", "expected": 120}
+    ]
+    api = WizardApi(ME, trip)
+    api.hold_next_put = True  # the inline save stays in flight while the user clicks Next
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    pg.fill('input[data-item-exp="i0000000001"]', "100")
+    pg.locator('input[data-item-exp="i0000000001"]').press("Tab")
+    pg.click("[data-a=tripMove][data-step=review]")
+    pg.wait_for_timeout(300)
+    assert pg.evaluate("location.hash").endswith("/expenses")
+    api.release()  # the inline save completes now; the queued Next then runs
+    pg.wait_for_selector("#t_breakdown")
+    assert pg.evaluate("location.hash").endswith("/review")
+    assert api.trip["items"][0]["expected"] == 100
+    assert len(puts(api)) == 2 and api.held == []
+    assert problems == []
+    ctx.close()
+
+
+def test_xss_item_text_and_place_name_are_shown_as_text(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["items"] = [
+        {
+            "id": "i0000000002",
+            "date": "2026-11-09",
+            "category": "other",
+            "text": '<img src=x onerror="window.__xss=1">',
+            "expected": 5,
+        }
+    ]
+    trip["places"] = [{"from_date": "2026-11-09", "country": "DE", "city": "<script>window.__xss=2</script>Evil"}]
+    api = WizardApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    expect(pg.locator("tr[data-item]")).to_contain_text('<img src=x onerror="window.__xss=1">')
+    assert pg.locator("#t_step img").count() == 0
+    open_trip(pg, "t7f3k2m9qa", "review")
+    assert pg.input_value('tr[data-day="2026-11-09"] [data-f=city]') == "<script>window.__xss=2</script>Evil"
+    assert pg.locator("#t_step script").count() == 0
+    assert pg.evaluate("window.__xss === undefined")
+    assert problems == []
+    ctx.close()
+
+
+def test_an_item_outside_the_period_shows_the_pill(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["items"] = [
+        {"id": "i0000000003", "date": "2026-11-20", "category": "other", "text": "Late workshop", "expected": 1},
+        {"id": "i0000000004", "date": "2026-11-09", "category": "other", "text": "Inside", "expected": 1},
+    ]
+    api = WizardApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    expect(pg.locator("tr[data-item]", has_text="Late workshop").locator(".pill")).to_contain_text(
+        "Outside the trip period"
+    )
+    expect(pg.locator("tr[data-item]", has_text="Inside").locator(".pill")).to_have_count(0)
+    assert problems == []
+    ctx.close()
+
+
+def test_flight_taxi_and_other_dialogs_store_their_fields(browser):
+    api = WizardApi(ME, copy.deepcopy(CONTRACT_TRIP))
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+
+    pg.select_option("#t_add_item", "flight")
+    pg.wait_for_selector("#f_from")
+    assert pg.input_value("#f_from") == "Berlin" and pg.input_value("#f_to") == "Hamburg"
+    pg.fill("#f_date", "2026-11-09")
+    pg.click("#m-save")
+    expect(pg.locator("tr[data-item]", has_text="Berlin – Hamburg")).to_have_count(1)  # text defaults to the route
+    assert api.trip["items"][0]["category"] == "flight" and api.trip["items"][0]["from"] == "Berlin"
+
+    pg.select_option("#t_add_item", "taxi")
+    pg.wait_for_selector("#f_from")
+    pg.fill("#f_from", "Airport")
+    pg.fill("#f_to", "Hotel")
+    pg.fill("#f_date", "2026-11-09")
+    pg.click("#m-save")
+    expect(pg.locator("tr[data-item]", has_text="Airport – Hotel")).to_have_count(1)
+    assert api.trip["items"][1]["category"] == "taxi" and api.trip["items"][1]["to"] == "Hotel"
+
+    pg.select_option("#t_add_item", "other")
+    pg.wait_for_selector("#f_text")
+    pg.fill("#f_text", "Demo parking")
+    pg.fill("#f_date", "2026-11-10")
+    pg.fill("#f_expected", "12.5")
+    pg.click("#m-save")
+    expect(pg.locator("tr[data-item]", has_text="Demo parking")).to_have_count(1)
+    other = api.trip["items"][2]
+    assert other["category"] == "other" and other["expected"] == 12.5 and "from" not in other
+    assert problems == []
+    ctx.close()
+
+
+def test_a_car_mileage_row_is_listed_and_saved_with_the_trip(browser):
+    api = WizardApi(ME, copy.deepcopy(CONTRACT_TRIP))
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    pg.select_option("#t_add_item", "car")
+    pg.wait_for_selector("#f_km")
+    pg.fill("#f_km", "42.5")
+    pg.fill("#f_purpose", "Site visit")
+    pg.click("#m-save")
+    expect(pg.locator("#t_step")).to_contain_text("42,5 km")
+    expect(pg.locator("#t_step tr[data-mileage]", has_text="Site visit")).to_have_count(
+        2
+    )  # items table and mileage table
+    assert api.trip["mileage"][-1]["km"] == 42.5
+    assert problems == []
+    ctx.close()
+
+
+def test_remove_item_deletes_the_planned_item_after_a_confirm(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["items"] = [
+        {"id": "i0000000005", "date": "2026-11-09", "category": "hotel", "text": "Hotel Hamburg", "expected": 120}
+    ]
+    api = WizardApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    pg.locator("tr[data-item]", has_text="Hotel Hamburg").locator("button", has_text="Remove").click()
+    expect(pg.locator("tr[data-item]")).to_have_count(0)
+    assert api.trip["items"] == [] and len(api.dialogs) == 1
+    assert problems == []
+    ctx.close()
+
+
+def test_edit_item_opens_the_dialog_and_keeps_the_fields_it_does_not_show(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["items"] = [
+        {
+            "id": "i0000000006",
+            "date": "2026-11-09",
+            "category": "hotel",
+            "text": "Hotel Hamburg",
+            "expected": 120,
+            "note_internal": "kept",
+        }
+    ]
+    trip["x_extra"] = "kept too"
+    api = WizardApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    pg.locator("tr[data-item]", has_text="Hotel Hamburg").locator("button", has_text="Edit").click()
+    pg.wait_for_selector("#f_text")
+    assert pg.input_value("#f_text") == "Hotel Hamburg" and pg.input_value("#f_expected") == "120"
+    pg.fill("#f_text", "Hotel Harbour")
+    pg.click("#m-save")
+    expect(pg.locator("tr[data-item]", has_text="Hotel Harbour")).to_have_count(1)
+    item = api.trip["items"][0]
+    assert item["text"] == "Hotel Harbour" and item["note_internal"] == "kept"
+    assert puts(api)[-1][3]["x_extra"] == "kept too"  # the unknown top-level field is sent back with the PUT
     assert problems == []
     ctx.close()

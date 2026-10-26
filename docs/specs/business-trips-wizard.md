@@ -87,7 +87,9 @@ A normal page section, not a dialog. One table, one row per **item**:
 
   Every item can also hold an already paid cost: *Add bill* on the row opens the existing bill dialog (receipt upload).
 * Bills linked to the trip but not to any item appear as rows with only the actual amount ("not planned"), so nothing
-  that is booked is hidden. The footer shows **Expected total**, **Actual total** and the difference.
+  that is booked is hidden. The footer shows **Expected total**, **Actual total** and the difference. The per-row
+  figures (actual, difference, car cost) are display-only client arithmetic in exact cents; the footer comes from the
+  server, and its expected total is labelled "(without mileage)" when car rows are listed.
 * Mileage (private car) is a second small table below with *Add mileage* (existing fields, existing rules).
 * Expected costs are **planning figures only**: they are never part of the statement, the allowance, VAT or any report.
 
