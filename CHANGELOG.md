@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format is based on
   now the larger of committed and allocated hours per day and project. The week table has a new "Allocated" column
   (red above the capacity) and the API rows a new `allocated` field. Without allocations the numbers are unchanged.
   Weeks with allocations can show a higher utilisation and a `tight` or `over` status that they did not show before.
+- A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
 
 ## [0.4.0-alpha.4] - 2026-10-26
 
