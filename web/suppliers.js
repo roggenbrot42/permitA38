@@ -67,9 +67,8 @@
     if (F.tag && !tags.includes(F.tag)) tags.push(F.tag);
     const limited = scopeOf('suppliers') === 'limited';
     const write = canWrite();
-    const boss = can('settings', 'write') && scopeOf('settings') === 'all';
     return `<div class="head"><div><h1>Suppliers</h1><div class="muted">${limited ? 'Companies and subcontractors the business buys from (names only).' : 'Companies, people and subcontractors you buy from.'}</div></div>
-      <div class="sup-actions">${write ? '<button class="primary" data-a="supNew">+ New supplier</button>' : ''}${write ? '<button data-a="supAdopt">Link expense vendors</button>' : ''}${boss ? '<a class="btn" href="#/import">Import</a><a class="btn" href="#/dataexport">Export</a>' : ''}</div></div>
+      <div class="sup-actions">${write ? '<button class="primary" data-a="supNew">+ New supplier</button>' : ''}${write ? '<button data-a="supAdopt">Link expense vendors</button>' : ''}</div></div>
     <div class="card sup-filter"><div class="row">
       <div class="auto"><label for="sup_kind">Kind</label><select id="sup_kind" data-change="supKind"><option value="">All kinds</option>${Object.entries(KIND).map(([k, l]) => `<option value="${k}" ${k === F.kind ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
       <div class="auto"><label for="sup_tag">Tag</label><select id="sup_tag" data-change="supTag"><option value="">All tags</option>${tags.map(t => `<option value="${esc(t)}" ${t === F.tag ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>

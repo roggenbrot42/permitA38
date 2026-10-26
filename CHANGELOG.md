@@ -5,6 +5,9 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- The "Import" and "Export" links (boss only) moved from the suppliers page to Settings, under "Data & sync": "Data export and import" and "Import documents from another tool".
+
 ### Fixed
 - A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
 

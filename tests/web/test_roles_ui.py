@@ -148,3 +148,19 @@ def test_boss_sees_everything_and_can_choose_roles(browser, srv):
     assert options == ["employee", "accountant", "boss"]
     assert problems == []
     ctx.close()
+
+
+def test_import_and_export_links_live_in_settings_not_suppliers(browser, srv):
+    ctx, pg, problems = open_as(browser, srv, "boss")
+    pg.goto(srv.base + "/#/suppliers")
+    pg.wait_for_selector("h1:has-text('Suppliers')")
+    assert pg.locator(".sup-actions a[href='#/import'], .sup-actions a[href='#/dataexport']").count() == 0
+    pg.goto(srv.base + "/#/settings")
+    pg.wait_for_selector("h2:has-text('Data & sync')")
+    card = pg.locator(".card", has=pg.locator("h2:has-text('Data & sync')"))
+    assert card.locator("a[href='#/dataexport']").count() == 1
+    assert card.locator("a[href='#/import']").count() == 1
+    assert "Data export and import" in card.locator("a[href='#/dataexport']").inner_text()
+    assert "Import documents from another tool" in card.locator("a[href='#/import']").inner_text()
+    assert problems == []
+    ctx.close()

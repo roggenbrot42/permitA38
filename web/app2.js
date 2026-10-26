@@ -717,7 +717,10 @@ PAGES.settings = async () => {
   ${teamVisibilityCard()}
   ${await calendarsCard()}
   ${await tokensCard()}
-  <div class="card"><h2>Data & sync</h2><p>Data folder on this device:<br><code>${esc(S.data_dir || '')}</code></p><p class="muted small">Put this folder inside a Syncthing-shared folder and start permitA38 with <code>permita38 --data &lt;that folder&gt;</code> on each device. See the README for details.</p></div>`;
+  <div class="card"><h2>Data & sync</h2><p>Data folder on this device:<br><code>${esc(S.data_dir || '')}</code></p><p class="muted small">Put this folder inside a Syncthing-shared folder and start permitA38 with <code>permita38 --data &lt;that folder&gt;</code> on each device. See the README for details.</p>
+    ${can('settings', 'write') && scopeOf('settings') === 'all' ? `<h3 style="margin-top:12px">Data transfer</h3>
+    <p class="small"><a href="#/dataexport">Data export and import</a>: a copy of all your data, or fill a new empty instance.</p>
+    <p class="small"><a href="#/import">Import documents from another tool</a>: offers, invoices, customers and expenses.</p>` : ''}</div>`;
 };
 A.saveSettings = async () => {
   const s = { ...S.settings };
