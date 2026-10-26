@@ -146,3 +146,22 @@ def test_line_vat_survives_the_first_save_with_slow_api(browser, srv):
     assert "VAT 7%" in pg.inner_text("#d_totals")
     assert problems == []
     ctx.close()
+
+
+def test_draft_can_be_deleted_from_the_editor(browser, srv):
+    h = {"Authorization": "Bearer " + srv.token}
+    cust = httpx.post(srv.base + "/api/customers", headers=h, json={"name": "Demo GmbH"}).json()
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    ctx.add_init_script(f"localStorage.setItem('permita38.token', '{srv.token}')")
+    pg = ctx.new_page()
+    pg.on("dialog", lambda d: d.accept())
+    pg.goto(srv.base + "/#/doc/offers/new-" + cust["id"])
+    pg.wait_for_selector("#d_totals")
+    assert pg.locator("[data-a=docDelete]").count() == 0  # nothing to delete before the first save
+    pg.fill('[data-l="0"][data-k="description"]', "Work")
+    pg.click("[data-a=docSave]")
+    pg.wait_for_selector("[data-a=docDelete]")
+    assert len(httpx.get(srv.base + "/api/offers", headers=h).json()) == 1
+    pg.click("[data-a=docDelete]")
+    pg.wait_for_function("() => location.hash === '#/sales/offers'")
+    assert httpx.get(srv.base + "/api/offers", headers=h).json() == []
