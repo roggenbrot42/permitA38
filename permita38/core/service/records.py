@@ -133,6 +133,12 @@ class RecordService:
                 )
                 if not visible:
                     raise ServiceError(422, "Unknown trip")
+                if data.get("trip_item_id") and not any(
+                    item.get("id") == data["trip_item_id"] for item in trip.get("items") or []
+                ):
+                    raise ServiceError(422, "Unknown trip item")
+            elif data.get("trip_item_id"):  # an item belongs to a trip: it is only valid together with trip_id
+                raise ServiceError(422, "Unknown trip item")
             self._link_supplier(data, keep_vendor)
             if data.get("lines"):
                 self._check_vat_rates(*(ln.get("vat_rate") for ln in data["lines"]))

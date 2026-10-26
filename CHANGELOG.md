@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- Business trips: an itinerary (legs with departure, from, to, country and transport mode, up to 60 per trip) and planned
+  items with an optional expected cost, linked to bills with `trip_item_id`. The trip shows the expected and actual totals
+  (planning only; expected costs are not part of the statement, allowance, VAT or reports). The statement PDF prints
+  the itinerary.
+
 ### Fixed
 - A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
 

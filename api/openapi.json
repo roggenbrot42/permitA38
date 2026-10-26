@@ -12443,6 +12443,17 @@
             ],
             "title": "Trip Id"
           },
+          "trip_item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Item Id"
+          },
           "supplier_id": {
             "anyOf": [
               {
@@ -12630,6 +12641,18 @@
               }
             ],
             "title": "Trip Id"
+          },
+          "trip_item_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Item Id"
           },
           "supplier_id": {
             "anyOf": [
@@ -17374,6 +17397,22 @@
             "title": "Mileage",
             "default": []
           },
+          "itinerary": {
+            "items": {
+              "$ref": "#/components/schemas/TripLeg"
+            },
+            "type": "array",
+            "title": "Itinerary",
+            "default": []
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TripItem"
+            },
+            "type": "array",
+            "title": "Items",
+            "default": []
+          },
           "not_needed": {
             "items": {
               "type": "string"
@@ -17481,6 +17520,28 @@
               }
             ],
             "title": "Checklist"
+          },
+          "items_expected_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items Expected Total"
+          },
+          "items_actual_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items Actual Total"
           }
         },
         "additionalProperties": true,
@@ -17744,6 +17805,24 @@
             "title": "Mileage",
             "default": []
           },
+          "itinerary": {
+            "items": {
+              "$ref": "#/components/schemas/TripLegIn"
+            },
+            "type": "array",
+            "maxItems": 60,
+            "title": "Itinerary",
+            "default": []
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TripItemIn"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Items",
+            "default": []
+          },
           "not_needed": {
             "items": {
               "type": "string",
@@ -17788,6 +17867,249 @@
         ],
         "title": "TripIn",
         "description": "A business trip. Figures (allowance, mileage, days) are computed by the server, never taken from the client."
+      },
+      "TripItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "id",
+          "date"
+        ],
+        "title": "TripItem",
+        "description": "A planned expense of the trip (docs/specs/business-trips-wizard.md, section 4); ``expected`` is planning only."
+      },
+      "TripItemIn": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Category"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Text"
+          },
+          "expected": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "category",
+          "text"
+        ],
+        "title": "TripItemIn"
+      },
+      "TripLeg": {
+        "properties": {
+          "depart": {
+            "type": "string",
+            "title": "Depart"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "depart"
+        ],
+        "title": "TripLeg",
+        "description": "One leg of the itinerary (docs/specs/business-trips-wizard.md, section 3)."
+      },
+      "TripLegIn": {
+        "properties": {
+          "depart": {
+            "type": "string",
+            "title": "Depart"
+          },
+          "from": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "From"
+          },
+          "to": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "To"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "train",
+                  "flight",
+                  "car",
+                  "taxi",
+                  "bus",
+                  "other"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "depart",
+          "from",
+          "to"
+        ],
+        "title": "TripLegIn"
       },
       "TripMeal": {
         "properties": {
@@ -20220,6 +20542,17 @@
               }
             ],
             "title": "Trip Id"
+          },
+          "trip_item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Item Id"
           },
           "supplier_id": {
             "anyOf": [

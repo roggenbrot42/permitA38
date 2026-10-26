@@ -13,16 +13,32 @@ from typing import Any
 from permita38.core import rights, trip_statement, trips_calc
 from permita38.core.errors import ServiceError
 from permita38.core.money import ZERO, dec, q2, to_float
-from permita38.core.repository import ID_RE, Repository
+from permita38.core.repository import ID_RE, Repository, new_id
 from permita38.core.rights import Scope
 from permita38.core.trip_rates import RateTableMissing, load_checklist, load_rates
 
 #: figures computed by the server: never taken from the request
 _COMPUTED = ("allowance_total", "mileage_km", "mileage_total", "rules_version", "days")
 #: response-only fields: ignored when a client sends them
-_RESPONSE_ONLY = ("bills", "checklist", "mileage_rate")
+_RESPONSE_ONLY = ("bills", "checklist", "mileage_rate", "items_expected_total", "items_actual_total")
 #: checklist lines that a user may mark "Not needed"; the allowance and the cost centre cannot be skipped
 _SKIPPABLE = ("accommodation", "transportation", "food", "material")
+
+
+def _with_item_ids(items: list[dict]) -> list[dict]:
+    """Items keep the id they were sent with; a missing or empty id gets a new one, unique within the trip."""
+    taken = {item["id"] for item in items if item.get("id")}
+    out = []
+    for item in items:
+        item = dict(item)
+        if not item.get("id"):
+            fresh = new_id()
+            while fresh in taken:
+                fresh = new_id()
+            taken.add(fresh)
+            item["id"] = fresh
+        out.append(item)
+    return out
 
 
 def _valid_id(rid: str) -> bool:
@@ -43,6 +59,15 @@ def bills_summary(bills: list[dict]) -> dict[str, Any]:
         "net": to_float(q2(_net_sum(bills))),
         "vat": to_float(q2(sum((dec(b.get("vat")) for b in bills), ZERO))),
     }
+
+
+def item_totals(trip: dict, bills: list[dict]) -> dict[str, float]:
+    """Planning totals of the items (docs/specs/business-trips-wizard.md, section 4). Expected costs are planning
+    figures only: they are not in the statement, the allowance, VAT or any report. The actual total is the gross
+    (net + VAT) of every bill of the trip: those booked against an item and the unplanned ones alike."""
+    expected = sum((dec(i.get("expected")) for i in trip.get("items") or []), ZERO)
+    actual = sum((dec(b.get("net")) + dec(b.get("vat")) for b in bills), ZERO)
+    return {"items_expected_total": to_float(q2(expected)), "items_actual_total": to_float(q2(actual))}
 
 
 def checklist(trip: dict, bills: list[dict]) -> list[dict[str, Any]]:
@@ -111,7 +136,12 @@ class TripService:
     def _view(self, trip: dict, bills: list[dict] | None = None) -> dict:
         """The response of a stored trip: ``bills`` and ``checklist`` computed now."""
         bills = self._linked(trip["id"]) if bills is None else bills
-        return {**trip, "bills": bills_summary(bills), "checklist": checklist(trip, bills)}
+        return {
+            **trip,
+            "bills": bills_summary(bills),
+            "checklist": checklist(trip, bills),
+            **item_totals(trip, bills),
+        }
 
     # -- reads ----------------------------------------------------------------------------------------------------
     def list_trips(self, me: dict) -> list[dict]:
@@ -165,6 +195,7 @@ class TripService:
         data = {k: v for k, v in body.items() if k not in ("id", "created", "updated", *_COMPUTED, *_RESPONSE_ONLY)}
         data["user_id"] = owner
         self._check_refs(data)
+        data["items"] = _with_item_ids(data.get("items") or [])
         figures = self._figures(data)
         data.update(
             allowance_total=figures["allowance_total"],
@@ -201,6 +232,10 @@ class TripService:
             raise ServiceError(409, "This trip is final; the boss can reopen it")
         data = self._prepare(body, old.get("user_id") or me["id"], old)
         bills = self._linked(rid)
+        kept = {item["id"] for item in data.get("items") or []}
+        removed = {item.get("id") for item in old.get("items") or []} - kept
+        if any(bill.get("trip_item_id") in removed for bill in bills):
+            raise ServiceError(422, "Item has bills")
         self._guard_final(data, bills, force)
         return self._view(self.store.save("trips", {**data, "id": rid}), bills)
 
@@ -209,8 +244,9 @@ class TripService:
         if old.get("status") == "final":
             raise ServiceError(409, "This trip is final; reopen it before deleting")
         with self.store.transaction():
-            for bill in self._linked(rid):  # the bills stay, unlinked from the trip
+            for bill in self._linked(rid):  # the bills stay, unlinked from the trip and its item
                 bill.pop("trip_id", None)
+                bill.pop("trip_item_id", None)
                 self.store.save("expenses", bill)
             self.store.delete("trips", rid)
 
