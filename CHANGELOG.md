@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- The planner's "Allocate my capacity" button stays visible while planned time is still not covered, also when
+  allocations exist. The "Not covered" banner gives a remedy with an "Allocate further capacity" button and an
+  "Allocate" button per project; planning warnings about a shortfall or an over-allocation get a short remedy line.
+  The buttons need the planning write right.
+
 ### Fixed
 - A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
 
