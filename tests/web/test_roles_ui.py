@@ -162,5 +162,19 @@ def test_import_and_export_links_live_in_settings_not_suppliers(browser, srv):
     assert card.locator("a[href='#/import']").count() == 1
     assert "Data export and import" in card.locator("a[href='#/dataexport']").inner_text()
     assert "Import documents from another tool" in card.locator("a[href='#/import']").inner_text()
+    # the whole page (not only the card) has exactly one entry of each: no duplicate in the Defaults card
+    assert pg.locator("a[href='#/import']").count() == 1
+    assert pg.locator("a[href='#/dataexport']").count() == 1
+    assert problems == []
+    ctx.close()
+
+
+def test_data_transfer_links_hidden_without_settings_write(browser, srv):
+    # the accountant may read Settings (all) but cannot write them: no Data transfer block, no links at all
+    ctx, pg, problems = open_as(browser, srv, "accountant")
+    pg.goto(srv.base + "/#/settings")
+    pg.wait_for_selector("h2:has-text('Data & sync')")
+    assert pg.locator("a[href='#/import']").count() == 0
+    assert pg.locator("a[href='#/dataexport']").count() == 0
     assert problems == []
     ctx.close()
