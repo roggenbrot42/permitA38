@@ -5,9 +5,9 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-### Fixed
-- **Subcontractors can be assigned to a contract**: the contract form lists active subcontractors (suppliers of kind
-  subcontractor) next to the employees under "Who works on it". Before, the only route was the API.
+### Changed
+- The contract form no longer asks who works on a contract; a contract records only what is owed to the customer.
+  Existing assignments are kept, and the planner's use of them is changed separately (docs/specs/project-capacity.md).
 
 ## [0.4.0-alpha.4] - 2026-10-26
 

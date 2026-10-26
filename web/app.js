@@ -465,9 +465,6 @@ function contractsView() {
 }
 A.editContract = async el => {
   const c = el.dataset.id ? S.d.contracts.find(x => x.id === el.dataset.id) : { status: 'confirmed', start: todayISO(), user_ids: [S.me.id] };
-  const users = S.d.users.filter(u => u.active !== false);
-  // active subcontractors (person-capacity suppliers) can work on a contract too; an assigned one stays listed even if inactive
-  const subs = window.SUP && can('suppliers') ? (await window.SUP.load()).filter(s => s.kind === 'person-capacity' && (s.active !== false || (c.user_ids || []).includes(s.id))) : [];
   openForm({
     title: c.id ? 'Edit contract' : 'New contract', vals: c,
     fields: [{ k: 'title', l: 'Title' }, { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '—'], ...S.d.customers.map(x => [x.id, x.name])] },
@@ -475,8 +472,7 @@ A.editContract = async el => {
       { k: 'start', l: 'Start', t: 'date', row: 1 }, { k: 'end', l: 'End', t: 'date', row: 1 },
       { k: 'hours_per_week', l: 'Hours per week', t: 'number', row: 2, h: 'Either this…' }, { k: 'total_hours', l: 'Total hours', t: 'number', row: 2, h: '…or this (spread over the period)' }, { k: 'rate', l: 'Hourly rate (€)', t: 'number', row: 2 },
       { k: 'status', l: 'Status', t: 'select', o: ['confirmed', 'done'] }],
-    extra: `<div class="field"><label>Who works on it</label>${users.map(u => `<label style="display:inline-block;margin-right:14px"><input type="checkbox" class="cu" value="${u.id}" ${(c.user_ids || []).includes(u.id) ? 'checked' : ''}> ${esc(u.name)}</label>`).join('')}${subs.map(s => `<label style="display:inline-block;margin-right:14px"><input type="checkbox" class="cu" value="${s.id}" ${(c.user_ids || []).includes(s.id) ? 'checked' : ''}> ${esc(s.name)} (subcontractor)</label>`).join('')}</div>`,
-    save: async v => { if (!v.title || !v.start || !v.end) throw new Error('Title, start and end are required'); if (!v.hours_per_week && !v.total_hours) throw new Error('Enter hours per week or total hours'); v.user_ids = [...document.querySelectorAll('.cu:checked')].map(x => x.value); await save('contracts', v); render(); },
+    save: async v => { if (!v.title || !v.start || !v.end) throw new Error('Title, start and end are required'); if (!v.hours_per_week && !v.total_hours) throw new Error('Enter hours per week or total hours'); v.user_ids = c.user_ids || []; await save('contracts', v); render(); },
     del: c.id ? async () => { await api('DELETE', 'contracts/' + c.id); await loadAll(['contracts']); render(); } : null
   });
 };
