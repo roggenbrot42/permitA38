@@ -24,14 +24,13 @@ with forward/backward navigation, the itinerary as a few lines per day, and expe
    |---|---|---|
    | 1 | **Plan** | the fields of the dialog above, cost centre / project decision |
    | 2 | **Itinerary** | day by day: where I started, where I went, where I ended up (section 3) |
-   | 3 | **Expenses** | table of expected and actual costs, mileage (section 4) |
+   | 3 | **Expenses** | **the main view of a trip** (opens by default for a stored trip): planned and already paid costs, mileage (section 4) |
    | 4 | **Review** | days with country and meals provided, live breakdown, reminder checklist, *Statement (PDF)*, *Finalize trip* |
 
    *Next* and *Back* save the current step first (one `PUT`), then move; a validation error stays on the step and
    shows the message. The stepper items are links (any step can be opened directly). **A step shows only its own
    fields**: what the user entered in an earlier step is not repeated (the Plan step is a summary line above steps 2-4:
-   reason, customer/project, period, with an *Edit* link to step 1). A new trip opens on step 2. An existing trip
-   opens on the first step whose data is empty (no itinerary -> 2, no items and no bills -> 3, else 4).
+   reason, customer/project, period, with an *Edit* link to step 1). A new trip opens on step 2 (itinerary), an existing trip on step 3 (expenses).
 3. A **final** trip shows all steps read-only (existing rules: boss may *Reopen*, delete only draft). The list page
    links each row to `#/trips/<id>`. No dialog remains except *New trip* and the existing bill dialog.
 
@@ -40,14 +39,15 @@ with forward/backward navigation, the itinerary as a few lines per day, and expe
 * Stored as `itinerary`: list (max 60) of **legs** `{depart: LocalDateTime, from: Short, to: Short, country?: ISO-3166
   alpha-2, mode?: train|flight|car|taxi|bus|other, note?: Short}`; legs lie inside `[start, end]`, ordered by
   `depart` (server sorts, 422 for outside the period).
-* **Display** day by day. Every travel day (a day with at least one leg) shows **three lines**:
-  1. *Started from* (first leg's `from`; prefilled with the previous day's end, or the home place on day 1),
-  2. *Went to* (the `to` of the first leg),
-  3. *Ended up at* (the `to` of the last leg; for a one-leg day this is a second leg back/onward).
-  A new day's block therefore consists of **two legs** (start -> destination, destination -> end place); **Add leg**
-  appends a further stop (leg) to that day, **Remove** drops one. A day with only one place (no travel) is not stored.
-* **Idle days are collapsed.** Consecutive days without a leg are one row "Stay in <place>, 12.-25. Nov" with an
-  *Add leg* button on a chosen day; a four-week stay is therefore two travel-day blocks and one row, never 28 blocks.
+* **Display: three rows for the whole trip, not per day.**
+  1. **Departure**: where I start from and at what time (first leg: `from`, `depart`; prefilled with the home place).
+  2. **Stay**: where I spent my time, from when to when (place = `to` of the first leg, from = its arrival, until = the
+     `depart` of the next leg).
+  3. **Return**: where I arrived back (the `to` of the last leg, usually home) and when.
+  The two stored legs of a plain trip are start -> place and place -> home; the Stay row is derived from them.
+  **Add stay** inserts a further place between two rows (one more leg, one more Stay row with its from/until);
+  **Remove** drops one. A trip with one place is therefore exactly three rows, a trip with three places five. Rows are
+  never created per day, so a four-week stay is still three rows. Times default to the trip's start and end.
 * Optional per leg: transport mode and the destination country (default: the previous leg's country, else `DE`).
 * *Take over for the allowance*: on saving step 2 the UI derives `places` (existing field, range based, one row per
   change of country/city) from the legs and writes it with the same `PUT`; step 4 still lets the user correct
@@ -93,8 +93,8 @@ A normal page section, not a dialog. One table, one row per **item**:
   expected 200,00, actual 107,10; employees only see/modify own trips (existing matrix gets the new fields).
 * Randomized stateful model gets the two rules (new field acceptance, item/bill rule); the field list of the model is
   updated, no expected value is adjusted to fit.
-* UI (Playwright, fake data): new-trip dialog creates the trip and lands on step 2; a one-day trip shows three lines
-  and *Add leg* adds a row; a 28-day single-city trip shows two day blocks plus one collapsed row; Back/Next keep the
+* UI (Playwright, fake data): new-trip dialog creates the trip and lands on step 2; a trip shows exactly three rows
+  (departure, stay, return) and *Add stay* adds a stay row; a 28-day single-city trip also shows three rows; Back/Next keep the
   entered values and a step never shows fields of another step; expenses table: add item, set expected, add a bill
   from the row (actual appears, receipt "missing"/"attached"), totals; a final trip is read-only; keyboard operable
   stepper (links, `aria-current="step"`).
@@ -110,6 +110,6 @@ Stages `planned/completed/settled`, *Complete trip*, customer settlement invoice
 1. Expected costs sit on **trip items**, actual costs come from **bills** linked to an item; this keeps the existing
    bill/receipt/VAT logic untouched. The alternative (expected costs as unbooked bills) was rejected: it would pollute
    bookkeeping and reports.
-2. Three lines per travel day are a **display** of legs, not three stored records; long stays stay compact.
+2. The three rows (departure, stay, return) are a **display** of the stored legs; extra places add stay rows.
 3. Step order Plan, Itinerary, Expenses, Review; allowance days/meals are decided last because they depend on the
    itinerary.
