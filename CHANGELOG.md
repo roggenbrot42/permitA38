@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format is based on
 - **Business trips failed with a server error in the installed packages** (Windows/Linux bundle and wheel): the rate
   tables and the checklist were not included. Creating or previewing a trip works again; a test now checks that every
   data file of the package is declared, and the smoke test previews a trip.
+- A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
 
 ## [0.4.0-alpha.4] - 2026-10-26
 
