@@ -237,11 +237,13 @@ PAGES.doc = async (coll, id) => {
 // Hourly rate for a new document: project > customer > your default (the same order the time entries use).
 const AUTO_PRICED = new WeakSet();   // lines whose price was set by us, not typed by hand
 let SUGGESTED_RATE = null;   // set only while editing a new, unsaved document; saved documents are never repriced
-function suggestedRate(customerId, projectId) {
+/* Effective hourly rate: project, then customer, then the user's rate, then the user's default, then the settings default. null when none is set. */
+function effectiveRate(customerId, projectId) {
   const pick = x => (x === null || x === undefined || x === '' ? null : +x);
   return pick(S.d.projects.find(p => p.id === projectId)?.rate) ?? pick(S.d.customers.find(c => c.id === customerId)?.rate)
-    ?? pick(S.me?.rate) ?? pick(S.me?.default_rate) ?? pick(S.settings.default_rate) ?? 0;
+    ?? pick(S.me?.rate) ?? pick(S.me?.default_rate) ?? pick(S.settings.default_rate);
 }
+function suggestedRate(customerId, projectId) { return effectiveRate(customerId, projectId) ?? 0; }
 function repriceNewDoc() {
   if (!DOC || DOC.id || SUGGESTED_RATE === null) return;
   syncDoc();

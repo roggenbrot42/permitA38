@@ -31,10 +31,11 @@ one horizontal row. The "Getting started" and "This week" cards stay as they are
 - **Start** button, colored (`class="primary big"`) when idle; while running it becomes **Stop** (`class="stop big"`),
   using the existing `timer/start` and `timer/stop` calls. The clock tick (`render.after`) already exists; keep it.
 - **Money toggle**: clicking the time field while a project is selected switches it to show the money earned
-  (elapsed hours × the project's hourly rate, formatted with `Money` / `eur` helpers). A second click reverts to time.
-  If the project has no rate, the field shows time and a small hint "no rate on this project", and the click does nothing.
-  Find the rate field on the project model (check `S.d.projects` fields and the projects form in `web/app2.js` or
-  `web/app.js`; use what exists, do not add a backend field). Money maths only via `web/money.js`, never floats.
+  (elapsed hours × the hourly rate, formatted with `Money` / `eur` helpers). A second click reverts to time.
+  The rate is the effective rate of the project (the same chain as `suggestedRate` in `web/app2.js`: project, customer,
+  user rate, user default, settings default; task rates are not part of that chain). If that chain is empty, the field
+  shows time and a small hint "no rate", and the click does nothing.
+  Use the existing rate fields (no backend change). Money maths only via `web/money.js`, never floats.
   The money view is per-view state (not stored).
 
 ## Constraints
@@ -46,7 +47,9 @@ one horizontal row. The "Getting started" and "This week" cards stay as they are
 
 ## Open design decisions (implementer lists its choices here in the report)
 - Exact icon glyphs (inline SVG or emoji).
-- Where the project rate is read from if it is not on the list payload.
+- Project rate: the implementation uses the effective rate chain of `suggestedRate` (project, customer, user, settings default),
+  not only the project's own rate; the hint shows only when that chain is empty. A task rate is not part of the chain (open).
+- Bare-name project matching (`projIdOf` accepts a typed bare name) is kept as is.
 
 ## Tests
 - `node --check web/app.js` must pass.
