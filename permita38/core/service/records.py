@@ -128,10 +128,10 @@ class RecordService:
             if data.get("trip_id"):  # a bill belongs to a trip the user may see (rights of the trips area)
                 trip = self.store.get("trips", data["trip_id"])
                 tsc = rights.scope_for(me, "trips", "read")
-                visible = trip is not None and (
-                    tsc == Scope.ALL or (tsc == Scope.LIMITED and trip.get("user_id") == me["id"])
+                visible = tsc == Scope.ALL or (
+                    tsc == Scope.LIMITED and trip is not None and trip.get("user_id") == me["id"]
                 )
-                if not visible:
+                if trip is None or not visible:
                     raise ServiceError(422, "Unknown trip")
                 if data.get("trip_item_id") and not any(
                     item.get("id") == data["trip_item_id"] for item in trip.get("items") or []
