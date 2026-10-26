@@ -284,6 +284,7 @@ PAGES.today = async () => {
   const projects = by(S.d.projects);
   const hello = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Hello' : 'Good evening';
   let extras = '';
+  moneyView = false;   // a fresh view starts on time, not money
   if (isBoss()) {
     const inv = S.d.invoices, off = S.d.offers, rep = await api('GET', 'project-report');
     const overdue = inv.filter(i => i.status === 'sent' && i.due_date && i.due_date < now);
@@ -320,7 +321,7 @@ A.addTime = () => entryForm({}, render);
 A.editEntry = el => entryForm(S.d.entries.find(e => e.id === el.dataset.id), render);
 A.timerProj = () => { localStorage.lastProj = projIdOf(); $('#t_task').innerHTML = taskOptions(localStorage.lastProj).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join(''); timerUpd(); };
 A.timerTask = () => timerUpd();
-A.timerStart = async () => { S.timer = await api('POST', 'timer/start', { project_id: projIdOf() || null, task_id: $('#t_task').value || null, note: $('#t_note').value }); render(); };
+A.timerStart = async () => { S.timer = await api('POST', 'timer/start', { project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value }); render(); };
 /* ---- time tracking card (Today page) ---- */
 let moneyView = false;   // per view, not stored: tracker shows money earned instead of the clock
 const hasRate = v => v !== null && v !== undefined && v !== '';
@@ -331,6 +332,12 @@ function projIdOf() {
   const v = ($('#t_proj')?.value || '').trim().toLowerCase();
   if (!v) return '';
   return (S.d.projects || []).find(p => p.status !== 'archived' && (projLabel(p).toLowerCase() === v || p.name.toLowerCase() === v))?.id || '';
+}
+/* Like projIdOf, but typed text that matches no project is an error, so time is never booked to no project by accident. */
+function projIdOrThrow() {
+  const id = projIdOf();
+  if (!id && ($('#t_proj')?.value || '').trim()) throw new Error('Pick a project from the list');
+  return id;
 }
 /* Hourly rate: the task's rate if set, else the project's rate; null when the client knows none. */
 function rateOf(pid, tid) {
@@ -375,7 +382,7 @@ function timerCard() {
   return `<div class="card"><div class="timer">
     <div class="field" style="flex:2;min-width:200px;margin:0"><label for="t_note">Description</label><input id="t_note" value="${esc(run ? t.note || '' : '')}" placeholder="What are you working on?"></div>
     <div class="field" style="margin:0"><label for="t_proj">Project</label><input id="t_proj" list="t_proj_list" value="${esc(labelById(pid))}" placeholder="Search projects" autocomplete="off" data-change="timerProj"><datalist id="t_proj_list">${projectOptions(false).map(([, l]) => `<option value="${esc(l)}"></option>`).join('')}</datalist></div>
-    <div class="field" style="margin:0"><label for="t_task">Task</label><select id="t_task" data-change="timerTask">${taskOptions(pid).map(([v, l]) => `<option value="${v}" ${v === tid ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+    <div class="field" style="margin:0"><label for="t_task">Task</label><select id="t_task" data-change="timerTask">${taskOptions(pid).map(([v, l]) => `<option value="${esc(v)}" ${v === tid ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
     <div id="t_mode_area" class="timer" style="flex:none">${timerModeHtml()}</div>
     <div class="row tight" style="flex:none">${modeBtn('manual', '✎', 'Manual')}${modeBtn('tracker', '⏱', 'Time tracker')}</div>
   </div></div>`;
@@ -400,10 +407,10 @@ A.timerAdd = async () => {
   if (!date) throw new Error('Pick a date');
   if (s === null || e === null) throw new Error('Enter start and stop times');
   if (e <= s) throw new Error('Stop must be after start');
-  await save('entries', { date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOf() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: true });
+  await save('entries', { date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: true });
   render();
 };
-A.timerStop = async () => { const r = await api('POST', 'timer/stop', { note: $('#t_note').value }); S.timer = { running: false }; toast('Saved ' + hm((r.entry?.minutes || 0) / 60) + ' h'); await loadAll(['entries']); render(); };
+A.timerStop = async () => { const r = await api('POST', 'timer/stop', { note: $('#t_note').value }); S.timer = { running: false }; moneyView = false; toast('Saved ' + hm((r.entry?.minutes || 0) / 60) + ' h'); await loadAll(['entries']); render(); };
 
 /* ================= TIMESHEET ================= */
 PAGES.time = async (week, uid) => {
