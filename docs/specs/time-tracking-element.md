@@ -1,5 +1,6 @@
 # Spec: time tracking element (Today page)
 
+Target: v0.4.0-alpha.5 (see `docs/roadmap.md`).
 Merge tier: Light (frontend only, no money/rights/storage change; money display uses `web/money.js` only).
 
 ## Where
