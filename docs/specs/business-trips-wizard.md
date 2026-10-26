@@ -30,7 +30,9 @@ with forward/backward navigation, the itinerary as a few lines per day, and expe
    | 4 | **Review** | days with country and meals provided, live breakdown, reminder checklist, *Statement (PDF)*, *Finalize trip* |
 
    *Next* and *Back* save the current step first (one `PUT`), then move; a validation error stays on the step and
-   shows the message. The stepper items are links (any step can be opened directly). **A step shows only its own
+   shows the message. The stepper items are links and do **not** save: a change made on a step is kept only by *Back* or
+   *Next* (or *Finalize*). An inline edit (an expected cost, *Not needed*) saves when it is made. Next from a step without
+   changes sends no `PUT`. The stepper items are links (any step can be opened directly). **A step shows only its own
    fields**: what the user entered in an earlier step is not repeated (the Plan step is a summary line above steps 2-4:
    reason, customer/project, period, with an *Edit* link to step 1). A new trip opens on step 2 (itinerary), an existing trip on step 3 (expenses).
 3. A **final** trip shows all steps read-only (existing rules: boss may *Reopen*, delete only draft). The list page
@@ -52,7 +54,10 @@ with forward/backward navigation, the itinerary as a few lines per day, and expe
   never created per day, so a four-week stay is still three rows. Times default to the trip's start and end.
 * **Reuse of the first dialog.** `origin` and `destination` prefill the three rows: Departure from `origin` at `start`,
   Stay at `destination` (country from `destination_country`), Return to `origin` at `end`; the UI creates the two legs
-  when the itinerary is empty, and editing the rows never changes `origin`/`destination` (they stay the plan). They also
+  when the itinerary is empty, and editing the rows never changes `origin`/`destination` (they stay the plan).
+  **Moving the period** (Plan step): when the start changes, the stored legs move with it by the same number of days and
+  keep their times of day (toast: "Itinerary moved by N days"); the Itinerary step then saves against the new period. A
+  period that still cuts off a leg after the shift is refused with the message to correct the times on the Itinerary step. They also
   prefill the *from/to* of the item dialogs (Train, Flight, Taxi, Car), the place of a Hotel and the country/city
   of the days in the Review step. Changing them in step 1 offers (does not force) to update empty itinerary rows only.
 * Optional per leg: transport mode and the destination country (default: the previous leg's country, else `DE`).
@@ -90,7 +95,11 @@ A normal page section, not a dialog. One table, one row per **item**:
   that is booked is hidden. The footer shows **Expected total**, **Actual total** and the difference. The per-row
   figures (actual, difference, car cost) are display-only client arithmetic in exact cents; the footer comes from the
   server, and its expected total is labelled "(without mileage)" when car rows are listed.
-* Mileage (private car) is a second small table below with *Add mileage* (existing fields, existing rules).
+* Mileage (private car) is a second small table below with *Add mileage* (existing fields, existing rules). The cost per
+  row is shown as "approx." and is display-only: each row is rounded to the cent, so the sum of the rows can differ from
+  the trip total by a cent (the server total is the figure of record).
+* Inline edits and the item and mileage dialogs are written through one queue, in the order they were made, each on the
+  trip as stored when its write runs; a second quick edit on another row is queued, never dropped.
 * Expected costs are **planning figures only**: they are never part of the statement, the allowance, VAT or any report.
 
 ## 5. Data and API (delta; the contract file `docs/contracts/trips.md` gets the same rows)

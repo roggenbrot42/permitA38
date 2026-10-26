@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format is based on
   the itinerary.
 - Adds migration `0013-trip_item_id` (new column `expenses.trip_item_id`). An upgraded database can no longer be opened by alpha.4. Back up your data folder before upgrading; the app also backs up automatically.
 - Business trips: a bill can be booked against a planned item of its trip; a trip item that still has bills cannot be removed (422 'Item has bills'); deleting a draft trip unlinks its bills from the trip and the item.
+- Business trips: each step saves with *Back* or *Next*; the stepper links do not save. Planned costs are planning
+  figures only (not in the statement, allowance, VAT or reports). A bill can be booked against a planned item of its trip.
 - Business trips: the start place (`origin`) and the destination (`destination`, `destination_country`) of a trip;
   planned items take a category of hotel, train, flight, taxi or other, and optional `from`, `to` and `date_to`.
 
