@@ -624,7 +624,8 @@ def test_an_inline_expected_edit_does_not_swallow_the_next_click(browser):
     pg.wait_for_selector("#t_breakdown")
     assert pg.evaluate("location.hash").endswith("/review")
     assert api.trip["items"][0]["expected"] == 100
-    assert len(puts(api)) == 2 and api.held == []
+    # Next from the Expenses step sends no PUT when nothing changed (N5): the inline save is the only PUT
+    assert len(puts(api)) == 1 and api.held == []
     assert problems == []
     ctx.close()
 
