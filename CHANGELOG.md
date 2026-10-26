@@ -7,6 +7,7 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 - Planner: hours in the contract rows and tooltips were shown with a decimal point (12.5 h) while the rest of the planner used the decimal comma; all planner numbers now use the app's number format (12,5 h).
+- A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
 
 ## [0.4.0-alpha.4] - 2026-10-26
 
