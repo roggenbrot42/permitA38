@@ -102,8 +102,48 @@ def test_item_bounds_and_money_rule(boss_client):
 
 
 def test_item_without_expected_is_allowed(boss_client):
-    trip = make_trip(boss_client, items=[{"date": "2026-11-09", "category": "food", "text": "Lunch"}])
+    trip = make_trip(boss_client, items=[{"date": "2026-11-09", "category": "other", "text": "Lunch"}])
     assert "expected" not in trip["items"][0]
+
+
+def test_item_category_is_one_of_the_five_types(boss_client):
+    assert boss_client.post("/api/trips", json=trip_body(items=[item(category="food")])).status_code == 422
+    assert boss_client.post("/api/trips", json=trip_body(items=[item(category="car")])).status_code == 422
+    for category in ("hotel", "train", "flight", "taxi", "other"):
+        assert boss_client.post("/api/trips", json=trip_body(items=[item(category=category)])).status_code == 200
+
+
+def test_item_from_to_and_date_to_round_trip(boss_client):
+    hotel = {
+        "date": "2026-11-09",
+        "date_to": "2026-11-11",
+        "category": "hotel",
+        "text": "Hotel Hamburg",
+        "expected": 120,
+    }
+    train = item(**{"from": "Berlin", "to": "Hamburg"})
+    trip = make_trip(boss_client, items=[hotel, train])
+    got = {i["category"]: i for i in trip["items"]}
+    assert got["hotel"]["date_to"] == "2026-11-11"
+    assert got["train"]["from"] == "Berlin" and got["train"]["to"] == "Hamburg"
+
+
+def test_item_date_to_before_date_is_422(boss_client):
+    body = item(date_to="2026-11-08")
+    assert boss_client.post("/api/trips", json=trip_body(items=[body])).status_code == 422
+
+
+def test_origin_destination_and_country_round_trip(boss_client):
+    trip = make_trip(boss_client, origin="Berlin", destination="Hamburg", destination_country="DE")
+    assert (trip["origin"], trip["destination"], trip["destination_country"]) == ("Berlin", "Hamburg", "DE")
+    again = boss_client.get(f"/api/trips/{trip['id']}").json()
+    assert again["destination_country"] == "DE"
+
+
+def test_destination_country_must_be_alpha_2_upper_case(boss_client):
+    assert boss_client.post("/api/trips", json=trip_body(destination_country="de")).status_code == 422
+    assert boss_client.post("/api/trips", json=trip_body(destination_country="DEU")).status_code == 422
+    assert boss_client.post("/api/trips", json=trip_body(destination_country="AT")).status_code == 200
 
 
 # ------------------------------------------------------------------ trip_item_id on bills
@@ -242,3 +282,94 @@ def test_statement_prints_the_itinerary_table(boss_client):
     assert "Itinerary" in text
     assert "09.11.2026 08:30" in text and "11.11.2026 16:45" in text
     assert "Berlin" in text and "Hamburg" in text and "train" in text
+
+
+# ------------------------------------------------------------------ review additions
+def test_bill_moved_to_another_trip_with_its_item_is_422_and_clearing_the_item_is_200(boss_client):
+    first = make_trip(boss_client, items=[item()])
+    second = make_trip(boss_client, items=[item(text="other")])
+    bill = boss_client.post(
+        "/api/expenses",
+        json={
+            "date": "2026-11-09",
+            "net": 80,
+            "vat": 0,
+            "trip_id": first["id"],
+            "trip_item_id": first["items"][0]["id"],
+        },
+    ).json()
+    moved = boss_client.put(
+        f"/api/expenses/{bill['id']}",
+        json={
+            "date": "2026-11-09",
+            "net": 80,
+            "vat": 0,
+            "trip_id": second["id"],
+            "trip_item_id": first["items"][0]["id"],
+        },
+    )
+    assert moved.status_code == 422, moved.text
+    assert "Unknown trip item" in moved.text
+    cleared = boss_client.put(
+        f"/api/expenses/{bill['id']}",
+        json={"date": "2026-11-09", "net": 80, "vat": 0, "trip_id": second["id"]},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["trip_id"] == second["id"]
+    assert cleared.json().get("trip_item_id") is None
+
+
+def test_items_actual_total_excludes_bills_of_other_trips(boss_client):
+    """Trip A has a bill of 50,00 net and 9,50 VAT (gross 59,50). Trip B has a bill of 1000,00 net, no VAT.
+    The actual total of A is 59,50, not 1059,50."""
+    trip_a = make_trip(boss_client, items=[item()])
+    trip_b = make_trip(boss_client, items=[item(text="other")])
+    boss_client.post(
+        "/api/expenses",
+        json={"date": "2026-11-09", "net": 50, "vat": 9.5, "vat_rate": 19, "trip_id": trip_a["id"]},
+    )
+    boss_client.post("/api/expenses", json={"date": "2026-11-09", "net": 1000, "vat": 0, "trip_id": trip_b["id"]})
+    assert boss_client.get(f"/api/trips/{trip_a['id']}").json()["items_actual_total"] == 59.5
+    assert boss_client.get(f"/api/trips/{trip_b['id']}").json()["items_actual_total"] == 1000.0
+
+
+def test_legs_with_equal_departure_keep_their_order(boss_client):
+    first = {"depart": "2026-11-09T09:00", "from": "First", "to": "Hamburg"}
+    second = {"depart": "2026-11-09T09:00", "from": "Second", "to": "Berlin"}
+    early = {"depart": "2026-11-09T08:30", "from": "Early", "to": "Berlin"}
+    trip = make_trip(boss_client, itinerary=[first, second, early])
+    assert [leg["from"] for leg in trip["itinerary"]] == ["Early", "First", "Second"]
+
+
+def test_old_stored_trip_without_itinerary_items_or_origin_loads(app, boss_client):
+    """A trip saved before the wizard has no itinerary, items, origin or destination: it still reads and lists."""
+    owner = app.state.services.store.list("users")[0]["id"]
+    app.state.services.store.save(
+        "trips",
+        {
+            "id": "oldtrip0001",
+            "user_id": owner,
+            "purpose": "Old customer visit",
+            "start": "2026-11-09T08:00",
+            "end": "2026-11-11T18:00",
+            "places": [{"from_date": "2026-11-09", "country": "DE", "city": "Hamburg"}],
+            "status": "draft",
+            "created": "2026-10-01T09:00:00Z",
+            "updated": "2026-10-01T09:00:00Z",
+        },
+    )
+    got = boss_client.get("/api/trips/oldtrip0001")
+    assert got.status_code == 200, got.text
+    body = got.json()
+    assert body["purpose"] == "Old customer visit"
+    assert body.get("itinerary", []) == [] and body.get("items", []) == []
+    assert body.get("origin") is None and body.get("destination") is None
+    assert body["items_actual_total"] == 0 and body["items_expected_total"] == 0
+    assert [t["id"] for t in boss_client.get("/api/trips").json()].count("oldtrip0001") == 1
+
+
+def test_hundred_items_get_a_hundred_unique_ids(boss_client):
+    trip = make_trip(boss_client, items=[item(text=f"Item {n}") for n in range(100)])
+    ids = [i["id"] for i in trip["items"]]
+    assert len(ids) == 100
+    assert len(set(ids)) == 100

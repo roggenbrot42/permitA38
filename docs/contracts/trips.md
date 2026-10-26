@@ -81,6 +81,9 @@ Request (`TripIn`, used by POST and PUT; PUT replaces the whole trip, same as ot
 |---|---|---|---|
 | `title` | string, 0-200 | no | |
 | `purpose` | string, 1-200, not blank | **yes** | printed on the statement |
+| `origin` | string 0-200 or null | no | start place of the trip (the first dialog of the wizard, default: the business settings city); plan only, not in the statement totals |
+| `destination` | string 0-200 or null | no | destination place of the trip; prefills the itinerary in the UI |
+| `destination_country` | `^[A-Z]{2}$` or null | no | ISO 3166-1 alpha-2, e.g. `DE`; lower case or longer codes are 422 |
 | `customer_id` | id or null | no | must exist, else 422 `"Unknown customer"` |
 | `project_id` | id or null | no | must exist, else 422 `"Unknown project"` |
 | `start`, `end` | local date-time | **yes** | `end` > `start`; at most 90 calendar days (inclusive); else 422 |
@@ -88,12 +91,12 @@ Request (`TripIn`, used by POST and PUT; PUT replaces the whole trip, same as ot
 | `meals_provided` | list, max 90, of `{date, breakfast, lunch, dinner}` | no | `date` within the trip; booleans default false; days not listed = none |
 | `mileage` | list, max 100, of `{date, from, to, km, purpose?}` | no | `date` within the trip; `from`,`to`,`purpose` strings 0-200; `km` number 0.1-5000 with at most one decimal; the JSON key is `from` (not `from_`) |
 | `itinerary` | list, max 60, of `{depart, from, to, country?, mode?, note?}` | no (default `[]`) | `depart` local date-time within `[start, end]` (else 422 `"itinerary leg departing <t> is outside the trip"`); `from`, `to` strings 0-200 (required); `country` `^[A-Z]{2}$`; `mode` `train`\|`flight`\|`car`\|`taxi`\|`bus`\|`other`; `note` string 0-200. Stored sorted by `depart` (stable). See "Itinerary and planned items" |
-| `items` | list, max 100, of `{id?, date, category, text, expected?}` | no (default `[]`) | `date` `YYYY-MM-DD`; `category`, `text` strings 0-200 (required, may be empty); `expected` money >= 0, whole cents, optional. `id` is generated when missing or empty, unique within the trip (duplicate sent ids -> 422 `"duplicate trip item id"`), kept on PUT |
+| `items` | list, max 100, of `{id?, date, date_to?, category, from?, to?, text, expected?}` | no (default `[]`) | `date`, `date_to` `YYYY-MM-DD` (`date_to` not before `date`, else 422 `"item date_to is before date"`); `category` one of `hotel`\|`train`\|`flight`\|`taxi`\|`other` (else 422); `from`, `to` strings 0-200; `text` string 0-200 (required, may be empty); `expected` money >= 0, whole cents, optional. Items are not checked against the trip period. `id` is generated when missing or empty, unique within the trip (duplicate sent ids -> 422 `"duplicate trip item id"`), kept on PUT |
 | `cost_centre` | `"project"` \| `"general"` \| null | no | the explicit decision for checklist line 6; `"project"` requires `project_id` or `customer_id` (else 422 `"Choose a customer or project, or general"`) |
 | `not_needed` | list, max 20, of checklist ids | no | checklist lines marked *Not needed*; unknown id -> 422 `"Unknown checklist item: <id>"` |
 | `status` | `"draft"` \| `"final"` | no (default `draft`) | see Finalizing |
 
-Response (`Trip`; POST, PUT, GET one; GET list returns an array of the same objects):
+Response (`Trip`, the same fields as the request plus the response-only ones below; POST, PUT, GET one; GET list returns an array of the same objects):
 
 ```json
 {
@@ -232,6 +235,8 @@ Errors: 401, 403, 404 (`"Not found"`, also malformed id and not visible).
 
 Full replacement of the editable fields, recomputing all figures. Errors: 401, 403, 404, 422, and
 
+* A PUT must send the item ids back to keep them: an item sent without an id gets a new one, and removing an item
+  that has bills is **422** `"Item has bills"`.
 * **409** `{"detail": "This trip is final; the boss can reopen it"}` if the stored trip is `final` (any body,
   including one that sends `status: "draft"`; only `reopen` changes a final trip).
 * **409** `{"detail": "Checklist has open items: Hotel / accommodation, Transportation"}` when the body has

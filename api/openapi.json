@@ -17373,6 +17373,39 @@
             ],
             "title": "End"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination"
+          },
+          "destination_country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Country"
+          },
           "places": {
             "items": {
               "$ref": "#/components/schemas/TripPlace"
@@ -17770,6 +17803,42 @@
             ],
             "title": "Project Id"
           },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
+          },
+          "destination": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination"
+          },
+          "destination_country": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Z]{2}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Destination Country"
+          },
           "start": {
             "type": "string",
             "title": "Start"
@@ -17878,6 +17947,17 @@
             "type": "string",
             "title": "Date"
           },
+          "date_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date To"
+          },
           "category": {
             "anyOf": [
               {
@@ -17888,6 +17968,28 @@
               }
             ],
             "title": "Category"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
           },
           "text": {
             "anyOf": [
@@ -17939,10 +18041,51 @@
             "type": "string",
             "title": "Date"
           },
+          "date_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date To"
+          },
           "category": {
             "type": "string",
-            "maxLength": 200,
+            "enum": [
+              "hotel",
+              "train",
+              "flight",
+              "taxi",
+              "other"
+            ],
             "title": "Category"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
           },
           "text": {
             "type": "string",

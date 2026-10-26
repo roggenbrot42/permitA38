@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format is based on
   items with an optional expected cost, linked to bills with `trip_item_id`. The trip shows the expected and actual totals
   (planning only; expected costs are not part of the statement, allowance, VAT or reports). The statement PDF prints
   the itinerary.
+- Business trips: the start place (`origin`) and the destination (`destination`, `destination_country`) of a trip;
+  planned items take a category of hotel, train, flight, taxi or other, and optional `from`, `to` and `date_to`.
 
 ### Changed
 - Business trips: the one big trip dialog is replaced by a small *New trip* dialog (reason, customer, project, period,
