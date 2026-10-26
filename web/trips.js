@@ -60,6 +60,8 @@ const tripCents = x => { const p = Money.parse(x ?? 0); return Money.roundDiv(p.
 const eurC = c => eur(Money.toNumber(c));
 const billCents = b => tripCents(b.net || 0) + tripCents(b.vat || 0);
 /** Private car: km x rate, exact cents, half up. The rate comes from the server (preview). */
+/** The cost of a mileage row is rounded per row; the trip total is computed on the sum of the km (it may differ by a cent). */
+const APPROX_TIP = 'Rounded per row. The trip total is computed from all rows and can differ by a cent.';
 const kmCost = (km, rate) => { const a = Money.parse(km), b = Money.parse(rate); return Money.toNumber(Money.roundDiv(a.n * b.n * 100n, 10n ** BigInt(a.s + b.s))); };
 /** A trip write waits for the writes already started: a Back, Next or inline edit is queued, never dropped. */
 const tripWrite = fn => { const run = TRIP_QUEUE.then(fn); TRIP_QUEUE = run.catch(() => {}); return run; };
@@ -220,10 +222,26 @@ A.tripMove = once(async el => {
 });
 async function tripSaveStep() {
   const values = tripStepValues(TRIP_PAGE.step);
+  if (!Object.keys(values).length) return;   // nothing of this step to save (expenses): the caller just moves on
   // meals of days the shorter period no longer has are dropped by tripPlanValues: the user is told how many
   const dropped = TRIP_PAGE.step === 'plan' && values.meals_provided ? (TRIP_PAGE.trip.meals_provided || []).length - values.meals_provided.length : 0;
+  // stored legs moved with a changed start: the toast names the days (tripPlanValues shifted them)
+  const moved = TRIP_PAGE.step === 'plan' && (TRIP_PAGE.trip.itinerary || []).length ? dayDelta(TRIP_PAGE.trip.start, values.start) : 0;
   await tripPutPartial(values);
-  toast(dropped ? `Saved. ${dropped} ${dropped === 1 ? 'meal entry' : 'meal entries'} outside the new period ${dropped === 1 ? 'was' : 'were'} removed.` : 'Saved');
+  const msgs = [];
+  if (moved) msgs.push(`Itinerary moved by ${Math.abs(moved)} ${Math.abs(moved) === 1 ? 'day' : 'days'}.`);
+  if (dropped) msgs.push(`${dropped} ${dropped === 1 ? 'meal entry' : 'meal entries'} outside the new period ${dropped === 1 ? 'was' : 'were'} removed.`);
+  toast(msgs.length ? `Saved. ${msgs.join(' ')}` : 'Saved');
+}
+/** Whole days from the date of a to the date of b (datetime-local strings). */
+function dayDelta(a, b) {
+  return Math.round((Date.parse(`${b.slice(0, 10)}T00:00:00Z`) - Date.parse(`${a.slice(0, 10)}T00:00:00Z`)) / 86400000);
+}
+/** A departure moved by a number of days: the same time of day. */
+function shiftDepart(depart, days) {
+  const d = new Date(`${depart.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10) + depart.slice(10);
 }
 /** The fields of the current step as a partial TripIn. Throws a plain message for what the user must complete first. */
 function tripStepValues(step) {
@@ -263,8 +281,11 @@ function tripPlanValues(t) {
   };
   const dest_c = values.destination_country;
   const stored = t.itinerary || [];
-  // a place not of the period any more: the rows must lie inside the new period (the server refuses them otherwise)
-  const late = stored.find(l => l.depart < start || l.depart > end);
+  // a moved start moves the stored rows with it (same number of days, same time of day), so a later or earlier
+  // period works without a detour through the Itinerary step; the rows must then lie inside the new period
+  const shift = stored.length ? dayDelta(t.start, start) : 0;
+  const shifted = shift ? stored.map(l => ({ ...l, depart: shiftDepart(l.depart, shift) })) : stored;
+  const late = shifted.find(l => l.depart < start || l.depart > end);
   if (late) throw new Error(`The itinerary has a row departing ${fmtDT(late.depart)}, outside the new period: correct the times on the Itinerary step first`);
   // mileage rows outside the period: removed only when the user asks for it
   const sd = start.slice(0, 10), ed = end.slice(0, 10);
@@ -285,11 +306,12 @@ function tripPlanValues(t) {
   if (!changed && start === t.start && end === t.end) return values;   // nothing of the place or the period moved: places (and day corrections) stay
   // stored legs: the user decides whether their places follow the plan; without legs the two default legs are used
   const useNew = stored.length > 0 && changed && confirm('The start place, the destination or its country changed. Use the new places in the itinerary rows too?');
-  if (useNew) values.itinerary = stored.map(l => {
+  if (useNew) values.itinerary = shifted.map(l => {
     const x = { ...l, from: mapPlace(l.from, t, origin, destination), to: mapPlace(l.to, t, origin, destination) };
     if (l.to === t.destination) x.country = dest_c;
     return x;
   });
+  else if (shift) values.itinerary = shifted;
   const legs = values.itinerary || stored;
   const planLegs = legs.length ? legs : defaultLegs({ start, end, origin, destination, destination_country: dest_c });
   values.places = placesFromLegs(planLegs, start);
@@ -465,7 +487,7 @@ function carRowHTML(m, k) {
   const cost = TRIP_PAGE.rate != null ? eur(kmCost(m.km, TRIP_PAGE.rate)) : '—';
   return `<tr data-mileage="${k}"><td class="nowrap">${esc(fmtDate(m.date))}</td><td>Car (private)</td>
     <td>${esc(`${m.from || ''} → ${m.to || ''}, ${num(m.km, 1)} km`)}${m.purpose ? ` · ${esc(m.purpose)}` : ''}</td>
-    <td class="num">${esc(cost)}</td><td class="num"></td><td><span class="muted">—</span></td><td></td></tr>`;
+    <td class="num">${TRIP_PAGE.rate != null ? `<span title="${APPROX_TIP}">approx. ${esc(cost)}</span>` : esc(cost)}</td><td class="num"></td><td><span class="muted">—</span></td><td></td></tr>`;
 }
 function unplannedRowHTML(b, t, canBill) {
   const acts = canBill ? `<button type="button" class="ghost sm" data-a="editExpense" data-id="${esc(b.id)}" data-trip="${esc(t.id)}" aria-label="Edit bill ${esc(b.vendor || '')}">Edit bill</button>` : '';
@@ -476,7 +498,7 @@ function unplannedRowHTML(b, t, canBill) {
 function mileageTableHTML(t, ro) {
   const list = t.mileage || [];
   const rows = list.map((m, k) => `<tr data-mileage="${k}"><td class="nowrap">${esc(fmtDate(m.date))}</td><td>${esc(m.from || '')}</td><td>${esc(m.to || '')}</td>
-      <td class="num">${num(m.km, 1)}</td><td class="num">${TRIP_PAGE.rate != null ? eur(kmCost(m.km, TRIP_PAGE.rate)) : '—'}</td><td>${esc(m.purpose || '')}</td>
+      <td class="num">${num(m.km, 1)}</td><td class="num">${TRIP_PAGE.rate != null ? `<span title="${APPROX_TIP}">approx. ${esc(eur(kmCost(m.km, TRIP_PAGE.rate)))}</span>` : '—'}</td><td>${esc(m.purpose || '')}</td>
       <td>${ro ? '' : `<button type="button" class="ghost sm" data-a="tripMileageEdit" data-k="${k}" aria-label="Edit mileage ${k + 1}">Edit</button>`}</td></tr>`).join('');
   return `<div class="table-wrap"><table class="lines trip-table"><caption class="sr-only">Mileage with a private car</caption>
       <thead><tr><th scope="col">Date</th><th scope="col">From</th><th scope="col">To</th><th scope="col" class="num">km</th><th scope="col" class="num">Cost</th><th scope="col">Purpose</th><th scope="col"><span class="sr-only">Edit</span></th></tr></thead>
@@ -496,24 +518,27 @@ A.tripItemEdit = el => {
 };
 A.tripItemDel = once(async el => {
   if (!confirm('Remove this planned item?')) return;
-  await tripPutPartial({ items: (TRIP_PAGE.trip.items || []).filter(i => i.id !== el.dataset.id) });
+  await tripPutPartial({ items: (TRIP_PAGE.trip.items || []).filter(i => i.id !== el.dataset.id) });   // once queues it already
   toast('Item removed');
   render();
 });
-A.tripExpected = once(async el => {
+// inline edits go through the write queue (no once): a second edit on another row is queued, not dropped
+A.tripExpected = el => {
   const id = el.dataset.itemExp, raw = el.value.trim();
   if (raw !== '' && (Number(raw) < 0 || Number.isNaN(Number(raw)) || Money.parse(raw).s > 2)) return tripError('Expected: enter an amount of at least 0 with at most two decimals');
-  const items = (TRIP_PAGE.trip.items || []).map(i => {
-    if (i.id !== id) return i;
-    const { expected, ...rest } = i;
-    return raw === '' ? rest : { ...rest, expected: Number(raw) };
+  return tripWrite(async () => {   // the items are read when the write runs: the answer of the write before is in
+    const items = (TRIP_PAGE.trip.items || []).map(i => {
+      if (i.id !== id) return i;
+      const { expected, ...rest } = i;
+      return raw === '' ? rest : { ...rest, expected: Number(raw) };
+    });
+    const t = await tripPutPartial({ items });
+    // a local update: the footer from the server's answer, no page render (the focus and the other rows stay)
+    const box = document.querySelector('#t_step .trip-totals');
+    if (box) box.innerHTML = tripTotalsHTML(t);
+    toast('Saved');
   });
-  const t = await tripPutPartial({ items });
-  // a local update: the footer from the server's answer, no page render (the focus and the other rows stay)
-  const box = document.querySelector('#t_step .trip-totals');
-  if (box) box.innerHTML = tripTotalsHTML(t);
-  toast('Saved');
-});
+};
 /** One planned item of a type; the fields depend on the type (docs/specs/business-trips-wizard.md, section 4). */
 function tripItemDialog(type, item) {
   const t = TRIP_PAGE.trip;
@@ -531,11 +556,13 @@ function tripItemDialog(type, item) {
   fields.push({ k: 'expected', l: 'Expected € (planning figure)', t: 'number', h: 'Not part of the statement, the allowance or VAT.' });
   openForm({
     title: `${item ? 'Edit' : 'Add'} ${TRIP_ITEM_LABEL[type] || type}`, fields, vals: v,
-    del: item ? async () => { await tripPutPartial({ items: (TRIP_PAGE.trip.items || []).filter(i => i.id !== item.id) }); render(); } : undefined,
+    del: item ? async () => { await tripWrite(() => tripPutPartial({ items: (TRIP_PAGE.trip.items || []).filter(i => i.id !== item.id) })); render(); } : undefined,
     save: async o => {
-      const it = tripItemFrom(type, o, item);
-      const items = item ? (TRIP_PAGE.trip.items || []).map(i => (i.id === item.id ? it : i)) : [...(TRIP_PAGE.trip.items || []), it];
-      await tripPutPartial({ items });
+      const it = tripItemFrom(type, o, item);   // the form's values; the list is read when the write runs
+      await tripWrite(() => {
+        const items = item ? (TRIP_PAGE.trip.items || []).map(i => (i.id === item.id ? it : i)) : [...(TRIP_PAGE.trip.items || []), it];
+        return tripPutPartial({ items });
+      });
       render();
     },
   });
@@ -572,11 +599,13 @@ function tripMileageDialog(k) {
     title: ex ? 'Edit mileage' : 'Add mileage (private car)', vals: v,
     fields: [{ k: 'date', l: 'Date', t: 'date', row: 1 }, { k: 'km', l: 'km', t: 'number', step: '0.1', row: 1 },
       { k: 'from', l: 'From', row: 2 }, { k: 'to', l: 'To', row: 2 }, { k: 'purpose', l: 'Purpose (optional)' }],
-    del: ex ? async () => { await tripPutPartial({ mileage: (t.mileage || []).filter((_, i) => i !== k) }); render(); } : undefined,
+    del: ex ? async () => { await tripWrite(() => tripPutPartial({ mileage: (TRIP_PAGE.trip.mileage || []).filter((_, i) => i !== k) })); render(); } : undefined,
     save: async o => {
       const row = tripMileageFrom(o);
-      const mileage = ex ? (t.mileage || []).map((m, i) => (i === k ? row : m)) : [...(t.mileage || []), row];
-      await tripPutPartial({ mileage });
+      await tripWrite(() => {
+        const mileage = ex ? (TRIP_PAGE.trip.mileage || []).map((m, i) => (i === k ? row : m)) : [...(TRIP_PAGE.trip.mileage || []), row];
+        return tripPutPartial({ mileage });
+      });
       render();
     },
   });
@@ -708,7 +737,7 @@ function checklistHTML(trip, ro) {
   return `<ol class="trip-check">${items.map(i => (i.id === 'cost_centre' ? ccLineHTML(trip, i) : checkItemHTML(i, trip, ro))).join('')}</ol>`;
 }
 /** Not-needed decisions are stored at once; the checklist then shows the server's states. */
-A.tripNotNeeded = once(async () => {
+A.tripNotNeeded = () => tripWrite(async () => {
   const t = await tripPutPartial({ not_needed: checkedNotNeeded() });
   $('#t_checklist').innerHTML = checklistHTML(t, false);
 });

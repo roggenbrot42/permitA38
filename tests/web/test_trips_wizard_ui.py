@@ -766,3 +766,125 @@ def test_edit_item_opens_the_dialog_and_keeps_the_fields_it_does_not_show(browse
     assert puts(api)[-1][3]["x_extra"] == "kept too"  # the unknown top-level field is sent back with the PUT
     assert problems == []
     ctx.close()
+
+
+def wait_until(pg, check, tries=60):
+    """Polls the page (a short wait each time) until check() is true; the caller asserts what it expects."""
+    for _ in range(tries):
+        if check():
+            return
+        pg.wait_for_timeout(50)
+
+
+LEGS_11_09_11_11 = [
+    {"depart": "2026-11-09T08:00", "from": "Berlin", "to": "Hamburg", "country": "DE"},
+    {"depart": "2026-11-11T18:00", "from": "Hamburg", "to": "Berlin", "country": "DE"},
+]
+
+
+def test_a_trip_moved_to_a_later_week_shifts_its_itinerary_and_the_itinerary_step_saves(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["itinerary"] = copy.deepcopy(LEGS_11_09_11_11)
+    trip["mileage"] = []  # no mileage row lies in the old week, so the mileage question does not come up here
+    api = WizardApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "plan")
+    pg.fill("#t_start", "2026-11-16T08:00")
+    pg.fill("#t_end", "2026-11-18T18:00")
+    pg.click("[data-a=tripMove][data-step=itinerary]")
+    pg.wait_for_selector("#t_step tr[data-row]")
+    saved = puts(api)
+    assert len(saved) == 1, "the Plan step saves once and is not refused"
+    assert saved[0][3]["itinerary"] == [
+        {"depart": "2026-11-16T08:00", "from": "Berlin", "to": "Hamburg", "country": "DE"},
+        {"depart": "2026-11-18T18:00", "from": "Hamburg", "to": "Berlin", "country": "DE"},
+    ]  # 7 days later, same times of day
+    expect(pg.locator("#toast")).to_contain_text("Itinerary moved by 7 days")
+    expect(pg.locator("nav[aria-label='Trip steps'] [aria-current=step]")).to_contain_text("Itinerary")
+    assert pg.locator('#t_step tr[data-row="dep"] [data-f=time]').input_value() == "2026-11-16T08:00"
+    # the Itinerary step now saves against the moved period (the fake answers 422 for a row outside it)
+    pg.click("[data-a=tripMove][data-step=expenses]")
+    pg.wait_for_selector("#t_step input[data-item-exp], #t_step .trip-totals, #t_step table")
+    assert pg.evaluate("location.hash").endswith("/expenses")
+    assert len(puts(api)) == 2
+    assert [leg["depart"] for leg in api.trip["itinerary"]] == ["2026-11-16T08:00", "2026-11-18T18:00"]
+    assert problems == []
+    ctx.close()
+
+
+def test_a_period_that_cuts_off_a_moved_leg_is_still_refused_with_the_itinerary_message(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["itinerary"] = copy.deepcopy(LEGS_11_09_11_11)
+    trip["mileage"] = []
+    api = WizardApi(ME, trip)
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "plan")
+    pg.fill("#t_start", "2026-11-09T08:00")
+    pg.fill("#t_end", "2026-11-10T18:00")  # the return leg departs 2026-11-11: no shift can keep it inside
+    pg.click("[data-a=tripMove][data-step=itinerary]")
+    expect(pg.locator("#t_error")).to_contain_text("correct the times on the Itinerary step first")
+    assert puts(api) == []
+    assert problems == []
+    ctx.close()
+
+
+def test_two_quick_expected_edits_on_different_rows_are_both_saved(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["items"] = [
+        {"id": "i0000000001", "date": "2026-11-09", "category": "hotel", "text": "Hotel Hamburg", "expected": 120},
+        {"id": "i0000000002", "date": "2026-11-10", "category": "train", "text": "ICE", "expected": 80},
+    ]
+    api = WizardApi(ME, trip)
+    api.hold_next_put = True  # the first inline save stays in flight while the second row is edited
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    pg.fill('input[data-item-exp="i0000000001"]', "100")
+    pg.locator('input[data-item-exp="i0000000001"]').press("Tab")
+    pg.wait_for_timeout(200)
+    pg.fill('input[data-item-exp="i0000000002"]', "90")
+    pg.locator('input[data-item-exp="i0000000002"]').press("Tab")
+    pg.wait_for_timeout(200)
+    api.release()
+    wait_until(pg, lambda: len(puts(api)) == 2)
+    saved = puts(api)
+    assert len(saved) == 2, "the second edit is sent after the first answer, not dropped"
+    assert {i["id"]: i.get("expected") for i in saved[-1][3]["items"]} == {"i0000000001": 100, "i0000000002": 90}
+    assert {i["id"]: i.get("expected") for i in api.trip["items"]} == {"i0000000001": 100, "i0000000002": 90}
+    assert problems == []
+    ctx.close()
+
+
+def test_an_item_dialog_save_waits_for_the_inline_write_and_keeps_both_figures(browser):
+    trip = copy.deepcopy(CONTRACT_TRIP)
+    trip["items"] = [
+        {"id": "i0000000001", "date": "2026-11-09", "category": "hotel", "text": "Hotel Hamburg", "expected": 120},
+        {"id": "i0000000002", "date": "2026-11-10", "category": "train", "text": "ICE", "expected": 80},
+    ]
+    api = WizardApi(ME, trip)
+    api.hold_next_put = True  # the inline save of row 1 is in flight while row 2 is edited in its dialog
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    pg.fill('input[data-item-exp="i0000000001"]', "100")
+    pg.locator('input[data-item-exp="i0000000001"]').press("Tab")
+    pg.wait_for_timeout(200)
+    pg.click('[data-a=tripItemEdit][data-id="i0000000002"]')
+    pg.fill("#f_expected", "95")
+    pg.click("#m-save")
+    pg.wait_for_timeout(200)
+    api.release()
+    wait_until(pg, lambda: len(puts(api)) == 2)
+    assert {i["id"]: i.get("expected") for i in api.trip["items"]} == {"i0000000001": 100, "i0000000002": 95}
+    assert problems == []
+    ctx.close()
+
+
+def test_next_from_the_expenses_step_sends_no_put_when_nothing_changed(browser):
+    api = WizardApi(ME, copy.deepcopy(CONTRACT_TRIP))
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    pg.click("[data-a=tripMove][data-step=review]")
+    pg.wait_for_selector("#t_breakdown")
+    assert pg.evaluate("location.hash").endswith("/review")
+    assert puts(api) == []
+    assert problems == []
+    ctx.close()
