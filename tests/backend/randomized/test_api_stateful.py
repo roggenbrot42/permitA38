@@ -89,6 +89,14 @@ class Session:
     iat: int
 
 
+def settle_default_date(exp: dict, act: dict, days: set[str]) -> None:
+    """A document sent without a date is stamped by the server on its own clock. The model cannot know which side of
+    midnight that clock was on, so it accepts the day before or after the call (`days`) and takes the server's value."""
+    if "date" not in exp:
+        assert act.get("date") in days, f"date: expected one of {sorted(days)}, got {act.get('date')!r}"
+        exp["date"] = act["date"]
+
+
 def approx(a, b) -> bool:
     if isinstance(a, bool) or isinstance(b, bool):
         return a == b
@@ -414,13 +422,13 @@ class ApiMachine(RuleBasedStateMachine):
         exp.setdefault("status", "draft")
         exp.setdefault("lines", [])
         if old is None:
-            exp["status"] = "draft"
-            exp["date"] = exp.get("date") or date.today().isoformat()
+            exp["status"] = "draft"  # no default date here: settle_default_date takes the server's stamp
         else:
             exp.pop("number", None)
             if old.get("number"):
                 exp["number"] = old["number"]
-            exp["date"] = exp.get("date") or old.get("date") or date.today().isoformat()  # a PUT cannot drop the date
+            if exp.get("date") or old.get("date"):  # a PUT cannot drop the date
+                exp["date"] = exp.get("date") or old.get("date")
         exp.setdefault("template_id", "classic")
         lines = []
         for ln in exp["lines"]:
@@ -754,12 +762,15 @@ class ApiMachine(RuleBasedStateMachine):
         self.op_create_doc(data.draw(self.actor()), coll, data.draw(self.doc_st(coll)))
 
     def op_create_doc(self, s, coll, body):
+        days = {date.today().isoformat()}  # the server stamps a missing date: accept the day before/after the call
         r = self.call("POST", f"/{coll}", s, json=body)
+        days.add(date.today().isoformat())
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
         assert r.status_code == 200, r.text
         exp = self.doc_expected(coll, body, None) | {"id": r.json()["id"]}
+        settle_default_date(exp, r.json(), days)
         self.check_record(coll, exp, r.json())
         self.m[coll][exp["id"]] = exp
         self.bodies[exp["id"]] = body
@@ -785,12 +796,15 @@ class ApiMachine(RuleBasedStateMachine):
         body["status"] = status
         if status == "paid":
             body["paid_date"] = paid
+        days = {date.today().isoformat()}  # the server stamps a missing date: accept the day before/after the call
         r = self.call("PUT", f"/{coll}/{rid}", s, json=body)
+        days.add(date.today().isoformat())
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
         assert r.status_code == 200, r.text
         exp = self.doc_expected(coll, body, self.m[coll][rid]) | {"id": rid}
+        settle_default_date(exp, r.json(), days)
         self.check_record(coll, exp, r.json())
         self.m[coll][rid], self.bodies[rid] = exp, body
         self.dirty.add(coll)
@@ -963,7 +977,9 @@ class ApiMachine(RuleBasedStateMachine):
         self.tick()
         s = data.draw(self.actor())
         rid = data.draw(st.sampled_from(list(self.m["offers"])))
+        days = {date.today().isoformat()}  # the server stamps the invoice date: accept the day before/after the call
         r = self.call("POST", f"/offers/{rid}/to-invoice", s)
+        days.add(date.today().isoformat())
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
@@ -974,8 +990,11 @@ class ApiMachine(RuleBasedStateMachine):
             for k in ("customer_id", "project_id", "lines", "template_id", "vat_rate", "language", "title", "reference")
             if k in o
         }
-        body.update(date=TODAY.isoformat(), offer_id=rid)
-        exp = self.doc_expected("invoices", body, None) | {"id": r.json()["id"]}
+        body.update(date=TODAY.isoformat(), offer_id=rid)  # sent, but the server ignores it and stamps its own date
+        exp = self.doc_expected("invoices", {k: v for k, v in body.items() if k != "date"}, None) | {
+            "id": r.json()["id"]
+        }
+        settle_default_date(exp, r.json(), days)
         self.check_record("invoices", exp, r.json())
         self.m["invoices"][exp["id"]] = exp
         self.bodies[exp["id"]] = body
@@ -1730,6 +1749,54 @@ class ApiMachine(RuleBasedStateMachine):
         self.dashboard_matches_model()
         self.finance_matches_model()
         self.dirty = set()
+
+
+def test_offer_to_invoice_accepts_the_server_stamp_after_midnight(monkeypatch):
+    """TODAY is fixed when the module is imported (26th); the server stamps the invoice date on its own clock after
+    midnight (27th). The pre-fix expectation kept the sent body date and failed; the stamp must be accepted."""
+
+    class Clock(date):
+        readings = iter([date(2026, 10, 26), date(2026, 10, 27)])  # model reads before the call, then after
+
+        @classmethod
+        def today(cls):
+            return next(cls.readings)
+
+    monkeypatch.setitem(globals(), "date", Clock)
+    monkeypatch.setitem(globals(), "TODAY", date(2026, 10, 26))
+
+    class Model:  # the two pure helpers of ApiMachine; neither touches instance state
+        doc_expected = ApiMachine.doc_expected
+        check_record = ApiMachine.check_record
+
+    body = {
+        "project_id": "p1",
+        "lines": [],
+        "date": TODAY.isoformat(),
+    }  # sent by offer_to_invoice, ignored by the server
+    act = {
+        "id": "d1",
+        "date": "2026-10-27",
+        "status": "draft",
+        "template_id": "classic",
+        "lines": [],
+        "project_id": "p1",
+    }
+
+    stale = Model.doc_expected(Model(), "invoices", body, None) | {"id": "d1"}
+    with pytest.raises(AssertionError, match="date"):
+        Model.check_record(Model(), "invoices", stale, act)
+
+    days = {date.today().isoformat()}  # 2026-10-26, before the call
+    days.add(date.today().isoformat())  # 2026-10-27, after the call
+    exp = Model.doc_expected(Model(), "invoices", {k: v for k, v in body.items() if k != "date"}, None) | {"id": "d1"}
+    settle_default_date(exp, act, days)
+    Model.check_record(Model(), "invoices", exp, act)
+    assert exp["date"] == "2026-10-27"
+
+    exp = Model.doc_expected(Model(), "invoices", {k: v for k, v in body.items() if k != "date"}, None) | {"id": "d1"}
+    with pytest.raises(AssertionError, match="expected one of"):
+        settle_default_date(exp, dict(act, date="2026-10-28"), days)
 
 
 # The run is split into SHARDS independent state machines with 1/SHARDS of the examples each, so that pytest-xdist can
