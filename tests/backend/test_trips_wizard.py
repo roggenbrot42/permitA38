@@ -208,7 +208,8 @@ def test_deleting_the_trip_unlinks_bills_from_item_too(boss_client):
         "/api/expenses",
         json={"date": "2026-11-09", "net": 40, "vat": 0, "trip_id": trip["id"], "trip_item_id": trip["items"][0]["id"]},
     ).json()
-    assert boss_client.delete(f"/api/trips/{trip['id']}").status_code == 204
+    deleted = boss_client.delete(f"/api/trips/{trip['id']}")
+    assert deleted.status_code == 204
     kept = boss_client.get(f"/api/expenses/{bill['id']}").json()
     assert kept.get("trip_id") is None and kept.get("trip_item_id") is None
 
