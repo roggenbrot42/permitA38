@@ -796,6 +796,9 @@ def test_accept_dialog_escape_and_cancel_button(browser):
     api = FakeApi()
     ctx, pg, problems = open_app(browser, api, page="incoming/9b3e51c7")
     pg.click("[data-a=offAccept]")
+    dlg = pg.locator("#modal-root .modal")
+    expect(dlg).to_be_visible()  # the dialog opens after two fetches: Escape before its key handler exists does nothing
+    expect(pg.locator("#ac_project")).to_be_focused()  # focus is inside the dialog when Escape is pressed
     pg.keyboard.press("Escape")
     expect(pg.locator("#modal-root .modal")).to_have_count(0)
     assert not api.calls("POST", "incoming-offers/9b3e51c7/accept")
