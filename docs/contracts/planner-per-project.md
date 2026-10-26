@@ -221,7 +221,7 @@ Query: `weeks` (1..156, default 26), `user_id`, `offers` (int, default 1), **new
 | `external_cost` | number | subcontractor cost booked to the project that week (0.0 until the subcontractor feature is present) |
 
 * `by_project=0`: no `projects[]`, no per-project warnings (`capacity.gap`, `allocation.no_demand`,
-  `offer.project_gap` for scopes are omitted); `gap*` stay; `capacity.over` uses the old team rule. Team rows are
+  `offer.project_gap` for scopes are omitted); `gap*` stay; `capacity.over` (`scope: "team"`) is the team rule on the used hours, see the warning table. Team rows are
   identical to `by_project=1`.
 * `totals` keeps its keys and gains `gap` (sum over the weeks, hours) and, unless `by_project=0`,
   `gap_by_project: [{project_id, name, gap}]` (only scopes with `gap > 0`, sorted by `gap` desc then name). `over_weeks`
@@ -384,7 +384,7 @@ Shape of every warning (unchanged): `{code, severity, field, message, details, c
 | Code | severity | field | confirmable | `details` (all keys always present) |
 |---|---|---|---|---|
 | `capacity.gap` | warning | `weeks` | false | `{project_id, project_name, week, pool, assigned, capacity, gap, contributions[]}` |
-| `capacity.over` | warning | `weeks` | false | `{week, over_by, contributions[], scope}` (`scope`: `"unassigned"` or `"team"`; the old keys keep their meaning) |
+| `capacity.over` | warning | `weeks` | false | `{week, over_by, contributions[], scope}` (`scope`: `"unassigned"` or `"team"`. `team` (`by_project=0`): the week's `used` hours are over its capacity, so an allocation-only overload fires it too; `over_by` = `used - capacity`, emitted only when positive. `unassigned` is unchanged) |
 | `allocation.employee_over_allocated` | warning | `allocations` on save, `weeks` in the forecast | true | `{user_id, week, allocated, weekly_hours, over_by, reason}` |
 | `allocation.no_demand` | info | `weeks` | false | `{allocation_id, project_id, project_name, week, capacity}` |
 | `allocation.overlap_same_project` | info | `allocations` | false | `{user_id, project_id, week, allocation_ids[]}` |

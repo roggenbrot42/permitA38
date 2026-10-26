@@ -131,8 +131,9 @@ capacity** (`POST /api/allocations/bootstrap`): the preview lists one allocation
 assignee, with the contract's period and the assignee's peak weekly demand rounded up to 0.25 h; confirming creates
 them. A second run creates nothing. Open offers are not allocated automatically.
 
-With `by_project=0` there is no project dimension: the team `capacity.over` warning uses the utilisation rule only
-(week utilisation above 100 %, `scope: "team"`), not the gaps.
+With `by_project=0` there is no project dimension: the team `capacity.over` warning is emitted from the used hours
+(week utilisation above 100 %, `scope: "team"`; `over_by` = used - capacity, only when positive; an allocation-only overload
+also fires it), not from the gaps.
 
 Before the bootstrap every project with contracts shows capacity 0 and a gap equal to its demand, and an offer of a
 project warns (`offer.project_gap`), because no hours are allocated to it yet. `what-must-move` takes no project in its

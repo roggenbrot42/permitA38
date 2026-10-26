@@ -146,6 +146,32 @@ def test_holiday_week_allocation_spread_over_four_days(w):
     assert (a["capacity"], a["allocated"], a["utilisation"]) == (32.0, 40.0, 125.0)
 
 
+def test_two_allocations_and_a_holiday_scale_to_58_percent(w):
+    # Hand computation (no code used): week of Monday 2026-11-16 in Saxony, Wednesday 2026-11-18 is a holiday, so
+    # 4 available days of 8 h = 32 h real capacity. A 30 h/week and B 25 h/week: per available day 30 / 4 = 7.5 h
+    # and 25 / 4 = 6.25 h, over four days 30 h and 25 h: 55 h allocated. Per day 13.75 h is asked of 8 h, so the
+    # projects are scaled to 8 / 13.75 = 58.2 % (the tooltip shows 58 %). Used 55 h of 32 h = 171.9 %, status over.
+    w.repo.save_settings({**w.repo.settings(), "state": "SN"})
+    w.alloc(w.a, 30.0, start="2026-11-16", end="2026-11-22")
+    w.alloc(w.b, 25.0, start="2026-11-16", end="2026-11-22")
+    week = w.forecast(weeks=1, today=date(2026, 11, 16))["weeks"][0]
+    assert week["week"] == "2026-11-16" and week["holiday_hours"] == 8.0
+    assert (week["capacity"], week["allocated"], week["used"]) == (32.0, 55.0, 55.0)
+    assert (week["utilisation"], week["status"]) == (171.9, "over")  # 55 / 32
+    a, b = w.scope(week, w.a["id"]), w.scope(week, w.b["id"])
+    assert (a["allocated"], b["allocated"]) == (30.0, 25.0)
+    assert a["capacity"] == pytest.approx(32 * 30 / 55, abs=0.05)  # 17.5 h
+    assert b["capacity"] == pytest.approx(32 * 25 / 55, abs=0.05)  # 14.5 h
+    assert (a["utilisation"], b["utilisation"]) == (171.9, 171.9)
+    assert round(32 / 55 * 100) == 58  # the tooltip of web/planner.js explain(): 'scaled down to 58 %'
+    team = w.forecast(weeks=1, today=date(2026, 11, 16), by_project=False)
+    warnings = [x for x in team["warnings"] if x["code"] == "capacity.over"]
+    assert len(warnings) == 1 and warnings[0]["details"]["over_by"] == 23.0  # 55 - 32, allocation-only overload
+    assert warnings[0]["message"] == (
+        "Week of 2026-11-16: 55 h allocated and 0 h committed for 32 h of capacity (over by 23 h)."
+    )
+
+
 def test_allocation_without_demand_under_capacity_is_ok_at_37_5_percent(w):
     # 15 h allocated to A, no demand: used 15 of 40 h = 37.5 %, status ok, no capacity.over warning.
     w.alloc(w.a, 15.0)
