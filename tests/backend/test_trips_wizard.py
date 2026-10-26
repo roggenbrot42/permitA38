@@ -102,8 +102,48 @@ def test_item_bounds_and_money_rule(boss_client):
 
 
 def test_item_without_expected_is_allowed(boss_client):
-    trip = make_trip(boss_client, items=[{"date": "2026-11-09", "category": "food", "text": "Lunch"}])
+    trip = make_trip(boss_client, items=[{"date": "2026-11-09", "category": "other", "text": "Lunch"}])
     assert "expected" not in trip["items"][0]
+
+
+def test_item_category_is_one_of_the_five_types(boss_client):
+    assert boss_client.post("/api/trips", json=trip_body(items=[item(category="food")])).status_code == 422
+    assert boss_client.post("/api/trips", json=trip_body(items=[item(category="car")])).status_code == 422
+    for category in ("hotel", "train", "flight", "taxi", "other"):
+        assert boss_client.post("/api/trips", json=trip_body(items=[item(category=category)])).status_code == 200
+
+
+def test_item_from_to_and_date_to_round_trip(boss_client):
+    hotel = {
+        "date": "2026-11-09",
+        "date_to": "2026-11-11",
+        "category": "hotel",
+        "text": "Hotel Hamburg",
+        "expected": 120,
+    }
+    train = item(**{"from": "Berlin", "to": "Hamburg"})
+    trip = make_trip(boss_client, items=[hotel, train])
+    got = {i["category"]: i for i in trip["items"]}
+    assert got["hotel"]["date_to"] == "2026-11-11"
+    assert got["train"]["from"] == "Berlin" and got["train"]["to"] == "Hamburg"
+
+
+def test_item_date_to_before_date_is_422(boss_client):
+    body = item(date_to="2026-11-08")
+    assert boss_client.post("/api/trips", json=trip_body(items=[body])).status_code == 422
+
+
+def test_origin_destination_and_country_round_trip(boss_client):
+    trip = make_trip(boss_client, origin="Berlin", destination="Hamburg", destination_country="DE")
+    assert (trip["origin"], trip["destination"], trip["destination_country"]) == ("Berlin", "Hamburg", "DE")
+    again = boss_client.get(f"/api/trips/{trip['id']}").json()
+    assert again["destination_country"] == "DE"
+
+
+def test_destination_country_must_be_alpha_2_upper_case(boss_client):
+    assert boss_client.post("/api/trips", json=trip_body(destination_country="de")).status_code == 422
+    assert boss_client.post("/api/trips", json=trip_body(destination_country="DEU")).status_code == 422
+    assert boss_client.post("/api/trips", json=trip_body(destination_country="AT")).status_code == 200
 
 
 # ------------------------------------------------------------------ trip_item_id on bills

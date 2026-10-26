@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format is based on
   items with an optional expected cost, linked to bills with `trip_item_id`. The trip shows the expected and actual totals
   (planning only; expected costs are not part of the statement, allowance, VAT or reports). The statement PDF prints
   the itinerary.
+- Business trips: the start place (`origin`) and the destination (`destination`, `destination_country`) of a trip;
+  planned items take a category of hotel, train, flight, taxi or other, and optional `from`, `to` and `date_to`.
 
 ### Fixed
 - A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
