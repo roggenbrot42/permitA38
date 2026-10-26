@@ -401,6 +401,15 @@ subcontractor feature (external pool is simply empty); the subcontractor branch 
    Tests: `tests/backend/test_utilisation_allocated.py` (oracle a to e, holiday week). The randomized equivalence
    test compared a world with itself (`with_allocations` was never applied); it now compares with and without
    allocations and asserts that utilisation never drops when allocations are added.
+   Asymmetry (review of 2026-10-26, intended): an **idle internal allocation counts as used** (the hours are reserved
+   for that project, so 40 h allocated and nothing planned is 100.0 % `tight`), while an **idle external allocation
+   does not** (the external pool stays as it was: only its assigned demand counts). A week with allocations and no
+   demand therefore shows `tight` or `over` and is counted in `totals.over_weeks` when it is over 100 %; that is
+   intended, because the owner has reserved the hours. The week row carries `used` (the hours used, the numerator of
+   the team utilisation); the `capacity.over` warning of `by_project=0` is emitted from `used` (over_by = used -
+   capacity, only when positive) and names the allocations when they exceed the capacity, or says that the days'
+   allocations and commitments exceed capacity when no single cause explains the excess. Rounding: the status and the
+   warning use the unrounded ratio (`status_for`), so at 100.04 % the row shows 100.0 `over` (test at 40.016 h).
    Open design decision (implementer, for review): the team utilisation keeps the external (subcontractor) demand and
    the team capacity includes the external capacity, as today, so that the subcontractor numbers stay unchanged.
    Reading "internal used over team capacity" literally would drop the external demand (W4 would show 66.7 %).

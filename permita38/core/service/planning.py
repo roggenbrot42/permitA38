@@ -851,6 +851,7 @@ def weeks_detail(
                 utilisation=util,
                 status=status,
                 allocated=round(sum(sm.alloc for sm in sums.values()), 6),
+                used=round(used, 6),
                 gap=round(gap, 6),
                 gap_confirmed=round(gap_c, 6),
                 gap_expected=round(gap_e, 6),

@@ -109,13 +109,11 @@ def dump(repo):
 
 def check_status_and_gap(w):
     """Two-way: the gap covers every hour the week is over by, and the status is ``over`` exactly when the old
-    utilisation rule says so or a project has a gap. The utilisation counts the allocations (decision D4), so the rule
-    reads the row's one-decimal utilisation (a value within 0.05 of 100 is left out: rounding decides there)."""
+    utilisation rule says so or a project has a gap. The utilisation counts the allocations (decision D4): the rule
+    reads the row's used hours with ``status_for``, the same unrounded rule the row status uses."""
     assert w["gap"] + 1e-6 >= max(0.0, -w["free_worst_case"])
-    util = w["utilisation"]
-    if util is None or abs(util - 100.0) > 0.06:
-        old_over = util is None or util > 100.0
-        assert (w["status"] == "over") == (old_over or w["gap"] > 1e-6)
+    old_over = eng.status_for(w["capacity"], w["used"])[0] == "over"
+    assert (w["status"] == "over") == (old_over or w["gap"] > 1e-6)
     assert w["gap_confirmed"] <= w["gap"] + 1e-6 and w["gap_expected"] <= w["gap"] + 1e-6
     assert w["gap_confirmed"] <= w["gap_expected"] + 1e-6
     for p in w.get("projects", []):
@@ -325,6 +323,7 @@ NOT_COMPARED = (
     "projects",
     "contributions",
     "utilisation",
+    "used",
     "allocated",
 )
 
@@ -362,7 +361,7 @@ def test_ring_fence_properties(world):
 @given(fenced_worlds())
 def test_allocations_never_change_the_team_numbers(world):
     """Equivalence: the same data with and without allocations gives the same team capacity, demand, free hours,
-    revenue and day-table cap/confirmed/binding; only status, gap, utilisation and allocated may differ. Utilisation
+    revenue and day-table cap/confirmed/binding; only status, gap, utilisation, used and allocated may differ. Utilisation
     counts the allocations as used (decision D4), so it never drops when allocations are added."""
     _, with_a, _, w_with = forecast_of(world)
     _, without_a, _, w_without = forecast_of(world, with_allocations=False)

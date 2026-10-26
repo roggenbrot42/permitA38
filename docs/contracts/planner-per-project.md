@@ -201,7 +201,8 @@ Query: `weeks` (1..156, default 26), `user_id`, `offers` (int, default 1), **new
   `utilisation` is `used / capacity` in percent (1 decimal; `null` for capacity 0 with work; 0.0 without work), where
   `used` = per day and scope `max(confirmed + binding, allocation)` of the employees (the allocation is unscaled) plus
   the subcontractors' confirmed + binding (decision D4, 2026-10-26). The team row sums `used` over the scopes.
-  Without allocations `used` equals `confirmed + binding_offers`, as before.
+  Without allocations `used` equals `confirmed + binding_offers`, as before. The week row (team) gains `used` (the
+  hours used, numerator of `utilisation`; rounded to 6 decimals like the other hours).
 * `projects[]` (one object per scope with any capacity, any demand, or any allocation overlapping the week, plus
   **always** the `unassigned` scope; sorted by `name` case-insensitive, then `project_id`; `unassigned` last). A project
   that no longer exists is named `"(deleted project)"`. Fields:

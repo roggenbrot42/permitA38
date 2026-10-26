@@ -48,7 +48,7 @@ Each week shows:
 | free (after confirmed) | capacity minus contracts |
 | free (worst case) | capacity minus contracts minus open offers |
 | allocated | hours you allocated to projects in the week (the allocations, before any scaling down); shown red when above the capacity |
-| utilisation | used / capacity, where used is the larger of the hours committed and the hours allocated, day by day and per project (see Capacity per project). Allocated hours count as used even when no contract fills them, so the figure shows how much of your capacity is in use |
+| utilisation | used / capacity, where used is the larger of the hours committed and the hours allocated, day by day and per project (see Capacity per project). Allocated hours count as used even when no contract fills them, so the figure shows how much of your capacity is in use. Idle allocations to employees count as used; subcontractor allocations count only with their commitments. A week with allocations and nothing planned can show `tight` or `over` |
 | status | `ok` up to 90 %, `tight` up to 100 %, `over` above 100 % (or capacity 0 with work booked) |
 
 ## Offer feasibility
