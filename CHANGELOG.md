@@ -5,6 +5,9 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- Planner: hours in the contract rows and tooltips were shown with a decimal point (12.5 h) while the rest of the planner used the decimal comma; all planner numbers now use the app's number format (12,5 h).
+
 ## [0.4.0-alpha.4] - 2026-10-26
 
 Fourth alpha. Adds the planner per project (each project gets its own ring-fenced share of your capacity, with
