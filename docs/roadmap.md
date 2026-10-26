@@ -58,6 +58,7 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 | Item | Status |
 |---|---|
 | **Accounting** (chart of accounts SKR03/SKR04, journal, receipts) and the **German VAT return (UStVA)** | spec: [`specs/ustva.md`](specs/ustva.md); boxes need the tax adviser |
+| **Project capacity**: people and subcontractors are allocated to projects; a project's demand is covered by its own pool, contracts only state what is owed | spec: [`specs/project-capacity.md`](specs/project-capacity.md) (draft, architect sign-off pending); Full review tier |
 
 ## v0.4.0-alpha.6
 
