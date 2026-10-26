@@ -46,7 +46,7 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 |---|---|
 | **MCP server** with scoped, audited tools on top of the API tokens (read direct, changes only through the proposal queue) | spec: [`specs/mcp-server.md`](specs/mcp-server.md); Full review tier |
 | **AI provider and proposal queue** (local / OpenAI-compatible model, suggestions never booked without approval) | spec: [`specs/ai-provider-and-proposals.md`](specs/ai-provider-and-proposals.md) |
-| **Suppliers and subcontractors** (suppliers as a collection, external people you allocate time to, incoming offers, capacity ring-fenced to projects) | spec: [`specs/subcontractors.md`](specs/subcontractors.md); contract and implementation in progress (the shared `allocations` table already exists) |
+| **Suppliers and subcontractors** (suppliers as a collection, external people you allocate time to, incoming offers, capacity ring-fenced to projects) | done on `main` (unreleased): suppliers, incoming offers with accept/unaccept, external allocations in the planner and forecast, commitments; spec [`specs/subcontractors.md`](specs/subcontractors.md), contract [`contracts/subcontractors.md`](contracts/subcontractors.md) |
 | **Planner per project** (capacity allocated to projects, ring fence, per-project gaps, "Allocate my capacity" bootstrap) | done on `main`, see [`specs/planner-per-project.md`](specs/planner-per-project.md) and [`planning.md`](planning.md); unreleased |
 | **Business trips**: import the real BMF country table for 2026 and 2027 | planned; blocks use of trips abroad |
 | **Merge-import** into an instance that already has data (id remapping, conflict policy) | planned; v1 import needs an empty instance |

@@ -407,6 +407,19 @@ class Monkey:
                 self.page.click(action, timeout=CLICK_TIMEOUT, no_wait_after=True)
         except Exception:
             pass
+        if action == "#m-save":
+            # random input is often refused by validation: the form then stays open and would block every later move.
+            # A user who gets a validation message gives up and closes it (the save itself is what the write count checks).
+            try:
+                self.page.wait_for_load_state("networkidle", timeout=2000)
+            except Exception:
+                pass
+            try:
+                if self.page.evaluate("() => document.querySelector('#modal-root').children.length > 0") and self.page.query_selector("#m-cancel"):
+                    self.say("episode: the form was refused, closing it")
+                    self.page.click("#m-cancel", timeout=CLICK_TIMEOUT, no_wait_after=True)
+            except Exception:
+                pass
 
     DOC_BUTTONS = (
         "[data-a=docSave], [data-a=addLine], [data-a=delLine], [data-a=docFinalize], [data-a=docAccept], "
