@@ -26,8 +26,12 @@ project/customer or "general"). New:
 
 * `itinerary`: list (max 30) of legs `{depart: LocalDateTime, from: Short, to: Short, mode, note?: Short}`, with
   `mode` in `train | flight | car | taxi | bus | other`. It documents the route and is printed on the statement. Legs
-  must lie inside `[start, end]`. `places` (country per day) stays the input of the allowance; the UI offers
-  "take countries from the itinerary" as a convenience, it does not derive them silently.
+  must lie inside `[start, end]`. **Only changes of location are recorded**: one row per leg, never one per day. A
+  four-week stay in one city is one outbound leg and one return leg; the UI and the validation must not push the
+  user towards a row per day. `places` (country per day) stays the input of the allowance; it is **range based**
+  (`from_date` holds until the next row), so the same rule applies: one row per change of country or city, and the
+  days in between are filled by the server. The UI offers "take countries from the itinerary" as a convenience; it
+  does not derive them silently.
 * `customer_pays`: boolean (default false). "The customer reimburses this trip." Requires `customer_id`.
 
 ## 3. Stage 2: items and receipts
@@ -80,7 +84,8 @@ hotel bill net 200,00 (rebill), taxi net 20,00 (rebill), mileage 100 km x 0,30 =
 lines = 220,00 net; with both ticks = 306,00 net; at 19 % VAT 364,14 gross (306 x 0,19 = 58,14). Also: transitions
 (every allowed and every refused one), migration mapping, idempotent settlement, replace-on-reopen with a user-added
 line surviving, finalized invoice blocks, rights matrix, `rebill` refused without `customer_pays`, itinerary bounds,
-randomized state machine (trip status model), UI tests for the three stages and the receipt upload.
+a 28-day single-location trip needs exactly 2 itinerary rows and 1 places row and yields 28 allowance days,
+randomized state machine (trip status model), UI tests (the itinerary form offers *Add leg*, never a day grid; a long trip stays at a handful of rows) for the three stages and the receipt upload.
 
 ## 7. Open decisions
 
