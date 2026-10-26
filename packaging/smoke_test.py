@@ -5,7 +5,7 @@
 
 Starts the app on a free port with a throw-away data folder and config (the real user config is never touched),
 then checks: health, public status, the bundled web frontend, first-run setup + login, a database write, and PDF
-rendering (which needs the bundled templates and the migrations). Stdlib only, so it runs against any build.
+rendering and a trip preview (which need the bundled templates, rate tables and the migrations). Stdlib only, so it runs against any build.
 """
 
 from __future__ import annotations
@@ -109,6 +109,13 @@ def main(argv: list[str]) -> int:
             inv = json.loads(raw)
             _, _, raw = call(base, "POST", f"/api/invoices/{inv['id']}/finalize", None, token)
             expect(json.loads(raw)["number"].startswith("RE-"), "database write + invoice numbering")
+            status, _, raw = call(
+                base, "POST", "/api/trips/preview",
+                {"purpose": "Smoke", "start": "2026-11-09T08:00", "end": "2026-11-11T18:00",
+                 "places": [{"from_date": "2026-11-09", "country": "DE", "city": "Hamburg"}]},
+                token,
+            )  # fmt: skip
+            expect(status == 200, "trip preview (bundled rate tables and checklist)")
             status, ctype, raw = call(base, "GET", f"/api/invoices/{inv['id']}/pdf", None, token)
             expect(status == 200 and raw.startswith(b"%PDF") and "pdf" in ctype, "invoice PDF is rendered")
         except Exception:

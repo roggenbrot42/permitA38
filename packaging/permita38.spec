@@ -10,6 +10,7 @@ root = Path(SPECPATH).parent  # noqa: F821  (SPECPATH is provided by PyInstaller
 datas = [
     (str(root / "web"), "web"),  # permita38.core.config.default_web_dir() looks for <package root>/web
     (str(root / "permita38" / "core" / "templates"), "permita38/core/templates"),
+    (str(root / "permita38" / "core" / "trip_rates"), "permita38/core/trip_rates"),
     (str(root / "permita38" / "core" / "schema" / "migrations"), "permita38/core/schema/migrations"),
 ]
 

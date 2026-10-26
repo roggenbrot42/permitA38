@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Business trips failed with a server error in the installed packages** (Windows/Linux bundle and wheel): the rate
+  tables and the checklist were not included. Creating or previewing a trip works again; a test now checks that every
+  data file of the package is declared, and the smoke test previews a trip.
+
 ## [0.4.0-alpha.4] - 2026-10-26
 
 Fourth alpha. Adds the planner per project (each project gets its own ring-fenced share of your capacity, with
