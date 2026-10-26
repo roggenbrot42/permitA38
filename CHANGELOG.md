@@ -5,6 +5,9 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- An offer, invoice, contract or trip can no longer be saved with a project of another customer: the project pickers list only the chosen customer's projects (and projects without a customer), and the API refuses a mismatch with 422. Existing records that already mismatch can still be edited.
+
 ## [0.4.0-alpha.4] - 2026-10-26
 
 Fourth alpha. Adds the planner per project (each project gets its own ring-fenced share of your capacity, with
