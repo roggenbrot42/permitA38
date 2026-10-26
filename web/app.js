@@ -413,8 +413,8 @@ function ppSummary(fc, uid, pid) {
   const writable = can('planning', 'write');
   const scope = uid ? ` data-user="${esc(uid)}"` : pid && pid !== 'unassigned' ? ` data-project="${esc(pid)}"` : '';
   return `<div class="banner bad pp-summary" role="status"><b>Not covered: ${esc(ppH(fc.totals.gap))}</b> in ${fc.totals.over_weeks} week${fc.totals.over_weeks === 1 ? '' : 's'}.
-    ${list.length ? `<ul>${list.map(g => `<li>${esc(g.name)}: ${esc(ppH(g.gap))}${writable ? ` <button type="button" class="ghost sm" data-a="allocations" data-project="${esc(g.project_id)}" aria-label="Allocate ${esc(g.name)}">Allocate</button>` : ''}</li>`).join('')}</ul>` : ''}
-    <div class="pp-remedy">Remedy: allocate further capacity to the projects listed.${writable ? ` <button type="button" class="primary sm" data-a="allocations"${scope}>Allocate further capacity</button>` : ''}</div></div>`;
+    ${list.length ? `<ul>${list.map(g => `<li>${esc(g.name)}: ${esc(ppH(g.gap))}${writable && g.project_id ? ` <button type="button" class="ghost sm" data-a="allocations" data-project="${esc(g.project_id)}" aria-label="Allocate ${esc(g.name)}">Allocate</button>` : ''}</li>`).join('')}</ul>` : ''}
+    ${writable ? `<div class="pp-remedy">Remedy: allocate further capacity to the projects listed. <button type="button" class="primary sm" data-a="allocations"${scope}>Allocate further capacity</button></div>` : ''}</div>`;
 }
 /* a remedy line for a planning warning about a shortfall or an over-allocation (empty for other codes) */
 function ppRemedy(w) {

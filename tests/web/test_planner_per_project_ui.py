@@ -335,6 +335,26 @@ def test_per_project_allocate_button_opens_the_dialog_for_that_project(browser):
     ctx.close()
 
 
+def test_gap_row_without_project_has_no_per_project_button(browser):
+    # the unassigned pool has no project_id: its row is listed, but there is nothing to allocate to by project
+    f = forecast_b()
+    f["totals"]["gap_by_project"] = [
+        {"project_id": "a1b2c3d4", "name": "Demo project P", "gap": 100.0},
+        {"project_id": None, "name": "Unassigned pool", "gap": 20.0},
+    ]
+    api = FakeApi(forecast=f, allocations=[])
+    ctx, pg, problems = open_app(browser, api)
+    rows = pg.locator(".pp-summary li")
+    expect(rows).to_have_count(2)
+    pool = rows.filter(has_text="Unassigned pool")
+    expect(pool).to_contain_text("20 h")
+    assert pool.locator("button").count() == 0
+    assert pg.locator(".pp-summary [data-a=allocations][data-project]").count() == 1
+    assert pg.locator(".pp-summary [data-project='null']").count() == 0
+    assert problems == []
+    ctx.close()
+
+
 def test_remedy_for_over_allocation_and_gap_warnings(browser):
     api = FakeApi()
     ctx, pg, problems = open_app(browser, api)
@@ -350,8 +370,10 @@ def test_remedy_buttons_hidden_for_read_only_planning(browser):
     api = FakeApi()
     api.me = {**BOSS, "permissions": {**BOSS["permissions"], "planning": {"read": "all", "write": "none"}}}
     ctx, pg, problems = open_app(browser, api)
-    expect(pg.locator(".pp-summary")).to_contain_text("Remedy: allocate further capacity to the projects listed.")
     expect(pg.locator(".pp-summary")).to_contain_text("Demo project P: 20 h")
+    # no remedy line and no buttons for a user who cannot write planning
+    assert "Remedy: allocate further capacity" not in pg.locator(".pp-summary").inner_text()
+    assert pg.locator(".pp-summary .pp-remedy").count() == 0
     assert pg.locator(".pp-summary button").count() == 0
     assert pg.locator(".pp-warnings button").count() == 0
     assert pg.locator("[data-a=allocBootstrap]").count() == 0
