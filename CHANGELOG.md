@@ -11,6 +11,14 @@ All notable changes to this project are documented here. The format is based on
   (planning only; expected costs are not part of the statement, allowance, VAT or reports). The statement PDF prints
   the itinerary.
 
+### Changed
+- Business trips: the one big trip dialog is replaced by a small *New trip* dialog (reason, customer, project, period,
+  start place, destination and country) and a trip page with four steps: Plan, Itinerary, Expenses and Review. A stored
+  trip opens on Expenses; a new trip opens on the itinerary. Each step saves with Back or Next and shows only its own
+  fields. The itinerary is three rows for the whole trip (departure, stay, return; *Add stay* for more places). Expenses
+  is a table of planned items (hotel, train, flight, private car, taxi, other) with expected and actual costs, receipt
+  state and *Add bill* per row. Planned costs are planning figures only.
+
 ### Fixed
 - A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
 

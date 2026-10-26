@@ -109,6 +109,9 @@ CONTRACT_TRIP = {
     "project_id": "p8d2m4qz7w",
     "start": "2026-11-09T08:00",
     "end": "2026-11-11T18:00",
+    "origin": "Berlin",
+    "destination": "Hamburg",
+    "destination_country": "DE",
     "places": [
         {"from_date": "2026-11-09", "country": "DE", "city": "Hamburg"},
         {"from_date": "2026-11-11", "country": "AT", "city": "Wien"},
@@ -148,7 +151,7 @@ ACCOUNTANT = {
     },
 }
 CUSTOMERS = [{"id": "k3j9x0ab12", "name": "Demo GmbH"}]
-PROJECTS = [{"id": "p8d2m4qz7w", "name": "Demo project", "status": "active"}]
+PROJECTS = [{"id": "p8d2m4qz7w", "name": "Demo project", "status": "active", "customer_id": "k3j9x0ab12"}]
 
 
 def preview_response(body):
@@ -246,13 +249,7 @@ class FakeTripApi:
                 return _json(route, 409, {"detail": "Checklist has open items: " + ", ".join(open_labels)})
             if body.get("cost_centre") == "project" and not (body.get("project_id") or body.get("customer_id")):
                 return _json(route, 422, {"detail": "Choose a customer or project for the cost centre"})
-            self.trip = {
-                **self.trip,
-                "status": body["status"],
-                "purpose": body["purpose"],
-                "cost_centre": body.get("cost_centre"),
-                "project_id": body.get("project_id"),
-            }
+            self.trip = {**self.trip, **body}  # PUT replaces the editable fields; figures stay as the fixture has them
             return _json(route, 200, self.trip)
         return _json(route, 405, {"detail": "Method not allowed"})
 
@@ -294,6 +291,11 @@ def open_trips_page(pg):
     pg.wait_for_selector("nav.side a.nav")
 
 
+def open_review(pg):
+    pg.goto(ORIGIN + "/#/trips/t7f3k2m9qa/review")
+    pg.wait_for_selector("#t_step")
+
+
 def test_list_shows_period_destination_purpose_and_figures(browser):
     api = FakeTripApi(ME, copy.deepcopy(CONTRACT_TRIP))
     ctx, pg, problems = open_app(browser, api)
@@ -307,37 +309,39 @@ def test_list_shows_period_destination_purpose_and_figures(browser):
     expect(row).to_contain_text("180,00")
     expect(row).to_contain_text("Draft")
     expect(pg.locator("[data-a=newTrip]")).to_have_count(1)
+    row.locator("a", has_text="09.11.2026").click()  # a row links to the trip page
+    pg.wait_for_selector("#t_step")
+    assert pg.evaluate("location.hash") == "#/trips/t7f3k2m9qa"  # the list links to the trip itself
+    expect(pg.locator("nav[aria-label='Trip steps'] [aria-current=step]")).to_contain_text("Expenses")
     assert problems == []
     ctx.close()
 
 
-def test_create_dialog_breakdown_follows_meal_checkbox_and_saves(browser):
-    api = FakeTripApi(ME, None)
+def test_review_breakdown_follows_meal_checkbox(browser):
+    api = FakeTripApi(ME, copy.deepcopy(CONTRACT_TRIP))
     ctx, pg, problems = open_app(browser, api)
-    open_trips_page(pg)
-    pg.click("[data-a=newTrip]")
-    pg.wait_for_selector("#t_purpose")
-    pg.fill("#t_start", "2026-11-09T08:00")
-    pg.fill("#t_end", "2026-11-11T18:00")
-    pg.fill("#t_purpose", "Workshop at the customer's site")
-    expect(pg.locator("#t_breakdown")).to_contain_text("56,00")
+    open_review(pg)
+    expect(pg.locator("#t_breakdown")).to_contain_text("50,40")  # the stored trip: breakfast provided on the 10th
     expect(pg.locator("#t_breakdown")).to_contain_text(
         "Mon 09.11."
     )  # every figure explained in words, not in a tooltip
     expect(pg.locator('tr[data-day="2026-11-10"] [data-f=country]')).to_have_value("Germany (DE)")
     before = len(api.calls("POST", "trips/preview"))
+    pg.uncheck('tr[data-day="2026-11-10"] [data-f=breakfast]')
+    expect(pg.locator("#t_breakdown")).to_contain_text("56,00")
     pg.check('tr[data-day="2026-11-10"] [data-f=breakfast]')
     expect(pg.locator("#t_breakdown")).to_contain_text("50,40")
     expect(pg.locator("#t_breakdown")).to_contain_text("breakfast provided 5,60")
     last = api.calls("POST", "trips/preview")[-1]
     assert len(api.calls("POST", "trips/preview")) > before
     assert last[3]["meals_provided"] == [{"date": "2026-11-10", "breakfast": True, "lunch": False, "dinner": False}]
-    assert last[3]["places"] == [{"from_date": "2026-11-09", "country": "DE"}]
-    pg.click("[data-a=tripSave]")
-    expect(pg.locator("#t_checklist")).to_contain_text("Hotel / accommodation")
-    post = api.calls("POST", "trips")[0][3]
-    assert post["purpose"] == "Workshop at the customer's site" and post["status"] == "draft"
-    assert "allowance_total" not in post and "checklist" not in post  # response-only fields are not sent
+    # the places come from the days table: a place is sent where the destination changes
+    assert last[3]["places"] == [
+        {"from_date": "2026-11-09", "country": "DE", "city": "Hamburg"},
+        {"from_date": "2026-11-11", "country": "AT", "city": "Wien"},
+    ]
+    post = [r for r in api.requests if r[0] == "POST" and r[1] == "trips"]
+    assert post == []  # nothing new is created on this page
     assert problems == []
     ctx.close()
 
@@ -345,8 +349,7 @@ def test_create_dialog_breakdown_follows_meal_checkbox_and_saves(browser):
 def test_checklist_open_line_add_bill_preselects_trip(browser):
     api = FakeTripApi(ME, copy.deepcopy(CONTRACT_TRIP))
     ctx, pg, problems = open_app(browser, api)
-    open_trips_page(pg)
-    pg.click("button[data-a=editTrip]")
+    open_review(pg)
     pg.wait_for_selector("#t_checklist .trip-check")
     line = pg.locator("#t_checklist li.check-item", has_text="Hotel / accommodation")
     expect(line).to_contain_text("Open")
@@ -355,6 +358,7 @@ def test_checklist_open_line_add_bill_preselects_trip(browser):
     assert pg.input_value("#f_category") == "Accommodation"
     assert pg.input_value("#f_trip_id") == "t7f3k2m9qa"
     assert pg.input_value("#f_project_id") == "p8d2m4qz7w"
+    assert pg.input_value("#f_trip_item_id") == ""  # a checklist bill is not booked against a planned item
     assert "Transportation" in pg.locator("#f_category option").all_inner_texts()
     assert problems == []
     ctx.close()
@@ -365,8 +369,7 @@ def open_trip_with_open_lines(browser):
     trip["checklist"][2] = {**trip["checklist"][2], "state": "open", "count": 0, "sum": 0}
     api = FakeTripApi(ME, trip)
     ctx, pg, problems = open_app(browser, api)
-    open_trips_page(pg)
-    pg.click("button[data-a=editTrip]")
+    open_review(pg)
     pg.wait_for_selector("[data-a=tripFinalize]")
     return api, ctx, pg, problems
 
@@ -381,7 +384,7 @@ def test_finalize_with_open_lines_asks_first_and_sends_one_forced_request(browse
         "Checklist has open items: Hotel / accommodation, Transportation\n\nFinalize anyway? "
         "The open lines stay open in the statement."
     ]
-    expect(pg.locator("#modal-root .banner")).to_contain_text("final")
+    expect(pg.locator("main .banner.info")).to_contain_text("final")
     assert problems == []
     ctx.close()
 
@@ -392,8 +395,7 @@ def test_finalize_without_open_lines_sends_one_plain_request(browser):
         if item["state"] == "open":
             item["state"] = "added"
     ctx, pg, problems = open_app(browser, api)
-    open_trips_page(pg)
-    pg.click("button[data-a=editTrip]")
+    open_review(pg)
     pg.wait_for_selector("[data-a=tripFinalize]")
     pg.click("[data-a=tripFinalize]")
     expect(pg.locator("[data-a=tripFinalize]")).to_have_count(0)
@@ -413,24 +415,21 @@ def test_finalize_declined_sends_nothing(browser):
     ctx.close()
 
 
-def test_cost_centre_project_choice_survives_picking_the_project(browser):
+def test_cost_centre_project_choice_is_saved_with_the_plan(browser):
     trip = copy.deepcopy(CONTRACT_TRIP)
     trip.update({"cost_centre": None, "project_id": None, "customer_id": None})
     api = FakeTripApi(ME, trip)
     ctx, pg, problems = open_app(browser, api)
-    open_trips_page(pg)
-    pg.click("button[data-a=editTrip]")
+    pg.goto(ORIGIN + "/#/trips/t7f3k2m9qa/plan")
     pg.wait_for_selector("#t_cc_project")
-    pg.check("#t_cc_project")  # no customer or project yet: the choice is kept, nothing is sent
-    pg.wait_for_timeout(300)
-    assert pg.is_checked("#t_cc_project")
-    assert [r for r in api.requests if r[0] == "PUT"] == []
+    pg.check("#t_cc_project")
+    pg.select_option("#t_customer", "k3j9x0ab12")
     pg.select_option("#t_project", "p8d2m4qz7w")
-    pg.wait_for_function("() => document.querySelector('#t_cc_project').checked")
-    pg.wait_for_function("() => document.querySelector('#t_checklist').innerText.includes('Added')")
+    assert [r for r in api.requests if r[0] == "PUT"] == []  # nothing is sent before Next
+    pg.click("[data-a=tripMove][data-step=itinerary]")
+    pg.wait_for_selector("#t_step tr[data-row]")
     puts = [r for r in api.requests if r[0] == "PUT"]
     assert len(puts) == 1 and puts[0][3]["cost_centre"] == "project" and puts[0][3]["project_id"] == "p8d2m4qz7w"
-    assert pg.is_checked("#t_cc_project")
     assert problems == []
     ctx.close()
 
@@ -442,18 +441,14 @@ def test_accountant_reads_trips_read_only(browser):
     expect(pg.locator("nav.side")).to_contain_text("Business trips")
     expect(pg.locator("[data-a=newTrip]")).to_have_count(0)
     expect(pg.locator("main")).to_contain_text("Read-only for your role.")
-    pg.click("button[data-a=editTrip]")
-    pg.wait_for_selector("#t_purpose")
-    assert pg.locator("#t_purpose").is_disabled()
-    assert pg.locator("#t_breakdown").inner_text().find("56,00") >= 0
-    for action in ("tripSave", "tripFinalize", "tripDelete", "tripReopen"):
-        assert pg.locator(f"#modal-root [data-a={action}]").count() == 0, action
-    assert pg.locator("#modal-root [data-a=editExpense]").count() == 0
-    assert pg.locator("#modal-root a", has_text="Statement (PDF)").count() == 1
+    open_review(pg)
+    expect(pg.locator("#t_breakdown")).to_contain_text("56,00")
+    for action in ("tripFinalize", "tripDelete", "tripReopen"):
+        assert pg.locator(f"#t_step [data-a={action}]").count() == 0, action
+    assert pg.locator("#t_step a", has_text="Statement (PDF)").count() == 1
+    assert pg.locator("#t_days input:not([disabled])").count() == 0
     assert api.calls("POST", "trips/preview") == []  # no write right: no preview either
     assert [r for r in api.requests if r[0] in ("PUT", "POST", "DELETE")] == []
-    pg.keyboard.press("Escape")
-    expect(pg.locator("#modal-root .modal")).to_have_count(0)
     assert problems == []
     ctx.close()
 
@@ -470,10 +465,9 @@ def test_employee_without_expense_right_gets_no_add_bill_button(browser):
     }
     api = FakeTripApi(employee, copy.deepcopy(CONTRACT_TRIP))
     ctx, pg, problems = open_app(browser, api)
-    open_trips_page(pg)
-    pg.click("button[data-a=editTrip]")
+    open_review(pg)
     pg.wait_for_selector("#t_checklist .trip-check")
-    expect(pg.locator("[data-a=tripSave]")).to_have_count(1)  # own trip: still editable
-    assert pg.locator("#modal-root [data-a=editExpense]").count() == 0
+    expect(pg.locator("[data-a=tripFinalize]")).to_have_count(1)  # own trip: still editable
+    assert pg.locator("#t_step [data-a=editExpense]").count() == 0
     assert problems == []
     ctx.close()

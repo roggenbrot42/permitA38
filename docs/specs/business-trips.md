@@ -146,6 +146,10 @@ Worked examples (domestic 2026 values, to be used as tests):
 
 ## UI
 
+> Superseded in its layout by [`business-trips-wizard.md`](business-trips-wizard.md): the one big trip dialog is
+> replaced by a small *New trip* dialog and a trip page with the steps Plan, Itinerary, Expenses and Review. The
+> checklist, breakdown and bill rules below still hold; the dialog descriptions read as the content of the steps.
+
 * A separate **Business trips** page (own entry in the menu, next to Expenses; also reachable from the Expenses page). The trip list shows period, destination, purpose, allowance,
   mileage, bills total.
 * Trip dialog: title, purpose, customer/project, start and end, a destination row per day (country select with search,
