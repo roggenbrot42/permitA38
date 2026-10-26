@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Subcontractors can be assigned to a contract**: the contract form lists active subcontractors (suppliers of kind
+  subcontractor) next to the employees under "Who works on it". Before, the only route was the API.
+
 ## [0.4.0-alpha.4] - 2026-10-26
 
 Fourth alpha. Adds the planner per project (each project gets its own ring-fenced share of your capacity, with
