@@ -55,13 +55,14 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 
 ## v0.4.0-alpha.5 (bugfix only)
 
-No new features: fixes for what the first hands-on tests of alpha.4 find (first: business trips failing in installed
+Fixes and changes the maintainer asks for explicitly, no other new features: fixes for what the first hands-on tests of alpha.4 find (first: business trips failing in installed
 packages, issue #44). Findings are collected as issues; the release is cut when the list is empty or the maintainer
 decides.
 
 | Item | Status |
 |---|---|
 | Package data fix for business trips ([#44](https://github.com/roggenbrot42/permitA38/issues/44)) | fix in PR #45 |
+| **Business trip workflow** like a travel tool: plan, items with receipts, settlement incl. invoice draft for the customer | maintainer request; spec [`specs/business-trips-workflow.md`](specs/business-trips-workflow.md) (proposal); Full review tier |
 | Further findings of the alpha.4 click-through | collecting |
 
 ## v0.4.0-alpha.6
