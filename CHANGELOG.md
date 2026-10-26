@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- The contract form no longer asks who works on a contract; a contract records only what is owed to the customer.
+  Existing assignments are kept, and the planner's use of them is changed separately (docs/specs/project-capacity.md).
+
 ## [0.4.0-alpha.4] - 2026-10-26
 
 Fourth alpha. Adds the planner per project (each project gets its own ring-fenced share of your capacity, with
