@@ -6,13 +6,19 @@ from datetime import date, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+import permita38.core.service.allocations as allocations_module
+import permita38.core.service.plan_service as plan_module
 from permita38.core.holidays import holidays as de_holidays
 from permita38.core.service.plan_service import MAX_DAY_TABLE_DAYS
 
+# The hand numbers of this file are for a fixed calendar: the first Monday after ANCHOR from which eight weeks hold no
+# national holiday. The anchor is a fixed date, so the file gives the same answers on every weekday.
+ANCHOR = date(2026, 10, 26)
 
-def _clean_monday() -> date:
-    """The first Monday after today from which 8 weeks hold no national holiday (the hand numbers assume none)."""
-    x = date.today() + timedelta(days=(7 - date.today().weekday()) % 7 or 7)
+
+def _clean_monday(after: date) -> date:
+    """The first Monday after ``after`` from which 8 weeks hold no national holiday (the hand numbers assume none)."""
+    x = after + timedelta(days=(7 - after.weekday()) % 7 or 7)
     while any(calc_holidays(x + timedelta(days=k)) for k in range(0, 56)):
         x += timedelta(days=7)
     return x
@@ -22,7 +28,7 @@ def calc_holidays(x: date):
     return de_holidays(x.year, "").get(x)
 
 
-MONDAY = _clean_monday()
+MONDAY = _clean_monday(ANCHOR)  # 2027-01-04: Christmas falls into the weeks after the anchor
 
 
 def day(offset: int) -> str:
@@ -30,6 +36,20 @@ def day(offset: int) -> str:
 
 
 START, END = day(0), day(25)
+
+
+class _FrozenToday(date):
+    """The service calls ``date.today()``; the file's week numbers assume today is the anchor Monday ``MONDAY``."""
+
+    @classmethod
+    def today(cls):
+        return MONDAY
+
+
+@pytest.fixture(autouse=True)
+def frozen_today(monkeypatch):
+    monkeypatch.setattr(plan_module, "date", _FrozenToday)  # forecast and day table start at the week of today
+    monkeypatch.setattr(allocations_module, "date", _FrozenToday)  # bootstrap proposals start from today
 
 
 @pytest.fixture
@@ -133,8 +153,8 @@ def test_warnings_come_with_the_saved_row(boss_client, boss_id, project):
 
 
 def test_warnings_are_capped_at_ten_weeks(boss_client, boss_id, project):
-    boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=40.0, end="2026-12-31"))
-    r = boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=10.0, end="2026-12-31"))
+    boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=40.0, end=day(77)))  # 11 weeks
+    r = boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=10.0, end=day(77)))
     over = [w for w in r.json()["planning_warnings"] if w["code"] == "allocation.employee_over_allocated"]
     assert len(over) == 10 and over[0]["details"]["week"] == day(0)
 
@@ -195,7 +215,7 @@ def test_external_rows_cannot_be_changed_here(boss_client, boss_id, project, sto
         {"user_id": "x"},
         {"user_id": ""},
         {"project_id": "UPPER-case"},
-        {"end": "2032-01-01"},  # longer than 1830 days
+        {"end": day(1831)},  # longer than 1830 days
         {"unknown": 1},
         {"status": "cancelled"},
         {"kind": "external"},
@@ -304,7 +324,7 @@ def test_bootstrap_skips_closed_projects_done_contracts_and_long_periods(boss_cl
     closed = store.save("projects", {"name": "Old", "status": "archived"})
     add_contract(store, boss_id, closed, 10)
     add_contract(store, boss_id, project, 10, status="done")
-    add_contract(store, boss_id, project, 10, end="2032-01-01", title="Long")
+    add_contract(store, boss_id, project, 10, end=day(1831), title="Long")  # longer than 1830 days
     res = boss_client.post("/api/allocations/bootstrap", json={"confirm": True}).json()
     assert res["allocations"] == []
     assert [s["reason"] for s in res["skipped"]] == ["period_too_long"]
