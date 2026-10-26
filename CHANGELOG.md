@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- Contracts: a contract can no longer be entered for a project of another customer (refused with a 422); a contract
+  without a customer takes its project's customer. Accepting an offer into a project of another customer is refused.
+  Specification: `docs/specs/contract-items.md` (draft, architect sign-off pending).
+- Offers: accepting an offer now opens "What did the customer accept?", where you tick the items the customer accepted;
+  the contract keeps only those. All items are ticked by default.
+
 ## [0.4.0-alpha.4] - 2026-10-26
 
 Fourth alpha. Adds the planner per project (each project gets its own ring-fenced share of your capacity, with
