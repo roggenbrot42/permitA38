@@ -223,6 +223,9 @@ function tripStepValues(step) {
     const legs = tripLegsFromDOM();
     if (legs.some(l => !l.from || !l.to)) throw new Error('Every row needs a place');
     if (legs.some(l => !l.depart)) throw new Error('Enter the time of every row');
+    // same rule as the server: a departure lies in [start, end] (datetime-local strings compare in time order)
+    const late = legs.find(l => l.depart < t.start || l.depart > t.end);
+    if (late) throw new Error(`The departure ${fmtDT(late.depart)} is outside the trip (${fmtDT(t.start)} to ${fmtDT(t.end)})`);
     TRIP_PAGE.legs = legs;
     return { itinerary: legs, places: placesFromLegs(legs, t.start) };
   }
@@ -385,8 +388,14 @@ const itemDesc = i => [i.from && i.to ? `${i.from} → ${i.to}` : '', i.text || 
 function receiptHTML(bills) {
   return bills.length ? bills.map(b => `<span class="pill ${b.attachment ? 'good' : 'warn'}">${b.attachment ? 'attached' : 'missing'}</span>`).join(' ') : '<span class="muted">—</span>';
 }
+/** A planned item whose dates lie outside the trip period: a hint only, nothing is blocked. */
+function itemOutsidePeriod(i, t) {
+  const first = i.date, last = i.date_to || i.date;
+  return first < t.start.slice(0, 10) || last > t.end.slice(0, 10);
+}
 function itemRowHTML(i, bills, ro, canBill) {
   const label = TRIP_ITEM_LABEL[i.category] || i.category, desc = itemDesc(i);
+  const outside = itemOutsidePeriod(i, TRIP_PAGE.trip) ? ' <span class="pill warn">Outside the trip period</span>' : '';
   const actual = bills.length ? eurC(bills.reduce((a, b) => a + billCents(b), 0n)) : '';
   const expVal = i.expected ?? '';
   const exp = ro ? `<span>${eur(i.expected || 0)}</span>` : `<input type="number" step="0.01" min="0" inputmode="decimal" value="${esc(expVal)}" data-item-exp="${esc(i.id)}" data-change="tripExpected" aria-label="Expected for ${esc(label)} on ${esc(fmtDate(i.date))}">`;
@@ -396,7 +405,7 @@ function itemRowHTML(i, bills, ro, canBill) {
     bills.length ? '' : `<button type="button" class="ghost sm" data-a="tripItemDel" data-id="${esc(i.id)}" aria-label="Remove ${esc(label)} ${esc(fmtDate(i.date))}">Remove</button>`,
   ].join(' ');
   return `<tr data-item="${esc(i.id)}"><td class="nowrap">${esc(i.date_to ? `${fmtDate(i.date)} – ${fmtDate(i.date_to)}` : fmtDate(i.date))}</td>
-    <td>${esc(label)}</td><td>${esc(desc)}</td><td class="num">${exp}</td><td class="num">${esc(actual)}</td><td>${receiptHTML(bills)}</td><td>${acts}</td></tr>`;
+    <td>${esc(label)}</td><td>${esc(desc)}${outside}</td><td class="num">${exp}</td><td class="num">${esc(actual)}</td><td>${receiptHTML(bills)}</td><td>${acts}</td></tr>`;
 }
 function carRowHTML(m, k) {
   const cost = TRIP_PAGE.rate != null ? eur(kmCost(m.km, TRIP_PAGE.rate)) : '—';
