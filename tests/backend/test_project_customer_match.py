@@ -183,6 +183,59 @@ def test_trip_update_to_other_customer_project_refused_and_legacy_edit_allowed(w
     assert r.json()["title"] == "Edited"
 
 
+# -- accept, conversions and PUT without a field --------------------------------------------------------------------
+PLAN = {"start": "2026-03-02", "end": "2026-03-31", "hours_per_week": 10, "total_hours": 40, "rate": 90}
+
+
+def test_accept_offer_with_other_customer_project_is_refused(world):
+    c = world["c"]
+    off = _offer(c, customer_id=world["acme"], project_id=world["p_acme"], plan=PLAN).json()
+    _move_project(c, world["p_acme"], world["other"])  # legacy: the offer now mismatches its project
+    before = c.get(f"/api/offers/{off['id']}").json()["status"]
+    r = c.post(f"/api/offers/{off['id']}/accept")
+    assert r.status_code == 422
+    assert r.json()["detail"] == MISMATCH
+    assert c.get(f"/api/offers/{off['id']}").json()["status"] == before  # not accepted
+    assert c.get("/api/contracts").json() == []
+
+
+def test_offer_to_invoice_with_other_customer_project_is_refused(world):
+    c = world["c"]
+    off = _offer(c, customer_id=world["acme"], project_id=world["p_acme"]).json()
+    _move_project(c, world["p_acme"], world["other"])  # legacy mismatch
+    r = c.post(f"/api/offers/{off['id']}/to-invoice")
+    assert r.status_code == 422
+    assert r.json()["detail"] == MISMATCH
+    assert c.get("/api/invoices").json() == []
+
+
+def test_legacy_contract_mismatch_edit_of_other_field_allowed_project_change_refused(world):
+    c = world["c"]
+    body = {"title": "Retainer", "start": "2026-02-01", "end": "2026-06-30"}
+    ct = c.post("/api/contracts", json={**body, "customer_id": world["acme"], "project_id": world["p_acme"]}).json()
+    _move_project(c, world["p_acme"], world["other"])  # legacy: the contract now mismatches its project
+    r = c.put(f"/api/contracts/{ct['id']}", json={**ct, "title": "Corrected"})
+    assert r.status_code == 200, r.text
+    assert r.json()["title"] == "Corrected"
+    r = c.put(f"/api/contracts/{ct['id']}", json={**ct, "project_id": world["p_other"]})
+    assert r.status_code == 422
+    assert r.json()["detail"] == MISMATCH
+
+
+def test_put_without_customer_is_checked_against_the_stored_customer(world):
+    """A PUT replaces the record, but an omitted customer_id is checked against the stored one (acme here)."""
+    c = world["c"]
+    body = {"title": "Retainer", "start": "2026-02-01", "end": "2026-06-30"}
+    ct = c.post("/api/contracts", json={**body, "customer_id": world["acme"], "project_id": world["p_acme"]}).json()
+    r = c.put(f"/api/contracts/{ct['id']}", json={**body, "project_id": world["p_other"]})
+    assert r.status_code == 422
+    assert r.json()["detail"] == MISMATCH
+    assert c.get(f"/api/contracts/{ct['id']}").json()["project_id"] == world["p_acme"]  # nothing was saved
+    r = c.put(f"/api/contracts/{ct['id']}", json={**body, "project_id": world["p_general"]})
+    assert r.status_code == 200, r.text  # a general project has no customer to check
+    assert r.json().get("customer_id") is None  # the PUT replaced the record: the omitted customer is gone
+
+
 # -- the shared helper ---------------------------------------------------------------------------------------------
 class _Store:
     def __init__(self, projects):
