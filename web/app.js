@@ -457,14 +457,19 @@ A.fcProject = el => { lsSet('fcProject', el.value); FC.days = {}; render(); };
 A.fcWeeks = el => { localStorage.fcWeeks = el.value; render(); };
 A.fcUser = el => { localStorage.fcUser = el.value; FC.days = {}; render(); };
 
+/* shared by the Planning > Contracts tab and the project page */
+const contractPeriod = c => `${fmtDate(c.start)} – ${fmtDate(c.end)}`;
+const contractHours = c => c.hours_per_week ? c.hours_per_week + ' h/week' : (c.total_hours || '') + ' h total';
+const contractPill = c => `<span class="pill ${c.status === 'done' ? '' : 'good'}">${esc(c.status || 'confirmed')}</span>`;
 function contractsView() {
   const cs = S.d.contracts;
   return `<div class="hint">Enter confirmed work as <b>hours per week</b> or a <b>total hour budget</b> between two dates. Open offers (with a plan) show up in the forecast automatically; when you accept an offer, it becomes a contract.</div>
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Contracts</h2><div class="right auto"><button class="primary" data-a="editContract">+ New contract</button></div></div>
-  ${cs.length ? `<table><tr><th>Contract</th><th>Customer</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${cs.sort((a, b) => a.start < b.start ? -1 : 1).map(c => `<tr class="click" data-a="editContract" data-id="${c.id}"><td><b>${esc(c.title)}</b></td><td>${esc(nameOf('customers', c.customer_id))}</td><td class="nowrap">${fmtDate(c.start)} – ${fmtDate(c.end)}</td><td class="num">${c.hours_per_week ? c.hours_per_week + ' h/week' : (c.total_hours || '') + ' h total'}</td><td class="num">${c.rate ? eur(c.rate) : ''}</td><td><span class="pill ${c.status === 'done' ? '' : 'good'}">${esc(c.status || 'confirmed')}</span></td></tr>`).join('')}</table>` : '<div class="empty">No contracts yet.</div>'}</div>`;
+  ${cs.length ? `<table><tr><th>Contract</th><th>Customer</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${cs.sort((a, b) => a.start < b.start ? -1 : 1).map(c => `<tr class="click" data-a="editContract" data-id="${c.id}"><td><b>${esc(c.title)}</b></td><td>${esc(nameOf('customers', c.customer_id))}</td><td class="nowrap">${contractPeriod(c)}</td><td class="num">${contractHours(c)}</td><td class="num">${c.rate ? eur(c.rate) : ''}</td><td>${contractPill(c)}</td></tr>`).join('')}</table>` : '<div class="empty">No contracts yet.</div>'}</div>`;
 }
 A.editContract = el => {
-  const c = el.dataset.id ? S.d.contracts.find(x => x.id === el.dataset.id) : { status: 'confirmed', start: todayISO(), user_ids: [S.me.id] };
+  const proj = el.dataset.proj ? S.d.projects.find(x => x.id === el.dataset.proj) : null;   // "+ New contract" on a project page
+  const c = el.dataset.id ? S.d.contracts.find(x => x.id === el.dataset.id) : { status: 'confirmed', start: todayISO(), user_ids: [S.me.id], ...(proj ? { project_id: proj.id, customer_id: proj.customer_id || '' } : {}) };
   const users = S.d.users.filter(u => u.active !== false);
   openForm({
     title: c.id ? 'Edit contract' : 'New contract', vals: c,

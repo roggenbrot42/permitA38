@@ -41,6 +41,7 @@ That's it. Everything else is planning and billing, which you do when you need t
 - **Customers → + New customer.** Company, address, tax number/VAT ID, point of contact, notes and an optional default hourly rate.
 - **Save typing: prefill from the Impressum.** At the top of the form, enter the customer's website (e.g. `www.example.com`) and press **Look up**. permitA38 reads their legal notice and fills the empty fields (marked *from Impressum* – hover to see where each value came from). Check everything, change what is wrong, then **Save**. Fields you typed yourself are never overwritten unless you click **Use**. Note that the app requests the web page you entered; the switch is `features.impressum_lookup` in the config.
 - **Projects → + New project.** Choose the customer (or tick *Personal project* for things like learning or admin – never billed). Optionally set a project rate and an hour budget.
+- **Contracts** – the project page lists the contracts of this project; **+ New contract** there prefills the project and its customer.
 - **Tasks (optional)** – open a project and add tasks when different work has a different price, e.g. *Consulting 130 €/h* vs *Development 95 €/h*.
 
 **Which rate is used?** The most specific wins: **task → project → customer → person → default rate.**

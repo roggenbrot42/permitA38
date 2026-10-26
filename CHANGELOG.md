@@ -5,6 +5,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Contracts on the project page**: a Contracts card lists the project's contracts (period, hours, rate, status) with
+  "+ New contract" (prefilled with the project and its customer) and a hint with the customer's contracts that have no
+  project. Needs the contracts right; without write access the list is read-only.
+
 ### Fixed
 - A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
 

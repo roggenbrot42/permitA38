@@ -153,13 +153,20 @@ A.editProject = el => {
   });
 };
 PAGES.project = async id => {
-  await loadAll(['projects', 'customers', 'tasks', 'entries', 'expenses']);
+  await loadAll(['projects', 'customers', 'tasks', 'entries', 'expenses', 'contracts']);   // loadAll skips contracts without the right
   const p = S.d.projects.find(x => x.id === id); if (!p) return '<div class="card">Not found.</div>';
   const r = (await api('GET', 'project-report'))[id] || {}, tasks = S.d.tasks.filter(t => t.project_id === id);
+  const contracts = can('contracts') ? S.d.contracts : [];
+  const mine = contracts.filter(c => c.project_id === id).sort((a, b) => a.start < b.start ? -1 : 1);
+  const others = p.customer_id && !p.personal ? contracts.filter(c => c.customer_id === p.customer_id && !c.project_id).length : 0;
+  const writeC = can('contracts', 'write');
   const th = t => S.d.entries.filter(e => e.task_id === t.id).reduce((a, e) => a + e.minutes, 0) / 60;
   const ex = S.d.expenses.filter(e => e.project_id === id);
   return `<div class="head"><div><a href="#/projects" class="small">← Projects</a><h1><span class="dot" style="background:${esc(p.color || '#888')}"></span>${esc(p.name)}</h1><div class="muted">${esc(nameOf('customers', p.customer_id) || (p.personal ? 'Personal project' : ''))}</div></div><span>${can('planning') ? `<button data-a="allocations" data-project="${esc(id)}">Allocations</button> ` : ''}<button data-a="editProject" data-id="${id}">Edit</button></span></div>
   <div class="grid g4"><div class="card kpi"><div class="l">Hours</div><div class="v">${hm(r.hours || 0)}</div></div><div class="card kpi"><div class="l">Revenue (at rates)</div><div class="v">${eur(r.revenue)}</div></div><div class="card kpi"><div class="l">Costs</div><div class="v">${eur((r.cost || 0) + (r.expenses || 0))}</div><span class="small muted">team ${eur(r.cost)} · expenses ${eur(r.expenses)}</span></div><div class="card kpi ${r.margin < 0 ? 'bad' : 'good'}"><div class="l">Margin</div><div class="v">${eur(r.margin)}</div></div></div>
+  ${can('contracts') ? `<div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Contracts</h2><div class="right auto">${writeC ? `<button class="primary" data-a="editContract" data-proj="${esc(id)}">+ New contract</button>` : ''}</div></div>
+  ${mine.length ? `<table><tr><th>Contract</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${mine.map(c => `<tr data-id="${c.id}"${writeC ? ' class="click" data-a="editContract"' : ''}><td><b>${esc(c.title)}</b></td><td class="nowrap">${contractPeriod(c)}</td><td class="num">${contractHours(c)}</td><td class="num">${c.rate ? eur(c.rate) : ''}</td><td>${contractPill(c)}</td></tr>`).join('')}</table>` : '<div class="empty">No contracts for this project yet.</div>'}
+  ${others ? `<div class="small muted" style="margin-top:10px">${others} more ${others === 1 ? 'contract' : 'contracts'} of ${esc(nameOf('customers', p.customer_id))} without a project${can('planning') ? ' – <a href="#/plan/contracts">show in Planning</a>' : ''}</div>` : ''}</div>` : ''}
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Tasks & task rates</h2><div class="right auto"><button data-a="editTask" data-proj="${id}">+ Task</button></div></div>
   ${tasks.length ? `<table><tr><th>Task</th><th class="num">Hours</th><th class="num">Rate</th></tr>${tasks.map(t => `<tr class="click" data-a="editTask" data-id="${t.id}" data-proj="${id}"><td>${esc(t.name)}</td><td class="num">${hm(th(t))}</td><td class="num">${t.rate ? eur(t.rate) : '<span class="muted">project rate</span>'}</td></tr>`).join('')}</table>` : '<div class="empty">No tasks. Tasks are optional – use them when different work has a different rate (e.g. "Consulting" vs "Development").</div>'}</div>
   ${ex.length ? `<div class="card"><h2>Expenses on this project</h2><table>${ex.map(e => `<tr><td>${fmtDate(e.date)}</td><td>${esc(e.vendor || '')}</td><td class="num">${eur(e.net)}</td></tr>`).join('')}</table></div>` : ''}`;
