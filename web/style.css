@@ -130,6 +130,18 @@ button:disabled { opacity: .6; cursor: progress; }
 .check-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 .check-skip, .radio { display: inline-flex; gap: 6px; align-items: center; margin-right: 14px; }
 .trip-explain { padding-left: 20px; margin: 0 0 12px; } .trip-explain li { margin-bottom: 6px; }
+.stepper { list-style: none; display: flex; gap: 6px; flex-wrap: wrap; padding: 0; margin: 14px 0; }
+.stepper a { display: inline-flex; gap: 8px; align-items: center; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+.stepper a[aria-current="step"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.stepper-no { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--bg); font-size: 12px; }
+.trip-nav { display: flex; justify-content: space-between; gap: 8px; margin: 14px 0; }
+.trip-summary { font-size: 14px; color: var(--muted); margin: 0 0 6px; }
+.trip-step h2 { margin: 4px 0 10px; font-size: 17px; }
+.trip-add { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px; }
+.trip-totals { display: flex; gap: 24px; flex-wrap: wrap; margin: 12px 0; }
+.trip-totals span { display: block; color: var(--muted); font-size: 13px; }
+.trip-final { display: flex; gap: 8px; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-top: 14px; }
+.trip-items input[type=number] { width: 7em; }
 .trip-table input[type=number] { width: 6em; }
 .trip-table input[type=date] { width: 9.5em; }
 

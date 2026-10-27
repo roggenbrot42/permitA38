@@ -42,6 +42,7 @@ That's it. Everything else is planning and billing, which you do when you need t
 - **Save typing: prefill from the Impressum.** At the top of the form, enter the customer's website (e.g. `www.example.com`) and press **Look up**. permitA38 reads their legal notice and fills the empty fields (marked *from Impressum* – hover to see where each value came from). Check everything, change what is wrong, then **Save**. Fields you typed yourself are never overwritten unless you click **Use**. Note that the app requests the web page you entered; the switch is `features.impressum_lookup` in the config.
 - **Projects → + New project.** Choose the customer (or tick *Personal project* for things like learning or admin – never billed). Optionally set a project rate and an hour budget.
 - **A project belongs to one customer.** An offer, invoice, trip or contract can only use a project of its own customer (or a project without a customer); the project list next to the customer shows only those, and a project of another customer is refused when saved. A record that already has such a project (legacy data) must be corrected before it can be accepted (when it has a plan) or converted.
+- **Contracts** – the project page lists the contracts of this project; **+ New contract** there prefills the project and its customer.
 - **Tasks (optional)** – open a project and add tasks when different work has a different price, e.g. *Consulting 130 €/h* vs *Development 95 €/h*.
 
 **Which rate is used?** The most specific wins: **task → project → customer → person → default rate.**
@@ -115,4 +116,4 @@ Open the account menu (bottom left) → **Two-factor authentication**. Enter you
 - **PDF has no logo** – the logo must be a JPEG (Settings → Your business).
 
 ## Data export and import
-Boss only: Settings > Data export and import. Download a copy of all your data (optionally with user accounts), or check an archive and import it into an empty instance. The copy is not a GoBD-compliant archive; see the notice on the page.
+Boss only: Settings > Data export and import. Download a copy of all your data (optionally with user accounts), or check an archive and import it into an empty instance. The copy is not a GoBD-compliant archive; see the notice on the page. Importing offers, invoices, customers or expenses from another tool is also in Settings (under "Data & sync": "Import documents from another tool").

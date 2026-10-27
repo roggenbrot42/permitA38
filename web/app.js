@@ -482,7 +482,7 @@ PAGES.plan = async (tab = 'forecast') => {
     <div class="auto"><label>Who</label><select data-change="fcUser"><option value="">Whole team</option>${S.d.users.filter(u => u.active !== false).map(u => `<option value="${u.id}" ${u.id === uid ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
     <div class="auto"><label>Project</label><select data-change="fcProject"><option value="">All projects</option>${S.d.projects.filter(p => p.status !== 'archived' || p.id === pid).map(p => `<option value="${esc(p.id)}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}<option value="unassigned" ${pid === 'unassigned' ? 'selected' : ''}>Unassigned</option></select></div>
     <div class="auto"><label class="pp-check"><input type="checkbox" id="fc_ext" data-change="fcExternal" ${ext ? 'checked' : ''}> include subcontractors</label></div></div>
-    ${ppSummary(fc)}${ppExternalKpis(fc)}
+    ${ppSummary(fc, uid, pid)}${ppExternalKpis(fc)}
     <div class="grid g4"><div class="card kpi"><div class="l">Capacity</div><div class="v">${num(totals.cap, 0)} h</div></div><div class="card kpi"><div class="l">Booked (contracts)</div><div class="v">${num(totals.conf, 0)} h</div></div>
       <div class="card kpi ${totals.cap - totals.conf > 0 ? 'good' : 'bad'}"><div class="l">Free capacity</div><div class="v">${num(totals.cap - totals.conf, 0)} h</div></div><div class="card kpi"><div class="l">Contracted revenue</div><div class="v">${eur(fc.totals.contracted_revenue)}</div><span class="small muted">assumed ${eur(fc.totals.assumed_revenue)} where no contract exists yet</span></div></div>
     <div class="card"><h2>Weekly load</h2>${chart}<div class="small muted"><span class="dot" style="background:var(--accent)"></span>booked <span class="dot" style="background:var(--accent);opacity:.35;margin-left:10px"></span>open offers <span class="dot" style="background:var(--good);margin-left:10px"></span>capacity (after holidays & time off)</div></div>
@@ -504,17 +504,30 @@ function ppBanner(fc, allocs, uid, pid) {
     return `<div class="hint pp-empty">All of ${mine ? 'your' : 'this person\'s'} capacity is unassigned. Give hours to a project in <a href="#" data-a="allocations" data-user="${esc(uid)}">Allocations</a>.</div>`;
   }
   if (!allocs || uid || pid) return '';
-  if (fc.totals.gap > 0 && !allocs.some(a => a.kind === 'employee')) {
-    return `<div class="banner pp-banner" role="status"><b>${esc(ppH(fc.totals.gap))} of planned work are not covered by any allocation.</b> Your capacity is not yet given to projects.
-      <button type="button" class="primary sm" data-a="allocBootstrap">Allocate my capacity</button></div>`;
-  }
-  return '';
+  if (!(fc.totals.gap > 0)) return '';
+  const text = allocs.some(a => a.kind === 'employee')
+    ? `<b>${esc(ppH(fc.totals.gap))} of planned work are not covered by any allocation.</b>`
+    : `<b>${esc(ppH(fc.totals.gap))} of planned work are not covered by any allocation.</b> Your capacity is not yet given to projects.`;
+  // shown whenever time is still open; the bootstrap is idempotent (the dialog previews first and skips what is allocated)
+  return `<div class="banner pp-banner" role="status">${text}
+      ${can('planning', 'write') ? '<button type="button" class="primary sm" data-a="allocBootstrap">Allocate my capacity</button>' : ''}</div>`;
 }
-function ppSummary(fc) {
+function ppSummary(fc, uid, pid) {
   const list = fc.totals.gap_by_project || [];
   if (!(fc.totals.gap > 0)) return '';
+  const writable = can('planning', 'write');
+  const scope = uid ? ` data-user="${esc(uid)}"` : pid && pid !== 'unassigned' ? ` data-project="${esc(pid)}"` : '';
   return `<div class="banner bad pp-summary" role="status"><b>Not covered: ${esc(ppH(fc.totals.gap))}</b> in ${fc.totals.over_weeks} week${fc.totals.over_weeks === 1 ? '' : 's'}.
-    ${list.length ? `<ul>${list.map(g => `<li>${esc(g.name)}: ${esc(ppH(g.gap))}</li>`).join('')}</ul>` : ''}</div>`;
+    ${list.length ? `<ul>${list.map(g => `<li>${esc(g.name)}: ${esc(ppH(g.gap))}${writable && g.project_id ? ` <button type="button" class="ghost sm" data-a="allocations" data-project="${esc(g.project_id)}" aria-label="Allocate ${esc(g.name)}">Allocate</button>` : ''}</li>`).join('')}</ul>` : ''}
+    ${writable ? `<div class="pp-remedy">Remedy: allocate further capacity to the projects listed. <button type="button" class="primary sm" data-a="allocations"${scope}>Allocate further capacity</button></div>` : ''}</div>`;
+}
+/* a remedy line for a planning warning about a shortfall or an over-allocation (empty for other codes) */
+function ppRemedy(w) {
+  const d = w.details || {}, writable = can('planning', 'write');
+  const open = attrs => writable ? ` <button type="button" class="ghost sm" data-a="allocations" ${attrs}>Open allocations</button>` : '';
+  if (w.code === 'allocation.employee_over_allocated' && d.user_id) return `<div class="small pp-remedy">Reduce or move allocated hours.${open(`data-user="${esc(d.user_id)}"`)}</div>`;
+  if (w.code === 'capacity.gap' && d.project_id) return `<div class="small pp-remedy">Allocate more capacity to this project.${open(`data-project="${esc(d.project_id)}"`)}</div>`;
+  return '';
 }
 /* subcontractors: the server's external_* numbers, drawn as they are */
 const ppHasExt = W => W.some(w => w.external_capacity || w.external_assigned || w.external_gap || w.external_cost);
@@ -548,7 +561,7 @@ function ppDays(t) {
 function ppWarnings(list) {
   if (!list || !list.length) return '';
   const shown = list.slice(0, 20);
-  return `<div class="card pp-warnings"><h2>Planning warnings (${list.length})</h2><ul class="small">${shown.map(w => `<li data-code="${esc(w.code)}"><span class="pill ${w.severity === 'warning' ? 'warn' : ''}">${esc(w.severity)}</span> ${esc(w.message)}</li>`).join('')}</ul>${list.length > shown.length ? `<div class="small muted">and ${list.length - shown.length} more</div>` : ''}</div>`;
+  return `<div class="card pp-warnings"><h2>Planning warnings (${list.length})</h2><ul class="small">${shown.map(w => `<li data-code="${esc(w.code)}"><span class="pill ${w.severity === 'warning' ? 'warn' : ''}">${esc(w.severity)}</span> ${esc(w.message)}${ppRemedy(w)}</li>`).join('')}</ul>${list.length > shown.length ? `<div class="small muted">and ${list.length - shown.length} more</div>` : ''}</div>`;
 }
 A.fcExpand = el => { const w = el.dataset.week; FC.open.has(w) ? FC.open.delete(w) : FC.open.add(w); render(); };
 A.fcDays = async el => {
@@ -562,15 +575,19 @@ A.fcProject = el => { lsSet('fcProject', el.value); FC.days = {}; render(); };
 A.fcWeeks = el => { localStorage.fcWeeks = el.value; render(); };
 A.fcUser = el => { localStorage.fcUser = el.value; FC.days = {}; render(); };
 
+/* shared by the Planning > Contracts tab and the project page */
+const contractPeriod = c => `${fmtDate(c.start)} – ${fmtDate(c.end)}`;
+const contractHours = c => c.hours_per_week ? c.hours_per_week + ' h/week' : (c.total_hours || '') + ' h total';
+const contractPill = c => `<span class="pill ${c.status === 'done' ? '' : 'good'}">${esc(c.status || 'confirmed')}</span>`;
 function contractsView() {
   const cs = S.d.contracts;
   return `<div class="hint">Enter confirmed work as <b>hours per week</b> or a <b>total hour budget</b> between two dates. Open offers (with a plan) show up in the forecast automatically; when you accept an offer, it becomes a contract.</div>
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Contracts</h2><div class="right auto"><button class="primary" data-a="editContract">+ New contract</button></div></div>
-  ${cs.length ? `<table><tr><th>Contract</th><th>Customer</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${cs.sort((a, b) => a.start < b.start ? -1 : 1).map(c => `<tr class="click" data-a="editContract" data-id="${c.id}"><td><b>${esc(c.title)}</b></td><td>${esc(nameOf('customers', c.customer_id))}</td><td class="nowrap">${fmtDate(c.start)} – ${fmtDate(c.end)}</td><td class="num">${c.hours_per_week ? c.hours_per_week + ' h/week' : (c.total_hours || '') + ' h total'}</td><td class="num">${c.rate ? eur(c.rate) : ''}</td><td><span class="pill ${c.status === 'done' ? '' : 'good'}">${esc(c.status || 'confirmed')}</span></td></tr>`).join('')}</table>` : '<div class="empty">No contracts yet.</div>'}</div>`;
+  ${cs.length ? `<table><tr><th>Contract</th><th>Customer</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${cs.sort((a, b) => a.start < b.start ? -1 : 1).map(c => `<tr class="click" data-a="editContract" data-id="${c.id}"><td><b>${esc(c.title)}</b></td><td>${esc(nameOf('customers', c.customer_id))}</td><td class="nowrap">${contractPeriod(c)}</td><td class="num">${contractHours(c)}</td><td class="num">${c.rate ? eur(c.rate) : ''}</td><td>${contractPill(c)}</td></tr>`).join('')}</table>` : '<div class="empty">No contracts yet.</div>'}</div>`;
 }
 A.editContract = el => {
-  const c = el.dataset.id ? S.d.contracts.find(x => x.id === el.dataset.id) : { status: 'confirmed', start: todayISO(), user_ids: [S.me.id] };
-  const users = S.d.users.filter(u => u.active !== false);
+  const proj = el.dataset.proj ? S.d.projects.find(x => x.id === el.dataset.proj) : null;   // "+ New contract" on a project page
+  const c = el.dataset.id ? S.d.contracts.find(x => x.id === el.dataset.id) : { status: 'confirmed', start: todayISO(), user_ids: [], ...(proj ? { project_id: proj.id, customer_id: proj.customer_id || '' } : {}) };
   openForm({
     title: c.id ? 'Edit contract' : 'New contract', vals: c,
     fields: [{ k: 'title', l: 'Title' }, { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '—'], ...S.d.customers.map(x => [x.id, x.name])] },
@@ -578,8 +595,7 @@ A.editContract = el => {
       { k: 'start', l: 'Start', t: 'date', row: 1 }, { k: 'end', l: 'End', t: 'date', row: 1 },
       { k: 'hours_per_week', l: 'Hours per week', t: 'number', row: 2, h: 'Either this…' }, { k: 'total_hours', l: 'Total hours', t: 'number', row: 2, h: '…or this (spread over the period)' }, { k: 'rate', l: 'Hourly rate (€)', t: 'number', row: 2 },
       { k: 'status', l: 'Status', t: 'select', o: ['confirmed', 'done'] }],
-    extra: `<div class="field"><label>Who works on it</label>${users.map(u => `<label style="display:inline-block;margin-right:14px"><input type="checkbox" class="cu" value="${u.id}" ${(c.user_ids || []).includes(u.id) ? 'checked' : ''}> ${esc(u.name)}</label>`).join('')}</div>`,
-    save: async v => { if (!v.title || !v.start || !v.end) throw new Error('Title, start and end are required'); if (!v.hours_per_week && !v.total_hours) throw new Error('Enter hours per week or total hours'); v.user_ids = [...document.querySelectorAll('.cu:checked')].map(x => x.value); await save('contracts', v); render(); },
+    save: async v => { if (!v.title || !v.start || !v.end) throw new Error('Title, start and end are required'); if (!v.hours_per_week && !v.total_hours) throw new Error('Enter hours per week or total hours'); v.user_ids = c.user_ids || []; await save('contracts', v); render(); },
     del: c.id ? async () => { await api('DELETE', 'contracts/' + c.id); await loadAll(['contracts']); render(); } : null
   });
 };

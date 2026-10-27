@@ -7,6 +7,7 @@ import copy
 import json
 import mimetypes
 import pathlib
+import re
 from datetime import date, timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -240,7 +241,10 @@ def test_forecast_shows_gap_per_project_and_server_warning(browser):
     expect(pg.locator(".pp-summary")).to_contain_text("Not covered: 20 h")
     expect(pg.locator(".pp-summary")).to_contain_text("Demo project P: 20 h")
     expect(pg.locator(".pp-warnings")).to_contain_text("project Demo project P: 30 h are planned but only 25 h")
-    assert pg.locator(".pp-banner").count() == 0  # the employee allocation exists: no bootstrap banner
+    expect(pg.locator(".pp-banner")).to_contain_text(
+        "20 h of planned work are not covered by any allocation"
+    )  # allocations exist, time is still open
+    expect(pg.locator(".pp-banner").get_by_role("button", name="Allocate my capacity")).to_be_visible()
     row.locator(".pp-toggle").click()
     detail = pg.locator("tr.pp-detail").first
     expect(detail).to_contain_text("5 h not covered")  # P
@@ -296,6 +300,91 @@ def test_banner_preview_confirm_and_second_run(browser):
     pg.wait_for_selector(".pp-summary", state="detached")  # the page was redrawn: gap and banner are gone
     assert pg.locator(".pp-banner").count() == 0
     assert problems == []
+    ctx.close()
+
+
+def test_allocate_my_capacity_stays_while_time_is_open(browser):
+    api = FakeApi(forecast=forecast_b(), allocations=fixture("allocations_list"))  # an allocation exists, the gap stays
+    ctx, pg, problems = open_app(browser, api)
+    banner = pg.locator(".pp-banner")
+    expect(banner).to_contain_text("120 h of planned work are not covered by any allocation")
+    expect(banner.get_by_role("button", name="Allocate my capacity")).to_be_visible()
+    assert problems == []
+    ctx.close()
+
+
+def test_not_covered_remedy_opens_the_allocations_dialog(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api)
+    summary = pg.locator(".pp-summary")
+    expect(summary).to_contain_text("Remedy: allocate further capacity to the projects listed.")
+    summary.get_by_role("button", name="Allocate further capacity").click()
+    dlg = pg.locator("#modal-root .modal")
+    expect(dlg).to_contain_text("Allocations")
+    expect(dlg).not_to_contain_text("Allocations of")  # the whole team, not one project
+    assert problems == []
+    ctx.close()
+
+
+def test_per_project_allocate_button_opens_the_dialog_for_that_project(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api)
+    pg.locator(".pp-summary [data-a=allocations][data-project=a1b2c3d4]").click()
+    dlg = pg.locator("#modal-root .modal")
+    expect(dlg).to_contain_text("Allocations of Demo project P")
+    assert problems == []
+    ctx.close()
+
+
+def test_gap_row_without_project_has_no_per_project_button(browser):
+    # the unassigned pool has no project_id: its row is listed, but there is nothing to allocate to by project
+    f = forecast_b()
+    f["totals"]["gap_by_project"] = [
+        {"project_id": "a1b2c3d4", "name": "Demo project P", "gap": 100.0},
+        {"project_id": None, "name": "Unassigned pool", "gap": 20.0},
+    ]
+    api = FakeApi(forecast=f, allocations=[])
+    ctx, pg, problems = open_app(browser, api)
+    rows = pg.locator(".pp-summary li")
+    expect(rows).to_have_count(2)
+    pool = rows.filter(has_text="Unassigned pool")
+    expect(pool).to_contain_text("20 h")
+    assert pool.locator("button").count() == 0
+    assert pg.locator(".pp-summary [data-a=allocations][data-project]").count() == 1
+    assert pg.locator(".pp-summary [data-project='null']").count() == 0
+    assert problems == []
+    ctx.close()
+
+
+def test_remedy_for_over_allocation_and_gap_warnings(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api)
+    warn = pg.locator(".pp-warnings li[data-code='capacity.gap']")
+    expect(warn).to_contain_text("Allocate more capacity to this project.")
+    warn.get_by_role("button", name="Open allocations").click()
+    expect(pg.locator("#modal-root .modal")).to_contain_text("Allocations of Demo project P")
+    assert problems == []
+    ctx.close()
+
+
+def test_remedy_buttons_hidden_for_read_only_planning(browser):
+    api = FakeApi()
+    api.me = {**BOSS, "permissions": {**BOSS["permissions"], "planning": {"read": "all", "write": "none"}}}
+    ctx, pg, problems = open_app(browser, api)
+    expect(pg.locator(".pp-summary")).to_contain_text("Demo project P: 20 h")
+    # no remedy line and no buttons for a user who cannot write planning
+    assert "Remedy: allocate further capacity" not in pg.locator(".pp-summary").inner_text()
+    assert pg.locator(".pp-summary .pp-remedy").count() == 0
+    assert pg.locator(".pp-summary button").count() == 0
+    assert pg.locator(".pp-warnings button").count() == 0
+    assert pg.locator("[data-a=allocBootstrap]").count() == 0
+    assert problems == []
+    ctx.close()
+    api = FakeApi(forecast=forecast_b(), allocations=[])
+    api.me = {**BOSS, "permissions": {**BOSS["permissions"], "planning": {"read": "all", "write": "none"}}}
+    ctx, pg, problems = open_app(browser, api)
+    expect(pg.locator(".pp-banner")).to_contain_text("120 h of planned work are not covered")
+    assert pg.locator(".pp-banner button").count() == 0
     ctx.close()
 
 
@@ -427,6 +516,27 @@ def test_planner_project_selector_and_stacked_bars(browser):
         pg.wait_for_timeout(100)
     assert api.calls("POST", "plan/simulate")[-1][3]["project_id"] == "a1b2c3d4"
     expect(pg.locator("#pln")).to_contain_text("Not covered: 20 h")
+    assert problems == []
+    ctx.close()
+
+
+def test_week_table_shows_allocated_and_the_over_allocation_text(browser):
+    """Decision D4: the week table has an Allocated column after Capacity (red when above the capacity); the row tooltip
+    says that the allocations exceed the capacity and by how much the projects are scaled down (55 h of 40 h: 73 %)."""
+    f = forecast_a()
+    for w in f["weeks"]:
+        w["allocated"] = 55.0  # the unscaled allocations of the week; capacity 40 h (example A)
+    api = FakeApi(forecast=f)
+    ctx, pg, problems = open_planner(browser, api)
+    expect(pg.locator("#pln th", has_text="Allocated")).to_have_count(1)
+    headers = pg.locator("#pln tr", has=pg.locator("th", has_text="Allocated")).first.locator("th").all_inner_texts()
+    assert [h.strip().lower() for h in headers[:3]] == ["week of", "capacity", "allocated"]  # CSS may upper-case them
+    row = pg.locator("tr[title*='allocated 55 h of 40 h capacity']").first
+    expect(row.locator("td").nth(2)).to_have_text("55")
+    expect(row.locator("td").nth(2)).to_have_class(re.compile(r"\bfree-bad\b"))
+    expect(row).to_have_attribute(
+        "title", re.compile(r"allocated 55 h of 40 h capacity: projects are scaled down to 73 %")
+    )
     assert problems == []
     ctx.close()
 

@@ -46,45 +46,61 @@ def open_as(browser, srv, username):
 
 
 def employee_trip_via_ui(pg, srv):
+    """The employee creates a trip in the new-trip dialog, adds the mileage on the expenses step and ticks breakfast
+    on the review step. Returns the trip id."""
     pg.goto(srv.base + "/#/trips")
     pg.wait_for_selector("[data-a=newTrip]")
     expect(pg.locator("main")).not_to_contain_text("Boss only trip")  # the boss's trip is not visible
     pg.click("[data-a=newTrip]")
-    pg.wait_for_selector("#t_purpose")
-    pg.fill("#t_start", "2026-11-09T08:00")
-    pg.fill("#t_end", "2026-11-11T18:00")
-    pg.fill("#t_purpose", "Demo workshop")
+    pg.wait_for_selector("#f_purpose")
+    pg.fill("#f_purpose", "Demo workshop")
+    pg.fill("#f_start", "2026-11-09T08:00")
+    pg.fill("#f_end", "2026-11-11T18:00")
+    pg.fill("#f_origin", "Berlin")
+    pg.fill("#f_destination", "Hamburg")
+    pg.click("#m-save")
+    pg.wait_for_selector("#t_step tr[data-row]")  # a new trip opens on the itinerary
+    tid = pg.evaluate("location.hash").split("/")[2]
+    assert pg.evaluate("location.hash").endswith("/itinerary")
+    expect(pg.locator("#t_step tr[data-row]")).to_have_count(3)  # departure, stay, return
+    pg.click("[data-a=tripMove][data-step=expenses]")
+    pg.wait_for_selector("#t_add_item")
+    pg.select_option("#t_add_item", "car")
+    pg.fill("#f_km", "237.5")
+    pg.click("#m-save")
+    expect(pg.locator("#t_step")).to_contain_text("237,5 km")
+    pg.click("[data-a=tripMove][data-step=review]")
+    pg.wait_for_selector("#t_breakdown")
     expect(pg.locator("#t_breakdown")).to_contain_text("56,00")
-    pg.click("#t_km_add")
-    pg.fill("#t_km [data-f=from]", "Berlin")
-    pg.fill("#t_km [data-f=to]", "Hamburg")
-    pg.fill("#t_km [data-f=km]", "237.5")
     expect(pg.locator("#t_breakdown")).to_contain_text("71,25")
     pg.check('tr[data-day="2026-11-10"] [data-f=breakfast]')
     expect(pg.locator("#t_breakdown")).to_contain_text("50,40")
     expect(pg.locator("#t_breakdown")).to_contain_text("71,25")
-    pg.click("[data-a=tripSave]")
-    pg.wait_for_selector("#t_checklist .check-item")
+    pg.click("[data-a=tripMove][data-step=expenses]")  # Back saves the review step
+    pg.wait_for_selector("#t_add_item")
+    return tid
 
 
 def test_trip_lifecycle_across_roles(browser, srv):
     # --- employee creates the trip and sees the live figures
     ctx, pg, problems, dialogs = open_as(browser, srv, "employee")
     pg.goto(srv.base + "/")
-    employee_trip_via_ui(pg, srv)
+    tid = employee_trip_via_ui(pg, srv)
+    pg.goto(srv.base + f"/#/trips/{tid}/review")
+    pg.wait_for_selector("#t_checklist .check-item")
     line = pg.locator("#t_checklist li.check-item", has_text="Transportation")
     expect(line).to_contain_text("Added")  # the mileage covers it
     accommodation = pg.locator("#t_checklist li.check-item", has_text="Hotel / accommodation")
     expect(accommodation).to_contain_text("Open")
-    assert pg.locator("#modal-root [data-a=editExpense]").count() == 0  # employees have no expenses right
+    assert pg.locator("#t_step [data-a=editExpense]").count() == 0  # employees have no expenses right
     ctx.close()
 
-    # --- the boss adds the hotel bill to that trip through 'Add bill'
+    # --- the boss adds the hotel bill to that trip through 'Add bill' on the checklist
     ctx, pg, problems_b, _ = open_as(browser, srv, "boss")
     pg.goto(srv.base + "/#/trips")
-    pg.wait_for_selector("button[data-a=editTrip]")
+    pg.wait_for_selector("a[href^='#/trips/']")
     expect(pg.locator("main")).to_contain_text("Demo workshop")
-    pg.locator("tr", has_text="Demo workshop").locator("button[data-a=editTrip]").click()
+    pg.goto(srv.base + f"/#/trips/{tid}/review")
     pg.wait_for_selector("#t_checklist .check-item")
     accommodation = pg.locator("#t_checklist li.check-item", has_text="Hotel / accommodation")
     accommodation.locator("button", has_text="Add bill").click()
@@ -97,21 +113,20 @@ def test_trip_lifecycle_across_roles(browser, srv):
     # the dialog returns to the trip and the line flipped
     accommodation = pg.locator("#t_checklist li.check-item", has_text="Hotel / accommodation")
     expect(accommodation).to_contain_text("Added")
-    expect(pg.locator("#modal-root")).to_contain_text("Demo Hotel")
     ctx.close()
 
     # --- employee finalizes with open lines: 409 -> confirm -> force, then downloads the statement
     ctx, pg, problems, dialogs = open_as(browser, srv, "employee")
     pg.goto(srv.base + "/#/trips")
-    pg.wait_for_selector("button[data-a=editTrip]")
-    assert pg.locator("button[data-a=editTrip]").count() == 1  # only the own trip
-    pg.click("button[data-a=editTrip]")
+    pg.wait_for_selector("a[href^='#/trips/']")
+    assert pg.locator("a[href^='#/trips/']").count() == 1  # only the own trip
+    pg.goto(srv.base + f"/#/trips/{tid}/review")
     pg.wait_for_selector("[data-a=tripFinalize]")
     pg.click("[data-a=tripFinalize]")
     expect(pg.locator("[data-a=tripFinalize]")).to_have_count(0)
     assert len(dialogs) == 1 and "Checklist has open items" in dialogs[0], dialogs
-    expect(pg.locator("#modal-root .banner")).to_contain_text("final")
-    href = pg.locator("#modal-root a", has_text="Statement (PDF)").evaluate("a => a.href")  # absolute
+    expect(pg.locator("main .banner.info")).to_contain_text("final")
+    href = pg.locator("#t_step a", has_text="Statement (PDF)").evaluate("a => a.href")  # absolute
     res = ctx.request.get(href)
     assert res.status == 200
     assert res.headers["content-type"].startswith("application/pdf")
@@ -122,16 +137,17 @@ def test_trip_lifecycle_across_roles(browser, srv):
     # --- accountant: reads the employee's trip, nothing to write
     ctx, pg, problems, _ = open_as(browser, srv, "accountant")
     pg.goto(srv.base + "/#/trips")
-    pg.wait_for_selector("button[data-a=editTrip]")
+    pg.wait_for_selector("a[href^='#/trips/']")
     expect(pg.locator("main")).to_contain_text("Demo workshop")
     expect(pg.locator("main")).to_contain_text("Boss only trip")
     expect(pg.locator("[data-a=newTrip]")).to_have_count(0)
-    pg.locator("tr", has_text="Demo workshop").locator("button[data-a=editTrip]").click()
-    pg.wait_for_selector("#t_purpose")
-    assert pg.locator("#t_purpose").is_disabled()
+    pg.locator("tr", has_text="Demo workshop").locator("a").first.click()
+    pg.wait_for_selector("#t_step")
+    pg.goto(srv.base + f"/#/trips/{tid}/review")
+    pg.wait_for_selector("#t_breakdown")
     expect(pg.locator("#t_breakdown")).to_contain_text("50,40")
-    for action in ("tripSave", "tripFinalize", "tripDelete", "tripReopen", "editExpense"):
-        assert pg.locator(f"#modal-root [data-a={action}]").count() == 0, action
-    assert pg.locator("#modal-root a", has_text="Statement (PDF)").count() == 1
+    for action in ("tripFinalize", "tripDelete", "tripReopen", "editExpense"):
+        assert pg.locator(f"#t_step [data-a={action}]").count() == 0, action
+    assert pg.locator("#t_step a", has_text="Statement (PDF)").count() == 1
     assert problems == []
     ctx.close()

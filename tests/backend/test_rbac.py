@@ -596,6 +596,8 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
             ' ALTER TABLE "expenses" DROP COLUMN "supplier_id"; ALTER TABLE "expenses" DROP COLUMN "allocation_id";'
             ' ALTER TABLE "expenses" DROP COLUMN "reverse_charge";'
         )
+    if "trip_item_id" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.execute('ALTER TABLE "expenses" DROP COLUMN "trip_item_id"')
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)

@@ -571,7 +571,7 @@ Errors (all `{"detail": ...}` unless noted):
 All screens live in the vanilla-JS app, talk only to the API, and follow the existing list/form patterns.
 
 ```text
-Suppliers                                   [+ New supplier] [Import] [Export]
+Suppliers                                   [+ New supplier] [Link expense vendors]
  filter: [kind v] [tag v] [search ________] [x active only]
  +--------+----------------------------+-----------------+--------+-------------+
  | No.    | Name                       | Kind            | Tags   | Open comm.  |

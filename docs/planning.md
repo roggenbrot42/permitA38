@@ -47,7 +47,8 @@ Each week shows:
 | binding offers | hours of open offers (worst case) |
 | free (after confirmed) | capacity minus contracts |
 | free (worst case) | capacity minus contracts minus open offers |
-| utilisation | (contracts + open offers) / capacity |
+| allocated | hours you allocated to projects in the week (the allocations, before any scaling down); shown red when above the capacity |
+| utilisation | used / capacity, where used is the larger of the hours committed and the hours allocated, day by day and per project (see Capacity per project). Allocated hours count as used even when no contract fills them, so the figure shows how much of your capacity is in use. Idle allocations to employees count as used; subcontractor allocations count only with their commitments. A week with allocations and nothing planned can show `tight` or `over` |
 | status | `ok` up to 90 %, `tight` up to 100 %, `over` above 100 % (or capacity 0 with work booked) |
 
 ## Offer feasibility
@@ -102,6 +103,10 @@ Capacity belongs to projects. You give a person's hours to a project with an **a
 period, see Allocations below). Only the contracts and open offers of **that project** draw on it; hours a project
 does not use are **not** lent to another project, and a project's shortfall is a **gap of that project**.
 
+- Utilisation counts the allocations (decision D4, 2026-10-26): on a day, each project's used hours are the larger of its
+  committed hours and its allocated hours. Example: 30 h/week allocated to project A and 25 h/week to B with 40 h of
+  capacity give 137.5 % (55 / 40), and "allocated 55 h of 40 h capacity: projects are scaled down to 73 %" in the
+  row's tooltip; the projects share the 40 h pro rata, as described below.
 - A person's real capacity of a day (see Capacity) is shared out to the projects they are allocated to:
   `hours per week / available days of the week` per allocation (days without holiday or time off, like a contract). If the allocations of one day add up to more than the real capacity
   (over-allocation, or a holiday or vacation day), every allocation is scaled down pro rata: nothing is invented and
@@ -126,8 +131,9 @@ capacity** (`POST /api/allocations/bootstrap`): the preview lists one allocation
 assignee, with the contract's period and the assignee's peak weekly demand rounded up to 0.25 h; confirming creates
 them. A second run creates nothing. Open offers are not allocated automatically.
 
-With `by_project=0` there is no project dimension: the team `capacity.over` warning uses the utilisation rule only
-(week utilisation above 100 %, `scope: "team"`), not the gaps.
+With `by_project=0` there is no project dimension: the team `capacity.over` warning is emitted from the used hours
+(week utilisation above 100 %, `scope: "team"`; `over_by` = used - capacity, only when positive; an allocation-only overload
+also fires it), not from the gaps.
 
 Before the bootstrap every project with contracts shows capacity 0 and a gap equal to its demand, and an offer of a
 project warns (`offer.project_gap`), because no hours are allocated to it yet. `what-must-move` takes no project in its
@@ -154,6 +160,8 @@ that has allocations; deactivate the person instead.
 
 Offers without a project are checked against the unassigned capacity (`capacity.offer_over`). The suggestions
 (earliest start, what must move) work per project; vacation suggestions count the resulting gaps of all projects.
+
+The "Not covered" banner of the forecast lists the gap per project and gives a remedy: "Allocate further capacity" (and "Allocate" per project) opens the allocations dialog, filtered to the project or person when the page is. "Allocate my capacity" stays visible while any gap is left, also when allocations exist; the bootstrap previews what it would create and skips people and projects that are already allocated. These buttons need the planning write right; read-only users see the text only. Shortfall and over-allocation warnings get one remedy line with an "Open allocations" button. The server's messages are unchanged.
 
 ### What-if with allocations
 

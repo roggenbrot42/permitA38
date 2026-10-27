@@ -138,7 +138,9 @@ Out of v1 (listed in the roadmap):
     reported and one entry is added to the transfer log (decision 14).
 11. **Id preservation.** Ids are never regenerated. A reference column (`customer_id`, `project_id`, `task_id`,
     `user_id`, `invoice_id`, `offer_id`, `trip_id`, `source_id`, and the list columns `member_ids` / `user_ids`)
-    pointing to a missing record is a **warning** (reported by preview and run, import proceeds). The mapping
+    pointing to a missing record is a **warning** (reported by preview and run, import proceeds). `trip_item_id` is
+    not a record: it names an entry of the `items` list of the trip in the bill's `trip_id`, and is checked against it
+    the same way. The mapping
     column -> collection is a table in `transfer/importer.py`, covered by a test that fails when `schema.py` gets a
     new `id` column that is missing in the table. An archive written by the app has zero dangling references (round-
     trip test asserts this).

@@ -28,7 +28,10 @@ from .upgrades import upgrade
 log = logging.getLogger("permita38.audit")
 
 #: reference column -> collection it points to. A guard test fails when schema.py gets an id column missing here.
+#: ``trips.items`` is not a collection: a trip item is an entry of the ``items`` list of a trip record, checked by
+#: ``_check_item_references`` against the trip named in the same bill (``trip_id``).
 REFERENCES: dict[str, str] = {
+    "trip_item_id": "trips.items",
     "customer_id": "customers",
     "project_id": "projects",
     "task_id": "tasks",
@@ -311,6 +314,31 @@ def _check_semantics(plan: Plan) -> None:
         plan.error("record_invalid", "data/settings.json contains settings that are not valid.", "data/settings.json")
 
 
+def _check_item_references(plan: Plan, shown: int) -> tuple[int, int]:
+    """A bill's ``trip_item_id`` must be an item of the trip in its ``trip_id`` (same rule as the service).
+
+    ``shown`` is how many warnings were already printed; returns (dangling count, warnings printed here)."""
+    items_by_trip = {
+        t.get("id"): {i.get("id") for i in t.get("items") or [] if isinstance(i, dict)}
+        for t in plan.records.get("trips", [])
+    }
+    total = 0
+    printed = 0
+    for i, rec in enumerate(plan.records.get("expenses", [])):
+        value = rec.get("trip_item_id")
+        if not value or value in items_by_trip.get(rec.get("trip_id"), set()):
+            continue
+        total += 1
+        if shown + printed < 20:
+            printed += 1
+            plan.warn(
+                "dangling_reference",
+                f"expenses[{i}].trip_item_id points to a missing trip item ({value}).",
+                "data/expenses.json",
+            )
+    return total, printed
+
+
 def _check_references(plan: Plan) -> None:
     ids = {c: {r["id"] for r in recs} for c, recs in plan.records.items()}
     shown = 0
@@ -323,6 +351,8 @@ def _check_references(plan: Plan) -> None:
                     continue
                 target = REFERENCES.get(col.name)
                 value = rec.get(col.name)
+                if target == "trips.items":
+                    continue  # checked below, against the items of the trip
                 if target is None or not value or value in ids.get(target, set()):
                     continue
                 total += 1
@@ -348,6 +378,9 @@ def _check_references(plan: Plan) -> None:
                                     f"{coll}[{i}].{key.split('.')[1]} points to a missing user ({value}).",
                                     f"data/{coll}.json",
                                 )
+    item_total, item_shown = _check_item_references(plan, shown)
+    total += item_total
+    shown += item_shown
     if total > shown:
         plan.warn("dangling_reference", f"{total - shown} more dangling references.", None)
     missing_files = 0

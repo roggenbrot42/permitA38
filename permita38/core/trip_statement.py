@@ -104,6 +104,31 @@ def render(*, company: str, person: str, trip: dict, figures: dict, bills: list[
     w.line(f"Status: {status}", gap=13)
     w.y += 8
 
+    # itinerary (only when the trip has legs): date and time, from, to, mode; planned expenses are not printed
+    legs = trip.get("itinerary") or []
+    if legs:
+        w.line("Itinerary", size=11, bold=True, gap=16)
+        w.row(
+            [
+                (0, 90, "Date / time", "l"),
+                (90, 150, "From", "l"),
+                (240, 150, "To", "l"),
+                (390, 105, "Mode", "l"),
+            ],
+            bold=True,
+        )
+        for leg in legs:
+            depart = str(leg.get("depart") or "")
+            w.row(
+                [
+                    (0, 90, f"{_date(depart)} {depart[11:16]}".strip(), "l"),
+                    (90, 150, str(leg.get("from") or ""), "l"),
+                    (240, 150, str(leg.get("to") or ""), "l"),
+                    (390, 105, str(leg.get("mode") or ""), "l"),
+                ]
+            )
+        w.y += 10
+
     # day table: date, place, hours, base, reductions, amount
     w.line("Meal allowance per day", size=11, bold=True, gap=16)
     w.row(
