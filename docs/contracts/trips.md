@@ -81,17 +81,22 @@ Request (`TripIn`, used by POST and PUT; PUT replaces the whole trip, same as ot
 |---|---|---|---|
 | `title` | string, 0-200 | no | |
 | `purpose` | string, 1-200, not blank | **yes** | printed on the statement |
+| `origin` | string 0-200 or null | no | start place of the trip (the first dialog of the wizard, default: the business settings city); plan only, not in the statement totals |
+| `destination` | string 0-200 or null | no | destination place of the trip; prefills the itinerary in the UI |
+| `destination_country` | `^[A-Z]{2}$` or null | no | ISO 3166-1 alpha-2, e.g. `DE`; lower case or longer codes are 422 |
 | `customer_id` | id or null | no | must exist, else 422 `"Unknown customer"` |
 | `project_id` | id or null | no | must exist, else 422 `"Unknown project"` |
 | `start`, `end` | local date-time | **yes** | `end` > `start`; at most 90 calendar days (inclusive); else 422 |
 | `places` | list, max 20, of `{from_date, country, city?}` | no (default `[]`) | `from_date` date; `country` ISO 3166-1 alpha-2, upper case (`^[A-Z]{2}$`); `city` string 0-200. Empty list = domestic (`DE`). |
 | `meals_provided` | list, max 90, of `{date, breakfast, lunch, dinner}` | no | `date` within the trip; booleans default false; days not listed = none |
 | `mileage` | list, max 100, of `{date, from, to, km, purpose?}` | no | `date` within the trip; `from`,`to`,`purpose` strings 0-200; `km` number 0.1-5000 with at most one decimal; the JSON key is `from` (not `from_`) |
+| `itinerary` | list, max 60, of `{depart, from, to, country?, mode?, note?}` | no (default `[]`) | `depart` local date-time within `[start, end]` (else 422 `"itinerary leg departing <t> is outside the trip"`); `from`, `to` strings 0-200 (required); `country` `^[A-Z]{2}$`; `mode` `train`\|`flight`\|`car`\|`taxi`\|`bus`\|`other`; `note` string 0-200. Stored sorted by `depart` (stable). See "Itinerary and planned items" |
+| `items` | list, max 100, of `{id?, date, date_to?, category, from?, to?, text, expected?}` | no (default `[]`) | `date`, `date_to` `YYYY-MM-DD` (`date_to` not before `date`, else 422 `"item date_to is before date"`); `category` one of `hotel`\|`train`\|`flight`\|`taxi`\|`other` (else 422); `from`, `to` strings 0-200; `text` string 0-200 (required, may be empty); `expected` money >= 0, whole cents, optional. Items are not checked against the trip period. `id` is generated when missing or empty, unique within the trip (duplicate sent ids -> 422 `"duplicate trip item id"`), kept on PUT |
 | `cost_centre` | `"project"` \| `"general"` \| null | no | the explicit decision for checklist line 6; `"project"` requires `project_id` or `customer_id` (else 422 `"Choose a customer or project, or general"`) |
 | `not_needed` | list, max 20, of checklist ids | no | checklist lines marked *Not needed*; unknown id -> 422 `"Unknown checklist item: <id>"` |
 | `status` | `"draft"` \| `"final"` | no (default `draft`) | see Finalizing |
 
-Response (`Trip`; POST, PUT, GET one; GET list returns an array of the same objects):
+Response (`Trip`, the same fields as the request plus the response-only ones below; POST, PUT, GET one; GET list returns an array of the same objects):
 
 ```json
 {
@@ -140,6 +145,12 @@ computed on every read): `id`, `created`, `updated`, `user_id`, `allowance_total
 `rules_version`, `days`, `bills`, `checklist`. `mileage_total` = round-half-up(Σkm x 0.30) once per trip.
 `bills` = the linked expenses (`expenses.trip_id` = this id): `count`, sum of `net`, sum of `vat` (numbers, cents;
 `{"count":0,"net":0,"vat":0}` when none). `id`/`created`/`updated` follow the other collections' format.
+
+Response-only, added to the `Trip` (computed on every read, never stored, a client value is ignored):
+`items_expected_total` = sum of the items' `expected` (money; `0` without items) and `items_actual_total` = sum of
+the gross (net + VAT) of **all** bills linked to the trip, those booked against an item and unplanned ones alike
+(money; `0` without bills). Example for the wizard tests: items 80,00 and 120,00 expected, bill on the first item
+gross 95,20 and unplanned bill gross 11,90 -> `items_expected_total: 200`, `items_actual_total: 107.1`.
 
 `user_id` is the owner = the creator; it is never changed by PUT (an employee cannot hand a trip to someone else; the
 boss editing a trip keeps the original owner).
@@ -224,6 +235,8 @@ Errors: 401, 403, 404 (`"Not found"`, also malformed id and not visible).
 
 Full replacement of the editable fields, recomputing all figures. Errors: 401, 403, 404, 422, and
 
+* A PUT must send the item ids back to keep them: an item sent without an id gets a new one, and removing an item
+  that has bills is **422** `"Item has bills"`.
 * **409** `{"detail": "This trip is final; the boss can reopen it"}` if the stored trip is `final` (any body,
   including one that sends `status: "draft"`; only `reopen` changes a final trip).
 * **409** `{"detail": "Checklist has open items: Hotel / accommodation, Transportation"}` when the body has
@@ -296,6 +309,34 @@ Other checklist ids added to the file later: `added` when a linked bill has `cat
 else `open`, skippable. Matching of `category` is case-insensitive on the stored text. The checklist is a view: it
 is never stored, only `not_needed` and `cost_centre` are.
 
+## Itinerary and planned items (wizard, docs/specs/business-trips-wizard.md)
+
+Both are stored in the trip record (the `extra` JSON column; no migration) and returned as they are stored.
+
+Example of a trip response part:
+
+```json
+{
+  "itinerary": [
+    {"depart": "2026-11-09T08:30", "from": "Berlin", "to": "Hamburg", "country": "DE", "mode": "train"},
+    {"depart": "2026-11-11T16:45", "from": "Wien", "to": "Berlin", "mode": "flight"}
+  ],
+  "items": [
+    {"id": "k3j9x0ab12", "date": "2026-11-09", "category": "train", "text": "ICE Berlin - Hamburg", "expected": 80},
+    {"id": "p8d2m4qz7w", "date": "2026-11-09", "category": "hotel", "text": "Hotel Hamburg", "expected": 120}
+  ],
+  "items_expected_total": 200,
+  "items_actual_total": 0
+}
+```
+
+* A travel day in the UI is built from two legs (start -> destination, destination -> end place); the server does not
+  group legs into days.
+* Items are planning figures only. `expected` never enters `days`, `allowance_total`, `mileage_total`, the statement
+  totals, the checklist, VAT or any report; the statement prints the itinerary table only.
+* Deleting an item that still has bills: `PUT` -> 422 `{"detail": "Item has bills"}`; the trip is unchanged.
+* `DELETE` of a draft trip also clears `trip_item_id` of its bills.
+
 ## Finance
 
 The finance report counts only **final** trips: a draft adds nothing until it is finalised. A final trip adds its
@@ -308,6 +349,10 @@ as deductible expenses without VAT ("Meal allowance" and "Mileage").
 role's own trips only, another's trip is `"Unknown trip"` too). `GET /api/expenses` is unchanged; the UI filters
 by `trip_id` client side (no new query parameter). Expense categories gain `Accommodation`, `Transportation`,
 `Material`.
+
+`ExpenseIn`/`Expense` gain `trip_item_id` (id or null). Only together with `trip_id`; the item must be one of that
+trip's `items`, else 422 `"Unknown trip item"` (also when `trip_id` is missing). A bill without `trip_item_id` but with
+`trip_id` is an unplanned bill.
 
 ## Contract decisions (where the spec left a choice)
 
@@ -327,3 +372,7 @@ by `trip_id` client side (no new query parameter). Expense categories gain `Acco
 9. Deleting a draft trip keeps its bills and clears their `trip_id`.
 10. The statement works for drafts too.
 11. No list filters or pagination in this version.
+12. Itinerary and items are stored in the trip's `extra` JSON (no migration); items are not checked against the trip
+    period (only legs are), and an item id is not a global id: it is unique within its trip.
+13. A `trip_item_id` without `trip_id` gives the same 422 `"Unknown trip item"` as a foreign item.
+14. The statement prints the itinerary table (date/time, from, to, mode) only when legs exist; items are not printed.

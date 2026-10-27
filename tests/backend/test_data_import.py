@@ -353,6 +353,20 @@ def test_dangling_references_are_warnings_not_errors(source, target, tmp_path):
     assert any("projects[0].customer_id" in m and ids["customer"] in m for m in msgs)
 
 
+def test_a_bill_pointing_to_a_missing_trip_item_is_a_dangling_warning(source, target, tmp_path):
+    _, src_client, _ = source
+    _, dst_client, _ = target
+    files = zip_files(export_archive(src_client))
+    body = json.loads(files["data/expenses.json"])
+    body["records"][0].update(trip_id="tripnotthere", trip_item_id="itemnotthere")
+    files["data/expenses.json"] = json.dumps(body).encode()
+    blob = build_zip(files, tmp_path / "item.zip").read_bytes()
+    res = post_run(dst_client, blob)
+    assert res.status_code == 200
+    msgs = [w["message"] for w in res.json()["warnings"] if w["code"] == "dangling_reference"]
+    assert any("expenses[0].trip_item_id" in m and "itemnotthere" in m for m in msgs)
+
+
 def test_a_clean_archive_has_no_dangling_reference_warning(source, target):
     _, src_client, _ = source
     _, dst_client, _ = target

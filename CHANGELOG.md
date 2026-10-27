@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 - The planner timeline no longer has the per-project row of stacked bars (allocated / planned / gap); it was unreadable with more than three projects. The week table and the project filter are unchanged.
+### Added
+- Business trips: an itinerary (legs with departure, from, to, country and transport mode, up to 60 per trip) and planned
+  items with an optional expected cost, linked to bills with `trip_item_id`. The trip shows the expected and actual totals
+  (planning only; expected costs are not part of the statement, allowance, VAT or reports). The statement PDF prints
+  the itinerary.
+- Adds migration `0013-trip_item_id` (new column `expenses.trip_item_id`). An upgraded database can no longer be opened by alpha.4. Back up your data folder before upgrading; the app also backs up automatically.
+- Business trips: a bill can be booked against a planned item of its trip; a trip item that still has bills cannot be removed (422 'Item has bills'); deleting a draft trip unlinks its bills from the trip and the item.
+- Business trips: the start place (`origin`) and the destination (`destination`, `destination_country`) of a trip;
+  planned items take a category of hotel, train, flight, taxi or other, and optional `from`, `to` and `date_to`.
+
 ### Fixed
 - Planner: "Earliest start for an offer" skips vacation, sick and other absence days and public holidays of the
   assignee (a weekend start moves to the next workday), and counts a vacation drafted in the planner that is not yet
