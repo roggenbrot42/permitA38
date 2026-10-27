@@ -56,6 +56,12 @@ All notable changes to this project are documented here. The format is based on
 - The monkey e2e walk closes the dialogs that have their own Cancel/Close button (Allocations, two-factor) instead of getting stuck in them; this made the boss seed 7 walk save again (test-only).
 - The contract form no longer asks who works on a contract; a contract records only what is owed to the customer.
   Existing assignments are kept, and the planner's use of them is changed separately (docs/specs/project-capacity.md).
+### Fixed
+- Contracts: a contract can no longer be entered for a project of another customer (refused with a 422); a contract
+  without a customer takes its project's customer. Accepting an offer into a project of another customer is refused.
+  Specification: `docs/specs/contract-items.md` (draft, architect sign-off pending).
+- Offers: accepting an offer now opens "What did the customer accept?", where you tick the items the customer accepted;
+  the contract keeps only those. All items are ticked by default.
 
 ## [0.4.0-alpha.4] - 2026-10-26
 

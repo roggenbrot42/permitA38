@@ -72,6 +72,7 @@ decides.
 | **Accounting** (chart of accounts SKR03/SKR04, journal, receipts) and the **German VAT return (UStVA)** | spec: [`specs/ustva.md`](specs/ustva.md); boxes need the tax adviser |
 | **Time tracking element** on the Today page: one row with description, project and task, manual entry (start, stop, date, duration, Add) and timer mode, with a click on the timer to show the earnings instead of the time | spec: [`specs/time-tracking-element.md`](specs/time-tracking-element.md); Light review tier |
 | **Project capacity**: people and subcontractors are allocated to projects; a project's demand is covered by its own pool, contracts only state what is owed | spec: [`specs/project-capacity.md`](specs/project-capacity.md) (draft, architect sign-off pending); Full review tier |
+| **Fix: contract customer rule and the customer's accepted items** (contract refused for another customer's project; items view after accepting an offer) | spec: [`specs/contract-items.md`](specs/contract-items.md) (draft, architect sign-off pending); Full review tier |
 
 ## v0.4.0-alpha.7
 
