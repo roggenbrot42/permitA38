@@ -538,7 +538,7 @@ function lineError(l, i) {
 }
 A.editExpense = el => {
   // a new bill can be started from a business trip: data-trip, data-category and data-project preselect those fields
-  const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: el?.dataset?.category || EXP_CATS[0], project_id: el?.dataset?.project || '', trip_id: el?.dataset?.trip || '' };
+  const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: el?.dataset?.category || EXP_CATS[0], project_id: el?.dataset?.project || '', trip_id: el?.dataset?.trip || '', trip_item_id: el?.dataset?.item || '' };
   const cats = e.category && !EXP_CATS.includes(e.category) ? [...EXP_CATS, e.category] : EXP_CATS;   // keep a category entered elsewhere
   const stored = Array.isArray(e.lines) ? e.lines : [];
   // a stored line keeps the fields this dialog does not show (line category, unknown fields); net/vat are derived
@@ -559,6 +559,7 @@ A.editExpense = el => {
       { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: LINE_RATES, row: 2 },
       { k: 'category', l: 'Category', t: 'select', o: cats, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
       { k: 'trip_id', l: 'Business trip', t: 'select', o: [['', '— no trip —'], ...tripOptions(e.trip_id)], row: 4 },
+      { k: 'trip_item_id', l: 'Planned item of the trip', t: 'select', o: [['', '— not planned —'], ...tripItemOptions(e.trip_id)], row: 4 },
       { k: 'deductible', l: 'Deductible %', t: 'number', h: '100 normally; 70 for business meals with business partners (set automatically with that category). Input VAT of business meals is reclaimed in full.' }],
     extra: `<div id="e_body" class="exp-body">
       <div id="e_itemised" class="exp-itemised" hidden>
@@ -583,6 +584,8 @@ A.editExpense = el => {
       const bmeal = v.category === 'Business meals';
       v.project_id = v.project_id || null;
       v.trip_id = v.trip_id || null;   // a bill belongs to one business trip (or none)
+      // a planned item belongs to the trip it was listed under: switching the trip drops the item
+      v.trip_item_id = v.trip_id && v.trip_id === (e.trip_id || null) ? (v.trip_item_id || null) : null;
       const rcVat = v.rc_vat; delete v.rc_vat;
       if (hasSup) { v.supplier_id = v.supplier_id || null; v.allocation_id = v.supplier_id ? (v.allocation_id || null) : null; v.reverse_charge = !!(v.supplier_id && v.reverse_charge); }
       v.vat_deductible = bmeal ? 100 : null;   // the 30 % that is not deductible does not touch the input VAT
