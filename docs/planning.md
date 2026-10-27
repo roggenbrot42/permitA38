@@ -201,7 +201,9 @@ holidays, time off, every contract and every open offer.
 - **Suggestions**:
   - *Find a time*: the best windows for N working days of vacation. Windows with the least overload win, then those
     that gain the most free calendar days around them (weekends and holidays).
-  - *Earliest start for an offer*: the first start day from which N hours fit before a deadline.
+  - *Earliest start for an offer*: the first start day from which N hours fit before a deadline. The start is an
+    available workday of the assignee (not a holiday or absence, a weekend moves to the next workday), and the draft
+    in the planner counts.
   - *What must move?*: for a selected offer, the smallest move of another open offer that makes it fit, or the
     largest amount that fits.
 

@@ -15436,6 +15436,14 @@
               }
             ],
             "title": "Project Id"
+          },
+          "changes": {
+            "$ref": "#/components/schemas/ScenarioChanges",
+            "default": {
+              "absences": [],
+              "commitments": [],
+              "allocations": []
+            }
           }
         },
         "type": "object",

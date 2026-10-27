@@ -737,9 +737,11 @@ class PlanningService:
         user_ids: list[str] | None = None,
         today: date | None = None,
         project_id: str | None = None,
+        changes: dict | None = None,
     ) -> dict:
         """Earliest start for a new offer of ``hours`` (total) that is feasible until ``deadline``. The offer belongs
-        to ``project_id`` (none = the unassigned scope): only that scope's free hours count."""
+        to ``project_id`` (none = the unassigned scope): only that scope's free hours count. The start is an AVAILABLE
+        workday (neither a public holiday nor an absence) of at least one assignee; ``changes`` (what-if draft) count."""
         today = today or date.today()
         first = earliest or today
         if deadline < first:
@@ -747,8 +749,21 @@ class PlanningService:
         scope = self._check_scope(project_id) or eng.UNASSIGNED
         if scope == eng.UNASSIGNED:
             project_id = None
-        world = self._world(today)
+        world = self._world(today, changes)
         ids = user_ids or ([world.boss] if world.boss else [])
+        people = [world.users[u] for u in ids if u in world.users]
+
+        def available(day: date) -> bool:
+            return any(world.cap.target(user, day) > 0 for user in people)
+
+        def available_from(day: date) -> date | None:
+            x = day
+            while x <= deadline:
+                if available(x):
+                    return x
+                x += timedelta(days=1)
+            return None
+
         n_days = (deadline - first).days + 1
         if n_days > MAX_SCAN_DAYS:
             first = deadline - timedelta(days=MAX_SCAN_DAYS - 1)
@@ -763,7 +778,14 @@ class PlanningService:
                 suffix += sd.cap - sd.internal.assigned - sd.external.assigned
             free_from[x] = suffix
             x -= timedelta(days=1)
-        for s in sorted(free_from):
+        tried: set[date] = set()
+        for candidate in sorted(free_from):
+            if free_from[candidate] + 1e-9 < hours or not ids:
+                continue
+            s = available_from(candidate)
+            if s is None or s in tried:
+                continue
+            tried.add(s)
             if free_from[s] + 1e-9 < hours:
                 continue
             item = eng.Item(
@@ -780,7 +802,7 @@ class PlanningService:
                 win=1.0,
                 project_id=project_id,
             )
-            if ids and self._fits(world, item):
+            if self._fits(world, item):
                 return dict(start=s.isoformat(), feasible=True, free_hours=round(free_from[s], 2))
         best = max(free_from.values()) if free_from else 0.0
         return dict(
