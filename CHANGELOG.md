@@ -5,11 +5,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- The planner timeline no longer has the per-project row of stacked bars (allocated / planned / gap); it was unreadable with more than three projects. The week table and the project filter are unchanged.
 ### Fixed
 - **Business trips failed with a server error in the installed packages** (Windows/Linux bundle and wheel): the rate
   tables and the checklist were not included. Creating or previewing a trip works again; a test now checks that every
   data file of the package is declared, and the smoke test previews a trip.
+- Planner: hours in the contract rows and tooltips were shown with a decimal point (12.5 h) while the rest of the planner used the decimal comma; all planner numbers now use the app's number format (12,5 h).
 - A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
+- An offer, invoice, contract or trip can no longer be saved with a project of another customer: the project pickers list only the chosen customer's projects (and projects without a customer), and the API refuses a mismatch with 422 (`Project belongs to another customer`). Scope: checked on offers, invoices, contracts and trips, and on the conversions (offer to invoice, accepting an offer that creates a contract, invoice from time). Not checked: incoming offers, allocations, contracts saved from a plan and bulk import. An offer that already has a project of another customer (legacy data) must be corrected first (edit the offer so customer and project match) before it can be accepted (when the offer has a plan) or converted; other edits of such a record are still allowed.
 
 ## [0.4.0-alpha.4] - 2026-10-26
 

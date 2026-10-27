@@ -278,7 +278,7 @@ defaults (rule 4).
   status pill). A gap is red text "5 h not covered" on that project's row; the free hours of other projects are
   printed grey and carry the title "not available to project P". A filter "Project: all / P / Q / Unassigned".
 * **Plan & vacation** (`web/planner.js`): a project selector next to the person selector (`P.project`, remembered in
-  `localStorage` like `plnUser`). Per week header a small stacked bar per project (allocated, planned, gap). The
+  `localStorage` like `plnUser`). The per-project stacked bar row was removed from the timeline (unreadable with more than three projects); per-project figures stay in the week table and day detail. The
   contract/offer bars are grouped by project; bars of other projects are dimmed when a project is selected. An
   "Allocations" row (draggable like time off: move, resize, hours field) lets the owner draft allocation changes.
   The draft bar lists allocation changes with Discard like the others. Keyboard and touch work as for the other bars.

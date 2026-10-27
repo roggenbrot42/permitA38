@@ -287,7 +287,7 @@ function renderTripDialog(trip) {
       <div class="row"><div class="field"><label for="t_title">Title</label><input id="t_title" value="${esc(v.title || '')}" maxlength="200" ${dis}></div>
         <div class="field"><label for="t_purpose">Purpose (printed on the statement)</label><input id="t_purpose" value="${esc(v.purpose || '')}" maxlength="200" required aria-required="true" ${dis}></div></div>
       <div class="row"><div class="field"><label for="t_customer">Customer</label><select id="t_customer" ${dis}>${sel(customers, v.customer_id)}</select></div>
-        <div class="field"><label for="t_project">Project</label><select id="t_project" ${dis}>${sel(projectOptions(), v.project_id)}</select></div></div>
+        <div class="field"><label for="t_project">Project</label><select id="t_project" ${dis}>${sel(projectOptions(true, v.customer_id || '', v.project_id), v.project_id)}</select></div></div>
       <div class="row"><div class="field"><label for="t_start">Start</label><input id="t_start" type="datetime-local" value="${esc(v.start)}" ${dis}></div>
         <div class="field"><label for="t_end">End</label><input id="t_end" type="datetime-local" value="${esc(v.end)}" ${dis}></div></div>
       <datalist id="t_countries">${tripCountryOptions()}</datalist>
@@ -324,6 +324,7 @@ function tripChange(e) {
   if (!TRIP_OPEN || TRIP_OPEN.ro) return;
   const t = e.target;
   if (t.id === 't_start' || t.id === 't_end') { rebuildDays(); return scheduleTripPreview(); }
+  if (t.id === 't_customer') refreshProjectSelect($('#t_project'), t.value);
   if (t.dataset.not !== undefined || t.name === 't_cc') return persistChecklist();
   if ((t.id === 't_project' || t.id === 't_customer') && document.querySelector('input[name="t_cc"]:checked')?.value === 'project') persistChecklist();
   scheduleTripPreview();
