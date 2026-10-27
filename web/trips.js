@@ -138,12 +138,12 @@ A.newTrip = () => {
     },
   });
   const cust = $('#f_customer_id'), proj = $('#f_project_id');
-  cust?.addEventListener('change', () => { proj.innerHTML = selOpts(tripProjectOptions(cust.value), ''); });
+  cust?.addEventListener('change', () => refreshProjectSelect(proj, cust.value));
 };
-/** Projects of the chosen customer (all projects when no customer is chosen), archived ones left out. */
-function tripProjectOptions(customerId) {
-  const list = (S.d.projects || []).filter(p => p.status !== 'archived' && (!customerId || p.customer_id === customerId));
-  return [['', '— no project —'], ...list.map(p => [p.id, p.name + (p.personal ? ' (personal)' : '')])];
+/** Projects next to a trip's customer: the customer's own and the general ones (app.js projectOptions); a stored project
+ * of another customer stays listed, marked, when currentId names it. */
+function tripProjectOptions(customerId, currentId = null) {
+  return projectOptions(true, customerId || '', currentId);
 }
 
 /* ---------- body of the trip (PUT replaces the whole trip) ---------- */
@@ -194,11 +194,7 @@ function tripSummaryHTML(t) {
 function tripAfter() {
   const p = TRIP_PAGE, st = $('#t_step');
   if (!p || !st) return;
-  if (p.step === 'plan' && !p.ro) $('#t_customer')?.addEventListener('change', () => {
-    const cur = $('#t_project').value;
-    const opts = tripProjectOptions($('#t_customer').value);
-    $('#t_project').innerHTML = selOpts(opts, opts.some(o => o[0] === cur) ? cur : '');
-  });
+  if (p.step === 'plan' && !p.ro) $('#t_customer')?.addEventListener('change', () => refreshProjectSelect($('#t_project'), $('#t_customer').value));
   if (p.step === 'review') {
     if (p.ro) return renderBreakdown(p.trip);
     st.addEventListener('input', scheduleTripPreview);
@@ -420,7 +416,7 @@ function planHTML(t, ro) {
     <div class="row"><div class="field"><label for="t_purpose">Reason for the trip (printed on the statement)</label><input id="t_purpose" value="${esc(t.purpose || '')}" maxlength="200" required aria-required="true" ${dis}></div>
       <div class="field"><label for="t_title">Title (optional)</label><input id="t_title" value="${esc(t.title || '')}" maxlength="200" ${dis}></div></div>
     <div class="row"><div class="field"><label for="t_customer">Customer</label><select id="t_customer" ${dis}>${selOpts([['', '— no customer —'], ...(S.d.customers || []).map(c => [c.id, c.name])], cust)}</select></div>
-      <div class="field"><label for="t_project">Project</label><select id="t_project" ${dis}>${selOpts(tripProjectOptions(cust), t.project_id || '')}</select></div></div>
+      <div class="field"><label for="t_project">Project</label><select id="t_project" ${dis}>${selOpts(tripProjectOptions(cust, t.project_id), t.project_id || '')}</select></div></div>
     <div class="row"><div class="field"><label for="t_start">Start</label><input id="t_start" type="datetime-local" value="${esc(t.start)}" ${dis}></div>
       <div class="field"><label for="t_end">End</label><input id="t_end" type="datetime-local" value="${esc(t.end)}" ${dis}></div></div>
     <div class="row"><div class="field"><label for="t_origin">Start place</label><input id="t_origin" value="${esc(t.origin || '')}" maxlength="200" ${dis}></div>

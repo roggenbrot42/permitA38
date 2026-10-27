@@ -804,8 +804,9 @@ def test_a_trip_moved_to_a_later_week_shifts_its_itinerary_and_the_itinerary_ste
     expect(pg.locator("nav[aria-label='Trip steps'] [aria-current=step]")).to_contain_text("Itinerary")
     assert pg.locator('#t_step tr[data-row="dep"] [data-f=time]').input_value() == "2026-11-16T08:00"
     # the Itinerary step now saves against the moved period (the fake answers 422 for a row outside it)
+    # wait for the Expenses step itself: the Itinerary table is still on screen while its save is in flight
     pg.click("[data-a=tripMove][data-step=expenses]")
-    pg.wait_for_selector("#t_step input[data-item-exp], #t_step .trip-totals, #t_step table")
+    pg.wait_for_selector("#t_add_item")
     assert pg.evaluate("location.hash").endswith("/expenses")
     assert len(puts(api)) == 2
     assert [leg["depart"] for leg in api.trip["itinerary"]] == ["2026-11-16T08:00", "2026-11-18T18:00"]

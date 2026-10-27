@@ -94,12 +94,12 @@ def test_trip_dialog_lists_only_the_chosen_customers_projects(browser, srv, worl
     pg = ctx.new_page()
     pg.goto(srv.base + "/#/trips")
     pg.click("[data-a=newTrip]")
-    pg.wait_for_selector("#t_project")
-    assert set(_options(pg, "#t_project")) == {"", world["p_general"]}
-    pg.select_option("#t_customer", world["acme"])
-    assert set(_options(pg, "#t_project")) == {"", world["p_acme"], world["p_general"]}
-    pg.select_option("#t_project", world["p_acme"])
-    pg.select_option("#t_customer", world["other"])
-    assert set(_options(pg, "#t_project")) == {"", world["p_other"], world["p_general"]}
-    assert pg.input_value("#t_project") == ""
+    pg.wait_for_selector("#f_project_id")
+    assert set(_options(pg, "#f_project_id")) == {"", world["p_general"]}
+    pg.select_option("#f_customer_id", world["acme"])
+    assert set(_options(pg, "#f_project_id")) == {"", world["p_acme"], world["p_general"]}
+    pg.select_option("#f_project_id", world["p_acme"])
+    pg.select_option("#f_customer_id", world["other"])
+    assert set(_options(pg, "#f_project_id")) == {"", world["p_other"], world["p_general"]}
+    assert pg.input_value("#f_project_id") == ""
     ctx.close()
