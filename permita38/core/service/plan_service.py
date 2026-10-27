@@ -137,21 +137,35 @@ class PlanningService:
     # ------------------------------------------------------------------ warnings of the weekly rows
     @staticmethod
     def _team_over_warnings(rows: list[dict]) -> list[dict]:
-        """The old rule: one ``capacity.over`` per week whose utilisation is over (no project dimension)."""
+        """The old rule: one ``capacity.over`` per week whose used hours are over the capacity (no project dimension).
+
+        ``used`` is the week's used hours (decision D4: per day and scope the larger of demand and allocation). The
+        trigger is ``status_for`` on those hours, the same unrounded rule as the row status, so the warning and the
+        status cannot disagree. ``over_by`` is ``used - capacity`` and is only emitted when it is positive.
+        """
         out = []
         for r in rows:
-            if eng.status_for(r["capacity"], r["confirmed"] + r["binding_offers"])[0] == "over":
-                over = max(-r["free_worst_case"], 0.0)
-                out.append(
-                    pw.warning(
-                        "capacity.over",
-                        "warning",
-                        "weeks",
-                        f"Week of {r['week']}: {_h(r['confirmed'] + r['binding_offers'])} h committed for "
-                        f"{_h(r['capacity'])} h of capacity (over by {_h(over)} h).",
-                        dict(week=r["week"], over_by=round(over, 2), contributions=r["contributions"], scope="team"),
-                    )
+            if eng.status_for(r["capacity"], r["used"])[0] != "over":
+                continue
+            over = round(r["used"] - r["capacity"], 2)
+            if over <= 0:
+                continue
+            committed_h = r["confirmed"] + r["binding_offers"]
+            committed = f"{_h(committed_h)} h committed"
+            if r["allocated"] > r["capacity"] + 1e-9:
+                committed = f"{_h(r['allocated'])} h allocated and {committed}"
+            elif r["used"] > committed_h + 1e-9:
+                # the allocations of some days add hours that the commitments do not: no single cause to name
+                committed = f"the days' allocations and commitments exceed capacity: {_h(r['used'])} h used"
+            out.append(
+                pw.warning(
+                    "capacity.over",
+                    "warning",
+                    "weeks",
+                    f"Week of {r['week']}: {committed} for {_h(r['capacity'])} h of capacity (over by {_h(over)} h).",
+                    dict(week=r["week"], over_by=over, contributions=r["contributions"], scope="team"),
                 )
+            )
         return out
 
     def _capacity_warnings(self, rows: list[dict], detail: dict, scope: str | None) -> list[dict]:

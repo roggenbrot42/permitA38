@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format is based on
 - **Business trips failed with a server error in the installed packages** (Windows/Linux bundle and wheel): the rate
   tables and the checklist were not included. Creating or previewing a trip works again; a test now checks that every
   data file of the package is declared, and the smoke test previews a trip.
+- **Planner utilisation counts the allocations.** The "Utilisation" of a week (and of each project) was committed hours
+  over capacity and ignored the allocations, so an over-allocated person never showed more than 100 %. Utilisation is
+  now the larger of committed and allocated hours per day and project. The week table has a new "Allocated" column
+  (red above the capacity) and the API rows a new `allocated` field. Without allocations the numbers are unchanged.
+  Weeks with allocations can show a higher utilisation and a `tight` or `over` status that they did not show before.
 - The supplier list test waits for the reset list before typing into the search box (it failed intermittently in CI when the typing landed in the input that the re-render replaced).
 - Planner: hours in the contract rows and tooltips were shown with a decimal point (12.5 h) while the rest of the planner used the decimal comma; all planner numbers now use the app's number format (12,5 h).
 - A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).

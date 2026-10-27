@@ -356,7 +356,7 @@ def test_forecast_parameters_and_the_e1_numbers_over_http(boss_client, boss_id, 
             40.0,
             5.0,
             "over",
-            100.0,
+            112.5,  # decision D4: P max(30, 25) + Q max(10, 15) = 45 of 40 capacity
         )
         by = {p["name"]: p for p in w["projects"]}
         assert (by["Demo project P"]["capacity"], by["Demo project P"]["gap"], by["Demo project P"]["utilisation"]) == (

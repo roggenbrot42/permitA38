@@ -111,7 +111,13 @@ def test_e1_two_projects_one_person_no_netting(w):
     for i in range(4):
         week = out["weeks"][i]
         assert pick(week, "capacity", "confirmed", "binding_offers", "utilisation", "status", "gap") == dict(
-            capacity=40.0, confirmed=40.0, binding_offers=0.0, utilisation=100.0, status="over", gap=5.0
+            # decision D4: used = max(demand, allocation) per scope and day: P max(30, 25) + Q max(10, 15) = 45 of 40
+            capacity=40.0,
+            confirmed=40.0,
+            binding_offers=0.0,
+            utilisation=112.5,
+            status="over",
+            gap=5.0,
         )
         assert week["gap_confirmed"] == 5.0 and week["gap_expected"] == 5.0
         assert week["free_after_confirmed"] == 0.0 and week["free_worst_case"] == 0.0
@@ -122,7 +128,13 @@ def test_e1_two_projects_one_person_no_netting(w):
         assert p["internal"] == dict(capacity=25.0, assigned=30.0, gap=5.0)
         assert p["external"] == dict(capacity=0.0, assigned=0.0, gap=0.0)
         assert pick(q, "capacity", "confirmed", "free_worst_case", "utilisation", "status", "gap") == dict(
-            capacity=15.0, confirmed=10.0, free_worst_case=5.0, utilisation=66.7, status="ok", gap=0.0
+            # decision D4: Q is allocated 15 h and uses them all (max(10, 15)): 15 of 15 = 100.0 %
+            capacity=15.0,
+            confirmed=10.0,
+            free_worst_case=5.0,
+            utilisation=100.0,
+            status="tight",
+            gap=0.0,
         )
         assert pick(un, "capacity", "confirmed", "utilisation", "status", "gap") == dict(
             capacity=0.0, confirmed=0.0, utilisation=0.0, status="ok", gap=0.0

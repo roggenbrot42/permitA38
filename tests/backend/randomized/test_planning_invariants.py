@@ -109,9 +109,10 @@ def dump(repo):
 
 def check_status_and_gap(w):
     """Two-way: the gap covers every hour the week is over by, and the status is ``over`` exactly when the old
-    utilisation rule says so or a project has a gap."""
+    utilisation rule says so or a project has a gap. The utilisation counts the allocations (decision D4): the rule
+    reads the row's used hours with ``status_for``, the same unrounded rule the row status uses."""
     assert w["gap"] + 1e-6 >= max(0.0, -w["free_worst_case"])
-    old_over = eng.status_for(w["capacity"], w["confirmed"] + w["binding_offers"])[0] == "over"
+    old_over = eng.status_for(w["capacity"], w["used"])[0] == "over"
     assert (w["status"] == "over") == (old_over or w["gap"] > 1e-6)
     assert w["gap_confirmed"] <= w["gap"] + 1e-6 and w["gap_expected"] <= w["gap"] + 1e-6
     assert w["gap_confirmed"] <= w["gap_expected"] + 1e-6
@@ -216,7 +217,7 @@ def build_fenced(repo, world, skip_contracts_of=None, extra_q_person=False, with
         for i, p in enumerate(people)
     ]
     day = lambda n: (MON + timedelta(days=n)).isoformat()  # noqa: E731
-    for a in allocs:
+    for a in allocs if with_allocations else []:
         repo.save(
             "allocations",
             dict(
@@ -314,7 +315,77 @@ def oracle_week_capacity(world, monday):
     return total
 
 
-NOT_COMPARED = ("status", "gap", "gap_confirmed", "gap_expected", "projects", "contributions")
+def oracle_allocations(world, monday):
+    """Independent oracle for the employee allocations of one week (rules 1 to 4 of docs/specs/planner-per-project.md).
+
+    Per person and available day (a workday that is neither a public holiday nor an absence day): each allocation whose
+    period covers the day gives ``hours_per_week / available days of that week``, unscaled. The real capacity of the day
+    is ``weekly_hours / workdays``; when the allocations of the day add up to more than that, each is scaled pro rata;
+    the rest is the unassigned capacity. Returns ``{project name or None: [allocated, capacity]}`` for the week.
+    The arithmetic is written here again from the rules, not taken from the engine.
+    """
+    from permita38.core.holidays import holidays
+
+    people, allocs, _, absences, _ = world
+    out = {"P": [0.0, 0.0], "Q": [0.0, 0.0], None: [0.0, 0.0]}
+    week_days = [monday + timedelta(days=k) for k in range(7)]
+    for i, p in enumerate(people):
+        off = {MON + timedelta(days=d + k) for ui, d in absences if ui == i for k in range(3)}
+
+        def available(x):
+            return x.weekday() in p["workdays"] and x not in off and not holidays(x.year, "").get(x)
+
+        n_avail = sum(available(x) for x in week_days)
+        for x in week_days:
+            if not available(x):
+                continue
+            real = p["weekly"] / len(p["workdays"])
+            day = (x - MON).days
+            today = [
+                (a["project"], a["hpw"] / n_avail)
+                for a in allocs
+                if a["user"] == i and a["start"] <= day <= a["start"] + a["days"]
+            ]
+            total = sum(h for _, h in today)
+            scale = real / total if total > real + 1e-9 else 1.0
+            for name, h in today:
+                out[name][0] += h
+                out[name][1] += h * scale
+            if real - total > 1e-9:
+                out[None][1] += real - total
+    return out
+
+
+def check_allocations_oracle(world, out, proj):
+    """Week ``allocated`` and the project ``allocated`` / ``capacity`` (and the unassigned capacity) equal the oracle; the
+    team ``used`` is at least the team ``allocated``. Only the allocation part is re-computed: the project ``used`` is
+    not in the public rows and demand is not re-computed, so ``used`` is checked as a bound only. Tolerance 0.1 h."""
+    tol = 0.1
+    ids = {v: k for k, v in proj.items()}
+    for w in out["weeks"]:
+        exp = oracle_allocations(world, date.fromisoformat(w["week"]))
+        rows = {p["project_id"]: p for p in w["projects"]}
+        for pid, name in ids.items():
+            r = rows.get(pid, {"allocated": 0.0, "capacity": 0.0})
+            assert abs(r["allocated"] - exp[name][0]) <= tol, (w["week"], name, r["allocated"], exp[name])
+            assert abs(r["capacity"] - exp[name][1]) <= tol, (w["week"], name, r["capacity"], exp[name])
+        un = rows.get(None, {"allocated": 0.0, "capacity": 0.0})
+        assert abs(un["allocated"]) <= tol and abs(un["capacity"] - exp[None][1]) <= tol, (w["week"], un)
+        assert abs(w["allocated"] - sum(v[0] for v in exp.values())) <= tol, (w["week"], w["allocated"])
+        assert w["used"] + tol >= w["allocated"], (w["week"], w["used"], w["allocated"])
+
+
+NOT_COMPARED = (
+    "status",
+    "gap",
+    "gap_confirmed",
+    "gap_expected",
+    "projects",
+    "contributions",
+    "utilisation",
+    "used",
+    "allocated",
+)
 
 
 @settings(max_examples=60, deadline=None)
@@ -333,6 +404,7 @@ def test_ring_fence_properties(world):
         # demand is booked once, in the scope of its project
         assert abs(sum(p["confirmed"] for p in w["projects"]) - w["confirmed"]) < 1e-4
         assert abs(sum(p["binding_offers"] for p in w["projects"]) - w["binding_offers"]) < 1e-4
+    check_allocations_oracle(world, out, proj)  # independent oracle for the allocated hours and the scaled capacity
     # (a) day level: per day the scopes add up to the day capacity
     table = eng.day_table(w0, MON, MON + timedelta(days=70))
     for d in table.days.values():
@@ -350,10 +422,16 @@ def test_ring_fence_properties(world):
 @given(fenced_worlds())
 def test_allocations_never_change_the_team_numbers(world):
     """Equivalence: the same data with and without allocations gives the same team capacity, demand, free hours,
-    utilisation, revenue and day-table cap/confirmed/binding; only status and gap may differ."""
+    revenue and day-table cap/confirmed/binding; only status, gap, utilisation, used and allocated may differ. Utilisation
+    counts the allocations as used (decision D4), so it never drops when allocations are added."""
     _, with_a, _, w_with = forecast_of(world)
     _, without_a, _, w_without = forecast_of(world, with_allocations=False)
     for a, b in zip(with_a["weeks"], without_a["weeks"]):
+        assert b["allocated"] == 0.0 and a["allocated"] >= 0.0
+        if a["utilisation"] is not None and b["utilisation"] is not None:
+            assert a["utilisation"] >= b["utilisation"] - 0.06
+        elif b["utilisation"] is not None:
+            assert a["utilisation"] is None  # cap 0 with used hours, only possible when allocations add used hours
         strip = lambda cs: sorted((c["kind"], c["title"], c["hours"]) for c in cs)  # noqa: E731  (ids differ per run)
         assert strip(a["contributions"]) == strip(b["contributions"])
         assert {k: v for k, v in a.items() if k not in NOT_COMPARED} == {

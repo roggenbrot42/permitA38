@@ -101,7 +101,10 @@
   const statusClass = s => (s === 'over' ? 'over' : s === 'tight' ? 'tight' : 'ok');
   function weekRows() { return (P.sim && P.sim.weeks) || []; }
   function explain(w) {
-    const parts = [`Capacity ${h1(w.capacity)}`, `committed ${h1(w.confirmed)} (contracts)`, `open offers ${h1(w.binding_offers)} (worst case)`];
+    const parts = [`Capacity ${h1(w.capacity)}`];
+    if (w.allocated > w.capacity) parts.push(`allocated ${h1(w.allocated)} of ${h1(w.capacity)} capacity: projects are scaled down to ${pct(w.capacity / w.allocated * 100)}`);
+    else if (w.allocated > 0) parts.push(`allocated ${h1(w.allocated)}`);
+    parts.push(`committed ${h1(w.confirmed)} (contracts)`, `open offers ${h1(w.binding_offers)} (worst case)`);
     if (w.vacation_hours) parts.push(`time off ${h1(w.vacation_hours)}`);
     if (w.holiday_hours) parts.push(`public holidays ${h1(w.holiday_hours)}`);
     if (w.external_capacity > 0) parts.push(`of which subcontractors ${h1(w.external_capacity)}`);
@@ -212,7 +215,7 @@
   function weekRowsHtml() {
     const W = weekRows(); if (!W.length) return '';
     const cap = `<div class="pln-row"><div class="pln-label">Capacity</div><div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => `<span class="pln-week" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px" title="Week of ${esc(fmtDate(w.week))}">${num(w.capacity, 0)} h</span>`).join('')}</div></div>`;
-    const util = `<div class="pln-row"><div class="pln-label">Utilisation (worst case)</div><div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => `<button type="button" class="pln-week util ${statusClass(w.status)}${w.delta > 0 ? ' worse' : w.delta < 0 ? ' better' : ''}" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px" data-a="plnWhy" data-i="${i}" aria-label="Week of ${esc(fmtDate(w.week))}: ${pct(w.utilisation)}, ${esc(w.status)}">${pct(w.utilisation)}</button>`).join('')}</div></div>`;
+    const util = `<div class="pln-row"><div class="pln-label" title="Utilisation of capacity, including allocated hours">Utilisation</div><div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => `<button type="button" class="pln-week util ${statusClass(w.status)}${w.delta > 0 ? ' worse' : w.delta < 0 ? ' better' : ''}" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px" data-a="plnWhy" data-i="${i}" aria-label="Week of ${esc(fmtDate(w.week))}: ${pct(w.utilisation)}, ${esc(w.status)}">${pct(w.utilisation)}</button>`).join('')}</div></div>`;
     const busy = W.some(w => w.busy_hours) ? `<div class="pln-row"><div class="pln-label">Calendar busy</div><div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => `<span class="pln-week" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px">${w.busy_hours ? num(w.busy_hours, 1) + ' h' : ''}</span>`).join('')}</div></div>` : '';
     return cap + util + busy;
   }
@@ -340,8 +343,8 @@
         ${compareBox()}
       </div>
     </div>
-    <div class="card"><h2>Week by week</h2><table><tr><th>Week of</th><th class="num">Capacity</th><th class="num">Contracts</th><th class="num">Offers</th><th class="num">Free</th><th class="num">Util.</th><th class="num">Gap</th><th>Basis</th><th class="num">Revenue</th><th>Notes</th></tr>
-      ${W.map(w => `<tr title="${esc(explain(w))}"><td class="nowrap">${esc(fmtDate(w.week))}</td><td class="num">${num(w.capacity, 1)}</td><td class="num">${num(w.confirmed, 1)}</td><td class="num muted">${w.binding_offers ? num(w.binding_offers, 1) : ''}</td><td class="num ${w.free_worst_case < 0 ? 'free-bad' : 'free-good'}">${num(w.free_worst_case, 1)}</td><td class="num ${statusClass(w.status)}">${pct(w.utilisation)}</td><td class="num">${w.gap > 0 ? `<span class="pp-gap">${num(w.gap, 1)}</span>` : ''}${w.delta ? ` <span class="small ${w.delta > 0 ? 'worse' : 'better'}">${w.delta > 0 ? '+' : ''}${num(w.delta, 1)}</span>` : ''}</td><td><span class="pill basis-${w.basis}">${esc(BASIS_LABEL[w.basis] || w.basis)}</span></td><td class="num">${eur(w.revenue)}</td><td class="small muted">${w.events.map(esc).join(', ')}</td></tr>`).join('')}</table></div>`;
+    <div class="card"><h2>Week by week</h2><table><tr><th>Week of</th><th class="num">Capacity</th><th class="num">Allocated</th><th class="num">Contracts</th><th class="num">Offers</th><th class="num">Free</th><th class="num">Util.</th><th class="num">Gap</th><th>Basis</th><th class="num">Revenue</th><th>Notes</th></tr>
+      ${W.map(w => `<tr title="${esc(explain(w))}"><td class="nowrap">${esc(fmtDate(w.week))}</td><td class="num">${num(w.capacity, 1)}</td><td class="num ${w.allocated > w.capacity ? 'free-bad' : ''}">${num(w.allocated, 1)}</td><td class="num">${num(w.confirmed, 1)}</td><td class="num muted">${w.binding_offers ? num(w.binding_offers, 1) : ''}</td><td class="num ${w.free_worst_case < 0 ? 'free-bad' : 'free-good'}">${num(w.free_worst_case, 1)}</td><td class="num ${statusClass(w.status)}">${pct(w.utilisation)}</td><td class="num">${w.gap > 0 ? `<span class="pp-gap">${num(w.gap, 1)}</span>` : ''}${w.delta ? ` <span class="small ${w.delta > 0 ? 'worse' : 'better'}">${w.delta > 0 ? '+' : ''}${num(w.delta, 1)}</span>` : ''}</td><td><span class="pill basis-${w.basis}">${esc(BASIS_LABEL[w.basis] || w.basis)}</span></td><td class="num">${eur(w.revenue)}</td><td class="small muted">${w.events.map(esc).join(', ')}</td></tr>`).join('')}</table></div>`;
   }
   const BASIS_LABEL = { contract: 'contracted', 'offer-binding': 'open offers', intended: 'assumed' };
 
