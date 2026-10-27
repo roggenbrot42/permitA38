@@ -161,6 +161,8 @@ that has allocations; deactivate the person instead.
 Offers without a project are checked against the unassigned capacity (`capacity.offer_over`). The suggestions
 (earliest start, what must move) work per project; vacation suggestions count the resulting gaps of all projects.
 
+The "Not covered" banner of the forecast lists the gap per project and gives a remedy: "Allocate further capacity" (and "Allocate" per project) opens the allocations dialog, filtered to the project or person when the page is. "Allocate my capacity" stays visible while any gap is left, also when allocations exist; the bootstrap previews what it would create and skips people and projects that are already allocated. These buttons need the planning write right; read-only users see the text only. Shortfall and over-allocation warnings get one remedy line with an "Open allocations" button. The server's messages are unchanged.
+
 ### What-if with allocations
 
 A draft can contain allocation changes (`changes.allocations`: new, changed hours or period, or deleted).

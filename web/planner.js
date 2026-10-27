@@ -679,7 +679,7 @@
     if (!box) { box = document.createElement('div'); box.id = 'plnWarn'; box.className = 'banner plnwarn'; main.prepend(box); }
     box.dataset.at = String(pending.at);
     const list = pending.list;
-    const rows = list.map(w => `<li data-code="${esc(w.code)}"><b>${esc(w.severity)}</b>: ${esc(w.message)}</li>`).join('');
+    const rows = list.map(w => `<li data-code="${esc(w.code)}"><b>${esc(w.severity)}</b>: ${esc(w.message)}${ppRemedy(w)}</li>`).join('');
     box.innerHTML = `<div><b>${list.length} warning${list.length === 1 ? '' : 's'}</b> (saved – you can still continue)</div><ul class="plnwarn-list">${rows}</ul><button type="button" class="ghost sm" data-a="plnDismiss">Dismiss</button>`;
   }
   function showWarnings(list) { pending = { list, at: Date.now() }; paintWarnings(); }

@@ -26,6 +26,10 @@ All notable changes to this project are documented here. The format is based on
   fields. The itinerary is three rows for the whole trip (departure, stay, return; *Add stay* for more places). Expenses
   is a table of planned items (hotel, train, flight, private car, taxi, other) with expected and actual costs, receipt
   state and *Add bill* per row. Planned costs are planning figures only.
+- The planner's "Allocate my capacity" button stays visible while planned time is still not covered, also when
+  allocations exist. The "Not covered" banner gives a remedy with an "Allocate further capacity" button and an
+  "Allocate" button per project; planning warnings about a shortfall or an over-allocation get a short remedy line.
+  The buttons need the planning write right.
 
 ### Fixed
 - Planner: "Earliest start for an offer" skips vacation, sick and other absence days and public holidays of the
