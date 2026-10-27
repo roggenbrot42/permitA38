@@ -165,7 +165,7 @@
       const sel = P.sel === key ? ' sel' : '';
       const otherProject = P.project && (P.project === 'unassigned' ? !!it.project_id : it.project_id !== P.project);
       const dim = mine && !otherProject ? '' : ' dim';
-      const hours = c.hours_per_week ? `${c.hours_per_week} h/week` : `${c.total_hours || 0} h total`;
+      const hours = c.hours_per_week ? `${num(c.hours_per_week, 2)} h/week` : `${num(c.total_hours || 0, 2)} h total`;
       const row = `<div class="pln-row${dim}"><div class="pln-label"><button type="button" class="pln-pick${sel}" data-a="plnSelect" data-key="${esc(key)}">${esc(it.title)}</button><div class="small muted">${esc(hours)}</div></div>
         <div class="pln-lane" data-lane="com" style="width:${horizon() * DW}px">${cells()}${bar(c.start, c.end, `${it.sub}${P.com[key] ? ' draft' : ''}${sel}`, `${it.title}: ${fmtDate(c.start)} – ${fmtDate(c.end)}, ${hours}`, { kind: 'com', key, id: key })}</div></div>`;
       html += row;
@@ -534,7 +534,7 @@
   A.plnProject = el => { P.project = el.value; lsSet('plnProject', P.project); P.day = null; P.dayWeek = null; schedule(); };
   A.plnAllocHours = el => {
     const v = +el.value;
-    if (!(v >= 0.25 && v <= 80)) { toast('Hours per week must be between 0.25 and 80', true); return paint(); }
+    if (!(v >= 0.25 && v <= 80)) { toast(`Hours per week must be between ${num(0.25, 2)} and ${num(80, 0)}`, true); return paint(); }
     editAlloc(el.dataset.key, { hours_per_week: v });
     schedule();
   };
@@ -543,7 +543,7 @@
     const project_id = document.getElementById('plnAProj').value, start = document.getElementById('plnAFrom').value, end = document.getElementById('plnATo').value, hours = +document.getElementById('plnAHrs').value;
     if (!project_id || !start || !end) return toast('Choose a project and both dates', true);
     if (end < start) return toast('The end is before the start', true);
-    if (!(hours >= 0.25 && hours <= 80)) return toast('Hours per week must be between 0.25 and 80', true);
+    if (!(hours >= 0.25 && hours <= 80)) return toast(`Hours per week must be between ${num(0.25, 2)} and ${num(80, 0)}`, true);
     P.alloc['n:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)] = { user_id: uid, project_id, start, end, hours_per_week: hours };
     schedule();
   };
