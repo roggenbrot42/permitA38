@@ -412,10 +412,10 @@ def test_planner_project_selector_and_stacked_bars(browser):
     api = FakeApi()
     ctx, pg, problems = open_planner(browser, api)
     assert "project_id" not in api.calls("POST", "plan/simulate")[-1][3]  # old call shape when no project is chosen
-    expect(pg.locator(".pln-pbar").first).to_have_attribute(
-        "title", "Demo project P: allocated 25 h, planned 30 h, not covered 5 h"
-    )
-    assert pg.locator(".pln-pbar .gap").count() > 0
+    # the per-project row of stacked bars was removed from the timeline; the week table keeps the Gap column
+    assert pg.locator(".pln-pbar").count() == 0
+    assert pg.locator("#pln .pln-label", has_text="Per project").count() == 0
+    expect(pg.locator("#pln table th", has_text="Gap")).not_to_have_count(0)
     pg.select_option("#plnProj", "a1b2c3d4")
     pg.wait_for_function("() => localStorage.plnProject === 'a1b2c3d4'")
     pg.wait_for_function(
