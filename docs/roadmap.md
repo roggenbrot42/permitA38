@@ -53,14 +53,26 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 | **Bill extraction from PDF/image** and e-invoice XML (prefill, you confirm) | planned, builds on the AI provider |
 | **Gantt chart** for the overall plan and project subtasks | later |
 
-## v0.4.0-alpha.5
+## v0.4.0-alpha.5 (bugfix only)
+
+Fixes and changes the maintainer asks for explicitly, no other new features: fixes for what the first hands-on tests of alpha.4 find (first: business trips failing in installed
+packages, issue #44). Findings are collected as issues; the release is cut when the list is empty or the maintainer
+decides.
+
+| Item | Status |
+|---|---|
+| Package data fix for business trips ([#44](https://github.com/roggenbrot42/permitA38/issues/44)) | fix in PR #45 |
+| **Business trip workflow** like a travel tool: plan, items with receipts, settlement incl. invoice draft for the customer | maintainer request; spec [`specs/business-trips-workflow.md`](specs/business-trips-workflow.md) (proposal); Full review tier |
+| Further findings of the alpha.4 click-through | collecting |
+
+## v0.4.0-alpha.6
 
 | Item | Status |
 |---|---|
 | **Accounting** (chart of accounts SKR03/SKR04, journal, receipts) and the **German VAT return (UStVA)** | spec: [`specs/ustva.md`](specs/ustva.md); boxes need the tax adviser |
 | **Time tracking element** on the Today page: one row with description, project and task, manual entry (start, stop, date, duration, Add) and timer mode, with a click on the timer to show the earnings instead of the time | spec: [`specs/time-tracking-element.md`](specs/time-tracking-element.md); Light review tier |
 
-## v0.4.0-alpha.6
+## v0.4.0-alpha.7
 
 | Item | Status |
 |---|---|
@@ -100,7 +112,7 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 | **SSO / OIDC** login | for team and server installations |
 | **ELSTER transmission** | research: certificate handling, ERiC library licensing, or an export for the official software |
 | **Public customer demo** | per-visitor sandboxes with fake data, risky features off; see [`specs/demo-deployment.md`](specs/demo-deployment.md) |
-| **GDPR per-person export** from the export archive (filter by customer or user) | planned (alpha.6, with the GDPR tooling) |
+| **GDPR per-person export** from the export archive (filter by customer or user) | planned (alpha.7, with the GDPR tooling) |
 | Recurring invoices, credit notes, reminders (Mahnungen) | |
 | macOS and Linux arm64 bundles | needs signing and notarisation |
 
@@ -114,21 +126,21 @@ release; `proposed` means not yet scheduled.
 |---|---|---|
 | **E-invoice receiving** (parse XRechnung/ZUGFeRD XML, archive the original) | Receiving e-invoices is already mandatory since 2025 *(verify)* | beta (moved back) |
 | **E-invoice issuing** (XRechnung / ZUGFeRD export) | Mandatory for all domestic B2B from 2028, for large businesses 2027 *(verify)* | beta (moved back; before the deadline) |
-| **GoBD change log (audit trail)** and **Verfahrensdokumentation generator** | GoBD core requirements | alpha.6 |
-| **Zusammenfassende Meldung (ZM)** for EU B2B services | Separate mandatory report next to the UStVA | alpha.5 |
-| **Annual VAT return** and **EÜR form export** (*Anlage EÜR*) | Year-end filing | alpha.6 |
-| **Income-tax advance-payment reminders** (10 Mar/Jun/Sep/Dec) | Cash planning | alpha.5 |
+| **GoBD change log (audit trail)** and **Verfahrensdokumentation generator** | GoBD core requirements | alpha.7 |
+| **Zusammenfassende Meldung (ZM)** for EU B2B services | Separate mandatory report next to the UStVA | alpha.6 |
+| **Annual VAT return** and **EÜR form export** (*Anlage EÜR*) | Year-end filing | alpha.7 |
+| **Income-tax advance-payment reminders** (10 Mar/Jun/Sep/Dec) | Cash planning | alpha.6 |
 | **Asset register and depreciation (AfA)** | Needed for correct EÜR/balance sheet | beta |
-| **Invoice lifecycle**: credit notes/cancellations, advance and final invoices, early-payment discount | Everyday invoicing needs | alpha.5 |
-| **Reminders (Mahnwesen)** with default interest and flat fee (§ 288 BGB) | Getting paid | alpha.5 |
-| **Bank statement import** (CAMT.053/MT940/CSV) and payment matching; **EPC GiroCode QR** on invoices | Faster payment and reconciliation | alpha.6 |
+| **Invoice lifecycle**: credit notes/cancellations, advance and final invoices, early-payment discount | Everyday invoicing needs | alpha.6 |
+| **Reminders (Mahnwesen)** with default interest and flat fee (§ 288 BGB) | Getting paid | alpha.6 |
+| **Bank statement import** (CAMT.053/MT940/CSV) and payment matching; **EPC GiroCode QR** on invoices | Faster payment and reconciliation | alpha.7 |
 | **SEPA direct-debit file export** | Optional collection of recurring payments | beta |
 | **Working-time law checks** (ArbZG breaks, rest, 10 h) as sanity warnings; absence entitlement (BUrlG) | Teams with employees | warnings released in alpha.2; entitlement (BUrlG) beta |
 | **Scheinselbständigkeit hint** (one customer dominates the forecast) | Informational risk hint for freelancers | beta |
 | **One-Stop-Shop (OSS)** support | EU sales to private customers | later |
 | **Security baseline self-assessment (OWASP ASVS L2)** and **CRA readiness** review | Trust, regulatory outlook | beta |
 | **Accessibility audit (WCAG 2.2 AA)** | Usability, legal outlook | beta (PWA work starts it) |
-| **Privacy pack** (privacy notice, Art. 28 agreement outline, breach checklist, erasure concept) | GDPR for hosted instances | alpha.6 (with GDPR tooling) |
+| **Privacy pack** (privacy notice, Art. 28 agreement outline, breach checklist, erasure concept) | GDPR for hosted instances | alpha.7 (with GDPR tooling) |
 | **Mobile web app (PWA)** with offline-tolerant time tracking | Phone use before a native app exists | beta (moved back) |
 
 

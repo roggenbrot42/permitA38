@@ -148,7 +148,7 @@ Worked examples (domestic 2026 values, to be used as tests):
 
 * A separate **Business trips** page (own entry in the menu, next to Expenses; also reachable from the Expenses page). The trip list shows period, destination, purpose, allowance,
   mileage, bills total.
-* Trip dialog: title, purpose, customer/project, start and end, a destination row per day (country select with search,
+* Trip dialog: title, purpose, customer/project, start and end, a destination row per change of location, not per day (country select with search,
   city), a day grid with the three meal-provided checkboxes, the km table, and a live **breakdown panel** (from
   `/trips/preview`) that explains every figure in words: "Tue 12.11.: 24 h in Germany: 28,00 € − breakfast provided
   5,60 € = 22,40 €". Notes (country fallback, three-month limit) are visible, not tooltips.

@@ -11,6 +11,9 @@ All notable changes to this project are documented here. The format is based on
 - Planner: "Earliest start for an offer" skips vacation, sick and other absence days and public holidays of the
   assignee (a weekend start moves to the next workday), and counts a vacation drafted in the planner that is not yet
   applied. The result shows the weekday.
+- **Business trips failed with a server error in the installed packages** (Windows/Linux bundle and wheel): the rate
+  tables and the checklist were not included. Creating or previewing a trip works again; a test now checks that every
+  data file of the package is declared, and the smoke test previews a trip.
 - The supplier list test waits for the reset list before typing into the search box (it failed intermittently in CI when the typing landed in the input that the re-render replaced).
 - Planner: hours in the contract rows and tooltips were shown with a decimal point (12.5 h) while the rest of the planner used the decimal comma; all planner numbers now use the app's number format (12,5 h).
 - A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
