@@ -58,6 +58,7 @@ PAYLOADS = [
     "null",
 ]
 CLICKABLE = "[data-a], a[href^='#'], button, tr.click, tr[data-href], select, input[type=checkbox], summary"
+MODAL_CLOSE = "#modal-root [id$=cancel], #modal-root [data-a$=Close]:not([disabled])"  # Cancel/Close of a dialog without #m-cancel
 FORBIDDEN = "[data-a=logout], [data-a=changePassword]"  # ends the session on purpose; covered by the journeys
 ROUTES = [
     "today",
@@ -280,6 +281,13 @@ class Monkey:
     def modal_action(self):
         if self.page.evaluate("() => document.querySelector('#modal-root').children.length > 0"):
             btn = self.rng.choice(["#m-save", "#m-cancel", "#m-cancel"])
+            # dialogs that are not generic forms (e.g. Allocations, two-factor) close with their own Cancel/Close button
+            if not self.page.query_selector(btn):
+                if self.page.query_selector(MODAL_CLOSE):
+                    btn = MODAL_CLOSE
+                else:
+                    self.say("modal Escape")
+                    return self.page.keyboard.press("Escape")
             self.say(f"modal {btn}")
             try:
                 self.page.click(btn, timeout=CLICK_TIMEOUT, no_wait_after=True)
