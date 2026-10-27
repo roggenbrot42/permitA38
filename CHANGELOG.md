@@ -5,63 +5,80 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
-### Changed
-- The planner timeline no longer has the per-project row of stacked bars (allocated / planned / gap); it was unreadable with more than three projects. The week table and the project filter are unchanged.
-### Added
-- Business trips: an itinerary (legs with departure, from, to, country and transport mode, up to 60 per trip) and planned
-  items with an optional expected cost, linked to bills with `trip_item_id`. The trip shows the expected and actual totals
-  (planning only; expected costs are not part of the statement, allowance, VAT or reports). The statement PDF prints
-  the itinerary.
-- Adds migration `0013-trip_item_id` (new column `expenses.trip_item_id`). An upgraded database can no longer be opened by alpha.4. Back up your data folder before upgrading; the app also backs up automatically.
-- Business trips: a bill can be booked against a planned item of its trip; a trip item that still has bills cannot be removed (422 'Item has bills'); deleting a draft trip unlinks its bills from the trip and the item.
-- Business trips: each step saves with *Back* or *Next*; the stepper links do not save. Planned costs are planning
-  figures only (not in the statement, allowance, VAT or reports). A bill can be booked against a planned item of its trip.
-- Business trips: the start place (`origin`) and the destination (`destination`, `destination_country`) of a trip;
-  planned items take a category of hotel, train, flight, taxi or other, and optional `from`, `to` and `date_to`.
+## [0.4.0-alpha.5] - 2026-10-27
 
-### Changed
-- Business trips: the one big trip dialog is replaced by a small *New trip* dialog (reason, customer, project, period,
-  start place, destination and country) and a trip page with four steps: Plan, Itinerary, Expenses and Review. A stored
-  trip opens on Expenses; a new trip opens on the itinerary. Each step saves with Back or Next and shows only its own
-  fields. The itinerary is three rows for the whole trip (departure, stay, return; *Add stay* for more places). Expenses
-  is a table of planned items (hotel, train, flight, private car, taxi, other) with expected and actual costs, receipt
-  state and *Add bill* per row. Planned costs are planning figures only.
-- The planner's "Allocate my capacity" button stays visible while planned time is still not covered, also when
-  allocations exist. The "Not covered" banner gives a remedy with an "Allocate further capacity" button and an
-  "Allocate" button per project; planning warnings about a shortfall or an over-allocation get a short remedy line.
-  The buttons need the planning write right.
+Fifth alpha. Adds the business trip wizard (a step-by-step trip page with a three-row itinerary and an expenses table
+with planned and actual costs), a time tracking row on the Today page, and planner improvements (allocations counted
+in utilisation, remedy banners, contracts on the project page, number formatting). A project must now match its
+customer, the contract form no longer asks for an assignee list, import and export moved to Settings, and many fixes
+are included. Adds migration `0013-trip_item_id`; an upgraded database can no longer be opened by alpha.4. Back up your
+data folder before upgrading (the app also does it automatically). Not for production bookkeeping yet; the tax rules
+marked *(verify)* in `docs/compliance.md` still need your tax adviser.
+
 ### Added
+- **Business trip wizard**: a trip opens on a step-by-step page (Plan, Itinerary, Expenses, Review) instead of one big
+  dialog. Starting a trip uses a small *New trip* dialog (reason, customer, project, period, start place, destination
+  and country). Each step saves with *Back* or *Next*; the stepper links do not save. A stored trip opens on Expenses,
+  a new trip on the itinerary.
+- **Itinerary**: legs with departure, from, to, country and transport mode (up to 60 per trip). The itinerary is three
+  rows for the whole trip (departure, stay, return); *Add stay* adds more places. The statement PDF prints the itinerary.
+- **Trip expenses table**: planned items (hotel, train, flight, private car, taxi, other) with an optional expected cost
+  and optional `from`, `to` and `date_to`, shown with expected and actual costs, receipt state and *Add bill* per row.
+  A bill can be booked against a planned item of its trip. A trip item that still has bills cannot be removed (422
+  `Item has bills`); deleting a draft trip unlinks its bills from the trip and the item. Planned costs are planning
+  figures only: they are not part of the statement, allowance, VAT or reports.
+- **Time tracking on the Today page**: a time card with a default manual row, a project picker (non-archived projects
+  only), manual entries with the computed duration, and start and stop of a timer on a project. A money toggle is shown
+  for a project with a rate; a hint explains a project without one.
 - **Contracts on the project page**: a Contracts card lists the project's contracts (period, hours, rate, status) with
   "+ New contract" (prefilled with the project and its customer) and a hint with the customer's contracts that have no
   project. Needs the contracts right; without write access the list is read-only.
-- The "Import" and "Export" links (boss only) moved from the suppliers page to Settings, under "Data & sync": "Data export and import" and "Import documents from another tool".
+- **Planner remedies**: the "Allocate my capacity" button stays visible while planned time is still not covered, also
+  when allocations exist. The "Not covered" banner offers "Allocate further capacity" and an "Allocate" button per
+  project; planning warnings about a shortfall or an over-allocation get a short remedy line. The buttons need the
+  planning write right.
+
+### Changed
+- **Planner**: the timeline no longer has the per-project row of stacked bars (allocated / planned / gap); it was
+  unreadable with more than three projects. The week table and the project filter are unchanged.
+- **A project must match its customer**: the project pickers on offers, invoices, contracts and trips list only the
+  chosen customer's projects (and projects without a customer), and the API refuses a mismatch with 422 (`Project belongs
+  to another customer`). A contract without a customer takes its project's customer, and accepting an offer into a
+  project of another customer is refused. Checked on offers, invoices, contracts and trips, and on the conversions
+  (offer to invoice, accepting an offer that creates a contract, invoice from time). Not checked: incoming offers,
+  allocations, contracts saved from a plan and bulk import. An offer that already has a project of another customer
+  (legacy data) must be corrected first (edit the offer so customer and project match) before it can be accepted (when
+  the offer has a plan) or converted; other edits of such a record are still allowed.
+- **Contract form without assignees**: the contract form no longer asks who works on a contract; a contract records only
+  what is owed to the customer. Existing assignments are kept; the planner's use of them is changed separately
+  (`docs/specs/project-capacity.md`).
+- **Import and export in Settings**: the "Import" and "Export" links (boss only) moved from the suppliers page to
+  Settings, under "Data & sync": "Data export and import" and "Import documents from another tool".
+- **Database migration `0013-trip_item_id`**: adds `expenses.trip_item_id`, which links a bill to a planned trip item.
+  An upgraded database can no longer be opened by alpha.4. Back up your data folder before upgrading; the app also
+  backs up automatically.
 
 ### Fixed
+- **Planner utilisation counts the allocations.** The "Utilisation" of a week (and of each project) was committed hours
+  over capacity and ignored the allocations, so an over-allocated person never showed more than 100 %. Utilisation is
+  now the larger of committed and allocated hours per day and project. The week table has a new "Allocated" column
+  (red above the capacity) and the API rows a new `allocated` field. Without allocations the numbers are unchanged.
+  Weeks with allocations can show a higher utilisation and a `tight` or `over` status that they did not show before.
+- **Planner numbers use the app's number format**: hours in the contract rows and tooltips were shown with a decimal
+  point (12.5 h) while the rest of the planner used the decimal comma; all planner numbers now show 12,5 h.
 - Planner: "Earliest start for an offer" skips vacation, sick and other absence days and public holidays of the
   assignee (a weekend start moves to the next workday), and counts a vacation drafted in the planner that is not yet
   applied. The result shows the weekday.
 - **Business trips failed with a server error in the installed packages** (Windows/Linux bundle and wheel): the rate
   tables and the checklist were not included. Creating or previewing a trip works again; a test now checks that every
   data file of the package is declared, and the smoke test previews a trip.
-- **Planner utilisation counts the allocations.** The "Utilisation" of a week (and of each project) was committed hours
-  over capacity and ignored the allocations, so an over-allocated person never showed more than 100 %. Utilisation is
-  now the larger of committed and allocated hours per day and project. The week table has a new "Allocated" column
-  (red above the capacity) and the API rows a new `allocated` field. Without allocations the numbers are unchanged.
-  Weeks with allocations can show a higher utilisation and a `tight` or `over` status that they did not show before.
-- The supplier list test waits for the reset list before typing into the search box (it failed intermittently in CI when the typing landed in the input that the re-render replaced).
-- Planner: hours in the contract rows and tooltips were shown with a decimal point (12.5 h) while the rest of the planner used the decimal comma; all planner numbers now use the app's number format (12,5 h).
-- A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
-- The randomized API suite no longer fails when a run crosses midnight: the model accepts the server's date stamp on the day before or after the call.
-- An offer, invoice, contract or trip can no longer be saved with a project of another customer: the project pickers list only the chosen customer's projects (and projects without a customer), and the API refuses a mismatch with 422 (`Project belongs to another customer`). Scope: checked on offers, invoices, contracts and trips, and on the conversions (offer to invoice, accepting an offer that creates a contract, invoice from time). Not checked: incoming offers, allocations, contracts saved from a plan and bulk import. An offer that already has a project of another customer (legacy data) must be corrected first (edit the offer so customer and project match) before it can be accepted (when the offer has a plan) or converted; other edits of such a record are still allowed.
-- The monkey e2e walk closes the dialogs that have their own Cancel/Close button (Allocations, two-factor) instead of getting stuck in them; this made the boss seed 7 walk save again (test-only).
-- The contract form no longer asks who works on a contract; a contract records only what is owed to the customer.
-  Existing assignments are kept, and the planner's use of them is changed separately (docs/specs/project-capacity.md).
-### Fixed
-- Contracts: a contract can no longer be entered for a project of another customer (refused with a 422); a contract
-  without a customer takes its project's customer. Accepting an offer into a project of another customer is refused.
-  Specification: `docs/specs/contract-items.md` (draft, architect sign-off pending).
-- Offers: accepting an offer now opens "What did the customer accept?", where you tick the items the customer accepted;
-  the contract keeps only those. All items are ticked by default.
+- A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents
+  still cannot be deleted).
+- The randomized API suite no longer fails when a run crosses midnight: the model accepts the server's date stamp on the
+  day before or after the call.
+- Browser test suite (test-only): the supplier list test waits for the reset list before typing into the search box
+  (it failed intermittently in CI), and the monkey e2e walk closes the dialogs that have their own Cancel/Close button
+  (Allocations, two-factor) instead of getting stuck in them.
 
 ## [0.4.0-alpha.4] - 2026-10-26
 
@@ -367,7 +384,8 @@ limitations and what is planned for the next alphas. Not for production bookkeep
 ## [0.1.0]
 - Initial version as *Timely*: time tracking, weekly goal, forecast, offers, invoices, expenses, tax estimates.
 
-[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.4...HEAD
+[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.5...HEAD
+[0.4.0-alpha.5]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.4...v0.4.0-alpha.5
 [0.4.0-alpha.4]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.3...v0.4.0-alpha.4
 [0.4.0-alpha.3]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.2...v0.4.0-alpha.3
 [0.4.0-alpha.2]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.1...v0.4.0-alpha.2
