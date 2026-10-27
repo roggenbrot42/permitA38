@@ -54,6 +54,8 @@ All notable changes to this project are documented here. The format is based on
 - The randomized API suite no longer fails when a run crosses midnight: the model accepts the server's date stamp on the day before or after the call.
 - An offer, invoice, contract or trip can no longer be saved with a project of another customer: the project pickers list only the chosen customer's projects (and projects without a customer), and the API refuses a mismatch with 422 (`Project belongs to another customer`). Scope: checked on offers, invoices, contracts and trips, and on the conversions (offer to invoice, accepting an offer that creates a contract, invoice from time). Not checked: incoming offers, allocations, contracts saved from a plan and bulk import. An offer that already has a project of another customer (legacy data) must be corrected first (edit the offer so customer and project match) before it can be accepted (when the offer has a plan) or converted; other edits of such a record are still allowed.
 - The monkey e2e walk closes the dialogs that have their own Cancel/Close button (Allocations, two-factor) instead of getting stuck in them; this made the boss seed 7 walk save again (test-only).
+- The contract form no longer asks who works on a contract; a contract records only what is owed to the customer.
+  Existing assignments are kept, and the planner's use of them is changed separately (docs/specs/project-capacity.md).
 
 ## [0.4.0-alpha.4] - 2026-10-26
 
