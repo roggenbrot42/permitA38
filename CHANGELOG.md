@@ -34,6 +34,7 @@ All notable changes to this project are documented here. The format is based on
 - **Contracts on the project page**: a Contracts card lists the project's contracts (period, hours, rate, status) with
   "+ New contract" (prefilled with the project and its customer) and a hint with the customer's contracts that have no
   project. Needs the contracts right; without write access the list is read-only.
+- The "Import" and "Export" links (boss only) moved from the suppliers page to Settings, under "Data & sync": "Data export and import" and "Import documents from another tool".
 
 ### Fixed
 - Planner: "Earliest start for an offer" skips vacation, sick and other absence days and public holidays of the
