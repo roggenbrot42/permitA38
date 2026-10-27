@@ -11,17 +11,17 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 
 pytest.importorskip("playwright.sync_api")
+import pathlib  # noqa: E402
+
 from playwright.sync_api import expect  # noqa: E402
 
 from tests.web.test_planner_per_project_ui import (  # noqa: E402
     ORIGIN,
+    PROJECTS,  # noqa: E402
     _json,
     _static,
     legacy_week,
 )
-from tests.web.test_planner_per_project_ui import PROJECTS  # noqa: E402
-
-import pathlib  # noqa: E402
 
 FIX = pathlib.Path(__file__).resolve().parent / "fixtures" / "subcontractors"
 
@@ -424,6 +424,7 @@ def test_supplier_list_shows_commitments_and_filters(browser):
     q = api.calls("GET", "suppliers")[-1][2]
     assert q["kind"] == ["person-capacity"] and q["active"] == ["true"]
     pg.select_option("#sup_kind", "")
+    expect(pg.locator("#sup-table tr[data-id]")).to_have_count(3)  # the reset list has rendered; typing before it would land in the replaced input
     pg.fill("#sup_q", "print")
     pg.press("#sup_q", "Enter")
     expect(pg.locator("#sup-table tr[data-id]")).to_have_count(1)
