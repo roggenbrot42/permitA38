@@ -33,15 +33,14 @@ marked *(verify)* in `docs/compliance.md` still need your tax adviser.
 - **Contracts on the project page**: a Contracts card lists the project's contracts (period, hours, rate, status) with
   "+ New contract" (prefilled with the project and its customer) and a hint with the customer's contracts that have no
   project. Needs the contracts right; without write access the list is read-only.
-- **Offer acceptance with items**: accepting an offer opens "What did the customer accept?", where you tick the items
-  the customer accepted; the contract keeps only those. All items are ticked by default. Specification:
-  `docs/specs/contract-items.md` (draft, architect sign-off pending).
 - **Planner remedies**: the "Allocate my capacity" button stays visible while planned time is still not covered, also
   when allocations exist. The "Not covered" banner offers "Allocate further capacity" and an "Allocate" button per
   project; planning warnings about a shortfall or an over-allocation get a short remedy line. The buttons need the
   planning write right.
 
 ### Changed
+- **Planner**: the timeline no longer has the per-project row of stacked bars (allocated / planned / gap); it was
+  unreadable with more than three projects. The week table and the project filter are unchanged.
 - **A project must match its customer**: the project pickers on offers, invoices, contracts and trips list only the
   chosen customer's projects (and projects without a customer), and the API refuses a mismatch with 422 (`Project belongs
   to another customer`). A contract without a customer takes its project's customer, and accepting an offer into a
