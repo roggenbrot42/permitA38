@@ -58,6 +58,7 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 | Item | Status |
 |---|---|
 | **Accounting** (chart of accounts SKR03/SKR04, journal, receipts) and the **German VAT return (UStVA)** | spec: [`specs/ustva.md`](specs/ustva.md); boxes need the tax adviser |
+| **Time tracking element** on the Today page: one row with description, project and task, manual entry (start, stop, date, duration, Add) and timer mode, with a click on the timer to show the earnings instead of the time | spec: [`specs/time-tracking-element.md`](specs/time-tracking-element.md); Light review tier |
 
 ## v0.4.0-alpha.6
 

@@ -5,13 +5,17 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+- The planner timeline no longer has the per-project row of stacked bars (allocated / planned / gap); it was unreadable with more than three projects. The week table and the project filter are unchanged.
 ### Fixed
 - **Planner utilisation counts the allocations.** The "Utilisation" of a week (and of each project) was committed hours
   over capacity and ignored the allocations, so an over-allocated person never showed more than 100 %. Utilisation is
   now the larger of committed and allocated hours per day and project. The week table has a new "Allocated" column
   (red above the capacity) and the API rows a new `allocated` field. Without allocations the numbers are unchanged.
   Weeks with allocations can show a higher utilisation and a `tight` or `over` status that they did not show before.
+- Planner: hours in the contract rows and tooltips were shown with a decimal point (12.5 h) while the rest of the planner used the decimal comma; all planner numbers now use the app's number format (12,5 h).
 - A draft offer or invoice can be deleted again: the document editor has a "Delete draft" button (numbered documents still cannot be deleted).
+- An offer, invoice, contract or trip can no longer be saved with a project of another customer: the project pickers list only the chosen customer's projects (and projects without a customer), and the API refuses a mismatch with 422 (`Project belongs to another customer`). Scope: checked on offers, invoices, contracts and trips, and on the conversions (offer to invoice, accepting an offer that creates a contract, invoice from time). Not checked: incoming offers, allocations, contracts saved from a plan and bulk import. An offer that already has a project of another customer (legacy data) must be corrected first (edit the offer so customer and project match) before it can be accepted (when the offer has a plan) or converted; other edits of such a record are still allowed.
 
 ## [0.4.0-alpha.4] - 2026-10-26
 
