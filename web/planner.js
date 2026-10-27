@@ -165,7 +165,7 @@
       const sel = P.sel === key ? ' sel' : '';
       const otherProject = P.project && (P.project === 'unassigned' ? !!it.project_id : it.project_id !== P.project);
       const dim = mine && !otherProject ? '' : ' dim';
-      const hours = c.hours_per_week ? `${c.hours_per_week} h/week` : `${c.total_hours || 0} h total`;
+      const hours = c.hours_per_week ? `${num(c.hours_per_week, 2)} h/week` : `${num(c.total_hours || 0, 2)} h total`;
       const row = `<div class="pln-row${dim}"><div class="pln-label"><button type="button" class="pln-pick${sel}" data-a="plnSelect" data-key="${esc(key)}">${esc(it.title)}</button><div class="small muted">${esc(hours)}</div></div>
         <div class="pln-lane" data-lane="com" style="width:${horizon() * DW}px">${cells()}${bar(c.start, c.end, `${it.sub}${P.com[key] ? ' draft' : ''}${sel}`, `${it.title}: ${fmtDate(c.start)} – ${fmtDate(c.end)}, ${hours}`, { kind: 'com', key, id: key })}</div></div>`;
       html += row;
@@ -214,24 +214,7 @@
     const cap = `<div class="pln-row"><div class="pln-label">Capacity</div><div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => `<span class="pln-week" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px" title="Week of ${esc(fmtDate(w.week))}">${num(w.capacity, 0)} h</span>`).join('')}</div></div>`;
     const util = `<div class="pln-row"><div class="pln-label">Utilisation (worst case)</div><div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => `<button type="button" class="pln-week util ${statusClass(w.status)}${w.delta > 0 ? ' worse' : w.delta < 0 ? ' better' : ''}" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px" data-a="plnWhy" data-i="${i}" aria-label="Week of ${esc(fmtDate(w.week))}: ${pct(w.utilisation)}, ${esc(w.status)}">${pct(w.utilisation)}</button>`).join('')}</div></div>`;
     const busy = W.some(w => w.busy_hours) ? `<div class="pln-row"><div class="pln-label">Calendar busy</div><div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => `<span class="pln-week" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px">${w.busy_hours ? num(w.busy_hours, 1) + ' h' : ''}</span>`).join('')}</div></div>` : '';
-    return cap + util + busy + projectStack(W);
-  }
-  // One small column per project and week: outline = allocated, fill = planned, red part = not covered (server numbers, scaled to fit).
-  function projectStack(W) {
-    if (!W.some(w => w.projects && w.projects.length)) return '';
-    const mx = Math.max(1, ...W.flatMap(w => (w.projects || []).map(p => Math.max(p.capacity, ppPlanned(p)))));
-    const H = 28;
-    const cols = (w, i) => {
-      const list = (w.projects || []).filter(p => p.capacity || p.confirmed || p.binding_offers || p.gap);
-      const cw = Math.max(3, Math.floor((7 * DW - 4) / Math.max(list.length, 1)) - 1);
-      return `<span class="pln-stack" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px">${list.map(p => {
-        const planned = ppPlanned(p);
-        const d = p.delta ? `; draft ${p.delta > 0 ? '+' : ''}${num(p.delta, 1)} h gap` : '';
-        const tip = `${p.name}: allocated ${h1(p.capacity)}, planned ${h1(planned)}${p.gap > 0 ? `, not covered ${h1(p.gap)}` : ''}${d}`;
-        return `<i class="pln-pbar${p.delta > 0 ? ' worse' : p.delta < 0 ? ' better' : ''}" style="width:${cw}px" title="${esc(tip)}"><b class="cap" style="height:${p.capacity / mx * H}px"></b><b class="plan" style="height:${planned / mx * H}px"></b>${p.gap > 0 ? `<b class="gap" style="height:${Math.min(p.gap, planned) / mx * H}px;bottom:${(planned - Math.min(p.gap, planned)) / mx * H}px"></b>` : ''}</i>`;
-      }).join('')}</span>`;
-    };
-    return `<div class="pln-row"><div class="pln-label">Per project<div class="small muted">allocated / planned / gap</div></div><div class="pln-lane pln-weeks pln-stacks" style="width:${horizon() * DW}px">${W.map(cols).join('')}</div></div>`;
+    return cap + util + busy;
   }
   function headerRow() {
     const W = weekRows();
@@ -534,7 +517,7 @@
   A.plnProject = el => { P.project = el.value; lsSet('plnProject', P.project); P.day = null; P.dayWeek = null; schedule(); };
   A.plnAllocHours = el => {
     const v = +el.value;
-    if (!(v >= 0.25 && v <= 80)) { toast('Hours per week must be between 0.25 and 80', true); return paint(); }
+    if (!(v >= 0.25 && v <= 80)) { toast(`Hours per week must be between ${num(0.25, 2)} and ${num(80, 0)}`, true); return paint(); }
     editAlloc(el.dataset.key, { hours_per_week: v });
     schedule();
   };
@@ -543,7 +526,7 @@
     const project_id = document.getElementById('plnAProj').value, start = document.getElementById('plnAFrom').value, end = document.getElementById('plnATo').value, hours = +document.getElementById('plnAHrs').value;
     if (!project_id || !start || !end) return toast('Choose a project and both dates', true);
     if (end < start) return toast('The end is before the start', true);
-    if (!(hours >= 0.25 && hours <= 80)) return toast('Hours per week must be between 0.25 and 80', true);
+    if (!(hours >= 0.25 && hours <= 80)) return toast(`Hours per week must be between ${num(0.25, 2)} and ${num(80, 0)}`, true);
     P.alloc['n:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)] = { user_id: uid, project_id, start, end, hours_per_week: hours };
     schedule();
   };
