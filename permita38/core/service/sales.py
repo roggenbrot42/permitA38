@@ -10,6 +10,7 @@ from permita38.core.settings import effective_settings
 
 from .numbering import NumberingService
 from .plan_service import PlanningService
+from .project_customer import check_project_customer
 from .records import RecordService
 
 
@@ -103,6 +104,7 @@ class SalesService:
             for k in ("hours_per_week", "total_hours", "rate"):
                 if plan.get(k) is not None:
                     c[k] = plan[k]
+            check_project_customer(self.store, c, None)
             out["contract"] = self.store.save("contracts", c)
         return out
 
@@ -111,6 +113,7 @@ class SalesService:
         keys = ("customer_id", "project_id", "lines", "template_id", "vat_rate", "language", "title", "reference")
         inv = {k: o[k] for k in keys if o.get(k) is not None}
         inv.update(date=date.today().isoformat(), offer_id=rid)
+        check_project_customer(self.store, inv, None)
         return self.store.save("invoices", self.records.prepare_document(inv, None))
 
     def invoice_from_time(
@@ -159,6 +162,7 @@ class SalesService:
         if project_id:
             inv["project_id"] = project_id
         inv = {k: v for k, v in inv.items() if v is not None}
+        check_project_customer(self.store, inv, None)
         with self.store.transaction():  # the invoice and the "billed" marks on the entries succeed or fail together
             inv = self.store.save("invoices", self.records.prepare_document(inv, None))
             for e in picked:

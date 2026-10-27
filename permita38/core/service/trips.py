@@ -17,6 +17,8 @@ from permita38.core.repository import ID_RE, Repository
 from permita38.core.rights import Scope
 from permita38.core.trip_rates import RateTableMissing, load_checklist, load_rates
 
+from .project_customer import check_project_customer
+
 #: figures computed by the server: never taken from the request
 _COMPUTED = ("allowance_total", "mileage_km", "mileage_total", "rules_version", "days")
 #: response-only fields: ignored when a client sends them
@@ -165,6 +167,7 @@ class TripService:
         data = {k: v for k, v in body.items() if k not in ("id", "created", "updated", *_COMPUTED, *_RESPONSE_ONLY)}
         data["user_id"] = owner
         self._check_refs(data)
+        check_project_customer(self.store, data, old)
         figures = self._figures(data)
         data.update(
             allowance_total=figures["allowance_total"],

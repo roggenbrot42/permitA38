@@ -53,6 +53,7 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); } td.nu
 .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--line); } .tabs a { padding: 8px 14px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tabs a.on { color: var(--accent); border-color: var(--accent); font-weight: 600; }
 .timer { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; } .timer .clock { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 190px; }
+.timer button.clock { background: none; border: 0; padding: 0; color: inherit; cursor: pointer; } .timer button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
 .days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-top: 14px; }
 .day { text-align: center; font-size: 12px; color: var(--muted); } .day .col { height: 70px; background: var(--bg); border-radius: 8px; position: relative; overflow: hidden; margin-bottom: 4px; }
 .day .col > div { position: absolute; bottom: 0; left: 0; right: 0; background: var(--accent); opacity: .85; } .day .col > span { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--muted); opacity: .6; }
