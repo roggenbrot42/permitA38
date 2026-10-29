@@ -32,10 +32,13 @@ dev = [
     "hypothesis>=6.100",
     "pytest-xdist>=3.5",  # the randomized and browser suites run on several workers (make test-random / test-web)
     "playwright==1.64.1",
+    "mcp>=2.3,<3",  # tests/backend/test_mcp_*.py (those needing the SDK skip without it)
     "ruff",
     "mypy",
     "types-PyYAML",
 ]
+# MCP server (docs/specs/mcp-server.md): `pip install permita38[mcp]`, then `permita38 mcp`
+mcp = ["mcp>=2.3,<3", "httpx>=0.27"]
 # tools used by the release workflow and scripts/ (not needed to run or develop the app)
 release = ["build", "twine", "pyinstaller", "cyclonedx-bom", "pytest-cov", "packaging"]
 
