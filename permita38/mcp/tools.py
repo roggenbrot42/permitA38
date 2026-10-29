@@ -327,7 +327,9 @@ async def expenses_list(
     return _page(rows, lambda r: {**project(r, EXPENSE), **_lines(r, False)}, limit)
 
 
-async def trips_list(api: ApiClient, from_date: Day | None = None, to_date: Day | None = None, limit: Limit = 20) -> dict:
+async def trips_list(
+    api: ApiClient, from_date: Day | None = None, to_date: Day | None = None, limit: Limit = 20
+) -> dict:
     """List business trips that overlap the date range, newest first."""
     lo, hi = _check_day(from_date, "from_date"), _check_day(to_date, "to_date")
 

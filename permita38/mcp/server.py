@@ -18,8 +18,8 @@ from mcp_types import ToolAnnotations
 from permita38 import __version__
 from permita38.mcp.client import ApiClient, ApiError, HttpApiClient
 from permita38.mcp.sanitize import clean_text
-from permita38.mcp.tools import ToolFailure, readable
 from permita38.mcp.tools import Tool as ToolDef
+from permita38.mcp.tools import ToolFailure, readable
 
 log = logging.getLogger("permita38.mcp")
 
@@ -103,8 +103,8 @@ class Session:
 
 def describe(me: dict[str, Any]) -> str:
     """One stderr line about the token (label, expiry, read-only, readable areas); never the token itself."""
-    auth = me.get("auth") if isinstance(me.get("auth"), dict) else {}
-    perms = me.get("permissions") if isinstance(me.get("permissions"), dict) else {}
+    auth: dict[str, Any] = me.get("auth") or {}
+    perms: dict[str, Any] = me.get("permissions") or {}
     areas = sorted(a for a, rw in perms.items() if isinstance(rw, dict) and rw.get("read") in ("limited", "all"))
     expires = auth.get("expires_at")
     when = time.strftime("%Y-%m-%d", time.gmtime(expires)) if isinstance(expires, int) else "unknown"

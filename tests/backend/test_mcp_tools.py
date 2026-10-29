@@ -227,8 +227,6 @@ def test_client_limits_concurrency_to_four():
 # ------------------------------------------------------------------ against a real app
 @pytest.fixture
 def make_api(app, client):
-    clients = []
-
     def make(token: str) -> HttpApiClient:
         return HttpApiClient(URL, token, transport=httpx.ASGITransport(app=app))
 
@@ -272,7 +270,9 @@ def seeded(boss_client):
     )
     assert inv.status_code == 200, inv.text
     c.post("/api/offers", json={"customer_id": cust["id"], "date": "2026-02-01", "title": "Offer"})
-    c.post("/api/expenses", json={"date": "2026-03-04", "net": 10.5, "vat": 2.0, "vendor": "Shop", "category": "Office"})
+    c.post(
+        "/api/expenses", json={"date": "2026-03-04", "net": 10.5, "vat": 2.0, "vendor": "Shop", "category": "Office"}
+    )
     return {"customer": cust, "project": proj, "invoice": inv.json()}
 
 
@@ -305,7 +305,9 @@ def test_read_tools_return_projections_inside_the_envelope(make_api, boss_client
         il = await tools.invoices_list(api, from_date="2026-03-01")
         assert il["total"] == 1 and il["items"][0]["line_count"] == 1 and "lines" not in il["items"][0]
         ig = await tools.invoices_get(api, seeded["invoice"]["id"])
-        assert ig["lines"] == [{"description": "Consulting", "qty": "2.0", "unit": "h", "price": "90.00", "vat": "19.0"}]
+        assert ig["lines"] == [
+            {"description": "Consulting", "qty": "2.0", "unit": "h", "price": "90.00", "vat": "19.0"}
+        ]
         assert (await tools.invoices_list(api, status="paid"))["items"] == []
 
         assert (await tools.offers_list(api))["total"] == 1
