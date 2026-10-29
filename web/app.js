@@ -62,7 +62,7 @@ function fieldHTML(f, v) {
   if (f.t === 'select') inner = `<select id="${id}">${(f.o || []).map(o => { const [ov, ol] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(ov)}" ${String(ov) === String(val) ? 'selected' : ''}>${esc(ol)}</option>`; }).join('')}</select>`;
   else if (f.t === 'area') inner = `<textarea id="${id}" rows="${f.rows || 3}" placeholder="${esc(f.ph || '')}">${esc(val)}</textarea>`;
   else if (f.t === 'check') return `<div class="field"><label><input type="checkbox" id="${id}" ${val === true || val === 'true' ? 'checked' : ''}> ${esc(f.l)}</label>${f.h ? `<div class="muted small">${esc(f.h)}</div>` : ''}</div>`;
-  else inner = `<input id="${id}" type="${f.t || 'text'}" value="${esc(val)}" placeholder="${esc(f.ph || '')}" ${f.step ? `step="${f.step}"` : f.t === 'number' ? 'step="any"' : ''}>`;
+  else inner = `<input id="${id}" type="${f.t || 'text'}" value="${esc(val)}" placeholder="${esc(f.ph || '')}" ${f.max ? `max="${f.max}"` : ''} ${f.step ? `step="${f.step}"` : f.t === 'number' ? 'step="any"' : ''}>`;
   return `<div class="field"><label for="${id}">${esc(f.l)}</label>${inner}${f.h ? `<div class="muted small">${esc(f.h)}</div>` : ''}</div>`;
 }
 function formHTML(fields, vals) {
@@ -134,10 +134,10 @@ function refreshProjectSelect(sel, customerId) {
 const taskOptions = pid => [['', '— no task —'], ...(S.d.tasks || []).filter(t => t.project_id === pid).map(t => [t.id, t.name])];
 
 function entryForm(e = {}, after) {
-  const vals = { date: todayISO(), billable: true, ...e, dur: e.minutes ? hm(e.minutes / 60) : '' };
+  const vals = { date: todayISO(), billable: true, user_id: S.me.id, ...e, dur: e.minutes ? hm(e.minutes / 60) : '' };
   const users = scopeOf('time', 'write') === 'all' ? [{ k: 'user_id', l: 'Who', t: 'select', o: (S.d.users || []).filter(u => u.active !== false).map(u => [u.id, u.name]), def: S.me.id }] : [];
   const fields = [...users,
-    { k: 'date', l: 'Date', t: 'date', row: 1 }, { k: 'start', l: 'From', t: 'time', row: 1 }, { k: 'end', l: 'To', t: 'time', row: 1 }, { k: 'dur', l: 'or duration (1:30, 1.5, 90m)', row: 1 },
+    { k: 'date', l: 'Date', t: 'date', row: 1, max: todayISO() }, { k: 'start', l: 'From', t: 'time', row: 1 }, { k: 'end', l: 'To', t: 'time', row: 1 }, { k: 'dur', l: 'or duration (1:30, 1.5, 90m)', row: 1 },
     { k: 'project_id', l: 'Project', t: 'select', o: projectOptions() },
     { k: 'task_id', l: 'Task', t: 'select', o: taskOptions(vals.project_id) },
     { k: 'note', l: 'What did you do?', t: 'area', rows: 2 },
@@ -148,11 +148,12 @@ function entryForm(e = {}, after) {
       let min = parseDur(v.dur);
       if ((min === null || isNaN(min)) && v.start && v.end) { const [a, b] = [v.start, v.end].map(x => +x.slice(0, 2) * 60 + +x.slice(3)); min = b - a; if (min <= 0) min += 1440; }
       if (!v.date) throw new Error('Pick a date');
+      if (v.date > todayISO()) throw new Error('Time cannot be added for a future date');
       if (min === null || isNaN(min) || min <= 0) throw new Error('Enter from/to times or a duration');
       if (min > 1440) throw new Error('A time entry can be at most 24 hours');
       v.minutes = min; delete v.dur;
       await save('entries', { ...v, project_id: v.project_id || null, task_id: v.task_id || null });
-      after && after();
+      after && after(v);
     },
     del: e.id ? async () => { await api('DELETE', 'entries/' + e.id); await loadAll(['entries']); after && after(); } : null
   });
@@ -337,7 +338,10 @@ function entryRow(e, projects) {
   return `<tr class="click" data-a="editEntry" data-id="${e.id}"><td>${p ? `<span class="dot" style="background:${esc(p.color || '#888')}"></span><b>${esc(p.name)}</b>` : '<span class="muted">no project</span>'}${e.task_id ? ' · ' + esc(nameOf('tasks', e.task_id)) : ''}<div class="small muted">${esc(e.note || '')}</div></td>
     <td class="small muted nowrap">${e.start ? esc(e.start) + '–' + esc(e.end || '') : ''}</td><td class="num"><b>${hm(e.minutes / 60)}</b></td><td>${e.invoice_id ? '<span class="pill good">billed</span>' : e.billable === false ? '<span class="pill">non-billable</span>' : ''}</td></tr>`;
 }
-A.addTime = () => entryForm({}, render);
+A.addTime = () => entryForm({}, v => {   // show the new entry: Today lists only today's own entries, so jump to its week otherwise
+  const to = !v || (v.date === todayISO() && v.user_id === S.me.id) ? null : `#/time/${mondayOf(v.date)}/${v.user_id}`;
+  if (to && location.hash !== to) location.hash = to; else render();
+});
 A.editEntry = el => entryForm(S.d.entries.find(e => e.id === el.dataset.id), render);
 A.timerProj = () => { localStorage.lastProj = projIdOf(); $('#t_task').innerHTML = taskOptions(localStorage.lastProj).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join(''); timerUpd(); };
 A.timerTask = () => timerUpd();

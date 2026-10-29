@@ -41,7 +41,7 @@ input, select, textarea { font: inherit; padding: 8px 10px; border: 1px solid va
 input:focus, select:focus, textarea:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 input[type=checkbox] { width: auto; } input[type=color] { padding: 2px; height: 38px; }
 label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-.field { margin-bottom: 12px; } .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; } .row > * { flex: 1; min-width: 120px; } .row > .auto { flex: none; } .row.tight > * { flex: none; min-width: 0; }
+.field { margin-bottom: 12px; } .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; } .row > * { flex: 1; min-width: 120px; } .row > .field:has(input[type=date]) { flex: 2 1 170px; min-width: 170px; } .row > .auto { flex: none; } .row.tight > * { flex: none; min-width: 0; }
 table { width: 100%; border-collapse: collapse; } th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; } tr:last-child td { border-bottom: 0; }
 tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); } td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
