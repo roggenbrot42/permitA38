@@ -7,7 +7,7 @@ remove it.
 
 import json
 import unicodedata
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
 TEXT_MAX = 500  # free-text fields (notes, title, intro ...)
@@ -47,7 +47,7 @@ def decimal_str(value: Any, places: int | None = None) -> str | None:
     if not number.is_finite():
         return None
     if places is not None:
-        number = number.quantize(Decimal(1).scaleb(-places))
+        number = number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
     return format(number, "f")
 
 
