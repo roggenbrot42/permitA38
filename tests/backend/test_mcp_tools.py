@@ -25,6 +25,19 @@ def run(coro):
 
 
 # ------------------------------------------------------------------ sanitize
+def test_strip_chars_removes_variation_selectors_and_blank_fillers():
+    dirty = "a\ufe0fb\U000e0100c\u034fd\u3164e\u2800f\u115fg\u1160h\uffa0i"
+    assert strip_chars(dirty) == "abcdefghi"
+
+
+def test_decimal_str_refuses_huge_and_unrepresentable_numbers():
+    assert decimal_str("1e999999999") is None
+    assert decimal_str(1e15) is None and decimal_str("999999999999999.99", 2) == "999999999999999.99"
+    assert decimal_str("1E+30", 2) is None
+    assert decimal_str("1e-400") is None
+    assert decimal_str("123456789012345678", 2) is None
+
+
 def test_strip_chars_removes_control_zero_width_and_bidi():
     dirty = "a\x00b\x07c​d‮e⁦f﻿g h\ni\tj"
     assert strip_chars(dirty) == "abcdefgh\ni\tj"
@@ -85,6 +98,18 @@ def test_projection_ignores_wrong_types():
 
 # ------------------------------------------------------------------ registry
 def test_every_tool_names_its_area_and_forbidden_tools_are_absent():
+    assert FORBIDDEN_TOOLS
+    assert {
+        "invoices_finalise",
+        "invoices_delete",
+        "customers_delete",
+        "settings_update",
+        "tokens_create",
+        "attachments_download",
+        "attachments_upload",
+        "backup_create",
+        "import_run",
+    } <= set(FORBIDDEN_TOOLS)
     assert not set(FORBIDDEN_TOOLS) & set(TOOLS)
     for name, tool in TOOLS.items():
         assert name == tool.name and name.replace("_", "").isalpha() and name == name.lower()
@@ -144,6 +169,42 @@ def test_token_file_must_not_be_readable_by_others(tmp_path):
         assert "pat_" not in str(e.value)
     f.chmod(stat.S_IRUSR)
     assert load_token(f, {}).startswith("pat_")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX symlinks and modes")
+def test_token_file_symlink_directory_and_bad_bytes_are_rejected(tmp_path):
+    real = tmp_path / "real"
+    real.write_text("pat_" + "B" * 43)
+    real.chmod(0o600)
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    with pytest.raises(ValueError, match="cannot read the token file"):
+        load_token(link, {})
+    with pytest.raises(ValueError, match="not a regular file"):
+        load_token(tmp_path, {})
+    bad = tmp_path / "bad"
+    bad.write_bytes(b"pat_\xff\xfe" + b"B" * 43)
+    bad.chmod(0o600)
+    with pytest.raises(ValueError) as e:
+        load_token(bad, {})
+    assert "xff" not in str(e.value) and "codec" not in str(e.value) and "pat_" not in str(e.value)
+
+
+def test_check_url_rejects_a_bad_port():
+    for bad in ("http://127.0.0.1:abc", "http://127.0.0.1:99999", "https://example.org:-1"):
+        with pytest.raises(ValueError, match="port"):
+            check_url(bad)
+
+
+def test_ids_allow_api_style_ids_but_no_path_characters():
+    from pydantic import TypeAdapter
+
+    ids = TypeAdapter(tools.Id)
+    for good in ("a1b2c3d4", "ABC_def-9", "x"):
+        assert ids.validate_python(good) == good
+    for bad in ("../../auth/me", "a/b", "a?x=1", "", "x" * 65, "a b", "a%2fb"):
+        with pytest.raises(ValueError):
+            ids.validate_python(bad)
 
 
 def test_load_token_skips_mode_check_off_posix(tmp_path):
@@ -306,8 +367,16 @@ def test_read_tools_return_projections_inside_the_envelope(make_api, boss_client
         assert il["total"] == 1 and il["items"][0]["line_count"] == 1 and "lines" not in il["items"][0]
         ig = await tools.invoices_get(api, seeded["invoice"]["id"])
         assert ig["lines"] == [
-            {"description": "Consulting", "qty": "2.0", "unit": "h", "price": "90.00", "vat": "19.0"}
+            {
+                "description": "Consulting",
+                "qty": "2.0",
+                "unit": "h",
+                "price": "90.00",
+                "vat": "19.0",
+                "amount": "180.00",
+            }
         ]
+        assert "total" not in ig and "net" not in ig  # no totals computed here (money rule)
         assert (await tools.invoices_list(api, status="paid"))["items"] == []
 
         assert (await tools.offers_list(api))["total"] == 1
@@ -332,10 +401,65 @@ def test_planner_summary(make_api, boss_client):
         assert len(res["weeks"]) == 3 and res["untrusted_data"] is True
         w = res["weeks"][0]
         assert w["week"].count("-W") == 1 and w["capacity_h"] == "40.0" and w["over_capacity"] is False
-        assert set(res["forecast"]) == {"basis", "revenue"}
+        assert set(res["forecast"]) == {"basis", "contracted_revenue", "offer_revenue", "assumed_revenue"}
+        assert "revenue" not in res["forecast"]
         await api.aclose()
 
     run(go())
+
+
+def test_planner_summary_sums_revenue_without_floats():
+    class Fake:
+        async def get(self, path, params=None):
+            assert path == "/api/forecast" and params["by_project"] == 0 and params["offers"] == 1
+            wk = {"week": "2026-03-02", "capacity": 40, "confirmed": 0.1, "binding_offers": 0.1, "expected_offers": 0.2}
+            return {
+                "weeks": [
+                    {
+                        **wk,
+                        "contracted_revenue": 0.1,
+                        "offer_revenue": 0.1,
+                        "intended_revenue": 0.1,
+                        "basis": "intended",
+                    },
+                    {
+                        **wk,
+                        "contracted_revenue": 0.2,
+                        "offer_revenue": 0.2,
+                        "intended_revenue": 0.2,
+                        "basis": "intended",
+                    },
+                ]
+            }
+
+    res = run(tools.planner_summary(Fake(), weeks=2))
+    assert res["forecast"] == {
+        "basis": "intended",
+        "contracted_revenue": "0.30",  # 0.1 + 0.2 in floats is 0.30000000000000004
+        "offer_revenue": "0.30",
+        "assumed_revenue": "0.30",
+    }
+    assert res["weeks"][0]["tentative_h"] == "0.3" and res["weeks"][0]["planned_h"] == "0.1"
+
+    class WithTotals(Fake):
+        async def get(self, path, params=None):
+            data = await super().get(path, params)
+            data["totals"] = {"contracted_revenue": 5, "offer_revenue": 6, "assumed_revenue": 7.5}
+            return data
+
+    res = run(tools.planner_summary(WithTotals(), weeks=2))
+    assert res["forecast"]["contracted_revenue"] == "5.00" and res["forecast"]["assumed_revenue"] == "7.50"
+
+
+def test_trips_without_a_start_are_excluded_from_a_range():
+    class Fake:
+        async def get(self, path, params=None):
+            return [{"id": "a", "title": "No date"}, {"id": "b", "start": "2026-03-05", "end": "2026-03-06"}]
+
+    both = run(tools.trips_list(Fake()))
+    assert both["total"] == 2
+    ranged = run(tools.trips_list(Fake(), from_date="2026-03-01", to_date="2026-03-31"))
+    assert [t["id"] for t in ranged["items"]] == ["b"]
 
 
 def test_argument_checks(make_api, boss_client):
@@ -407,6 +531,23 @@ def test_revoked_and_expired_tokens_give_clean_errors(app, make_api, boss_client
             await tools.whoami(api)
         assert e.value.status == 401 and "invalid, expired or revoked" in e.value.message
         assert token not in e.value.message
+        await api.aclose()
+
+    run(go())
+
+
+def test_expired_token_gives_a_clean_error(app, make_api, boss_client):
+    token = new_token(boss_client)
+    store = app.state.services.store
+    row = store.list("api_tokens")[0]
+    store.save("api_tokens", {**row, "expires_at": 1_000_000}, touch=False)
+
+    async def go():
+        api = make_api(token)
+        with pytest.raises(ApiError) as e:
+            await tools.whoami(api)
+        assert e.value.status == 401 and "invalid, expired or revoked" in e.value.message
+        assert token not in e.value.message and token[4:] not in e.value.message
         await api.aclose()
 
     run(go())
