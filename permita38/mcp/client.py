@@ -9,6 +9,7 @@ import ipaddress
 import logging
 import os
 import re
+import stat
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol
@@ -47,6 +48,10 @@ def check_url(url: str) -> str:
         raise ValueError("PERMITA38_URL must be an http(s) URL such as http://127.0.0.1:8765")
     if parts.username or parts.password or parts.query or parts.fragment:
         raise ValueError("PERMITA38_URL must not contain credentials, a query or a fragment")
+    try:
+        parts.port  # noqa: B018 - raises ValueError for a non-numeric or out-of-range port
+    except ValueError:
+        raise ValueError("PERMITA38_URL has an invalid port") from None
     if parts.scheme == "http" and not _is_loopback(parts.hostname):
         raise ValueError("PERMITA38_URL: plain http is only allowed for 127.0.0.1, ::1 and localhost; use https")
     return url.rstrip("/")
@@ -133,15 +138,34 @@ def load_token(token_file: Path | None, environ: Mapping[str, str], posix: bool 
     contain the token."""
     posix = os.name == "posix" if posix is None else posix
     if token_file is not None:
-        try:
-            mode = token_file.stat().st_mode
-            raw = token_file.read_text(encoding="utf-8")
-        except OSError as e:
-            raise ValueError(f"cannot read the token file: {e.strerror or 'error'}") from None
-        if posix and mode & 0o077:
-            raise ValueError(f"the token file {token_file} is accessible to other users; run: chmod 600 {token_file}")
-        return check_token(raw)
+        return check_token(_read_token_file(token_file, posix))
     raw = environ.get("PERMITA38_TOKEN", "")
     if not raw.strip():
         raise ValueError("no token: set PERMITA38_TOKEN or use --token-file PATH (a token is created in the web app)")
     return check_token(raw)
+
+
+def _read_token_file(path: Path, posix: bool) -> str:
+    """Open without following a symlink, check the opened file (regular, no group/other bits) and only then read."""
+    flags = os.O_RDONLY | (getattr(os, "O_NOFOLLOW", 0) if posix else 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        raise ValueError("cannot read the token file (missing, unreadable or a symbolic link)") from None
+    try:
+        try:
+            info = os.fstat(fd)
+        except OSError:
+            raise ValueError("cannot read the token file") from None
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("the token file is not a regular file")
+        if posix and info.st_mode & 0o077:
+            raise ValueError(f"the token file {path} is accessible to other users; run: chmod 600 {path}")
+        try:
+            with os.fdopen(fd, "rb", closefd=False) as f:
+                return f.read(4096).decode("utf-8")
+        except (ValueError, OSError):
+            # one fixed message: no byte details, nothing derived from the content
+            raise ValueError("cannot read the token file (it must be plain UTF-8 text)") from None
+    finally:
+        os.close(fd)

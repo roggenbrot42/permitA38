@@ -19,11 +19,22 @@ MARK = "… [truncated]"
 #: Cs surrogates, Zl/Zp line and paragraph separators
 _DROP = {"Cc", "Cf", "Co", "Cs", "Zl", "Zp", "Cn"}
 _KEEP = {"\n", "\t"}
+#: invisible or blank-looking characters in other categories (variation selectors, joiners, fillers, braille blank)
+_INVISIBLE = (
+    {chr(c) for c in range(0xFE00, 0xFE10)}
+    | {chr(c) for c in range(0xE0100, 0xE01F0)}
+    | {"\u034f", "\u3164", "\u2800", "\u115f", "\u1160", "\uffa0"}
+)
+#: numbers at or above this size (or with a larger exponent) are not shown
+_MAX_ABS = Decimal(10) ** 15
+_MAX_EXP = 20
 
 
 def strip_chars(value: str) -> str:
     """The text without control, zero-width and bidi characters (newline and tab stay)."""
-    return "".join(ch for ch in value if ch in _KEEP or unicodedata.category(ch) not in _DROP)
+    return "".join(
+        ch for ch in value if ch in _KEEP or (ch not in _INVISIBLE and unicodedata.category(ch) not in _DROP)
+    )
 
 
 def clean_text(value: Any, limit: int = TEXT_MAX) -> str | None:
@@ -46,8 +57,16 @@ def decimal_str(value: Any, places: int | None = None) -> str | None:
         return None
     if not number.is_finite():
         return None
+    # decide on the exponent first: arithmetic on a huge exponent can overflow
+    if number != 0 and not -_MAX_EXP <= number.adjusted() <= _MAX_EXP:
+        return None
+    if abs(number) >= _MAX_ABS:
+        return None
     if places is not None:
-        number = number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+        try:
+            number = number.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP)
+        except InvalidOperation:
+            return None
     return format(number, "f")
 
 
