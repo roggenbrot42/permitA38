@@ -9,6 +9,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Any
 
 from pydantic import Field
@@ -22,7 +23,7 @@ DATA_NOTE = (
 )
 MAX_RANGE_DAYS = 92
 
-Id = Annotated[str, Field(pattern=r"^[0-9a-z]{6,32}$", description="record id")]
+Id = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,64}$", description="record id")]
 Day = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$", description="date, YYYY-MM-DD")]
 Limit = Annotated[int, Field(ge=1, le=ITEMS_MAX, description="maximum number of items (1-50)")]
 Word = Annotated[str, Field(max_length=100)]
@@ -99,7 +100,7 @@ DOCUMENT: Spec = {
     "vat_rate": "d",
     "offer_id": "s",
 }
-LINE: Spec = {"description": "s", "qty": "d", "unit": "s", "price": "m", "vat": "d"}
+LINE: Spec = {"description": "s", "qty": "d", "unit": "s", "price": "m", "vat": "d", "amount": "m"}
 EXPENSE: Spec = {
     "id": "s",
     "date": "s",
@@ -295,7 +296,7 @@ async def invoices_get(api: ApiClient, id: Id) -> dict:
 
 async def offers_list(
     api: ApiClient,
-    status: Annotated[Word | None, Field(description="for example draft, sent, accepted, declined")] = None,
+    status: Annotated[Word | None, Field(description="for example draft, sent, accepted, rejected")] = None,
     customer_id: Id | None = None,
     limit: Limit = 20,
 ) -> dict:
@@ -335,6 +336,8 @@ async def trips_list(
 
     def overlaps(trip: dict) -> bool:
         start, end = _day(trip.get("start")), _day(trip.get("end")) or _day(trip.get("start"))
+        if (lo or hi) and not start:
+            return False
         return not ((hi and start and start > hi) or (lo and end and end < lo))
 
     rows = [r for r in _records(await api.get("/api/trips")) if overlaps(r)]
@@ -342,16 +345,30 @@ async def trips_list(
     return _page(rows, lambda r: project(r, TRIP), limit)
 
 
+def _dec(value: Any) -> Decimal:
+    """A number from the API as an exact decimal (via its string form, never float arithmetic); 0 if unusable."""
+    if value is None or isinstance(value, bool):
+        return Decimal(0)
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, ValueError):
+        return Decimal(0)
+    return number if number.is_finite() else Decimal(0)
+
+
 async def planner_summary(
     api: ApiClient, weeks: Annotated[int, Field(ge=1, le=26, description="number of weeks from this week")] = 8
 ) -> dict:
-    """Capacity against planned hours per week, weeks over capacity, and the revenue forecast."""
-    data = await api.get("/api/forecast", {"weeks": weeks})
-    rows = [w for w in (data.get("weeks") if isinstance(data, dict) else None) or [] if isinstance(w, dict)]
+    """Capacity against planned hours per week, weeks over capacity, and the revenue forecast. planned_h counts
+    confirmed hours only; tentative_h is binding plus expected offers; over_capacity also counts binding offers.
+    Revenue is split into contracted, offer and assumed (intended) revenue, as decimal strings."""
+    data = await api.get("/api/forecast", {"weeks": weeks, "by_project": 0, "offers": 1})
+    data = data if isinstance(data, dict) else {}
+    rows = [w for w in data.get("weeks") or [] if isinstance(w, dict)][:weeks]
     out_weeks = []
-    revenue = 0.0
     bases: set[str] = set()
-    for w in rows[:weeks]:
+    sums = {"contracted_revenue": Decimal(0), "offer_revenue": Decimal(0), "assumed_revenue": Decimal(0)}
+    for w in rows:
         label = _day(w.get("week"))
         try:
             iso = date.fromisoformat(label).isocalendar()
@@ -364,16 +381,23 @@ async def planner_summary(
                 "week": clean_text(label, 20),
                 "capacity_h": decimal_str(w.get("capacity")),
                 "planned_h": decimal_str(w.get("confirmed")),
-                "tentative_h": decimal_str((w.get("binding_offers") or 0) + (w.get("expected_offers") or 0)),
+                "tentative_h": decimal_str(_dec(w.get("binding_offers")) + _dec(w.get("expected_offers"))),
                 "over_capacity": isinstance(gap, int | float) and gap > 1e-6,
             }
         )
-        if isinstance(w.get("revenue"), int | float):
-            revenue += w["revenue"]
+        sums["contracted_revenue"] += _dec(w.get("contracted_revenue"))
+        sums["offer_revenue"] += _dec(w.get("offer_revenue"))
+        if w.get("basis") == "intended":
+            sums["assumed_revenue"] += _dec(w.get("intended_revenue"))
         if isinstance(w.get("basis"), str):
             bases.add(w["basis"])
-    basis = bases.pop() if len(bases) == 1 else ("mixed" if bases else None)
-    return wrap({"weeks": out_weeks, "forecast": {"basis": basis, "revenue": decimal_str(revenue, 2)}})
+    raw_totals = data.get("totals")
+    totals: dict[str, Any] = raw_totals if isinstance(raw_totals, dict) else {}
+    forecast: dict[str, Any] = {"basis": bases.pop() if len(bases) == 1 else ("mixed" if bases else None)}
+    for key, summed in sums.items():
+        # the API's totals block when it has the key, else the sum of the weeks
+        forecast[key] = decimal_str(totals[key] if key in totals else summed, 2)
+    return wrap({"weeks": out_weeks, "forecast": forecast})
 
 
 async def whoami(api: ApiClient) -> dict:
@@ -386,7 +410,7 @@ def project_me(me: Any) -> dict[str, Any]:
     auth = me.get("auth") if isinstance(me.get("auth"), dict) else {}
     perms = me.get("permissions") if isinstance(me.get("permissions"), dict) else {}
     return {
-        "user": clean_text(me.get("name"), 100),
+        "user": clean_text(me.get("name") or me.get("username"), 100),
         "role": clean_text(me.get("role"), 40),
         "auth_kind": clean_text(auth.get("kind"), 20),
         "label": clean_text(auth.get("label"), 80),
