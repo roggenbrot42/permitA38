@@ -80,9 +80,10 @@ class Session:
         except ToolError:
             status = "error"
             raise
-        except Exception:
+        except Exception as e:
             status = "failed"
-            log.exception("tool %s failed", tool.name)
+            # the type name only: messages and tracebacks may carry record content or the token
+            log.error("tool %s failed: %s", tool.name, type(e).__name__)
             raise ToolError("The tool failed unexpectedly") from None
         finally:
             log.info("tool %s %s %.0f ms", tool.name, status, (time.monotonic() - started) * 1000)
@@ -109,7 +110,7 @@ def describe(me: dict[str, Any]) -> str:
     expires = auth.get("expires_at")
     when = time.strftime("%Y-%m-%d", time.gmtime(expires)) if isinstance(expires, int) else "unknown"
     return (
-        f"token {clean_text(auth.get('label'), 80)!r} of {clean_text(me.get('username'), 64)!r}, "
+        f"token {clean_text(auth.get('label'), 80)!r} of {clean_text(me.get('name') or me.get('username'), 64)!r}, "
         f"read_only={auth.get('read_only')}, expires {when}, can read: {', '.join(areas) or 'nothing'}"
     )
 
