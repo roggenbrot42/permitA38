@@ -72,7 +72,10 @@ def test_timeout(monkeypatch, tmp_path):
 
 
 def test_crash(monkeypatch, tmp_path):
-    _fake(monkeypatch, "import os; os.abort()")
+    _fake(
+        monkeypatch,
+        "import os, signal; os.kill(os.getpid(), getattr(signal, 'SIGKILL', signal.SIGTERM))",
+    )
     assert runner.read_file(str(tmp_path / "x"), SCAN).error == "crash"
     _fake(monkeypatch, "import sys; sys.exit(3)")
     assert runner.read_file(str(tmp_path / "x"), SCAN).error == "crash"
