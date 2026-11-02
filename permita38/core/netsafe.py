@@ -361,7 +361,7 @@ class SafeFetcher:
             try:
                 os.unlink(dest)
             except OSError:
-                pass
+                pass  # the partial download may already be gone; the original error is re-raised below
             raise
 
     def _stream_to_file(

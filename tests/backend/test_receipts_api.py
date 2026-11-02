@@ -344,14 +344,16 @@ def test_a_bill_attached_by_hand_is_detected_as_a_duplicate(c, reader, services)
     assert [s["status"] for s in scans(services)] == ["known"]
     assert up(c, content).status_code == 409 and len(scans(services)) == 1  # hashed once, not again
     # deleting the expense frees the file
-    assert c.delete(f"/api/expenses/{exp['id']}").status_code == 204
+    deleted = c.delete(f"/api/expenses/{exp['id']}")
+    assert deleted.status_code == 204
     assert up(c, content).json()["outcome"] == "booked"
 
 
 def test_a_receipt_can_be_uploaded_again_after_its_expense_was_deleted(c, reader, services):
     content = reader.add(HOTEL)
     first = up(c, content).json()
-    assert c.delete(f"/api/expenses/{first['expense']['id']}").status_code == 204
+    deleted = c.delete(f"/api/expenses/{first['expense']['id']}")
+    assert deleted.status_code == 204
     assert scans(services) == []
     again = up(c, content)
     assert again.status_code == 201 and again.json()["outcome"] == "booked"
@@ -468,22 +470,24 @@ def test_page_image_of_a_pdf_and_404_otherwise(c, reader):
     assert r.headers["x-frame-options"] == "SAMEORIGIN"
     assert c.get(f"/api/receipts/{scan['id']}/pages/2").status_code == 404
     assert c.get(f"/api/receipts/{scan['id']}/pages/-1").status_code == 404
-    png = reader.add([], tag="img", result=ReadResult(engine="none", error="x"))
+    reader.add([], tag="img", result=ReadResult(engine="none", error="x"))
     image = up(c, b"\x89PNG\r\n\x1a\n" + b"fake image", "photo.png").json()["scan"]
     assert c.get(f"/api/receipts/{image['id']}/pages/0").status_code == 404
     assert c.get("/api/receipts/nope/pages/0").status_code == 404
-    del png
 
 
 def test_discard_removes_a_flagged_scan_and_its_file_only(c, reader, services):
     flagged = up(c, reader.add(TANK)).json()["scan"]
     booked = up(c, reader.add(HOTEL)).json()["scan"]
-    assert c.delete(f"/api/receipts/{booked['id']}").status_code == 409
-    assert c.delete(f"/api/receipts/{flagged['id']}").status_code == 204
+    refused = c.delete(f"/api/receipts/{booked['id']}")
+    assert refused.status_code == 409
+    removed = c.delete(f"/api/receipts/{flagged['id']}")
+    assert removed.status_code == 204
     assert c.get(f"/api/receipts/{flagged['id']}").status_code == 404
     assert services.store.attachment_path(flagged["attachment"]) is None
     assert services.store.attachment_path(booked["attachment"]) is not None
-    assert c.delete(f"/api/receipts/{flagged['id']}").status_code == 404
+    again = c.delete(f"/api/receipts/{flagged['id']}")
+    assert again.status_code == 404
 
 
 # ------------------------------------------------------------------ confirm
@@ -605,7 +609,8 @@ def test_rights_tokens(app, c, reader):
     rw = bearer(app, new_token(c, read_only=False)["token"])
     assert ro.get("/api/receipts").status_code == 200 and ro.get("/api/receipts/capabilities").status_code == 200
     assert up(ro, reader.add(HOTEL)).status_code == 403
-    assert ro.delete("/api/receipts/nope").status_code == 403
+    forbidden_delete = ro.delete("/api/receipts/nope")
+    assert forbidden_delete.status_code == 403
     assert ro.post("/api/receipts/nope/parts", files={"file": ("p.jpg", _TINY_JPEG)}).status_code == 403
     assert ro.post("/api/receipts/nope/confirm", json=TANK_BODY).status_code == 403
     assert up(rw, reader.add(HOTEL)).status_code == 201
@@ -922,7 +927,8 @@ def test_the_keys_of_a_booked_scan_follow_the_expense(c, reader):
     r = up(c, reader.add([ln.replace("RE-5", "RE-9") for ln in inv], tag="four"))
     assert r.status_code == 409 and r.json()["match"] == "invoice"
     # and a deleted expense takes its keys with it
-    assert c.delete(f"/api/expenses/{first['id']}").status_code == 204
+    deleted = c.delete(f"/api/expenses/{first['id']}")
+    assert deleted.status_code == 204
     r = up(c, reader.add([ln.replace("RE-5", "RE-9") for ln in inv], tag="five"))
     assert r.status_code == 201
 

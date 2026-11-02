@@ -323,7 +323,8 @@ class ReceiptService:
         old_doc = scan.get("doc") or {}
         old_path = self.store.attachment_path(old_name) or ""
         try:
-            data = open(old_path, "rb").read()
+            with open(old_path, "rb") as handle:
+                data = handle.read()
             existing = (
                 photopdf.extract(data)
                 if old_name.lower().endswith(".pdf")

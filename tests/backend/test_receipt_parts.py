@@ -9,7 +9,7 @@ from permita38.core.receipts.extraction import ReadResult, Word
 from permita38.core.service import receipts as svc_mod
 
 from .receipt_helpers import bill, read
-from .test_receipts_api import SINGLE, TODAY, c, reader, services  # noqa: F401  # noqa: F401  (fixtures)
+from .test_receipts_api import SINGLE, c, reader, services  # noqa: F401  # noqa: F401  (fixtures)
 
 
 def fake_jpeg(tag: int, w: int = 8, h: int = 12, comps: int = 3) -> bytes:
@@ -29,7 +29,8 @@ class PhotoReader:
         self.on_pdf = None  # called when the generated PDF is read, i.e. while the parts upload is under way
 
     def __call__(self, path, config):
-        data = open(path, "rb").read()
+        with open(path, "rb") as handle:
+            data = handle.read()
         if data.startswith(b"%PDF"):
             self.pdfs.append(data)
             if self.on_pdf:
@@ -95,7 +96,8 @@ def test_adding_a_photo_books_the_whole_bill_keeps_one_pdf_and_remembers_each_ph
     body = reply.json()
     assert body["outcome"] == "booked" and body["expense"]["attachment"].endswith(".pdf")
     assert body["scan"]["doc"]["part_hashes"] == [hashlib.sha256(one).hexdigest(), hashlib.sha256(two).hexdigest()]
-    pdf = open(services.store.attachment_path(body["expense"]["attachment"]), "rb").read()
+    with open(services.store.attachment_path(body["expense"]["attachment"]), "rb") as handle:
+        pdf = handle.read()
     assert photopdf.extract(pdf) == [(one, 90), (two, 90)]
     assert services.store.attachment_path(scan["attachment"]) is None  # the original photo is gone
     for photo in (one, two):  # each photo alone is a duplicate now

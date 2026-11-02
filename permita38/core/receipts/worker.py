@@ -44,7 +44,7 @@ def apply_limits(timeout_s: int) -> None:
             new = value if hard == resource.RLIM_INFINITY else min(value, hard)
             resource.setrlimit(limit, (new, hard))
         except (ValueError, OSError):
-            pass
+            pass  # a limit the platform refuses to lower is skipped; the others still apply
 
 
 def _kind(head: bytes) -> str:

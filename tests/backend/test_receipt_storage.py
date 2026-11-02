@@ -141,7 +141,8 @@ def test_deleting_the_expense_deletes_its_scan_row(app, boss_client):
     rec = records(app).create_scanned(boss_user(app), dict(BILL), "s4")
     keep = store.save("receipt_scans", {"status": "flagged", "sha256": "e" * 64})
     store.save("receipt_scans", {"status": "booked", "sha256": "f" * 64, "expense_id": rec["id"]})
-    assert boss_client.delete(f"/api/expenses/{rec['id']}").status_code in (200, 204)
+    deleted = boss_client.delete(f"/api/expenses/{rec['id']}")
+    assert deleted.status_code in (200, 204)
     assert [r["id"] for r in store.list("receipt_scans")] == [keep["id"]]
 
 
@@ -150,7 +151,8 @@ def test_a_plain_expense_is_unchanged(boss_client):
     assert r.status_code in (200, 201), r.text
     body = r.json()
     assert "external_id" not in body and "paid_on" not in body and body["invoice_no"] == "R-1"
-    assert boss_client.delete(f"/api/expenses/{body['id']}").status_code in (200, 204)
+    deleted = boss_client.delete(f"/api/expenses/{body['id']}")
+    assert deleted.status_code in (200, 204)
 
 
 def test_bounds_of_the_new_fields(boss_client):

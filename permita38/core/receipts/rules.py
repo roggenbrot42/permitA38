@@ -285,8 +285,8 @@ def vat_keys(vat_id: Any, invoice_no: Any) -> list[str]:
 def evaluate(read: ReadResult, x: Extraction, ctx: Context) -> Evaluation:
     x = _clean(x)
     codes: set[str] = set()
-    empty = not (x.vendor or x.total is not None or x.bill_date or x.items or x.vat_groups or x.competing_totals)
-    if read.engine == "none" or read.error or empty:
+    has_content = bool(x.vendor or x.total is not None or x.bill_date or x.items or x.vat_groups or x.competing_totals)
+    if read.engine == "none" or read.error or not has_content:
         return Evaluation(flags=ordered({"unreadable"}), draft={}, doc={"checks": [], "boxes": [], "items": []})
 
     if read.pages_total > read.pages_read:

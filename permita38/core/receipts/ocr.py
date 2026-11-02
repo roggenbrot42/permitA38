@@ -107,7 +107,7 @@ def _tiff_orientation(tiff: bytes) -> int:
                 (value,) = struct.unpack(endian + "H", entry[8:10])
                 return value if 1 <= value <= 8 else 1
     except (KeyError, struct.error):
-        pass
+        pass  # a damaged or unknown EXIF block means: no rotation
     return 1
 
 

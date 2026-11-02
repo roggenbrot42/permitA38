@@ -745,7 +745,8 @@ def _vendor(x: Extraction, lines: list[_Line], exclude: tuple[str, ...] = ()) ->
         return (found, ln.words) if found else None
 
     if _AMAZON.search("\n".join(ln.text for ln in lines)):
-        return take([], "Amazon")
+        take([], "Amazon")
+        return
     for ln in first:
         got = legal_name(ln)
         if got:
@@ -755,17 +756,21 @@ def _vendor(x: Extraction, lines: list[_Line], exclude: tuple[str, ...] = ()) ->
                 before = usable(cell(first[i - 1]), first[i - 1])
                 if before and len(before.split()) <= 4 and not _search(r"merci|danke|willkommen", before.lower()):
                     text, words = before + " " + text, first[i - 1].words + words
-            return take(words, text)
+            take(words, text)
+            return
     for ln in lines:
         got = legal_name(ln)
         if got:
-            return take(got[1], got[0])
+            take(got[1], got[0])
+            return
     for i, ln in enumerate(first):
         if i and _STREET.search(ln.text):
             above = usable(cell(first[i - 1]), first[i - 1])
             if above:
-                return take(first[i - 1].words, above)
+                take(first[i - 1].words, above)
+                return
     for ln in first:
         plain = usable(cell(ln), ln)
         if plain:
-            return take(ln.words, plain)
+            take(ln.words, plain)
+            return

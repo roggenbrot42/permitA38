@@ -324,9 +324,6 @@ def _unreadable() -> ReadResult:
 
 
 def flag_cases():
-    def f(over=None, **kw):
-        return (over or {}), kw
-
     yield "no_total", base(total=None, vat_groups=[VatGroup(rate=D("19"))]), {}
     yield "ambiguous_total", base(total=None, competing_totals=[D("11.90"), D("12.90")]), {}
     yield "no_date", base(bill_date=None), {}

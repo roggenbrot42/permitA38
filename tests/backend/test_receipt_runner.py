@@ -190,7 +190,8 @@ def test_psm_is_passed_to_tesseract(monkeypatch, tmp_path):
     def fake_run(cmd, **kw):
         seen["cmd"] = cmd
         (tmp_path / "x").mkdir(exist_ok=True)
-        open(cmd[2] + ".tsv", "w").write("level\n")
+        with open(cmd[2] + ".tsv", "w") as out:
+            out.write("level\n")
         return subprocess.CompletedProcess(cmd, 0)
 
     monkeypatch.setattr(ocr.subprocess, "run", fake_run)

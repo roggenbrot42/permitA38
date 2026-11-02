@@ -10,6 +10,7 @@
     third_country_reverse_charge: 'Third-country reverse charge (verify)',
     small_business: 'Small business (no VAT)',
   };
+  let VC_SEQ = 0;   // unique DOM ids of the vendor comboboxes
   const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const F = { kind: lsGet('supKind', ''), tag: lsGet('supTag', ''), active: lsGet('supActive', '1') !== '0', q: '' };
   const hh = x => num(x, 2) + ' h';
@@ -304,7 +305,7 @@
   /** Vendor combobox: a free-text field with a list of the active suppliers (WAI-ARIA combobox, list autocomplete).
       Picking links the supplier; "+ Add as new supplier" creates one on an explicit click only. */
   function bindVendorCombo({ vendor, known, named, link, setPicking, sel }) {
-    const field = vendor.parentNode, uid = 'e_vc' + Math.random().toString(36).slice(2, 7);
+    const field = vendor.parentNode, uid = 'e_vc' + (++VC_SEQ);
     const wrap = document.createElement('div'); wrap.className = 'vc';
     field.insertBefore(wrap, vendor); wrap.appendChild(vendor);
     const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'vc-arrow'; btn.tabIndex = -1;

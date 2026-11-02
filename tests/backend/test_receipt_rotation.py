@@ -78,6 +78,7 @@ def test_a_portrait_photo_is_tried_at_0_then_180(monkeypatch):
     assert r.rotation == 180 and seen[:2] == [0, 180]
     seen = _fake_photo(monkeypatch, (300, 400), {0: RECEIPT_WORDS})
     assert worker._read_jpeg(b"jpeg", "tesseract", "deu", lambda: 100).rotation == 0
+    assert set(seen) == {0}  # the first angle was plausible: no other angle is tried
 
 
 def test_with_no_plausible_angle_the_one_with_most_amounts_wins(monkeypatch):

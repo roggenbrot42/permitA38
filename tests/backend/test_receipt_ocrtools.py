@@ -163,7 +163,7 @@ def test_first_host_must_be_allowed_and_https_is_required_by_default(site, tmp_p
     with pytest.raises(FetchError) as e:
         fetcher(site).download_pinned(site.url(), sha(b"x"), 100, tmp_path / "p", allowed_hosts=(HOST,))
     assert e.value.code == "insecure_url"
-    assert "github.com" in netsafe.GITHUB_RELEASE_HOSTS
+    assert "github.com" in set(netsafe.GITHUB_RELEASE_HOSTS)  # an exact host, not a substring
 
 
 def test_http_error_and_redirect_loop(site, tmp_path):

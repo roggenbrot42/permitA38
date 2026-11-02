@@ -497,7 +497,9 @@ def test_ocr_download_button_shows_size_and_host_first(make_ui):
     pg = make_ui(mock)
     pg.click("#rcpt_ocr_install")
     pg.wait_for_selector("#rcpt_ocr_note", state="detached")
-    assert "50 MB" in pg.dialogs[-1] and "github.com" in pg.dialogs[-1]
+    dialog = pg.dialogs[-1]
+    assert "50 MB" in dialog
+    assert dialog.split(" from ", 1)[1].split("?", 1)[0] == "github.com"  # the host named in the question, exactly
     assert mock.calls("POST", "receipts/ocr/install")
     # a failure keeps the button
     failing = Mock()
