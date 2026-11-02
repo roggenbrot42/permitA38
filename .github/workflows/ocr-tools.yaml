@@ -1,0 +1,166 @@
+# OCR package for the Windows build (docs/specs/receipt-scan.md, "OCR on Windows"). MANUAL ONLY.
+#
+# Takes the upstream UB-Mannheim Tesseract installer at a pinned SHA-256, unpacks it with 7z (the installer is never
+# executed), drops the training tools and `osd`, adds `tessdata_fast` deu and eng from a pinned commit plus all licence
+# files, zips the result and publishes it as its own release `ocr-tools-win64-<version>` with a build attestation.
+#
+# After a run: copy VERSION, URL, SIZE and SHA256 from the job summary into `permita38/core/receipts/ocr_tools.py`
+# and commit. Until then the app offers no download. A new package needs a new run and a new commit of those constants.
+#
+# Action pins: full commit SHA, the comment names the release (same rule as release.yaml).
+name: OCR tools (Windows package)
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "Our revision of the package for this upstream build, e.g. 1 (gives 5.4.0.20240606-1)"
+        required: true
+        default: "1"
+        type: string
+
+permissions: {}
+
+env:
+  UPSTREAM_VERSION: "5.4.0.20240606"
+  UPSTREAM_URL: https://github.com/UB-Mannheim/tesseract/releases/download/v5.4.0.20240606/tesseract-ocr-w64-setup-5.4.0.20240606.exe
+  # Computed 2026-11-02 by downloading the file into an empty folder and hashing it (never executed).
+  UPSTREAM_SHA256: c885fff6998e0608ba4bb8ab51436e1c6775c2bafc2559a19b423e18678b60c9
+  # tesseract-ocr/tessdata_fast, main at 2026-11-02 (Apache-2.0). Re-check before relying on it.
+  TESSDATA_COMMIT: 87416418657359cb625c412a48b6e1d6d41c29bd
+  VERSION: 5.4.0.20240606-${{ inputs.revision }}
+
+jobs:
+  build:
+    name: Build the package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Validate the revision
+        env:
+          REVISION: ${{ inputs.revision }}
+        run: |
+          case "$REVISION" in
+            ''|*[!0-9]*) echo "::error::revision must be a number"; exit 1;;
+          esac
+      - name: Download the upstream installer and check the digest
+        run: |
+          mkdir -p "$RUNNER_TEMP/upstream"
+          curl --fail --location --silent --show-error --proto '=https' --tlsv1.2 \
+            --output "$RUNNER_TEMP/upstream/setup.exe" "$UPSTREAM_URL"
+          echo "$UPSTREAM_SHA256  $RUNNER_TEMP/upstream/setup.exe" | sha256sum --check -
+      - name: Unpack with 7z (the installer is not run)
+        run: |
+          mkdir -p "$RUNNER_TEMP/extract"
+          7z x -y -o"$RUNNER_TEMP/extract" "$RUNNER_TEMP/upstream/setup.exe" > /dev/null
+          ls -la "$RUNNER_TEMP/extract"
+      - name: tessdata_fast at the pinned commit
+        run: |
+          mkdir -p "$RUNNER_TEMP/tessdata_fast"
+          cd "$RUNNER_TEMP/tessdata_fast"
+          git init --quiet
+          git remote add origin https://github.com/tesseract-ocr/tessdata_fast.git
+          git fetch --quiet --depth 1 origin "$TESSDATA_COMMIT"
+          git checkout --quiet FETCH_HEAD
+          test "$(git rev-parse HEAD)" = "$TESSDATA_COMMIT"
+          ls -la deu.traineddata eng.traineddata LICENSE
+      - name: Assemble the package
+        run: |
+          set -eu
+          src="$RUNNER_TEMP/extract"
+          out="$RUNNER_TEMP/pkg"
+          mkdir -p "$out/tessdata" "$out/licenses"
+          test -f "$src/tesseract.exe"
+          cp "$src/tesseract.exe" "$out/"
+          cp "$src"/*.dll "$out/"
+          # only the program, no training tools, no uninstaller; osd and the upstream models are not wanted
+          cp -r "$src/tessdata/configs" "$src/tessdata/tessconfigs" "$out/tessdata/"
+          cp "$RUNNER_TEMP/tessdata_fast/deu.traineddata" "$RUNNER_TEMP/tessdata_fast/eng.traineddata" "$out/tessdata/"
+          # licences: upstream documentation folder, any licence file shipped next to the program, tessdata_fast
+          [ -d "$src/doc" ] && cp -r "$src/doc" "$out/licenses/tesseract-doc"
+          find "$src" -maxdepth 2 -type f \( -iname 'LICEN*' -o -iname 'COPYING*' -o -iname 'NOTICE*' -o -iname 'AUTHORS*' \) \
+            -exec cp {} "$out/licenses/" \;
+          cp "$RUNNER_TEMP/tessdata_fast/LICENSE" "$out/licenses/tessdata_fast-LICENSE"
+          {
+            echo "Tesseract OCR for permitA38 (Windows 64 bit), package revision ${VERSION}"
+            echo "Upstream: ${UPSTREAM_URL}"
+            echo "Upstream SHA-256: ${UPSTREAM_SHA256}"
+            echo "Language data: tesseract-ocr/tessdata_fast ${TESSDATA_COMMIT} (deu, eng)"
+            echo "Removed: training tools, osd, uninstaller. Nothing else was changed."
+          } > "$out/licenses/PACKAGE.txt"
+          # a package without licence texts must not be published
+          test "$(find "$out/licenses" -type f | wc -l)" -ge 3
+          find "$out" -type f -name '*.exe' ! -name tesseract.exe -print -quit | grep -q . && { echo "::error::extra program in package"; exit 1; } || true
+          mkdir -p "$RUNNER_TEMP/dist"
+          (cd "$out" && find . -type f -print | LC_ALL=C sort | sed 's|^\./||' | TZ=UTC zip -X -q -9 "$RUNNER_TEMP/dist/ocr-tools-win64-${VERSION}.zip" -@)
+          ls -l "$RUNNER_TEMP/dist"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ocr-tools
+          path: ${{ runner.temp }}/dist/ocr-tools-win64-${{ env.VERSION }}.zip
+          if-no-files-found: error
+
+  smoke:
+    name: Smoke test on Windows
+    needs: build
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ocr-tools
+          path: ${{ runner.temp }}\pkg
+      - name: Unpack and list the languages
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'pkg'
+          Expand-Archive -Path (Join-Path $dir "ocr-tools-win64-$env:VERSION.zip") -DestinationPath (Join-Path $dir 'x')
+          $out = & (Join-Path $dir 'x\tesseract.exe') --list-langs --tessdata-dir (Join-Path $dir 'x\tessdata') 2>&1 | Out-String
+          Write-Host $out
+          if ($out -notmatch 'deu' -or $out -notmatch 'eng') { throw 'deu and eng are required' }
+          if ($out -match 'osd') { throw 'osd must not be in the package' }
+
+  publish:
+    name: Attest and publish
+    needs: [build, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release
+      id-token: write # attestation
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ocr-tools
+          path: dist
+      - name: Digest and size
+        id: info
+        run: |
+          f="dist/ocr-tools-win64-${VERSION}.zip"
+          echo "sha=$(sha256sum "$f" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -c %s "$f")" >> "$GITHUB_OUTPUT"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/ocr-tools-win64-${{ env.VERSION }}.zip
+      - name: Publish as its own release
+        run: |
+          tag="ocr-tools-win64-${VERSION}"
+          gh release create "$tag" "dist/ocr-tools-win64-${VERSION}.zip" \
+            --repo "$GITHUB_REPOSITORY" --title "OCR tools for Windows ${VERSION}" \
+            --notes "Tesseract ${UPSTREAM_VERSION} (UB-Mannheim build, digest ${UPSTREAM_SHA256}) with tessdata_fast deu and eng. Downloaded by permitA38 on request and verified against the digest committed in the code. Verify: gh attestation verify <file> --repo ${GITHUB_REPOSITORY}"
+      - name: Constants for core/receipts/ocr_tools.py
+        run: |
+          {
+            echo "### Commit these constants in \`permita38/core/receipts/ocr_tools.py\`"
+            echo '```'
+            echo "VERSION = \"${VERSION}\""
+            echo "URL = \"https://github.com/${GITHUB_REPOSITORY}/releases/download/ocr-tools-win64-${VERSION}/ocr-tools-win64-${VERSION}.zip\""
+            echo "SIZE = ${{ steps.info.outputs.size }}"
+            echo "SHA256 = \"${{ steps.info.outputs.sha }}\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
