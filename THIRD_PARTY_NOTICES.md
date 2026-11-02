@@ -21,6 +21,8 @@ The standalone downloads additionally bundle the CPython interpreter and its sta
 | opentelemetry-api | 1.45.1 | Apache-2.0 |
 | pydantic | 2.14.1 | MIT |
 | pydantic_core | 2.50.1 | MIT |
+| pypdfium2 | 5.14.0 | BSD-3-Clause |
+| zxing-cpp | 3.1.1 | Apache-2.0 |
 | python-multipart | 0.0.32 | Apache-2.0 |
 | PyYAML | 6.0.3 | MIT |
 | segno | 1.6.6 | BSD-3-Clause |
@@ -528,6 +530,12 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+### pypdfium2 5.14.0 — BSD-3-Clause
+
+<https://github.com/pypdfium2-team/pypdfium2>
+
+_The package ships no separate license file; see its homepage._
 
 ### python-multipart 0.0.32 — Apache-2.0
 

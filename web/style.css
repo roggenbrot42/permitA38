@@ -98,6 +98,25 @@ button:disabled { opacity: .6; cursor: progress; }
 .exp-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .exp-body > *, .exp-side { min-width: 0; }
 @media (min-width: 900px) { .exp-body.two { grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); align-items: start; } }
+/* landscape screens: the bill fills the right 60 % beside the fields. The dialog has the height of the window (inside
+   the backdrop padding); the fields scroll in .modal-scroll above the pinned Cancel/Save row, the preview is a flex
+   column pinned to the dialog's right side with the A4 ratio 1 : sqrt(2) (width = height / 1.41421356, at most 60 % of the dialog) whose stage takes the height that is left (min-height 0), so nothing is
+   hand-tuned and nothing can overflow. */
+@media (min-width: 1100px) and (orientation: landscape) {
+  .modal-bg:has(.exp-bill) { padding-top: 2vh; padding-bottom: 2vh; overflow: hidden; container-type: size; }
+  .modal.exp-bill { --mw: min(98vw, 2200px); --pw: min(calc((100cqh - 44px) / 1.41421356), calc(var(--mw) * .6 - 22px)); position: relative; box-sizing: border-box; width: var(--mw); max-width: none; height: 100%; display: flex; flex-direction: column; padding-right: calc(var(--pw) + 44px); }
+  .modal.exp-bill .modal-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; }
+  .modal.exp-bill .exp-body.two { grid-template-columns: minmax(0, 1fr); }
+  .modal.exp-bill .exp-side { position: absolute; top: 22px; bottom: 22px; right: 22px; width: var(--pw); display: flex; flex-direction: column; min-height: 0; }
+  .modal.exp-bill .row { flex-wrap: wrap; }
+  .modal.exp-bill .exp-side > .field { flex: none; margin: 0 0 6px; }
+  .modal.exp-bill .exp-side > .field > label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .modal.exp-bill .exp-preview { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; box-sizing: border-box; }
+  .modal.exp-bill .exp-preview > * { flex: none; }
+  .modal.exp-bill .exp-preview .exp-zoombar { margin-bottom: 6px; }
+  .modal.exp-bill .exp-preview > .small { margin: 6px 0 0; order: 5; }
+  .modal.exp-bill .exp-stage, .modal.exp-bill .exp-pdf { flex: 1 1 0; height: auto; min-height: 0; }
+}
 .exp-table-wrap { overflow-x: auto; }
 .exp-lines input, .exp-lines select { width: 100%; min-width: 0; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); }
 .exp-lines td { padding: 4px 6px; vertical-align: middle; }
@@ -116,7 +135,8 @@ button:disabled { opacity: .6; cursor: progress; }
 .exp-zoombar a { margin-left: auto; font-size: 13px; }
 .exp-stage { height: 360px; max-width: 100%; overflow: auto; background: #6b6f7a; border-radius: 6px; position: relative; touch-action: none; }
 .exp-stage { cursor: grab; }
-.exp-stage img { display: block; max-width: none; margin: auto; user-select: none; -webkit-user-drag: none; }
+.exp-wrap { position: relative; width: fit-content; margin: auto; }
+.exp-stage img { display: block; max-width: none; margin: 0; user-select: none; -webkit-user-drag: none; }
 .exp-pdf { width: 100%; height: 420px; border: 0; border-radius: 6px; background: #fff; }
 
 /* business trips */
@@ -178,3 +198,49 @@ tr.pp-detail > td { background: var(--bg); padding: 8px 12px; }
 .pp-check { display: inline-flex; gap: 6px; align-items: center; color: var(--ink); font-size: 14px; }
 .proc-warnings { margin: 6px 0 0 18px; padding: 0; }
 .proc-hint { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+
+/* receipt scan (docs/specs/receipt-scan.md): upload, progress panel, check dialog, detected fields */
+.rcpt-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.rcpt-note { margin-bottom: 10px; }
+.rcpt-panel { padding: 8px 14px; }
+.rcpt-row { display: flex; gap: 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.rcpt-row:last-child { border-bottom: 0; }
+.rcpt-name { font-weight: 600; min-width: 0; overflow-wrap: anywhere; flex: 0 1 30%; }
+.rcpt-msg { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.rcpt-row[data-state=error] .rcpt-msg, .rcpt-row[data-state=duplicate] .rcpt-msg { color: var(--bad); }
+.rcpt-row[data-state=check] .rcpt-msg { color: var(--warn); }
+.rcpt-row[data-state=added] .rcpt-msg { color: var(--good); }
+.rcpt-drop { position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border: 4px dashed var(--accent); opacity: .93; }
+.rcpt-drop[hidden] { display: none; }
+.rcpt-checks { margin: 10px 0; }
+.rcpt-checks caption { text-align: left; padding-bottom: 4px; }
+.rcpt-checks th.num, .rcpt-checks td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.rcpt-checks tr.rcpt-failed td { color: var(--bad); background: var(--bad-soft); }
+.rcpt-accept .field { margin: 8px 0; }
+.rcpt-layer { position: absolute; inset: 0; pointer-events: none; }
+.rcpt-layer[hidden] { display: none; }
+.rcpt-box { position: absolute; padding: 0; margin: 0; display: block; pointer-events: auto; cursor: pointer; background: transparent; border: 2px solid var(--accent); border-radius: 3px; }
+.rcpt-box:hover { background: var(--accent-soft); }
+.rcpt-box.ok { border-color: var(--good); } .rcpt-box.failed { border-color: var(--bad); border-style: dashed; }
+.rcpt-box.hl, .rcpt-box:focus-visible { outline: 3px solid var(--warn); outline-offset: 1px; background: var(--warn-soft); }
+.rcpt-lab { position: absolute; left: -2px; bottom: 100%; margin-bottom: 1px; z-index: 2; white-space: nowrap; font: 600 11px/1.3 system-ui, sans-serif; padding: 0 4px; border-radius: 3px; background: var(--card); color: var(--ink); border: 1px solid var(--accent); pointer-events: none; }
+.rcpt-lab.below { bottom: auto; top: 100%; margin: 1px 0 0; }
+.rcpt-box.ok .rcpt-lab { border-color: var(--good); } .rcpt-box.failed .rcpt-lab { border-color: var(--bad); color: var(--bad); }
+.rcpt-tip { display: none; font-weight: 400; }
+.rcpt-box:hover .rcpt-tip, .rcpt-box:focus .rcpt-tip, .rcpt-box.hl .rcpt-tip { display: inline; }
+.rcpt-box:hover, .rcpt-box:focus, .rcpt-box.hl { z-index: 3; }
+.rcpt-unmarked { margin-top: 8px; font-size: 13px; } .rcpt-unmarked h3 { margin: 0 0 4px; font-size: 13px; } .rcpt-unmarked ul { margin: 0; padding-left: 18px; }
+#rcpt_toggle[aria-pressed=true] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+/* vendor combobox of the bill dialog */
+.vc { position: relative; }
+.vc > input { padding-right: 34px; box-sizing: border-box; width: 100%; }
+.vc-arrow { position: absolute; top: 1px; bottom: 1px; right: 1px; width: 32px; padding: 0; border: 0; border-left: 1px solid var(--line); border-radius: 0 8px 8px 0; background: transparent; color: var(--ink); cursor: pointer; font-size: 13px; box-shadow: none; }
+.vc-arrow:hover { background: var(--bg); }
+.vc-list { position: absolute; left: 0; right: 0; top: calc(100% + 2px); z-index: 30; max-height: 240px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+.vc-list li { display: flex; justify-content: space-between; gap: 10px; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+.vc-list li[aria-selected=true] { background: var(--accent); color: #fff; }
+.vc-list li[aria-selected=true] .muted { color: inherit; }
+.vc-list .vc-add { font-weight: 600; color: var(--accent); border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; margin-top: 2px; }
+.vc-list .vc-add[aria-selected=true] { color: #fff; }
+.vc-list .vc-empty { cursor: default; }

@@ -232,9 +232,20 @@ def main(argv: list[str] | None = None):
     cu.add_argument("--name", required=True)
     cu.add_argument("--role", choices=("boss", "employee", "accountant", "member"), default="employee")
     cu.add_argument("--password-file", type=Path, help="read the password from this file (default: prompt)")
+    sw = sub.add_parser("scan-worker")  # internal (no help line): reads one receipt file for the scan
+    sw.add_argument("--timeout", type=int, default=120)
+    sw.add_argument("--languages", default="deu+eng")
+    sw.add_argument("--tesseract")
+    sw.add_argument("--page", type=int)
+    sw.add_argument("--rotation", type=int)
+    sw.add_argument("path")
     args = ap.parse_args(argv)
 
     command = args.command or "serve"
+    if command == "scan-worker":
+        from permita38.core.receipts.worker import run as run_scan_worker
+
+        sys.exit(run_scan_worker(args))
     if command == "create-migration":
         from permita38.core.database import create_migration
 

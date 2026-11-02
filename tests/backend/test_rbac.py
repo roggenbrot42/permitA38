@@ -282,6 +282,16 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("GET", "/api/allocations/{allocation_id}"): ("procurement", "read", False),
     ("POST", "/api/allocations/{allocation_id}/cancel"): ("procurement", "write", False),
     ("GET", "/api/finance/commitments"): ("procurement", "read", False),
+    # receipts: expenses AND attachments (checked as a pair in the test below)
+    ("POST", "/api/receipts"): ("expenses", "write", False),
+    ("GET", "/api/receipts"): ("expenses", "read", False),
+    ("GET", "/api/receipts/capabilities"): ("expenses", "read", False),
+    ("GET", "/api/receipts/{scan_id}"): ("expenses", "read", False),
+    ("GET", "/api/receipts/{scan_id}/pages/{page}"): ("expenses", "read", False),
+    ("POST", "/api/receipts/{scan_id}/confirm"): ("expenses", "write", False),
+    ("POST", "/api/receipts/{scan_id}/parts"): ("expenses", "write", False),
+    ("DELETE", "/api/receipts/{scan_id}"): ("expenses", "write", False),
+    ("POST", "/api/receipts/ocr/install"): ("settings", "write", True),
 }
 
 
@@ -290,6 +300,12 @@ def test_declared_rights_equal_the_hand_written_table(app):
     for method, route, path in _routes(app):
         reqs = declared(route)
         if reqs:
+            if (
+                path.startswith("/api/receipts") and path != "/api/receipts/ocr/install"
+            ):  # a receipt needs the expenses AND the attachments right
+                op = "read" if method == "GET" else "write"
+                assert sorted(reqs) == [("attachments", op, False), ("expenses", op, False)], (method, path, reqs)
+                reqs = [("expenses", op, False)]
             assert len(reqs) == 1, (method, path, reqs)
             actual[(method, path)] = reqs[0]
     assert actual == EXPECTED
@@ -349,6 +365,7 @@ SESSION_ONLY = {
     ("GET", "/api/tokens/{token_id}/audit"),
     ("PATCH", "/api/tokens/{token_id}"),
     ("PUT", "/api/settings"),
+    ("POST", "/api/receipts/ocr/install"),
     # full data export and import (boss only, never with a token)
     ("GET", "/api/data/export/info"),
     ("POST", "/api/data/export"),
@@ -598,6 +615,11 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
         )
     if "trip_item_id" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         raw.execute('ALTER TABLE "expenses" DROP COLUMN "trip_item_id"')
+    if "receipt_scans" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.executescript(
+            'DROP TABLE "receipt_scans"; ALTER TABLE "expenses" DROP COLUMN "paid_on";'
+            ' ALTER TABLE "expenses" DROP COLUMN "invoice_no";'
+        )
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)

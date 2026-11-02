@@ -58,9 +58,15 @@
     } catch { return null; }
   }
 
+  /* optional: how many bills have a free-text vendor that is not a supplier (0 without the suppliers write right) */
+  async function unlinkedVendors() {
+    if (!canWrite()) return 0;
+    try { return Number((await api('GET', 'suppliers/vendor-suggestions')).unlinked_expenses) || 0; } catch { return 0; }
+  }
+
   async function listPage() {
     const filtered = !!(F.kind || F.tag || F.q.trim() || F.active);
-    const [all, rows, open] = await Promise.all([api('GET', 'suppliers'), filtered ? api('GET', 'suppliers' + filterQuery()) : null, openByScope()]);
+    const [all, rows, open, unlinked] = await Promise.all([api('GET', 'suppliers'), filtered ? api('GET', 'suppliers' + filterQuery()) : null, openByScope(), unlinkedVendors()]);
     SUP.list = all;
     const list = rows || all;
     const tags = [...new Set(all.flatMap(s => s.tags || []))].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
@@ -68,7 +74,7 @@
     const limited = scopeOf('suppliers') === 'limited';
     const write = canWrite();
     return `<div class="head"><div><h1>Suppliers</h1><div class="muted">${limited ? 'Companies and subcontractors the business buys from (names only).' : 'Companies, people and subcontractors you buy from.'}</div></div>
-      <div class="sup-actions">${write ? '<button class="primary" data-a="supNew">+ New supplier</button>' : ''}${write ? '<button data-a="supAdopt">Link expense vendors</button>' : ''}</div></div>
+      <div class="sup-actions">${write ? '<button class="primary" data-a="supNew">+ New supplier</button>' : ''}${unlinked ? `<button class="sm" data-a="supAdopt">Link vendors from expenses (${unlinked})</button>` : ''}</div></div>
     <div class="card sup-filter"><div class="row">
       <div class="auto"><label for="sup_kind">Kind</label><select id="sup_kind" data-change="supKind"><option value="">All kinds</option>${Object.entries(KIND).map(([k, l]) => `<option value="${k}" ${k === F.kind ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
       <div class="auto"><label for="sup_tag">Tag</label><select id="sup_tag" data-change="supTag"><option value="">All tags</option>${tags.map(t => `<option value="${esc(t)}" ${t === F.tag ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select></div>
@@ -295,16 +301,107 @@
 
   /* ---------- expense dialog: supplier, allocation, reverse charge ---------- */
   const fieldOf = k => $('#f_' + k)?.closest('.field');
+  /** Vendor combobox: a free-text field with a list of the active suppliers (WAI-ARIA combobox, list autocomplete).
+      Picking links the supplier; "+ Add as new supplier" creates one on an explicit click only. */
+  function bindVendorCombo({ vendor, known, named, link, setPicking, sel }) {
+    const field = vendor.parentNode, uid = 'e_vc' + Math.random().toString(36).slice(2, 7);
+    const wrap = document.createElement('div'); wrap.className = 'vc';
+    field.insertBefore(wrap, vendor); wrap.appendChild(vendor);
+    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'vc-arrow'; btn.tabIndex = -1;
+    btn.setAttribute('aria-label', 'Show the suppliers'); btn.textContent = '\u25be';
+    const ul = document.createElement('ul'); ul.className = 'vc-list'; ul.id = uid; ul.setAttribute('role', 'listbox'); ul.hidden = true;
+    wrap.append(btn, ul);
+    vendor.setAttribute('role', 'combobox'); vendor.setAttribute('aria-autocomplete', 'list'); vendor.setAttribute('aria-controls', uid);
+    vendor.setAttribute('aria-expanded', 'false'); vendor.setAttribute('aria-haspopup', 'listbox');
+    let rows = [], act = -1, isOpen = false, busy = false;
+    const compute = () => {
+      const q = vendor.value.trim().toLowerCase(), cur = SUP.byId(sel.value);
+      const all = !q || (cur && cur.name.trim().toLowerCase() === q);   // the linked name itself: show every supplier to switch
+      const items = known().filter(s => all || s.name.toLowerCase().includes(q)).map(s => ({ s }));
+      if (q && !named(vendor.value) && canWrite()) items.push({ add: vendor.value.trim() });
+      return items;
+    };
+    const paint = () => {
+      ul.replaceChildren();
+      rows.forEach((r, i) => {
+        const li = document.createElement('li'); li.id = uid + '-' + i; li.setAttribute('role', 'option');
+        li.setAttribute('aria-selected', i === act ? 'true' : 'false'); li.dataset.i = i;
+        if (r.add !== undefined) { li.className = 'vc-add'; li.textContent = '+ Add as new supplier'; }
+        else {
+          const n = document.createElement('span'); n.className = 'vc-name'; n.textContent = r.s.name + (r.s.active === false ? ' (inactive)' : '');
+          li.appendChild(n);
+          if (r.s.supplier_no) { const no = document.createElement('span'); no.className = 'vc-no small muted'; no.textContent = r.s.supplier_no; li.appendChild(no); }
+        }
+        ul.appendChild(li);
+      });
+      if (!rows.length) { const li = document.createElement('li'); li.className = 'vc-empty small muted'; li.setAttribute('role', 'presentation'); li.textContent = 'No supplier matches'; ul.appendChild(li); }
+      ul.hidden = false; isOpen = true; vendor.setAttribute('aria-expanded', 'true');
+      if (act >= 0) { vendor.setAttribute('aria-activedescendant', uid + '-' + act); ul.children[act]?.scrollIntoView({ block: 'nearest' }); }
+      else vendor.removeAttribute('aria-activedescendant');
+    };
+    const open = () => { rows = compute(); act = -1; paint(); };
+    const close = () => { ul.hidden = true; isOpen = false; act = -1; vendor.setAttribute('aria-expanded', 'false'); vendor.removeAttribute('aria-activedescendant'); };
+    const setVendor = text => {
+      vendor.value = text;
+      setPicking(true); try { vendor.dispatchEvent(new Event('input', { bubbles: true })); } finally { setPicking(false); }   // other listeners (receipt boxes) follow the text
+    };
+    const pickSupplier = s => { setVendor(s.name); link(s.id); close(); vendor.focus(); };
+    const addNew = async text => {
+      if (busy) return;
+      busy = true;
+      try {
+        const created = await api.post('suppliers', { name: text, kind: 'company' });
+        if (!SUP.list.some(x => x.id === created.id)) SUP.list = [...SUP.list, created];
+        pickSupplier(created);
+        toast('Supplier added: ' + created.name);
+      } catch (err) {
+        toast((err && err.message) || 'The supplier could not be added', true);   // the typed text stays
+        vendor.focus();
+      } finally { busy = false; }
+    };
+    const choose = i => { const r = rows[i]; if (!r) return; if (r.add !== undefined) addNew(r.add); else pickSupplier(r.s); };
+    vendor.addEventListener('focus', open);
+    vendor.addEventListener('click', () => { if (!isOpen) open(); });
+    vendor.addEventListener('input', () => { if (!busy) open(); });
+    vendor.addEventListener('blur', close);
+    btn.addEventListener('mousedown', ev => ev.preventDefault());   // keep the focus in the field
+    btn.addEventListener('click', () => { if (isOpen) close(); else { vendor.focus(); open(); } });
+    ul.addEventListener('mousedown', ev => ev.preventDefault());
+    ul.addEventListener('click', ev => { const li = ev.target.closest('li[data-i]'); if (li) choose(+li.dataset.i); });
+    ul.addEventListener('mousemove', ev => { const li = ev.target.closest('li[data-i]'); if (li && +li.dataset.i !== act) { act = +li.dataset.i; [...ul.children].forEach((c, i) => c.setAttribute('aria-selected', i === act ? 'true' : 'false')); vendor.setAttribute('aria-activedescendant', li.id); } });
+    // the dialog's own handler saves on Enter and closes on Escape: while the list is open these keys belong to the list
+    vendor.addEventListener('keydown', ev => {
+      const k = ev.key;
+      if (k === 'ArrowDown' || k === 'ArrowUp') {
+        ev.preventDefault();
+        if (!isOpen) { open(); return; }
+        if (!rows.length) return;
+        act = k === 'ArrowDown' ? (act + 1) % rows.length : (act <= 0 ? rows.length - 1 : act - 1);
+        paint();
+      } else if (isOpen && k === 'Enter') {
+        ev.preventDefault(); ev.stopPropagation();
+        if (act >= 0) choose(act); else close();
+      } else if (isOpen && k === 'Escape') {
+        ev.preventDefault(); ev.stopPropagation(); close();
+      } else if (isOpen && k === 'Tab') close();
+    });
+  }
   SUP.bindExpense = e => {
     const sel = $('#f_supplier_id'), alloc = $('#f_allocation_id'), vendor = $('#f_vendor'), rc = $('#f_reverse_charge');
     if (!sel) return;
     const rcBox = fieldOf('rc_vat');
     if (rcBox) rcBox.insertAdjacentHTML('beforeend', '<button type="button" class="ghost sm" data-a="supRcPropose">Propose from the VAT % above</button>');
+    // one Vendor field: the select stays as the hidden value, a vendor named like a supplier links to it
+    fieldOf('supplier_id').hidden = true;
+    const known = () => SUP.list.filter(s => s.active !== false || s.id === sel.value);
+    vendor.autocomplete = 'off';
+    vendor.insertAdjacentHTML('afterend', '<div id="e_vendor_sup" class="small muted" hidden></div>');
+    const linked = $('#e_vendor_sup');
+    const named = text => { const t = text.trim().toLowerCase(); return t ? known().find(s => s.name.trim().toLowerCase() === t) : null; };
     let seq = 0;
     const sync = async (initial) => {
       const s = SUP.byId(sel.value), mine = ++seq;
-      vendor.readOnly = !!s;
-      if (s && !initial) vendor.value = s.name;
+      linked.hidden = !s; linked.textContent = s ? 'Linked to supplier ' + (s.supplier_no ? s.supplier_no + ' ' : '') + s.name : '';
       const showRc = !!s && (isRC(s.vat_mode) || rc.checked);
       fieldOf('reverse_charge').hidden = !showRc; rcBox.hidden = !showRc || !rc.checked;
       if (s && isRC(s.vat_mode) && !initial && !rc.checked) { rc.checked = true; rcBox.hidden = false; }
@@ -320,22 +417,25 @@
       if (cur && sel.value === e.supplier_id) alloc.value = cur;
       af.hidden = !items.length && !cur;
     };
-    sel.onchange = () => sync(false);
+    let picking = false;
+    const link = (id) => {
+      if (id && ![...sel.options].some(o => o.value === id)) sel.add(new Option(SUP.name(id), id));   // a supplier created just now
+      if (id !== sel.value) { sel.value = id; sync(false); }
+    };
+    vendor.addEventListener('input', () => {
+      if (picking) return;
+      const s = named(vendor.value);
+      link(s ? s.id : '');
+    });
+    bindVendorCombo({ vendor, sel, known, named, link, setPicking: v => { picking = v; } });
     rc.onchange = () => sync(true);
+    // a scanned (draft) vendor equal to a supplier's name links when the dialog opens
+    if (!sel.value && !e.id) { const s = named(vendor.value); if (s) sel.value = s.id; }
     sync(true);
   };
   A.supRcPropose = () => {
     const gross = $('#f_gross')?.value, rate = $('#f_vat_rate')?.value;
     if (!gross) return toast('Enter the amount on the bill first', true);
     $('#f_rc_vat').value = Money.toNumber(Money.vatCents(Money.lineCents(1, gross), rate));
-  };
-
-  /* banner on the expenses page: how many bills have a vendor without a supplier */
-  SUP.vendorBanner = async () => {
-    if (!can('suppliers', 'write')) return '';
-    let r;
-    try { r = await api('GET', 'suppliers/vendor-suggestions'); } catch { return ''; }
-    if (!r || !r.unlinked_expenses) return '';
-    return `<div class="banner info sup-vendor-banner" role="status"><b>${esc(String(r.unlinked_expenses))} expense${r.unlinked_expenses === 1 ? ' has' : 's have'} a vendor without a supplier.</b> <button type="button" class="sm" data-a="supAdopt">Review and link…</button></div>`;
   };
 })();

@@ -140,6 +140,8 @@ class Expense(Record):
     supplier_id: str | None = None  # docs/contracts/subcontractors.md; `vendor` is then the supplier's name (snapshot)
     allocation_id: str | None = None  # an external allocation of that supplier this bill is booked against
     reverse_charge: bool | None = None  # stored as sent; the VAT figures are not changed (open decision 6)
+    paid_on: str | None = None  # docs/specs/receipt-scan.md: null = not given, counts as paid on the bill date `date`
+    invoice_no: str | None = None  # the invoice number printed on the bill
 
 
 class Line(BaseModel):
@@ -493,12 +495,36 @@ class ExpenseIn(v.StrictRecord):
     supplier_id: v.OptId = None
     allocation_id: v.OptId = None
     reverse_charge: bool = False
+    paid_on: v.OptDate = None  # null/empty = same as the bill date
+    invoice_no: Annotated[str, StringConstraints(max_length=60)] | None = None
 
     @model_validator(mode="after")
     def _net_or_lines(self):
         if not self.lines and self.net is None:
             raise ValueError("net is required for a bill without lines")
         return self
+
+
+class ReceiptConfirmIn(ExpenseIn):
+    """Saving a scanned receipt (docs/specs/receipt-scan.md): the expense plus the flags the user accepted."""
+
+    accepted: Annotated[list[Literal["no_invoice_number", "total_differs"]], Field(max_length=2)] = []
+
+
+class ReceiptScan(Record):
+    """A scanned receipt: a flagged bill is not an expense until it is saved (lenient response model)."""
+
+    status: str = "flagged"  # flagged | booked | known
+    sha256: str | None = None
+    invoice_key: str | None = None
+    attachment: str | None = None
+    filename: str | None = None
+    engine: str | None = None
+    draft: dict | None = None
+    doc: dict | None = None
+    flags: list | None = None
+    expense_id: str | None = None
+    created_by: str | None = None
 
 
 class LineIn(v.CheckedBody):

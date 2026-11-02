@@ -3,7 +3,7 @@
 # The bundle contains the interpreter, all dependencies, the web frontend and the SQL migrations.
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
 
 root = Path(SPECPATH).parent  # noqa: F821  (SPECPATH is provided by PyInstaller)
 
@@ -14,12 +14,17 @@ datas = [
     (str(root / "permita38" / "core" / "schema" / "migrations"), "permita38/core/schema/migrations"),
 ]
 
+# pypdfium2 ships the pdfium library as a data file / binary of its own
+datas += collect_data_files("pypdfium2_raw") + collect_data_files("pypdfium2")
+binaries = collect_dynamic_libs("pypdfium2_raw")
+
 # uvicorn/starlette import protocol, loop and lifespan implementations dynamically
-hiddenimports = collect_submodules("uvicorn") + collect_submodules("permita38") + ["multipart", "yaml"]
+hiddenimports = collect_submodules("uvicorn") + collect_submodules("permita38") + ["multipart", "yaml", "pypdfium2", "pypdfium2_raw", "zxingcpp"]
 
 a = Analysis(  # noqa: F821
     [str(root / "packaging" / "entry.py")],
     pathex=[str(root)],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     excludes=["tkinter", "pytest", "mypy", "ruff", "playwright", "hypothesis", "unittest.mock"],

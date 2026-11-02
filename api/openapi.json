@@ -8367,6 +8367,426 @@
           }
         }
       }
+    },
+    "/api/receipts": {
+      "post": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "scan a receipt",
+        "operationId": "upload_api_receipts_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_api_receipts_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "receipts that need a check",
+        "operationId": "list_receipts_api_receipts_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "const": "flagged",
+              "type": "string",
+              "default": "flagged",
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/receipts/{scan_id}/parts": {
+      "post": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "add a photo to a receipt that needs a check",
+        "operationId": "add_part_api_receipts__scan_id__parts_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_add_part_api_receipts__scan_id__parts_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/receipts/capabilities": {
+      "get": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "what receipt scanning can do on this device",
+        "operationId": "capabilities_api_receipts_capabilities_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ]
+      }
+    },
+    "/api/receipts/ocr/install": {
+      "post": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "download and install OCR (bundled Windows build, boss, session only)",
+        "operationId": "install_ocr_api_receipts_ocr_install_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OcrInstalled"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/receipts/{scan_id}": {
+      "get": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "one scanned receipt",
+        "operationId": "get_receipt_api_receipts__scan_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "discard a flagged receipt",
+        "operationId": "discard_api_receipts__scan_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/receipts/{scan_id}/pages/{page}": {
+      "get": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "PNG of one page of a scanned PDF (150 dpi)",
+        "operationId": "page_image_api_receipts__scan_id__pages__page__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "image/png": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/receipts/{scan_id}/confirm": {
+      "post": {
+        "tags": [
+          "receipts"
+        ],
+        "summary": "save a flagged receipt",
+        "operationId": "confirm_api_receipts__scan_id__confirm_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceiptConfirmIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfirmResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -9478,6 +9898,20 @@
         ],
         "title": "AuthStatus"
       },
+      "Body_add_part_api_receipts__scan_id__parts_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_add_part_api_receipts__scan_id__parts_post"
+      },
       "Body_import_preview_api_data_import_preview_post": {
         "properties": {
           "file": {
@@ -9758,6 +10192,20 @@
           "file"
         ],
         "title": "Body_upload_api_attachments_post"
+      },
+      "Body_upload_api_receipts_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_api_receipts_post"
       },
       "Body_upload_calendar_api_calendars_upload_post": {
         "properties": {
@@ -10263,6 +10711,83 @@
         ],
         "title": "Candidate"
       },
+      "Capabilities": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "pdf": {
+            "type": "boolean",
+            "title": "Pdf"
+          },
+          "einvoice": {
+            "type": "boolean",
+            "title": "Einvoice"
+          },
+          "ocr": {
+            "type": "boolean",
+            "title": "Ocr"
+          },
+          "ocr_install": {
+            "type": "string",
+            "enum": [
+              "available",
+              "none"
+            ],
+            "title": "Ocr Install"
+          },
+          "ocr_download_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Download Size"
+          },
+          "ocr_download_host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ocr Download Host"
+          },
+          "vision": {
+            "type": "string",
+            "enum": [
+              "off",
+              "local",
+              "remote"
+            ],
+            "title": "Vision"
+          },
+          "accepted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Accepted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "pdf",
+          "einvoice",
+          "ocr",
+          "ocr_install",
+          "vision",
+          "accepted"
+        ],
+        "title": "Capabilities"
+      },
       "ChangePasswordPayload": {
         "properties": {
           "old_password": {
@@ -10370,6 +10895,273 @@
         "title": "CommitmentChange",
         "description": "Overrides the period or hours of an existing contract or open offer. Omitted fields keep their value."
       },
+      "ConfirmExpense": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "net": {
+            "type": "number",
+            "title": "Net"
+          },
+          "vat": {
+            "type": "number",
+            "title": "Vat",
+            "default": 0
+          },
+          "vat_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Rate"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "deductible": {
+            "type": "number",
+            "title": "Deductible",
+            "default": 100
+          },
+          "vat_deductible": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Deductible"
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "import_batch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Batch"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ExpenseLine"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines"
+          },
+          "trip_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Id"
+          },
+          "trip_item_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Item Id"
+          },
+          "supplier_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Id"
+          },
+          "allocation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Id"
+          },
+          "reverse_charge": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reverse Charge"
+          },
+          "paid_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid On"
+          },
+          "invoice_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice No"
+          },
+          "sanity_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sanity Warnings"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date",
+          "net"
+        ],
+        "title": "ConfirmExpense"
+      },
       "ConfirmIn": {
         "properties": {
           "confirm": {
@@ -10380,6 +11172,22 @@
         },
         "type": "object",
         "title": "ConfirmIn"
+      },
+      "ConfirmResult": {
+        "properties": {
+          "expense": {
+            "$ref": "#/components/schemas/ConfirmExpense"
+          },
+          "scan": {
+            "$ref": "#/components/schemas/ScanResult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expense",
+          "scan"
+        ],
+        "title": "ConfirmResult"
       },
       "Contract": {
         "properties": {
@@ -12486,6 +13294,28 @@
               }
             ],
             "title": "Reverse Charge"
+          },
+          "paid_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid On"
+          },
+          "invoice_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice No"
           }
         },
         "additionalProperties": true,
@@ -12682,6 +13512,29 @@
             "type": "boolean",
             "title": "Reverse Charge",
             "default": false
+          },
+          "paid_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid On"
+          },
+          "invoice_no": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice No"
           }
         },
         "additionalProperties": true,
@@ -13970,6 +14823,24 @@
         ],
         "title": "NumberingCheck"
       },
+      "OcrInstalled": {
+        "properties": {
+          "ocr": {
+            "type": "boolean",
+            "title": "Ocr"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ocr",
+          "version"
+        ],
+        "title": "OcrInstalled"
+      },
       "PasswordPayload": {
         "properties": {
           "password": {
@@ -14461,6 +15332,238 @@
         ],
         "title": "ProjectIn"
       },
+      "ReceiptConfirmIn": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "net": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net"
+          },
+          "vat": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Vat",
+            "default": 0
+          },
+          "vat_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Rate"
+          },
+          "vendor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vendor"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "deductible": {
+            "type": "number",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Deductible",
+            "default": 100
+          },
+          "vat_deductible": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Deductible"
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}\\.[a-z0-9]{1,5}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ExpenseLineIn"
+                },
+                "type": "array",
+                "maxItems": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines"
+          },
+          "trip_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Id"
+          },
+          "trip_item_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trip Item Id"
+          },
+          "supplier_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Id"
+          },
+          "allocation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Id"
+          },
+          "reverse_charge": {
+            "type": "boolean",
+            "title": "Reverse Charge",
+            "default": false
+          },
+          "paid_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid On"
+          },
+          "invoice_no": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice No"
+          },
+          "accepted": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "no_invoice_number",
+                "total_differs"
+              ]
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Accepted",
+            "default": []
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "date"
+        ],
+        "title": "ReceiptConfirmIn",
+        "description": "Saving a scanned receipt (docs/specs/receipt-scan.md): the expense plus the flags the user accepted."
+      },
       "RecoveryCodesResult": {
         "properties": {
           "recovery_codes": {
@@ -14543,6 +15646,162 @@
           "revoked"
         ],
         "title": "RevokeAllResult"
+      },
+      "ScanList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScanResult"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ScanList"
+      },
+      "ScanResult": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "flagged"
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft"
+          },
+          "doc": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doc"
+          },
+          "flags": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flags"
+          },
+          "expense_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expense Id"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "ScanResult",
+        "description": "A scanned receipt as sent to a client (the file hash and the duplicate key stay on the server)."
       },
       "ScenarioChanges": {
         "properties": {
@@ -18547,6 +19806,37 @@
         ],
         "title": "UnavailableIn"
       },
+      "UploadResult": {
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "booked",
+              "flagged"
+            ],
+            "title": "Outcome"
+          },
+          "scan": {
+            "$ref": "#/components/schemas/ScanResult"
+          },
+          "expense": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Expense"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "outcome",
+          "scan"
+        ],
+        "title": "UploadResult"
+      },
       "Uploaded": {
         "properties": {
           "name": {
@@ -20737,6 +22027,28 @@
               }
             ],
             "title": "Reverse Charge"
+          },
+          "paid_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid On"
+          },
+          "invoice_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invoice No"
           },
           "planning_warnings": {
             "anyOf": [

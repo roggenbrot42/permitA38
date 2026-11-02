@@ -151,7 +151,7 @@ jobs:
         run: |
           tag="ocr-tools-win64-${VERSION}"
           gh release create "$tag" "dist/ocr-tools-win64-${VERSION}.zip" \
-            --repo "$GITHUB_REPOSITORY" --title "OCR tools for Windows ${VERSION}" \
+            --repo "$GITHUB_REPOSITORY" --latest=false --prerelease --title "OCR tools for Windows ${VERSION}" \
             --notes "Tesseract ${UPSTREAM_VERSION} (UB-Mannheim build, digest ${UPSTREAM_SHA256}) with tessdata_fast deu and eng. Downloaded by permitA38 on request and verified against the digest committed in the code. Verify: gh attestation verify <file> --repo ${GITHUB_REPOSITORY}"
       - name: Constants for core/receipts/ocr_tools.py
         run: |

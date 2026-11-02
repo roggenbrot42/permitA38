@@ -50,8 +50,10 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 | **Planner per project** (capacity allocated to projects, ring fence, per-project gaps, "Allocate my capacity" bootstrap) | done on `main`, see [`specs/planner-per-project.md`](specs/planner-per-project.md) and [`planning.md`](planning.md); unreleased |
 | **Business trips**: import the real BMF country table for 2026 and 2027 | planned; blocks use of trips abroad |
 | **Merge-import** into an instance that already has data (id remapping, conflict policy) | planned; v1 import needs an empty instance |
-| **Bill extraction from PDF/image** and e-invoice XML (prefill, you confirm) | planned, builds on the AI provider |
+| **Automatic receipt scan** from PDF/image and e-invoice XML (clean bills are booked, ambiguous ones flagged, duplicates refused) | user guide [`receipt-scan.md`](receipt-scan.md), spec [`specs/receipt-scan.md`](specs/receipt-scan.md); local, no AI provider needed; OCR on Windows is a download on request (package built by a manual workflow, pending its first run); Full review tier; in progress on a feature branch |
 | **Gantt chart** for the overall plan and project subtasks | later |
+| **Settings split into business and user**: today one page mixes business data, personal user settings, tax details, company type and hourly rates | maintainer request, later |
+| **Real tax burden estimate** for Freiberufler and Gewerbetreibende: income tax, trade tax, and health care and pension from the known percentages, instead of a flat reserve | maintainer request, later; needs current rates and a tax adviser check |
 
 ## v0.4.0-alpha.5 (bugfix only)
 

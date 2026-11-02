@@ -22,6 +22,8 @@ dependencies = [
     "PyYAML>=6",
     "python-multipart>=0.0.9",
     "segno>=1.6",
+    "zxing-cpp>=3",  # receipt scan: QR codes (TSE, GiroCode)
+    "pypdfium2>=5",  # receipt scan: PDF text, embedded e-invoice XML, page rendering
     "tzdata",   # zoneinfo needs a time zone database: Windows and slim containers have none
 ]
 

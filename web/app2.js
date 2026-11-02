@@ -331,13 +331,39 @@ A.billTimeInto = () => A.billTime({ dataset: { cust: DOC.customer_id } });
 
 /* ================= EXPENSES ================= */
 const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & coworking', 'Travel', 'Transportation', 'Accommodation', 'Material', 'Business meals', 'Marketing', 'Insurance', 'Phone & internet', 'Training', 'Subcontractors', 'Fees & bank', 'Other'];
+// The two tiles on the Expenses page, as /api/finance counts them (core/calc.py `finance`): the cost on the paid date under
+// `eur` (empty = bill date) and on the bill date under `accrual`, the input VAT always on the bill date; a business meal
+// counts its own deductible shares line by line; a Kleinunternehmer's cost is the gross and has no input VAT.
+const cents = v => Math.round((v + Number.EPSILON) * 100) / 100;
+const isoDay = v => {   // a real calendar day as YYYY-MM-DD, else ''  (the backend's d(): a damaged date is no date)
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v ?? ''));
+  if (!m) return '';
+  const t = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return t.getUTCFullYear() === +m[1] && t.getUTCMonth() === +m[2] - 1 && t.getUTCDate() === +m[3] ? m[0] : '';
+};
+// Bills only: the trip amounts that calc.finance adds to the expenses are not part of this tile.
+function expenseTiles(list, y) {
+  const accrual = S.settings.accounting === 'accrual', klein = !!S.settings.kleinunternehmer, year = String(y);
+  let cost = 0, vat = 0;
+  for (const e of list) {
+    const bill = isoDay(e.date), paid = accrual ? bill : (isoDay(e.paid_on) || bill);
+    for (const ln of (e.lines && e.lines.length ? e.lines : [e])) {
+      if (!ln) continue;
+      const pct = (ln.deductible ?? 100) / 100, vatPct = (ln.vat_deductible ?? ln.deductible ?? 100) / 100;
+      if (paid.startsWith(year)) cost += cents(((ln.net || 0) + (klein ? (ln.vat || 0) : 0)) * pct);
+      if (!klein && bill.startsWith(year)) vat += cents((ln.vat || 0) * vatPct);
+    }
+  }
+  return { cost: cents(cost), vat: cents(vat) };
+}
 PAGES.expenses = async () => {
   await loadAll(['expenses', 'projects', 'trips']);   // trips: the bill dialog's trip select
-  const supBanner = window.SUP ? (await SUP.load(), await SUP.vendorBanner()) : '';   // suppliers: the bill dialog's supplier select
-  const y = new Date().getFullYear(), list = S.d.expenses.sort((a, b) => a.date < b.date ? 1 : -1), yr = list.filter(e => (e.date || '').startsWith(y));
-  return `<div class="head"><div><h1>Expenses</h1><div class="muted">Bills you pay – general or tied to a project.</div></div><button class="primary" data-a="editExpense">+ Add bill</button></div>
-  ${supBanner}<div class="grid g3"><div class="card kpi"><div class="l">${y} net expenses</div><div class="v">${eur(yr.reduce((a, e) => a + (e.net || 0) * (e.deductible ?? 100) / 100, 0))}</div></div><div class="card kpi"><div class="l">Input VAT ${y}</div><div class="v">${S.settings.kleinunternehmer ? '–' : eur(yr.reduce((a, e) => a + (e.vat || 0) * (e.vat_deductible ?? e.deductible ?? 100) / 100, 0))}</div></div></div>
-  <div class="card">${list.length ? `<table><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Project</th><th class="num">Net</th><th class="num">VAT</th><th></th></tr>${list.map(e => `<tr class="click" data-a="editExpense" data-id="${e.id}"><td class="nowrap">${fmtDate(e.date)}</td><td><b>${esc(e.vendor || '')}</b>${e.supplier_id ? ` <a href="#/suppliers/${esc(e.supplier_id)}" class="pill sup-tag" data-stop>supplier</a>` : ''}${e.reverse_charge ? ' <span class="pill warn">reverse charge</span>' : ''}<div class="small muted">${esc(e.description || '')}</div>${e.lines?.length ? `<div class="small muted">${e.lines.length === 1 ? '1 item' : e.lines.length + ' items'}</div>` : ''}</td><td>${esc(e.category || '')}</td><td>${esc(nameOf('projects', e.project_id) || 'General')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td><td>${e.attachment ? `<a href="${api.url('attachments/' + e.attachment)}" target="_blank" data-stop>📎</a>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses yet.</div>'}</div>`;
+  await RCPT.load();   // receipt scan: capabilities and the bills that need a check (receipts.js)
+  if (window.SUP) await SUP.load();   // suppliers: the bill dialog's supplier select
+  const y = new Date().getFullYear(), list = S.d.expenses.sort((a, b) => a.date < b.date ? 1 : -1), tiles = expenseTiles(list, y);
+  return `<div class="head"><div><h1>Expenses</h1><div class="muted">Bills you pay – general or tied to a project.</div></div><div class="rcpt-actions">${RCPT.uploadButton()}<button class="primary" data-a="editExpense">+ Add bill</button></div></div>
+  ${RCPT.pageTop()}<div class="grid g3"><div class="card kpi"><div class="l">${y} ${S.settings.kleinunternehmer ? 'bills (gross)' : 'net bills'}</div><div class="v">${eur(tiles.cost)}</div></div><div class="card kpi"><div class="l">Input VAT ${y}</div><div class="v">${S.settings.kleinunternehmer ? '–' : eur(tiles.vat)}</div></div></div>
+  ${RCPT.flaggedSection()}<div class="card">${list.length ? `<table><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Project</th><th class="num">Net</th><th class="num">VAT</th><th></th></tr>${list.map(e => `<tr class="click" data-a="editExpense" data-id="${e.id}"><td class="nowrap">${fmtDate(e.date)}</td><td><b>${esc(e.vendor || '')}</b>${e.supplier_id ? ` <a href="#/suppliers/${esc(e.supplier_id)}" class="pill sup-tag" data-stop>supplier</a>` : ''}${e.reverse_charge ? ' <span class="pill warn">reverse charge</span>' : ''}${RCPT.pills(e)}<div class="small muted">${esc(e.description || '')}</div>${e.lines?.length ? `<div class="small muted">${e.lines.length === 1 ? '1 item' : e.lines.length + ' items'}</div>` : ''}</td><td>${esc(e.category || '')}</td><td>${esc(nameOf('projects', e.project_id) || 'General')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td><td>${e.attachment ? `<a href="${api.url('attachments/' + e.attachment)}" target="_blank" data-stop>📎</a>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses yet.</div>'}</div>`;
 };
 /* ----- itemised bills: lines table, live totals, bill preview (docs/specs/itemised-expenses.md) ----- */
 const LINE_RATES = [19, 7, 0], MAX_LINES = 50;
@@ -406,6 +432,7 @@ function pvRelease() {
 function pvSet(kind, name, src, own, href = src, note = '') {
   pvRelease();
   const box = $('#e_preview');
+  $('#modal-root .modal').classList.toggle('exp-bill', kind === 'image' || kind === 'pdf');   // landscape: bill beside the fields
   if (!kind) { box.hidden = true; box.innerHTML = ''; return; }
   PV = { kind, name, src, own, zoom: 100, fit: kind === 'image', nw: 0, nh: 0 };
   box.hidden = false;
@@ -424,7 +451,7 @@ function pvSet(kind, name, src, own, href = src, note = '') {
         <button type="button" data-a="zoom100" aria-label="Zoom to 100 %">100 %</button>
         <span id="e_zoom_label" class="small muted" aria-live="polite"></span>${link}</div>
       ${help}
-      <div id="e_stage" class="exp-stage"><img id="e_img" alt="${esc(name)}" src="${esc(src)}" draggable="false"></div>`;
+      <div id="e_stage" class="exp-stage"><div id="e_wrap" class="exp-wrap"><img id="e_img" alt="${esc(name)}" src="${esc(src)}" draggable="false"><div id="e_layer" class="rcpt-layer" hidden></div></div></div>`;
     const img = $('#e_img');
     img.addEventListener('load', () => { if (!PV || PV.src !== src) return; PV.nw = img.naturalWidth; PV.nh = img.naturalHeight; if (PV.fit) pvZoomTo(fitZoom(), null, true); else pvApply(); });
   } else if (kind === 'pdf') {
@@ -435,6 +462,7 @@ function pvSet(kind, name, src, own, href = src, note = '') {
   } else {
     box.innerHTML = `<div class="exp-zoombar">${link}</div><p class="small muted">${esc(note || 'No preview for this file type.')}</p>`;
   }
+  RCPT.afterPreview();   // detected-fields layer of a scanned bill (receipts.js); does nothing for manual bills
 }
 /** The stored bill, fetched with the token (an img or iframe cannot send it) and shown from a blob: URL. */
 async function pvStored(name) {
@@ -456,7 +484,9 @@ async function pvStored(name) {
 function fitZoom() {
   const stage = $('#e_stage'), img = $('#e_img');
   if (!stage || !img || !PV.nw) return 100;
-  return Math.min(100, 100 * Math.min(stage.clientWidth / PV.nw, stage.clientHeight / (PV.nh || 1)));
+  const fitWidth = stage.clientWidth / PV.nw;
+  if (PV.nh / PV.nw > 2) return Math.min(100, 100 * fitWidth);   // a long till receipt: readable width, scroll down the rest
+  return Math.min(100, 100 * Math.min(fitWidth, stage.clientHeight / (PV.nh || 1)));
 }
 /** Sets the zoom (clamped to 25..800 %) and keeps the point under the pointer (or the centre) where it is. */
 function pvZoomTo(z, anchor, fit = false) {
@@ -545,7 +575,12 @@ function lineError(l, i) {
 }
 A.editExpense = el => {
   // a new bill can be started from a business trip: data-trip, data-category and data-project preselect those fields
+  if (el?.dataset?.id && !S.d.expenses.some(x => x.id === el.dataset.id)) return toast('This bill was not found', true);
   const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: el?.dataset?.category || EXP_CATS[0], project_id: el?.dataset?.project || '', trip_id: el?.dataset?.trip || '', trip_item_id: el?.dataset?.item || '' };
+  expenseDialog(e, null);
+};
+/** The bill dialog. scan: a flagged receipt ("Check receipt", draft filled in, Save confirms it) or null (a manual or booked bill). */
+function expenseDialog(e, scan) {
   const cats = e.category && !EXP_CATS.includes(e.category) ? [...EXP_CATS, e.category] : EXP_CATS;   // keep a category entered elsewhere
   const stored = Array.isArray(e.lines) ? e.lines : [];
   // a stored line keeps the fields this dialog does not show (line category, unknown fields); net/vat are derived
@@ -553,22 +588,22 @@ A.editExpense = el => {
     const { description, gross, vat_rate, deductible, vat_deductible, net, vat, ...extra } = l;
     return { description: description ?? '', gross: String(gross ?? ''), vat_rate: String(vat_rate ?? 19), deductible: String(deductible ?? 100), vat_deductible: vat_deductible ?? null, extra };
   });
-  const v0 = { ...e, gross: e.net != null && !stored.length ? Math.round((e.net + (e.reverse_charge ? 0 : e.vat || 0)) * 100) / 100 : '', vat_rate: e.vat_rate ?? 19, itemise: stored.length > 0, rc_vat: e.reverse_charge ? e.vat : '' };
+  const v0 = { ...e, gross: e.net != null && !stored.length ? Math.round((e.net + (e.reverse_charge ? 0 : e.vat || 0)) * 100) / 100 : (e.gross ?? ''), vat_rate: e.vat_rate ?? 19, itemise: stored.length > 0, rc_vat: e.reverse_charge ? e.vat : '' };
   const hasSup = !!window.SUP && can('suppliers');   // supplier, allocation and reverse-charge fields (docs/contracts/subcontractors.md)
   const supFields = hasSup ? [{ k: 'supplier_id', l: 'Supplier', t: 'select', o: [['', '— none (free-text vendor) —'], ...SUP.options(e.supplier_id)] },
     { k: 'allocation_id', l: 'Subcontractor allocation', t: 'select', o: [['', '— none —']] },
     { k: 'reverse_charge', l: 'Reverse charge: the VAT is owed by me, not charged on the bill (verify with your tax adviser)', t: 'check' },
     { k: 'rc_vat', l: 'Self-assessed VAT €', t: 'number', h: 'Enter the amount on the bill above; this is the VAT you owe yourself. Not used for itemised bills.' }] : [];
   openForm({
-    title: e.id ? 'Edit bill' : 'Add bill', vals: v0, wide: true,
-    fields: [{ k: 'date', l: 'Paid on', t: 'date', row: 1 }, { k: 'vendor', l: 'Vendor', row: 1 }, { k: 'description', l: 'Description' }, ...supFields,
+    title: scan ? 'Check receipt' : e.id ? 'Edit bill' : 'Add bill', vals: v0, wide: true, note: scan ? RCPT.dialogTop(scan) : '',
+    fields: [{ k: 'date', l: 'Bill date', t: 'date', row: 1 }, { k: 'paid_on', l: 'Paid on', t: 'date', h: 'Empty = same as the bill date.', row: 1 }, { k: 'invoice_no', l: 'Invoice number', row: 1 }, { k: 'vendor', l: 'Vendor' }, { k: 'description', l: 'Description' }, ...supFields,
       { k: 'itemise', l: 'Itemise this bill (several lines, e.g. a hotel invoice with different VAT rates)', t: 'check' },
-      { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: LINE_RATES, row: 2 },
+      { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: e.vat_rate != null && !LINE_RATES.includes(+e.vat_rate) ? [...LINE_RATES, e.vat_rate] : LINE_RATES, row: 2 },
       { k: 'category', l: 'Category', t: 'select', o: cats, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
       { k: 'trip_id', l: 'Business trip', t: 'select', o: [['', '— no trip —'], ...tripOptions(e.trip_id)], row: 4 },
       { k: 'trip_item_id', l: 'Planned item of the trip', t: 'select', o: [['', '— not planned —'], ...tripItemOptions(e.trip_id)], row: 4 },
       { k: 'deductible', l: 'Deductible %', t: 'number', h: '100 normally; 70 for business meals with business partners (set automatically with that category). Input VAT of business meals is reclaimed in full.' }],
-    extra: `<div id="e_body" class="exp-body">
+    extra: `${scan ? RCPT.dialogAccept(scan) : ''}<div id="e_body" class="exp-body">
       <div id="e_itemised" class="exp-itemised" hidden>
         <div id="e_itemise_hint" class="muted small" hidden>Several lines: remove lines until one is left to switch itemising off.</div>
         <div class="exp-table-wrap"><table class="exp-lines">
@@ -582,13 +617,15 @@ A.editExpense = el => {
           <tbody id="e_tot_rates"></tbody></table>
       </div>
       <div class="exp-side">
-        <div class="field"><label for="e_file">Attach the bill (PDF / photo)</label><input type="file" id="e_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif">${e.attachment ? `<div class="small"><a href="${api.url('attachments/' + esc(e.attachment))}" target="_blank" rel="noopener">Current attachment</a></div>` : ''}</div>
+        <div class="field" ${scan ? 'hidden' : ''}><label for="e_file">Attach the bill (PDF / photo)</label><input type="file" id="e_file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif">${e.attachment ? `<div class="small"><a href="${api.url('attachments/' + esc(e.attachment))}" target="_blank" rel="noopener">Current attachment</a></div>` : ''}</div>
         <div id="e_preview" class="exp-preview" tabindex="0" aria-label="Bill preview" hidden></div>
       </div></div>`,
     save: async v => {
       const itemised = !!v.itemise, gross = v.gross;
       delete v.itemise; delete v.gross;
       const bmeal = v.category === 'Business meals';
+      v.paid_on = v.paid_on || null;   // empty = same as the bill date
+      v.invoice_no = (v.invoice_no || '').trim() || null;
       v.project_id = v.project_id || null;
       v.trip_id = v.trip_id || null;   // a bill belongs to one business trip (or none)
       // a planned item belongs to the trip it was listed under: switching the trip drops the item
@@ -599,7 +636,7 @@ A.editExpense = el => {
       if (itemised) {
         if (!LN.length) throw new Error('Add at least one line');
         const bad = LN.map(lineError).find(Boolean); if (bad) throw new Error(bad);
-        if (!v.date) throw new Error('Pick the date you paid');
+        if (!v.date) throw new Error('Pick the bill date');
         v.lines = LN.map(l => ({ ...l.extra, description: l.description, gross: toNum(l.gross), vat_rate: Number(l.vat_rate),
           deductible: toNum(l.deductible), vat_deductible: l.vat_deductible ?? (bmeal ? 100 : null) }));
         delete v.net; delete v.vat; delete v.vat_rate;   // derived by the server from the lines
@@ -608,21 +645,23 @@ A.editExpense = el => {
         if (!gross) throw new Error('Enter the amount');
         const r = +v.vat_rate || 0;
         if (gross < 0) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
-        if (!v.date) throw new Error('Pick the date you paid');
+        if (!v.date) throw new Error('Pick the bill date');
         Object.assign(v, Money.splitGross(gross, v.reverse_charge ? 0 : r)); v.vat_rate = v.reverse_charge ? 0 : r;
         if (v.reverse_charge) v.vat = Number.isFinite(rcVat) && rcVat > 0 ? rcVat : 0;   // the self-assessed VAT, as typed
       }
+      if (scan) return RCPT.confirm(scan, v);   // POST /api/receipts/{id}/confirm; the server sets attachment and external_id
       const f = $('#e_file').files[0];
       if (f) v.attachment = (await api.upload(f)).name;
       await save('expenses', v); render();
     },
-    del: e.id ? async () => { await api('DELETE', 'expenses/' + e.id); await loadAll(['expenses']); render(); } : null
+    del: e.id && !scan ? async () => { await api('DELETE', 'expenses/' + e.id); await loadAll(['expenses']); render(); } : null
   });
   if (hasSup) SUP.bindExpense(e);
   const modalEl = $('#modal-root .modal');
-  closeModal.onClose = () => { PV_GEN++; pvRelease(); LN = []; };
+  closeModal.onClose = () => { PV_GEN++; pvRelease(); LN = []; RCPT.closeDialog(); };
   bindExpenseDialog(modalEl);
   bindPreview($('#e_preview'));
+  RCPT.bindDialog(modalEl, scan);
   // Business meals are 70 % deductible: choosing the category proposes that, leaving it restores 100 (a hand-typed value stays)
   $('#f_category')?.addEventListener('change', ev => {
     const ded = $('#f_deductible'); if (!ded) return;
@@ -653,8 +692,10 @@ A.editExpense = el => {
     if (e.attachment) pvStored(e.attachment); else pvSet(null);
   });
   if (stored.length) setItemised(true);
-  if (e.attachment) pvStored(e.attachment);
-};
+  if (scan) RCPT.openPreview(scan);
+  else if (RCPT.isScanned(e)) RCPT.openBooked(e);   // loads the scan for the overlay; falls back to the plain preview
+  else if (e.attachment) pvStored(e.attachment);
+}
 
 /* ================= MONEY & TAXES ================= */
 PAGES.money = async (year) => {

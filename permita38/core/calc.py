@@ -325,10 +325,14 @@ def finance(store, year, today=None):
             m["vat_out"] += dec(t["vat_total"])
     cats: dict[str, Decimal] = defaultdict(lambda: ZERO)
     for x in store.list("expenses"):
-        when = d(x.get("date"))
-        if not when or when.year != year:
+        # docs/specs/receipt-scan.md: the cost counts on the paid date under `eur` (null/damaged = the bill date) and on
+        # the bill date under `accrual`; the input VAT always counts on the bill date. Each picks its own month/year.
+        bill = d(x.get("date"))
+        cost_when = (d(x.get("paid_on")) or bill) if not accrual else bill
+        cost_m = months[cost_when.month - 1] if cost_when and cost_when.year == year else None
+        vat_m = months[bill.month - 1] if bill and bill.year == year else None
+        if cost_m is None and vat_m is None:
             continue
-        m = months[when.month - 1]
         for ln in expense_lines(x):
             # per line: a business meal is 70 % deductible as an expense while its input VAT is reclaimed in full
             # (§ 15 Abs. 1a UStG), so the VAT share is set apart from the cost share
@@ -337,10 +341,11 @@ def finance(store, year, today=None):
             net, vat_raw = ln["net"], ln["vat"]
             # Kleinunternehmer cannot reclaim input VAT, so the gross amount is the cost
             cost = q2((net + vat_raw) * pct) if klein else q2(net * pct)
-            m["expenses"] += cost
-            if not klein:
-                m["vat_in"] += q2(vat_raw * vat_pct)
-            cats[ln["category"] or "Other"] += cost
+            if cost_m is not None:
+                cost_m["expenses"] += cost
+                cats[ln["category"] or "Other"] += cost
+            if not klein and vat_m is not None:
+                vat_m["vat_in"] += q2(vat_raw * vat_pct)
     for t in store.list("trips"):
         for item in trip_amounts(t):
             when = d(item["date"])

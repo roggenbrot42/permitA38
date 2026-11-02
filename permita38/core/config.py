@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DatabaseConfig(BaseModel):
@@ -25,6 +25,18 @@ class DatabaseConfig(BaseModel):
 class FeaturesConfig(BaseModel):
     # outbound request to a website the user enters (customer prefill from the Impressum)
     impressum_lookup: bool = True
+
+
+class ScanConfig(BaseModel):
+    """Automatic receipt scan (docs/specs/receipt-scan.md). Per device, never in the synced data folder."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    tesseract_path: str | None = Field(default=None, min_length=1, max_length=1024)  # None: search PATH
+    languages: str = Field(default="deu+eng", pattern=r"^[A-Za-z_]{2,16}(\+[A-Za-z_]{2,16}){0,4}$")
+    timeout_s: int = Field(default=120, ge=5, le=600)
+    max_concurrent: int = Field(default=2, ge=1, le=8)
 
 
 class Config(BaseModel):
@@ -48,6 +60,7 @@ class Config(BaseModel):
     token_ttl_hours: int = 12
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     features: FeaturesConfig = Field(default_factory=FeaturesConfig)
+    scan: ScanConfig = Field(default_factory=ScanConfig)
 
 
 def config_dir() -> Path:

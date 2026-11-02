@@ -12,8 +12,11 @@ Rules enforced for every request *and every redirect hop*:
 The network is reached through the small :class:`Fetcher` interface so services can be tested without it.
 """
 
+import hashlib
+import hmac
 import http.client
 import ipaddress
+import os
 import socket
 import ssl
 import time
@@ -28,6 +31,8 @@ MAX_BODY_BYTES = 2 * 1024 * 1024
 MAX_REDIRECTS = 3
 ALLOWED_PORTS = (80, 443)
 ALLOWED_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
+# Hosts a pinned download may visit (also after redirects): GitHub's release downloads.
+GITHUB_RELEASE_HOSTS = ("github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com")
 _REDIRECT_STATUS = (301, 302, 303, 307, 308)
 _HTML_ACCEPT = "text/html,application/xhtml+xml;q=0.9"
 _BLOCKED_SUFFIXES = (".localhost", ".local", ".internal", ".intranet", ".lan", ".home", ".corp", ".home.arpa")
@@ -309,6 +314,116 @@ class SafeFetcher:
             last_modified=headers.get("last-modified"),
         )
 
+    def download_pinned(
+        self,
+        url: str,
+        sha256: str,
+        max_bytes: int,
+        dest: str | os.PathLike[str],
+        *,
+        allowed_hosts: Iterable[str] = GITHUB_RELEASE_HOSTS,
+        https_only: bool = True,
+    ) -> int:
+        """Stream ``url`` into the new file ``dest`` and return its size, once the SHA-256 matches.
+
+        Same address rules as :meth:`fetch`; additionally every hop (the first too) must be on ``allowed_hosts`` and,
+        by default, https. No content-type check. On any failure ``dest`` is removed again.
+        """
+        wanted = (sha256 or "").strip().lower()
+        if len(wanted) != 64 or any(c not in "0123456789abcdef" for c in wanted):
+            raise FetchError("invalid_digest", "The expected SHA-256 is not valid.")
+        hosts = tuple(h.lower() for h in allowed_hosts)
+        budget = RequestBudget(self.max_redirects + 1)
+        started = time.monotonic()
+        current = url
+        visited: list[str] = []
+        try:
+            for _ in range(self.max_redirects + 1):
+                parsed = parse_url(current, self.allowed_ports)
+                if parsed.host not in hosts:
+                    raise FetchError("host_not_allowed", "The download address is not on the list of allowed hosts.")
+                if https_only and parsed.scheme != "https":
+                    raise FetchError("insecure_url", "Only https:// addresses are accepted here.")
+                key = f"{parsed.scheme}://{parsed.host}:{parsed.port}{parsed.target}"
+                if key in visited:
+                    raise FetchError("redirect_loop", "The website redirects in a loop.")
+                visited.append(key)
+                ip = self._resolve_and_check(parsed)
+                budget.spend()
+                location, size, digest = self._stream_to_file(parsed, ip, started, max_bytes, dest)
+                if location is None:
+                    if not hmac.compare_digest(digest, wanted):
+                        raise FetchError("digest_mismatch", "The downloaded file does not match the expected digest.")
+                    return size
+                current = urljoin(current, location.strip())
+            raise FetchError("too_many_redirects", "The website redirects too often.")
+        except BaseException:
+            try:
+                os.unlink(dest)
+            except OSError:
+                pass
+            raise
+
+    def _stream_to_file(
+        self, parsed: ParsedUrl, ip: str, started: float, max_bytes: int, dest: str | os.PathLike[str]
+    ) -> tuple[str | None, int, str]:
+        """One GET. Returns (redirect location, 0, "") or (None, size, hex digest) with the body written to ``dest``."""
+        conn = self._connection(parsed, ip)
+        try:
+            conn.request(
+                "GET",
+                parsed.target,
+                headers={
+                    "User-Agent": self.user_agent,
+                    "Accept": "*/*",
+                    "Accept-Encoding": "identity",
+                    "Connection": "close",
+                },
+            )
+            resp = conn.getresponse()
+            if resp.status in _REDIRECT_STATUS:
+                location = resp.getheader("location")
+                if not location:
+                    raise FetchError("http_error", "The website sent an invalid redirect.")
+                return location, 0, ""
+            if resp.status != 200:
+                raise FetchError("http_error", f"The website answered with HTTP status {resp.status}.")
+            if resp.getheader("content-encoding", "identity").strip().lower() not in ("", "identity"):
+                raise FetchError("bad_content_type", "The website uses an unsupported content encoding.")
+            declared = resp.getheader("content-length")
+            if declared and declared.isdigit() and int(declared) > max_bytes:
+                raise FetchError("too_large", "The file is larger than expected.")
+            h = hashlib.sha256()
+            size = 0
+            with open(dest, "xb") as out:
+                while True:
+                    remaining = self.deadline - (time.monotonic() - started)
+                    if remaining <= 0:
+                        raise FetchError("timeout", "The website did not answer in time.")
+                    if conn.sock is not None:
+                        conn.sock.settimeout(max(0.05, min(self.timeout, remaining)))
+                    chunk = resp.read1(65536)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > max_bytes:
+                        raise FetchError("too_large", "The file is larger than expected.")
+                    h.update(chunk)
+                    out.write(chunk)
+            return None, size, h.hexdigest()
+        except FetchError:
+            raise
+        except (TimeoutError, socket.timeout):
+            raise FetchError("timeout", "The website did not answer in time.") from None
+        except ssl.SSLError:
+            raise FetchError(
+                "tls_error", "The secure connection to the website failed (invalid certificate?)."
+            ) from None
+        except (OSError, http.client.HTTPException):
+            raise FetchError("network_error", "The website could not be reached.") from None
+        finally:
+            conn.close()
+
     # -- internals ------------------------------------------------------------------------------
     def _walk(
         self,
@@ -449,3 +564,18 @@ class SafeFetcher:
             if len(out) > limit:
                 raise FetchError("too_large", "The web page is too large.")
         return bytes(out)
+
+
+def download_pinned(
+    url: str,
+    sha256: str,
+    max_bytes: int,
+    dest: str | os.PathLike[str],
+    *,
+    user_agent: str = "permitA38",
+    allowed_hosts: Iterable[str] = GITHUB_RELEASE_HOSTS,
+    fetcher: SafeFetcher | None = None,
+) -> int:
+    """Download one file with a known SHA-256 (see :meth:`SafeFetcher.download_pinned`). Returns the size in bytes."""
+    fetcher = fetcher or SafeFetcher(user_agent, timeout=30.0, deadline=900.0)
+    return fetcher.download_pinned(url, sha256, max_bytes, dest, allowed_hosts=allowed_hosts)

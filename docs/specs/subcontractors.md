@@ -579,7 +579,7 @@ Suppliers                                   [+ New supplier] [Link expense vendo
  | L-0004 | Demo Print Shop GmbH       | Company         |        |      0,00   |
  +--------+----------------------------+-----------------+--------+-------------+
  Supplier form: master data | bank | payment terms | [capacity: weekly h, workdays, rate, unavailable windows]
- Banner on the Expenses page: "12 expenses have a vendor without a supplier. [Review and link...]"
+ Optional header link (only with N > 0): [Link vendors from expenses (12)]; no banner on the Expenses page (free-text vendors are normal)
 
 Incoming offers                             [+ Record offer]
  tabs: [Open] [Accepted] [Rejected] [Expired]

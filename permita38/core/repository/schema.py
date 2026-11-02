@@ -136,7 +136,8 @@ TABLES: dict[str, Table] = {
             _cols(
                 _BASE + "date:str net:float vat:float vat_rate:float vendor:str description:text category:str "
                 "project_id:id deductible:float attachment:str vat_deductible:float external_id:str import_batch:str lines:json "
-                "trip_id:id trip_item_id:id supplier_id:id allocation_id:id reverse_charge:bool" + _EXTRA
+                "trip_id:id trip_item_id:id supplier_id:id allocation_id:id reverse_charge:bool paid_on:str invoice_no:str"
+                + _EXTRA
             ),
             (
                 Index("idx_expenses_date", ("date",)),
@@ -274,6 +275,20 @@ TABLES: dict[str, Table] = {
                 Index("idx_allocations_status", ("status",)),
             ),
         ),
+        # scanned receipts (docs/specs/receipt-scan.md): a flagged bill is not an expense until the user saves it
+        Table(
+            "receipt_scans",
+            _cols(
+                _BASE + "status:str sha256:str invoice_key:str attachment:str filename:str engine:str draft:json "
+                "doc:json flags:json expense_id:id created_by:id" + _EXTRA
+            ),
+            (
+                Index("idx_receipt_scans_sha256", ("sha256",), unique=True),
+                Index("idx_receipt_scans_status", ("status",)),
+                Index("idx_receipt_scans_invoice_key", ("invoice_key",)),
+                Index("idx_receipt_scans_expense_id", ("expense_id",)),
+            ),
+        ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
 }
@@ -290,6 +305,7 @@ INTERNAL_COLLECTIONS = [
     "plan_scenarios",
     "calendar_sources",
     "calendar_events",
+    "receipt_scans",
 ]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]
