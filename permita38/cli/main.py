@@ -10,6 +10,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
+from permita38.cli import mcp_cmd
 from permita38.core.bootstrap import bootstrap_from_env, create_user, read_password_file
 from permita38.core.config import load_config
 from permita38.core.errors import ServiceError
@@ -177,6 +178,7 @@ def main(argv: list[str] | None = None):
     ap.add_argument("--port", type=int)
     ap.add_argument("--no-browser", action="store_true")
     sub = ap.add_subparsers(dest="command")
+    mcp_cmd.register(sub)
     sub.add_parser("serve", help="run the web app and API (default)")
     sub.add_parser("show-openapi", help="print the OpenAPI contract as JSON")
     sp = sub.add_parser("set-password", help="reset the password of a user")
@@ -235,6 +237,8 @@ def main(argv: list[str] | None = None):
     args = ap.parse_args(argv)
 
     command = args.command or "serve"
+    if command == "mcp":
+        return mcp_cmd.run(args)
     if command == "create-migration":
         from permita38.core.database import create_migration
 
