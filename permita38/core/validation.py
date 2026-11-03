@@ -165,6 +165,7 @@ Keyword = Annotated[str, StringConstraints(max_length=100), AfterValidator(_keyw
 
 Amount = Annotated[float, Field(ge=-MAX_MONEY, le=MAX_MONEY, allow_inf_nan=False)]
 NonNegAmount = Annotated[float, Field(ge=0, le=MAX_MONEY, allow_inf_nan=False)]
+MonthlyAmount = Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False)]
 Qty = Annotated[float, Field(ge=-MAX_QTY, le=MAX_QTY, allow_inf_nan=False)]
 Rate = Annotated[float, Field(ge=0, le=MAX_RATE, allow_inf_nan=False)]
 Hours = Annotated[float, Field(ge=0, le=168, allow_inf_nan=False)]

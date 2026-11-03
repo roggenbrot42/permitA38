@@ -608,6 +608,128 @@ class TeamTimelineVisibilityIn(v.StrictRecord):
     accountant: TeamLevel = "off"
 
 
+# ---------------------------------------------------------------- personal tax profile (settings key personal_tax)
+_Count = Annotated[int, Field(ge=0, le=15)]
+
+
+class ChildrenIn(v.StrictRecord):
+    count: _Count = 0
+    full_allowance: bool = False
+    pv_parent: bool = False
+    pv_children_under_25: _Count = 0
+
+
+class HealthIn(v.StrictRecord):
+    mode: Literal["gkv", "pkv", "none"] = "gkv"
+    krankengeld: bool = True
+    zusatzbeitrag_percent: Annotated[float, Field(ge=0, le=10, allow_inf_nan=False)] | None = None
+    pkv_monthly: v.MonthlyAmount = 0
+    pkv_basis_monthly: v.MonthlyAmount = 0
+    pkv_care_monthly: v.MonthlyAmount = 0
+    pkv_employer_subsidy_monthly: v.MonthlyAmount = 0
+
+    @model_validator(mode="after")
+    def _basis_within_premium(self):
+        if self.pkv_basis_monthly > self.pkv_monthly:
+            raise ValueError("pkv_basis_monthly must not exceed pkv_monthly")
+        return self
+
+
+class PensionIn(v.StrictRecord):
+    mode: Literal["none", "statutory_income", "statutory_regular", "fixed"] = "none"
+    fixed_monthly: v.MonthlyAmount = 0
+
+
+class UnemploymentIn(v.StrictRecord):
+    mode: Literal["none", "voluntary", "voluntary_half"] = "none"
+
+
+class EmploymentIn(v.StrictRecord):
+    gross_year: v.NonNegAmount
+    sv_liable: bool = True
+    steuerklasse: Annotated[int, Field(ge=1, le=6)] | None = None
+    bav_employee_year: Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False)] = 0
+    bav_employer_year: Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False)] = 0
+    vwl_employer_year: Annotated[float, Field(ge=0, le=10_000, allow_inf_nan=False)] = 0
+    werbungskosten_year: v.NonNegAmount = 0
+    withheld_year: v.NonNegAmount | None = None
+
+
+class PersonalTaxIn(v.StrictRecord):
+    """PUT /settings/personal-tax: the whole profile (replaces the stored one)."""
+
+    assessment: Literal["single", "joint"] = "single"
+    church_tax_percent: Annotated[float, Field(ge=0, le=15, allow_inf_nan=False)] = 0
+    other_income_year: v.NonNegAmount = 0
+    other_deductions_year: v.NonNegAmount = 0
+    other_insurance_year: v.NonNegAmount = 0
+    children: ChildrenIn = Field(default_factory=ChildrenIn)
+    health: HealthIn = Field(default_factory=HealthIn)
+    pension: PensionIn = Field(default_factory=PensionIn)
+    unemployment: UnemploymentIn = Field(default_factory=UnemploymentIn)
+    employment: EmploymentIn | None = None
+
+
+class PersonalTaxChildren(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    count: int = 0
+    full_allowance: bool = False
+    pv_parent: bool = False
+    pv_children_under_25: int = 0
+
+
+class PersonalTaxHealth(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    mode: str = "gkv"
+    krankengeld: bool = True
+    zusatzbeitrag_percent: float | None = None
+    pkv_monthly: float = 0
+    pkv_basis_monthly: float = 0
+    pkv_care_monthly: float = 0
+    pkv_employer_subsidy_monthly: float = 0
+
+
+class PersonalTaxPension(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    mode: str = "none"
+    fixed_monthly: float = 0
+
+
+class PersonalTaxUnemployment(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    mode: str = "none"
+
+
+class PersonalTaxEmployment(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    gross_year: float = 0
+    sv_liable: bool = True
+    steuerklasse: int | None = None
+    bav_employee_year: float = 0
+    bav_employer_year: float = 0
+    vwl_employer_year: float = 0
+    werbungskosten_year: float = 0
+    withheld_year: float | None = None
+
+
+class PersonalTax(BaseModel):
+    """Response of the personal tax profile; ``stored`` is false when the defaults are shown."""
+
+    model_config = ConfigDict(extra="allow")
+    assessment: str = "single"
+    church_tax_percent: float = 0
+    other_income_year: float = 0
+    other_deductions_year: float = 0
+    other_insurance_year: float = 0
+    children: PersonalTaxChildren = Field(default_factory=PersonalTaxChildren)
+    health: PersonalTaxHealth = Field(default_factory=PersonalTaxHealth)
+    pension: PersonalTaxPension = Field(default_factory=PersonalTaxPension)
+    unemployment: PersonalTaxUnemployment = Field(default_factory=PersonalTaxUnemployment)
+    employment: PersonalTaxEmployment | None = None
+    stored: bool = False
+    warnings: list[str] | None = None
+
+
 class SettingsIn(v.StrictRecord):
     """PUT /settings: any subset of the settings, each value checked."""
 

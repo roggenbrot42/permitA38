@@ -57,7 +57,8 @@ nesting depth).
 | Status / kind / role / layout / language | from the allowed sets (e.g. project status `active, paused, done, archived`) |
 | Colours | `#rrggbb` |
 | Ids | 6–32 characters `0-9a-z`; attachment names `<id>.<ext>` |
-| Settings | company type, accounting method, federal state code, Hebesatz 0–1000, payment/offer days 0–365, church tax 0–15 %; numbering patterns may only contain `{year}` and `{n}` / `{n:04d}` and must contain `{n}` |
+| Settings | company type, accounting method, federal state code, Hebesatz 0–1000, payment/offer days 0–365; numbering patterns may only contain `{year}` and `{n}` / `{n:04d}` and must contain `{n}` |
+| Personal tax profile | assessment `single`/`joint`, church tax 0–15 %, yearly amounts 0–1 000 000 000, children and care-insurance counts 0–15, Zusatzbeitrag 0–10 %, monthly amounts 0–100 000 (`pkv_basis_monthly` ≤ `pkv_monthly`), Steuerklasse 1–6, bAV 0–100 000, VWL 0–10 000, modes from fixed lists; employment needs `gross_year` |
 | Query `year` | 2000 … 2100 |
 
 Attachments: uploads are at most 15 MB. A PDF or image (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`) whose first
