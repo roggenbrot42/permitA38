@@ -16014,31 +16014,6 @@
             "title": "Numbering Shared",
             "default": false
           },
-          "social_monthly": {
-            "type": "number",
-            "title": "Social Monthly",
-            "default": 0
-          },
-          "church_tax": {
-            "type": "number",
-            "title": "Church Tax",
-            "default": 0
-          },
-          "splitting": {
-            "type": "boolean",
-            "title": "Splitting",
-            "default": false
-          },
-          "other_income": {
-            "type": "number",
-            "title": "Other Income",
-            "default": 0
-          },
-          "other_deductions": {
-            "type": "number",
-            "title": "Other Deductions",
-            "default": 0
-          },
           "planning_min_rate": {
             "type": "number",
             "title": "Planning Min Rate",
@@ -16268,39 +16243,6 @@
             "title": "Numbering Shared",
             "default": false
           },
-          "social_monthly": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
-            "title": "Social Monthly",
-            "default": 0
-          },
-          "church_tax": {
-            "type": "number",
-            "maximum": 15.0,
-            "minimum": 0.0,
-            "title": "Church Tax",
-            "default": 0
-          },
-          "splitting": {
-            "type": "boolean",
-            "title": "Splitting",
-            "default": false
-          },
-          "other_income": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
-            "title": "Other Income",
-            "default": 0
-          },
-          "other_deductions": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
-            "title": "Other Deductions",
-            "default": 0
-          },
           "planning_min_rate": {
             "type": "number",
             "maximum": 10000.0,
@@ -16501,31 +16443,6 @@
             "type": "boolean",
             "title": "Numbering Shared",
             "default": false
-          },
-          "social_monthly": {
-            "type": "number",
-            "title": "Social Monthly",
-            "default": 0
-          },
-          "church_tax": {
-            "type": "number",
-            "title": "Church Tax",
-            "default": 0
-          },
-          "splitting": {
-            "type": "boolean",
-            "title": "Splitting",
-            "default": false
-          },
-          "other_income": {
-            "type": "number",
-            "title": "Other Income",
-            "default": 0
-          },
-          "other_deductions": {
-            "type": "number",
-            "title": "Other Deductions",
-            "default": 0
           },
           "planning_min_rate": {
             "type": "number",

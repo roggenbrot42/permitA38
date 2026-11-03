@@ -766,8 +766,6 @@ PAGES.settings = async () => {
     ${f('kleinunternehmer', 'Kleinunternehmer (§19 UStG) – no VAT on invoices', 'check')}
     <div class="row">${fieldHTML({ k: 'vat_rate', l: 'Default VAT %', t: 'select', o: [19, 7, 0] }, s)}${f('hebesatz', 'Gewerbesteuer Hebesatz %', 'number')}</div>
     ${fieldHTML({ k: 'accounting', l: 'Revenue counted…', t: 'select', o: [['eur', 'when paid (EÜR / Ist-Versteuerung)'], ['accrual', 'when invoiced (Soll)']] }, s)}
-    <div class="row">${f('social_monthly', 'Health/care/pension per month €', 'number')}${f('church_tax', 'Church tax %', 'number', { h: '0, 8 or 9' })}</div>
-    <div class="row">${f('other_income', 'Other taxable income / year €', 'number')}${f('other_deductions', 'Other deductions / year €', 'number')}</div>${f('splitting', 'Joint assessment (Ehegattensplitting)', 'check')}
     <p class="small muted">Tax figures are planning estimates (Einkommensteuer tariff §32a, Soli, Gewerbesteuer incl. §35 credit). Always confirm with your Steuerberater.</p></div></div>
   <div class="card"><h2>Defaults</h2><div class="row">${f('default_rate', 'Default hourly rate €', 'number')}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div><p class="small">Document numbers: <a href="#/numbering">Numbering</a> (patterns, next number, preview, history).</p></div>
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Document templates</h2><div class="right auto"><button data-a="editTemplate">+ New template</button></div></div><table>${S.templates.map(t => `<tr><td><b>${esc(t.name)}</b> <span class="muted small">${esc(t.layout)} · ${esc(t.language)}</span></td><td><span class="dot" style="background:${esc(t.accent)}"></span></td><td class="right"><button class="sm" data-a="editTemplate" data-id="${t.id}">${tpls.find(x => x.id === t.id) ? 'Edit' : 'Copy & customise'}</button></td></tr>`).join('')}</table></div>
@@ -782,10 +780,11 @@ PAGES.settings = async () => {
 A.saveSettings = async () => {
   const s = { ...S.settings };
   const txt = ['company_name', 'owner_name', 'street', 'zip', 'city', 'email', 'phone', 'website', 'tax_number', 'vat_id', 'bank_name', 'iban', 'bic', 'company_type', 'state', 'accounting', 'default_template'];
-  const nums = ['hebesatz', 'social_monthly', 'church_tax', 'other_income', 'other_deductions', 'default_rate', 'payment_days', 'offer_valid_days', 'vat_rate'];
+  const nums = ['hebesatz', 'default_rate', 'payment_days', 'offer_valid_days', 'vat_rate'];
   txt.forEach(k => { const e = $('#f_' + k); if (e) s[k] = e.value; });
   nums.forEach(k => { const e = $('#f_' + k); if (e) s[k] = e.value === '' ? 0 : parseFloat(e.value); });
-  ['kleinunternehmer', 'splitting'].forEach(k => s[k] = $('#f_' + k).checked);
+  s.kleinunternehmer = $('#f_kleinunternehmer').checked;
+  delete s.personal_tax;
   if ($('#f_tl_employee')) s.team_timeline_visibility = { employee: $('#f_tl_employee').value, accountant: $('#f_tl_accountant').value };
   const lf = $('#logo_file').files[0];
   if (lf) s.logo = (await api.upload(lf)).name;

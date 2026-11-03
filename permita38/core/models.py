@@ -279,6 +279,10 @@ class UserIn(v.CheckedBody):
         return sorted(days)
 
 
+#: tax inputs that moved into the personal tax profile; no longer settings
+LEGACY_TAX_KEYS = ("social_monthly", "church_tax", "splitting", "other_income", "other_deductions")
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="allow")
     company_name: str = ""
@@ -310,11 +314,6 @@ class Settings(BaseModel):
     invoice_reset: str = "yearly"  # never | yearly | monthly (see core/numbering.py)
     offer_reset: str = "yearly"
     numbering_shared: bool = False  # invoices and offers share one sequence
-    social_monthly: float = 0
-    church_tax: float = 0
-    splitting: bool = False
-    other_income: float = 0
-    other_deductions: float = 0
     planning_min_rate: float = 0
     planning_default_win_probability: float = 100
     subcontractor_hint_hours_per_week: float = 30
@@ -641,17 +640,23 @@ class SettingsIn(v.StrictRecord):
     invoice_reset: Literal["never", "yearly", "monthly"] = "yearly"
     offer_reset: Literal["never", "yearly", "monthly"] = "yearly"
     numbering_shared: bool = False
-    social_monthly: v.NonNegAmount = 0
-    church_tax: Annotated[float, Field(ge=0, le=15, allow_inf_nan=False)] = 0
-    splitting: bool = False
-    other_income: v.NonNegAmount = 0
-    other_deductions: v.NonNegAmount = 0
     planning_min_rate: v.Rate = 0
     planning_default_win_probability: v.Percent = 100
     subcontractor_hint_hours_per_week: Annotated[float, Field(ge=1, le=168, allow_inf_nan=False)] = 30
     subcontractor_hint_weeks: Annotated[int, Field(ge=1, le=104)] = 12
     customer_dominance_percent: Annotated[float, Field(ge=1, le=100, allow_inf_nan=False)] = 83
     team_timeline_visibility: TeamTimelineVisibilityIn = TeamTimelineVisibilityIn()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_tax_keys_removed(cls, data):
+        if isinstance(data, dict):
+            for key in LEGACY_TAX_KEYS:
+                if key in data:
+                    raise ValueError(
+                        f"{key} was removed; use the personal tax profile (PUT /api/settings/personal-tax)"
+                    )
+        return data
 
     @field_validator("state")
     @classmethod
