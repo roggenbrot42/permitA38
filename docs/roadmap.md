@@ -52,8 +52,8 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 | **Merge-import** into an instance that already has data (id remapping, conflict policy) | planned; v1 import needs an empty instance |
 | **Automatic receipt scan** from PDF/image and e-invoice XML (clean bills are booked, ambiguous ones flagged, duplicates refused) | user guide [`receipt-scan.md`](receipt-scan.md), spec [`specs/receipt-scan.md`](specs/receipt-scan.md); local, no AI provider needed; OCR on Windows is a download on request (package built by a manual workflow, pending its first run); Full review tier; in progress on a feature branch |
 | **Gantt chart** for the overall plan and project subtasks | later |
-| **Settings split into business and user**: today one page mixes business data, personal user settings, tax details, company type and hourly rates | maintainer request, later |
-| **Real tax burden estimate** for Freiberufler and Gewerbetreibende: income tax, trade tax, and health care and pension from the known percentages, instead of a flat reserve | maintainer request, later; needs current rates and a tax adviser check |
+| **Settings split into business and user**: today one page mixes business data, personal user settings, tax details, company type and hourly rates | maintainer request, later; spec: [`specs/tax-burden-and-settings.md`](specs/tax-burden-and-settings.md) (part A) |
+| **Real tax burden estimate** for Freiberufler and Gewerbetreibende: income tax, trade tax, and health care and pension from the known percentages, instead of a flat reserve | maintainer request, later; spec: [`specs/tax-burden-and-settings.md`](specs/tax-burden-and-settings.md) (part B); needs a tax adviser check |
 
 ## v0.4.0-alpha.5 (bugfix only)
 
