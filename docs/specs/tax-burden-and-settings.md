@@ -75,14 +75,18 @@ The `settings` table is a key/value store (`schema.py`: `key:str value:json`), s
   profile is changed with PUT /api/settings/personal-tax")`, before anything is stored. The stored `personal_tax`
   survives every `PUT /settings` (the service merges over the stored settings; add a test).
 * New router functions in `permita38/api/routers/settings.py`, both boss-only via
-  `Needs("settings", "write", full=True)` (the same dependency as `data_transfer.py`):
-  * `GET /api/settings/personal-tax` → `PersonalTax` (stored profile, or the profile derived from the legacy fields,
+  `Needs("settings", "write", full=True)` (the same dependency as `data_transfer.py`) **and** `SessionOnly`: API
+  tokens (and the MCP server, which uses tokens) never read or write the profile:
+  * `GET /api/settings/personal-tax` (`dependencies=[SessionOnly]`) → `PersonalTax` (stored profile, or the profile derived from the legacy fields,
     with `derived_from_legacy: true`).
   * `PUT /api/settings/personal-tax` (`dependencies=[SessionOnly]`) with body `PersonalTaxIn` → **replaces** the
     stored profile (not a merge; nested objects make a merge ambiguous) and returns `PersonalTax` plus
     `warnings: list[str]` (advisory, never stored, see "Advisory warnings").
 * Logic lives in a new `permita38/core/service/personal_tax.py` (`PersonalTaxService(store)` with `get()`,
-  `update(data)`, `effective()`), registered where `SettingsService` is.
+  `update(data)`, `effective()`), registered where `SettingsService` is. The pure function
+  `effective_personal_tax(raw_settings: dict) -> dict` (legacy derivation + defensive read) lives in
+  `permita38/core/settings.py` next to `effective_settings`, so `calc.finance` can use it without importing a service;
+  `PersonalTaxService.effective()` delegates to it.
 * **Legacy fields** `social_monthly`, `church_tax`, `splitting`, `other_income`, `other_deductions` stay in `Settings`
   and `SettingsIn` unchanged (API clients keep working) with the field description "deprecated: superseded by
   `personal_tax`; used only while no personal tax profile is stored". The web UI no longer shows them.
@@ -98,10 +102,11 @@ The `settings` table is a key/value store (`schema.py`: `key:str value:json`), s
 ### `/finance` redaction
 
 `/finance` is readable by the accountant (`finance: (A, N)`). Church tax reveals religion (GDPR Art. 9), children and
-insurance are private. For a caller who is not the boss, `tax_actual` and `tax_projected` contain **only**
+insurance are private. For a caller who is not the boss **or** is authenticated by an API token (`rights.is_token`),
+`tax_actual` and `tax_projected` contain **only**
 `total`, `rate`, `gewst`, `kst` and `redacted: true`; `social_year`, `take_home` and the months' `social` /
-`take_home` stay (aggregates). The boss gets the full breakdown. Rights test in `tests/backend/test_finance_api.py`
-(or the existing finance API test file).
+`take_home` stay (aggregates). The boss in a session gets the full breakdown. The redaction is a function `calc.redact_tax(result) -> dict`; the
+router `api/routers/finance.py` calls it for those callers (it already receives the user).
 
 ### Models (`core/models.py`, primitives in `core/validation.py`)
 
@@ -199,7 +204,7 @@ voluntary members 2026 of a public health insurer (IKK BB, 2025-12-29) for the G
 | `kv_rate_general`, `kv_rate_reduced` | 14.6, 14.0 | §§241, 243 SGB V (insurer table 2026) |
 | `kv_zusatz_average` | 2.9 | BMG, BAnz AT 10.11.2025 B7 (§242a SGB V) |
 | `pv_rate`, `pv_childless_surcharge`, `pv_child_reduction` | 3.6, 0.6, 0.25 per child from the 2nd to the 5th under 25 | §55 SGB XI (insurer table 2026) |
-| `pv_employee_share` / `pv_employee_share_sn` | 1.8 / 2.3 (employer 1.7 / 1.3; childless surcharge and reductions on the employee) | §58 SGB XI; **Sachsen value TO VERIFY** |
+| `pv_employer_share`, `pv_employer_share_sn` | 1.8, 1.3 (the employee pays the rest: 1.8 / 2.3 with one child; childless surcharge and child reductions are the employee's) | §58 SGB XI (insurer table 2026); **Sachsen value TO VERIFY** |
 | `rv_rate`, `rv_min_base_month` | 18.6, 603 | DRV 2026 (Geringfügigkeitsgrenze 603) |
 | `alv_rate` | 2.6 | §341 SGB III (DRV 2026) |
 | `alv_voluntary_month`, `alv_voluntary_half_month` | 102.83 (= 2.6 % × 3955), 51.42 (= 2.6 % × 1977.50, half-up) | §345b SGB III; **half value TO VERIFY** (sources show 51.42 and 51.43) |
@@ -238,7 +243,7 @@ users see the same numbers until they switch to "full".
 **2. Employee contributions** (only with `employment.sv_liable`): monthly bases
 `kv_m = min(q2(sv_wage / 12), bbg_kv_month)`, `rv_m = min(q2(sv_wage / 12), bbg_rv_month)`; annual amounts are
 `12 × q2(base × rate)`:
-`ee_kv` at `kv_rate_general/2 + zusatz/2`, `ee_pv` at `pv_total − employer share` (employer share 1.7, or 1.3 when
+`ee_kv` at `kv_rate_general/2 + zusatz/2`, `ee_pv` at `pv_total − pv_employer_share` (`pv_employer_share_sn` when
 `settings.state == "SN"`), `ee_rv` at 9.3, `ee_alv` at 1.3; `er_rv = ee_rv` (tax-free employer share §3 Nr. 62).
 `pv_total = pv_rate + (0.6 if not pv_parent) − 0.25 × (min(pv_children_under_25, 5) − 1 if ≥ 2)`.
 `zusatz` = `health.zusatzbeitrag_percent` or `kv_zusatz_average`. If `health.mode == "pkv"`, `ee_kv = ee_pv = 0`
@@ -359,7 +364,7 @@ est = 9 139 − 7 770 + 1 554 = **2 923.00**; Z 9 139; soli_base 1 369 → Soli 
 **731.12**; income_taxes **3 654.12**; total **42 808.05**.
 
 **O5 – employment block plus Freiberufler side income, single, GKV, childless.** Profit 20 000; employment gross
-50 000, sv_liable, steuerklasse 1, bav_employee 2 400, bav_employer 360, vwl_employer 480, withheld 7 000.
+50 000, sv_liable, steuerklasse 1, business `state` not `SN`, bav_employee 2 400, bav_employer 360, vwl_employer 480, withheld 7 000.
 tax_wage = sv_wage = 48 080 (tax_free = sv_free = 2 760); emp_income 46 850. Monthly base 4 006.67: ee_kv (8.75 %)
 4 206.96; ee_pv (2.4 %) 1 153.92; ee_rv 4 471.44; er_rv 4 471.44; ee_alv 625.08; social **10 457.40**. A 8 942.88,
 dA 4 471.44; B 5 192.60; O 793.36; C 1 900 → dBO 5 192.60; sa 36; sum_income 66 850; zvE 57 149.96; est
@@ -374,9 +379,17 @@ dBO 7 560; sa 36; zvE 46 374; est **9 297**; income_taxes **9 297.00**; total **
 base_m 1 318.33 (floor); kv 16.9 % → 222.80/month → **2 673.60**; pv 4.2 % → 55.37/month → **664.44**; social
 3 338.04; B 3 338.04 (> C, deducted in full); zvE 8 625.96 → est 0; total **3 338.04**.
 
-**Legacy flat mode – L1.** `tax.estimate` in mode flat for the inputs of the three existing `test_domain.py` cases
-returns the same values as the current float implementation to the cent (regression test computing the old values
-literally in the test, not by calling old code).
+**Legacy flat mode – L1 to L4** (values produced by today's float `tax.estimate`, 2026; the Decimal port must return
+them to the cent):
+
+| case | settings | est | soli | church | gewst | gewst_credit | kst | social | total | zve |
+|---|---|---|---|---|---|---|---|---|---|---|
+| L1 | freiberufler, profit 60 000 | 14 233 | 0 | 0 | 0 | 0 | 0 | 0 | 14 233.00 | 60 000 |
+| L2 | gmbh, Hebesatz 400, profit 60 000 | 0 | 495.00 | 0 | 8 400.00 | 0 | 9 000.00 | 0 | 17 895.00 | 0 |
+| L3 | gewerbe, Hebesatz 400, profit 80 000 | 14 694 | 0 | 0 | 7 770.00 | 7 770.00 | 0 | 0 | 22 464.00 | 80 000 |
+| L4 | gewerbe, Hebesatz 450, social_monthly 1 000, church 9, splitting, other_income 10 000, other_deductions 2 000, profit 90 000 | 7 178 | 0 | 646.02 | 10 316.25 | 9 170.00 | 0 | 12 000.00 | 18 140.27 | 86 000 |
+
+`rate = total / profit` in each case.
 
 ## UI (vanilla JS, no build step)
 
@@ -387,8 +400,10 @@ literally in the test, not by calling old code).
 * **My settings** (`#/me`, new nav entry "My settings" for every role, `'*'`): Profile card, calendars card (if
   allowed), API tokens card, and for the boss a card "Personal tax profile" with a short summary (mode, health mode,
   children count) and a link to `#/me/tax`.
-* **Personal tax profile** (`#/me/tax`, boss only, `PAGES.metax` in a new `web/taxprofile.js`, loaded from
-  `index.html`): sections "Assessment" (single/joint, church tax %, other income, other deductions, other insurance),
+* **Personal tax profile** (`#/me/tax`, boss only). Routing follows the existing pattern (`#/money/2026` calls
+  `PAGES.money('2026')`): `PAGES.me = async sub => sub === 'tax' ? taxProfilePage() : mySettingsPage()`, both in a
+  new `web/taxprofile.js` loaded from `index.html`; the route-rights helper in `app.js` treats `me` as `'*'` and
+  `taxProfilePage` itself shows a "boss only" message for other roles: sections "Assessment" (single/joint, church tax %, other income, other deductions, other insurance),
   "Children" (count, full allowance, care-insurance parent/under-25 count), "Health and care" (GKV/PKV/none, then only
   the fields of the chosen mode; Zusatzbeitrag empty = average with the value shown as placeholder), "Pension"
   (mode + monthly amount for fixed), "Unemployment" (none / voluntary / half rate in the founding years),
@@ -411,11 +426,11 @@ request, in this order; WP-B1 and WP-A1 can run in parallel.
 
 | WP | Content | Files (owned) | Tests | Review tier |
 |---|---|---|---|---|
-| **A1 – profile storage and API** | `MonthlyAmount`; `PersonalTaxIn`/`PersonalTax` + nested models; `PersonalTaxService` (get, update, effective, legacy derivation, advisory warnings); `SettingsService.get` removes and `update` refuses `personal_tax`; two routes; `docs/validation.md` row; `make generate-openapi` | `core/validation.py`, `core/models.py`, `core/service/personal_tax.py` (new), `core/service/settings.py`, `core/service/__init__.py` (registration), `api/routers/settings.py`, `docs/validation.md`, `api/openapi.json` | new `tests/backend/test_personal_tax_api.py`: bounds (each field min/max ±1, `pkv_basis > pkv` → 422), unknown field round-trip, boss-only GET/PUT (employee, accountant, API token → 403), `PUT /settings` with `personal_tax` → 400 and stored profile unchanged, `GET /settings` and `/bootstrap` without the key, legacy derivation, PUT replaces; add an export/import round-trip of `personal_tax` to `tests/backend/test_data_export.py` | **Full** (rights, outside input) |
+| **A1 – profile storage and API** | `MonthlyAmount`; `PersonalTaxIn`/`PersonalTax` + nested models; `PersonalTaxService` (get, update, effective, legacy derivation, advisory warnings); `SettingsService.get` removes and `update` refuses `personal_tax`; two routes; `docs/validation.md` row; `make generate-openapi` | `core/validation.py`, `core/models.py`, `core/service/personal_tax.py` (new), `core/service/settings.py`, `core/settings.py` (`effective_personal_tax`), `core/service/__init__.py` (registration), `api/routers/settings.py`, `docs/validation.md`, `api/openapi.json`, `tests/backend/randomized/` (model of the settings API) | new `tests/backend/test_personal_tax_api.py`: bounds (each field min/max ±1, `pkv_basis > pkv` → 422), unknown field round-trip, boss-only GET/PUT (employee, accountant, API token → 403), `PUT /settings` with `personal_tax` → 400 and stored profile unchanged, `GET /settings` and `/bootstrap` without the key, legacy derivation, PUT replaces; add an export/import round-trip of `personal_tax` to `tests/backend/test_data_export.py` | **Full** (rights, outside input) |
 | **B1 – rule tables** | `tax_rules/2026.json`, `2025.json`, loader with fallback warning and `to_verify` list | `core/tax_rules/__init__.py`, `core/tax_rules/2026.json`, `core/tax_rules/2025.json` (new), packaging (`pyproject.toml` package data, as for `trip_rates`) | new `tests/backend/test_tax_rules.py`: every key present in every year, each value has source and valid_from, Decimals parse, fallback year + warning, 2026 values equal the table in this spec literally | **Full** (logic pass checks every number against the source list) |
 | **B2 – engine** | rewrite `core/tax.py` on Decimal: tariff, flat mode port, full mode steps 1–12, GmbH, business share; keep `est_single`, `est`, `KLEIN_LIMIT_*` names (return `int` / `Decimal`) | `core/tax.py` | new `tests/backend/test_tax_estimate.py`: O1–O7 and L1 with every listed intermediate asserted exactly; property tests (hypothesis, small): total monotone in profit for fixed profile, `dBO ≥ B`, `dA ≤ H`, Soli never above 5.5 % of its base, Günstigerprüfung never worse than Kindergeld; update `test_domain.py` to exact asserts | **Full** (code, test, logic passes; logic pass recomputes O1–O7 by hand) |
-| **B3 – finance integration** | `calc.finance` on Decimal, profile from `PersonalTaxService.effective()`, social from the estimate, warnings, redaction for non-boss | `core/calc.py`, `core/service/` file that calls `calc.finance` (only the profile hand-over), `api/routers/finance.py`, `api/openapi.json` | finance API test: boss sees full breakdown, accountant only `total, rate, gewst, kst, redacted`; month `social` = q2(social/12); take_home not double-counting social; flat mode identical to current numbers for an existing settings dict | **Full** (money, rights) |
-| **A2 – web UI** | Business settings trimmed, My settings page, `#/me/tax` page, Money & Taxes card | `web/app2.js`, `web/app.js` (nav, route rights), `web/taxprofile.js` (new), `web/index.html`, `docs/` user guide section on the tax profile | `tests/web/`: settings page no longer shows the five legacy fields; tax profile round-trip (fill, save, reload); employee sees My settings but no tax link; money page shows social block | **Standard** (UI; no money logic in the browser) |
+| **B3 – finance integration** | `calc.finance` on Decimal, profile from `PersonalTaxService.effective()`, social from the estimate, warnings, redaction for non-boss | `core/calc.py` (finance on Decimal, `redact_tax`), `api/routers/finance.py`, `api/openapi.json`, new `tests/backend/test_finance_tax.py` | `test_finance_tax.py`: boss session sees full breakdown, accountant and a boss API token only `total, rate, gewst, kst, redacted`; month `social` = q2(social/12); take_home not double-counting social; flat mode identical to current numbers for an existing settings dict | **Full** (money, rights) |
+| **A2 – web UI** | Business settings trimmed, My settings page, `#/me/tax` page, Money & Taxes card | `web/app2.js`, `web/app.js` (nav, route rights for `me`), `web/taxprofile.js` (new: `PAGES.me`), `web/index.html`, `docs/` user guide section on the tax profile | `tests/web/`: settings page no longer shows the five legacy fields; tax profile round-trip (fill, save, reload); employee sees My settings but no tax link; money page shows social block | **Standard** (UI; no money logic in the browser) |
 
 The randomized suites model the settings API: WP-A1 updates `tests/backend/randomized/` for the new key (refused in
 `PUT /settings`, invisible in `GET /settings`) and runs `make test-summary SUITES="random"` once before merge.
