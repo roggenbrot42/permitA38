@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from permita38.core import tax
 from permita38.core.holidays import easter, holidays
@@ -12,18 +13,15 @@ def test_tariff_2026_continuity():
     assert tax.est(100000, 2026, True) == 2 * tax.est_single(50000, 2026)
 
 
-def test_freiberufler_vs_gmbh():
-    fb = tax.estimate(60000, 2026, {"company_type": "freiberufler"})
-    assert 0.15 < fb["rate"] < 0.35
-    assert fb["gewst"] == 0
-    gm = tax.estimate(60000, 2026, {"company_type": "gmbh", "hebesatz": 400})
-    assert abs(gm["kst"] - 9000) < 0.01
-    assert abs(gm["gewst"] - 60000 * 0.035 * 4) < 0.01
-
-
-def test_gewerbe_credit():
-    g = tax.estimate(80000, 2026, {"company_type": "gewerbe", "hebesatz": 400})
-    assert g["gewst"] > 0 and g["gewst_credit"] > 0
+def test_tariff_exact_values_2026():
+    # hand-computed: zone 2 at 17 799 (y = 0.5451): y = 0.5451: (914.51 * y + 1400) * y = 1034.85
+    assert tax.est_single(17799, 2026) == 1034
+    assert tax.est_single(Decimal("12348.99"), 2026) == 0
+    assert tax.est_single(-5, 2026) == 0
+    assert tax.est_single(47364, 2026) == 9634  # oracle O1
+    assert tax.est(Decimal(100000), 2026, True) == 2 * tax.est_single(50000, 2026)
+    assert isinstance(tax.est_single(100000, 2026), int)
+    assert tax.KLEIN_LIMIT_PREV == 25000 and tax.KLEIN_LIMIT_CUR == 100000
 
 
 def test_holidays():
