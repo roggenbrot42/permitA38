@@ -8,7 +8,7 @@ window.RCPT = (() => {
   let rowSeq = 0, running = false;
 
   /* ---------- fixed texts ---------- */
-  const BOX_LABEL = { vendor: 'Vendor', date: 'Date', invoice_no: 'Invoice no.', vat_id: 'VAT ID', subtotal: 'Subtotal', total: 'Total', vat_group: 'VAT', item: 'Item', due_date: 'Due date', paid_date: 'Paid date', tendered: 'Tendered', change: 'Change', net_total: 'Net total', vat_total: 'VAT total', qr: 'QR code' };
+  const BOX_LABEL = { vendor: 'Vendor', date: 'Date', invoice_no: 'Invoice no.', vat_id: 'VAT ID', subtotal: 'Subtotal', total: 'Total', vat_group: 'VAT', item: 'Item', due_date: 'Due date', paid_date: 'Paid date', tendered: 'Tendered', change: 'Change', net_total: 'Net total', vat_total: 'VAT total', qr: 'QR code', number: 'Number', customer: 'Customer', valid_until: 'Valid until', gross: 'Gross total', service: 'Service period', kind: 'Type', net: 'Net', vat: 'VAT' };
   const CHECK_LABEL = { group_sum: 'Net plus VAT of a rate', group_vat: 'VAT of a rate', subtotal: 'Subtotal', groups_total: 'All rates together', item_line: 'Item line', items_group: 'Items of a rate', items_total: 'Items together', due: 'Amount due', tendered: 'Amount tendered', card: 'Card amount', net_total: 'Net of all rates', vat_total: 'VAT of all rates', qr_payment: 'QR code: rates and payment', qr_total: 'QR code: total' };
   // which box a form field of the dialog belongs to (focusing the field highlights the box)
   const FORM_BOX = { f_vendor: ['vendor'], f_date: ['date'], f_invoice_no: ['invoice_no'], f_gross: ['total'], f_paid_on: ['paid_date'], f_vat_rate: ['vat_group'] };
@@ -263,7 +263,10 @@ window.RCPT = (() => {
       return await r.blob();
     } catch { return null; }
   }
-  const startCtx = (scan, dflt) => { R.ctx = { scan, page: 0, show: showPref(dflt) }; R.showPage(0); };
+  /* Shared with the document scan (docscan.js): opts = { base: API collection of the page images ('receipts' by default),
+     boxText(scan, box): text for a box, unmarked(ctx): list of values without a box (null = none) }. */
+  const startCtx = (scan, dflt, opts = {}) => { R.ctx = { scan, page: 0, show: showPref(dflt), base: opts.base || 'receipts', boxText: opts.boxText || valueOf, unmarked: opts.unmarked || unmarked }; R.showPage(0); };
+  R.startPreview = (scan, opts) => startCtx(scan, true, opts);
   R.openPreview = scan => startCtx(scan, true);   // "Check receipt": detected fields on by default
   R.openBooked = async e => {
     const gen = PV_GEN, id = e.external_id.slice(5);
@@ -277,7 +280,7 @@ window.RCPT = (() => {
     const c = R.ctx; if (!c) return;
     const gen = PV_GEN, s = c.scan, name = s.attachment || '', pages = Number(s.doc?.pages) || 0;
     if ((kindOf(name) === 'pdf' || s.doc?.rotation !== undefined) && pages > 0) {
-      const blob = await fetchBlob(`receipts/${encodeURIComponent(s.id)}/pages/${n}`);
+      const blob = await fetchBlob(`${c.base}/${encodeURIComponent(s.id)}/pages/${n}`);
       if (gen !== PV_GEN || R.ctx !== c) return;
       if (blob) { c.page = n; c.pdf = true; return pvSet('image', `${s.filename || name} – page ${n + 1}`, URL.createObjectURL(blob), true, api.url('attachments/' + encodeURIComponent(name))); }
       c.pdf = false;   // no page image: the plain PDF preview, without a layer
@@ -306,7 +309,7 @@ window.RCPT = (() => {
     layer.replaceChildren(); layer.hidden = !c.show;
     for (const b of c.scan.doc?.boxes || []) {
       if ((b.page || 0) !== c.page || !BOX_LABEL[b.field]) continue;
-      const failed = b.check === 'failed', value = valueOf(c.scan, b);
+      const failed = b.check === 'failed', value = c.boxText(c.scan, b);
       const box = el('button', undefined, 'rcpt-box ' + (failed ? 'failed' : b.check === 'ok' ? 'ok' : 'none'));
       box.type = 'button'; box.dataset.field = b.field;
       box.style.left = pct(b.x); box.style.top = pct(b.y); box.style.width = pct(b.w); box.style.height = pct(b.h);
@@ -343,6 +346,7 @@ window.RCPT = (() => {
     for (const [k, label] of [['prepaid', 'Prepaid'], ['amount_due', 'Amount due'], ['card_amount', 'Card amount']]) if (num(doc[k]) !== null) out.push(`${label}: ${eur(num(doc[k]))}`);
     return out;
   }
+  R.highlight = highlight;
   R.afterPreview = () => {
     const c = R.ctx, box = $('#e_preview');
     $('#rcpt_unmarked')?.remove(); $('#rcpt_pages')?.remove();
@@ -360,7 +364,7 @@ window.RCPT = (() => {
       bar.after(row);
     }
     buildLayer(c);
-    const list = unmarked(c);
+    const list = c.unmarked(c) || [];
     if (list.length) {
       const u = el('div', undefined, 'rcpt-unmarked'); u.id = 'rcpt_unmarked';
       u.appendChild(el('h3', 'Not marked on the bill'));

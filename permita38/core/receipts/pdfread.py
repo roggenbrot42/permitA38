@@ -10,7 +10,7 @@ from typing import Any
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 
-from permita38.core.receipts.einvoice import EInvoiceError, parse_einvoice
+from permita38.core.receipts.einvoice import EInvoiceDoc, EInvoiceError, read_einvoice
 from permita38.core.receipts.extraction import Extraction, Word
 
 MAX_TEXT_PAGES = 50
@@ -35,6 +35,12 @@ def open_pdf(path: str) -> Any:
 
 def embedded_einvoice(pdf: Any) -> Extraction | None:
     """The first attached XML that is a supported e-invoice (ZUGFeRD / Factur-X), else ``None``."""
+    doc = embedded_einvoice_doc(pdf)
+    return doc.extraction if doc is not None else None
+
+
+def embedded_einvoice_doc(pdf: Any) -> EInvoiceDoc | None:
+    """Like ``embedded_einvoice`` with the buyer and the type code (``einvoice.read_einvoice``)."""
     try:
         count = pdf.count_attachments()
     except Exception:
@@ -45,7 +51,7 @@ def embedded_einvoice(pdf: Any) -> Extraction | None:
             name = (att.get_name() or "").lower()
             if not name.endswith(".xml"):
                 continue
-            return parse_einvoice(_attachment_bytes(att))
+            return read_einvoice(_attachment_bytes(att))
         except Exception:  # not an invoice, refused, or unreadable: try the next attachment
             continue
     return None
