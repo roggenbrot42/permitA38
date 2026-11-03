@@ -319,17 +319,41 @@ def _floats(x: Any) -> Any:
     return x
 
 
+_PUBLIC_TOP = (
+    "year",
+    "months",
+    "totals",
+    "categories",
+    "open_receivables",
+    "kleinunternehmer",
+    "company_type",
+    "projected_profit",
+    "extrapolated",
+)
+_PUBLIC_MONTH = ("month", "revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due", "vat_set_aside")
+_PUBLIC_TAX = ("gewst", "kst", "kst_soli")
+_PUBLIC_OWED = ("as_of", "gewst", "kst", "kst_soli")
+
+
+def _pick(src: dict, keys: tuple[str, ...]) -> dict:
+    return {k: src[k] for k in keys if k in src}
+
+
 def redact_tax(result: dict) -> dict:
-    """The /finance result for a caller who may see business figures only (accountant, any API token)."""
-    out = dict(result)
+    """The /finance result for a caller who may see business figures only (accountant, any API token).
+
+    Built from allowlists at every level (docs/specs/tax-burden-and-settings.md, "/finance redaction"): a key added
+    to ``finance`` later stays hidden until it is listed here.
+    """
+    out = _pick(result, _PUBLIC_TOP)
+    out["months"] = [_pick(m, _PUBLIC_MONTH) for m in result.get("months") or []]
     for k in ("tax_actual", "tax_projected"):
-        t = result.get(k) or {}
-        out[k] = {x: t.get(x) for x in ("total", "rate", "gewst", "kst")} | {"redacted": True}
-    if result.get("tax_owed") is not None:
-        t = result["tax_owed"]
-        out["tax_owed"] = {x: t.get(x) for x in ("as_of", "gewst", "kst")} | {"redacted": True}
-    r = result.get("reserve") or {}
-    out["reserve"] = {x: r.get(x) for x in ("monthly", "months_left")} | {"redacted": True}
+        out[k] = _pick(result.get(k) or {}, _PUBLIC_TAX) | {"redacted": True}
+    owed = result.get("tax_owed")
+    out["tax_owed"] = None if owed is None else _pick(owed, _PUBLIC_OWED) | {"redacted": True}
+    out["reserve"] = {"redacted": True}
+    out["warnings"] = [w for w in result.get("warnings") or [] if w != NOT_SAVED_WARNING]
+    out["redacted"] = True
     return out
 
 
@@ -393,9 +417,10 @@ def finance(store, year, today=None):
     tot = {k: sum((m[k] for m in months), ZERO) for k in keys}
     profit_ytd = tot["profit"]
     profile = PersonalTaxService(store).effective()
-    if year == today.year:
-        days = (today - date(year, 1, 1)).days + 1
-        projected = _pos(q2(profit_ytd * 365 / min(max(days, 30), 365)))
+    days = (today - date(year, 1, 1)).days + 1
+    extrapolated = year == today.year and days >= 60
+    if extrapolated:
+        projected = _pos(q2(profit_ytd * 365 / min(days, 365)))
     else:
         projected = _pos(profit_ytd)
     proj = tax.estimate(projected, year, s, profile)
@@ -439,16 +464,25 @@ def finance(store, year, today=None):
         monthly=monthly,
         balance=proj["balance"],
     )
-    # social insurance paid so far (full year for past years, none for future ones)
-    social_months = 12 if year < today.year else today.month if year == today.year else 0
-    social_m = q2(proj["social"] / 12)
-    first_reserve_month = 1 if year > today.year else today.month if year == today.year else 13
+    # months that have begun (c) and the month the set-aside starts in (s), see the spec "Months"
+    counted = 12 if year < today.year else today.month if year == today.year else 0
+    start = 12 if year < today.year else today.month if year == today.year else 1
+    self_social = sum((proj["insurance"][k] for k in ("kv", "pv", "rv", "alv")), ZERO) - proj["insurance"]["subsidy"]
+    social_m = q2(self_social / 12)
+    take_home = ZERO
     for m in months:
-        aside = monthly if m["month"] >= first_reserve_month else ZERO
+        n = m["month"]
+        aside = ZERO if n < start else owed_now + monthly if n == start else monthly
         m["tax_set_aside"] = to_float(aside)
-        m["social"] = to_float(social_m)
         m["vat_set_aside"] = to_float(m["vat_due"])
-        m["take_home"] = to_float(m["profit"] - aside - social_m)
+        if n <= counted:
+            m["social"] = to_float(social_m)
+            th = m["profit"] - aside - social_m
+            take_home += th
+            m["take_home"] = to_float(th)
+        else:
+            m["social"] = 0.0
+            m["take_home"] = None
         for k in keys:
             m[k] = to_float(m[k])
     warnings = []
@@ -470,9 +504,10 @@ def finance(store, year, today=None):
         tax_owed=_floats(tax_owed),
         reserve=_floats(reserve),
         projected_profit=to_float(projected),
+        extrapolated=extrapolated,
         effective_rate=rnd(proj["rate"], 4),
-        social_year=to_float(social_m * social_months),
-        take_home=to_float(profit_ytd - actual["tax_due"] - social_m * social_months),
+        social_year=to_float(social_m * counted),
+        take_home=to_float(take_home),
         categories={k: to_float(v) for k, v in sorted(cats.items(), key=lambda kv: -kv[1])},
         open_receivables=to_float(open_receivables),
         warnings=warnings,
