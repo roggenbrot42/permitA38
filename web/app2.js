@@ -753,30 +753,30 @@ A.editUser = el => {
 /* ================= SETTINGS ================= */
 PAGES.settings = async () => {
   S.settings = await api('GET', 'settings'); await loadAll(['templates']);
-  const st = await api.get('auth/status', { noAuthRedirect: true }), s = S.settings;
+  const s = S.settings;
   const f = (k, l, t = 'text', extra = '') => fieldHTML({ k, l, t, ...extra }, s);
   const tpls = S.d.templates || [];
-  return `<div class="head"><div><h1>Settings</h1></div><button class="primary" data-a="saveSettings">Save settings</button></div>
-  <div class="grid g2"><div class="card"><h2>Your business</h2>${f('company_name', 'Business name')}${f('owner_name', 'Your name (signature)')}${f('street', 'Street & number')}<div class="row">${f('zip', 'ZIP')}${f('city', 'City')}</div><div class="row">${f('email', 'E-mail')}${f('phone', 'Phone')}</div>${f('website', 'Website')}<div class="row">${f('tax_number', 'Tax number (Steuernr.)')}${f('vat_id', 'VAT ID (USt-IdNr.)')}</div>
-    <h3 style="margin-top:12px">Bank</h3>${f('bank_name', 'Bank')}<div class="row">${f('iban', 'IBAN')}${f('bic', 'BIC')}</div>
-    <div class="field"><label>Logo for documents (JPEG)</label><input type="file" id="logo_file" accept="image/jpeg">${s.logo ? '<div class="small muted">A logo is set. Choose a new file to replace it.</div>' : ''}</div></div>
-  <div class="card"><h2>Company type & taxes (Germany)</h2>
-    ${fieldHTML({ k: 'company_type', l: 'Company type', t: 'select', o: [['freiberufler', 'Freiberufler (EÜR, no trade tax)'], ['gewerbe', 'Gewerbetreibender / Einzelunternehmen'], ['gmbh', 'UG / GmbH']] }, s)}
+  const hebesatz = ['gewerbe', 'gmbh'].includes(s.company_type);
+  return `<div class="head"><div><h1>Business settings</h1><div class="muted">Your business, documents and data. Personal items (profile, tax profile, calendars, tokens) are under <a href="#/me">My settings</a>.</div></div><button class="primary" data-a="saveSettings">Save settings</button></div>
+  <div class="grid g2"><div class="card" id="card-identity"><h2>Business identity</h2>${f('company_name', 'Business name')}${f('owner_name', 'Your name (signature)')}${f('street', 'Street & number')}<div class="row">${f('zip', 'ZIP')}${f('city', 'City')}</div><div class="row">${f('email', 'E-mail')}${f('phone', 'Phone')}</div>${f('website', 'Website')}<div class="row">${f('tax_number', 'Tax number (Steuernr.)')}${f('vat_id', 'VAT ID (USt-IdNr.)')}</div></div>
+  <div class="card" id="card-bank"><h2>Bank and logo</h2>${f('bank_name', 'Bank')}<div class="row">${f('iban', 'IBAN')}${f('bic', 'BIC')}</div>
+    <div class="field"><label>Logo for documents (JPEG)</label><input type="file" id="logo_file" accept="image/jpeg">${s.logo ? '<div class="small muted">A logo is set. Choose a new file to replace it.</div>' : ''}</div></div></div>
+  <div class="card" id="card-tax"><h2>Business tax set-up</h2>
+    ${fieldHTML({ k: 'company_type', l: 'Company type', t: 'select', o: [['freiberufler', 'Freiberufler (EÜR, no trade tax)'], ['gewerbe', 'Gewerbetreibender / Einzelunternehmen'], ['gmbh', 'UG / GmbH']] }, s).replace('<select ', '<select data-change="settingsCompanyType" ')}
     ${fieldHTML({ k: 'state', l: 'Federal state (public holidays)', t: 'select', o: Object.entries(S.states || {}) }, s)}
     ${f('kleinunternehmer', 'Kleinunternehmer (§19 UStG) – no VAT on invoices', 'check')}
-    <div class="row">${fieldHTML({ k: 'vat_rate', l: 'Default VAT %', t: 'select', o: [19, 7, 0] }, s)}${f('hebesatz', 'Gewerbesteuer Hebesatz %', 'number')}</div>
+    <div class="row">${fieldHTML({ k: 'vat_rate', l: 'Default VAT %', t: 'select', o: [19, 7, 0] }, s)}<div id="hebesatz_wrap" ${hebesatz ? '' : 'hidden'}>${f('hebesatz', 'Gewerbesteuer Hebesatz %', 'number')}</div></div>
     ${fieldHTML({ k: 'accounting', l: 'Revenue counted…', t: 'select', o: [['eur', 'when paid (EÜR / Ist-Versteuerung)'], ['accrual', 'when invoiced (Soll)']] }, s)}
-    <p class="small muted">Tax figures are planning estimates (Einkommensteuer tariff §32a, Soli, Gewerbesteuer incl. §35 credit). Always confirm with your Steuerberater.</p></div></div>
-  <div class="card"><h2>Defaults</h2><div class="row">${f('default_rate', 'Default hourly rate €', 'number')}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div><p class="small">Document numbers: <a href="#/numbering">Numbering</a> (patterns, next number, preview, history).</p></div>
-  <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Document templates</h2><div class="right auto"><button data-a="editTemplate">+ New template</button></div></div><table>${S.templates.map(t => `<tr><td><b>${esc(t.name)}</b> <span class="muted small">${esc(t.layout)} · ${esc(t.language)}</span></td><td><span class="dot" style="background:${esc(t.accent)}"></span></td><td class="right"><button class="sm" data-a="editTemplate" data-id="${t.id}">${tpls.find(x => x.id === t.id) ? 'Edit' : 'Copy & customise'}</button></td></tr>`).join('')}</table></div>
+    <p class="small muted">Tax figures are planning estimates (Einkommensteuer tariff §32a, Soli, Gewerbesteuer incl. §35 credit). Always confirm with your Steuerberater.</p></div>
+  <div class="card" id="card-defaults"><h2>Documents and defaults</h2><div class="row">${f('default_rate', 'Default hourly rate €', 'number')}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div><p class="small">Document numbers: <a href="#/numbering">Numbering</a> (patterns, next number, preview, history).</p>
+    <h3 style="margin-top:12px">Document templates</h3><div class="row" style="align-items:center"><div class="right auto"><button data-a="editTemplate">+ New template</button></div></div><table>${S.templates.map(t => `<tr><td><b>${esc(t.name)}</b> <span class="muted small">${esc(t.layout)} · ${esc(t.language)}</span></td><td><span class="dot" style="background:${esc(t.accent)}"></span></td><td class="right"><button class="sm" data-a="editTemplate" data-id="${t.id}">${tpls.find(x => x.id === t.id) ? 'Edit' : 'Copy & customise'}</button></td></tr>`).join('')}</table></div>
   ${teamVisibilityCard()}
-  ${await calendarsCard()}
-  ${await tokensCard()}
-  <div class="card"><h2>Data & sync</h2><p>Data folder on this device:<br><code>${esc(S.data_dir || '')}</code></p><p class="muted small">Put this folder inside a Syncthing-shared folder and start permitA38 with <code>permita38 --data &lt;that folder&gt;</code> on each device. See the README for details.</p>
+  <div class="card" id="card-data"><h2>Data & sync</h2><p>Data folder on this device:<br><code>${esc(S.data_dir || '')}</code></p><p class="muted small">Put this folder inside a Syncthing-shared folder and start permitA38 with <code>permita38 --data &lt;that folder&gt;</code> on each device. See the README for details.</p>
     ${can('settings', 'write') && scopeOf('settings') === 'all' ? `<h3 style="margin-top:12px">Data transfer</h3>
     <p class="small"><a href="#/dataexport">Data export and import</a>: a copy of all your data, or fill a new empty instance.</p>
     <p class="small"><a href="#/import">Import documents from another tool</a>: offers, invoices, customers and expenses.</p>` : ''}</div>`;
 };
+A.settingsCompanyType = el => { const w = $('#hebesatz_wrap'); if (w) w.hidden = !['gewerbe', 'gmbh'].includes(el.value); };
 A.saveSettings = async () => {
   const s = { ...S.settings };
   const txt = ['company_name', 'owner_name', 'street', 'zip', 'city', 'email', 'phone', 'website', 'tax_number', 'vat_id', 'bank_name', 'iban', 'bic', 'company_type', 'state', 'accounting', 'default_template'];

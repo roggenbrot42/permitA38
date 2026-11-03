@@ -366,12 +366,12 @@ def test_forbidden_list_shows_the_server_message(browser):
     ctx.close()
 
 
-def test_settings_page_has_the_card_for_the_boss(browser):
+def test_my_settings_page_has_the_card_for_the_boss(browser):
     api = FakeTokenApi(
         {**BOSS, "permissions": {"settings": {"read": "all", "write": "all"}}},
         [copy.deepcopy(ITEM)],
     )
-    ctx, pg, problems = open_app(browser, api, page="settings")
+    ctx, pg, problems = open_app(browser, api, page="me")
     expect(pg.locator("#tokens-card")).to_contain_text("Backup script")
     ctx.close()
 

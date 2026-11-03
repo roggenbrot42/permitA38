@@ -50,7 +50,7 @@ def test_accountant_nav_and_read_only_pages(browser, srv):
     pg.goto(srv.base + "/")
     labels = nav(pg)
     joined = " ".join(labels)
-    for shown in ("Customers", "Projects", "Offers & Invoices", "Expenses", "Money & Taxes", "Settings"):
+    for shown in ("Customers", "Projects", "Offers & Invoices", "Expenses", "Money & Taxes", "Business settings"):
         assert shown in joined, labels
     for hidden in ("Today", "Timesheet", "Planning", "Time off"):
         assert hidden not in joined, labels
@@ -121,6 +121,9 @@ def test_employee_nav_is_unchanged(browser, srv):
         "📅",
         "Team",
         "timeline",
+        "👤",
+        "My",
+        "settings",
         "🔑",
         "API",
         "tokens",

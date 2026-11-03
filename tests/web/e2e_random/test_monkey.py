@@ -310,8 +310,8 @@ class Monkey:
             except Exception:
                 return  # a dialog without a cancel button: leave it to the other episodes
         if not self.page.query_selector("#cal_link"):
-            self.say("calendar: going to #/settings")
-            self.page.evaluate("h => { location.hash = h; }", "#/settings")
+            self.say("calendar: going to #/me")
+            self.page.evaluate("h => { location.hash = h; }", "#/me")
             self.settle()
             if self.secrets is not None:
                 return  # members do not see the settings page (asserted by the member checks); do not wait for it
