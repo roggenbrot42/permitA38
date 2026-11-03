@@ -129,10 +129,12 @@ def test_discard_removes_a_flagged_scan_but_not_an_added_one(c, reader):
     added = up(c, reader.add(OFFER_BODY)).json()["scan"]
     refused = c.delete(f"/api/document-scans/{added['id']}")
     assert refused.status_code == 409 and refused.json()["code"] == "not_flagged"
-    assert c.delete(f"/api/document-scans/{flagged['id']}").status_code == 204
+    deleted = c.delete(f"/api/document-scans/{flagged['id']}")
+    assert deleted.status_code == 204
     assert c.get("/api/document-scans").json() == {"items": []}
     assert c.get(f"/api/document-scans/{flagged['id']}").json()["status"] == "discarded"
-    assert c.delete("/api/document-scans/nope").status_code == 404
+    missing = c.delete("/api/document-scans/nope")
+    assert missing.status_code == 404
 
 
 def test_same_file_twice_is_409_with_the_existing_record(c, reader):
@@ -197,7 +199,8 @@ def test_rights(app, c, reader, member_client):
     acc = _login(app, "ada")
     assert up(acc, content).status_code == 403
     assert acc.post("/api/document-scans/nope/confirm", json=confirm_body()).status_code == 403
-    assert acc.delete("/api/document-scans/nope").status_code == 403
+    forbidden = acc.delete("/api/document-scans/nope")
+    assert forbidden.status_code == 403
     assert acc.get("/api/document-scans").status_code == 200  # reading is allowed
     assert c.get("/api/invoices").json() == []  # nothing was added
 
