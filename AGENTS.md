@@ -72,17 +72,23 @@
 
 ## Division of labour between models
 - **Architecture, planning and specifications** (data models, module interfaces and contracts, migration numbering,
-  security trade-offs, task breakdown) are decided by the stronger model (Sonnet 5.5) and written down in the task
+  security trade-offs, task breakdown) are decided by Opus and written down in the task
   specification before implementation starts.
-- **Implementation** (code, tests, docs) may be done by a smaller model. It executes the specification and does **not**
+- **Implementation** (code, tests, docs) is done by the implementer agents. It executes the specification and does **not**
   make architectural decisions: on ambiguity it picks the simplest option consistent with the spec and lists it under
   "Open design decisions" in its report, so the reviewer can confirm or change it before the merge.
-- **Review** (code, tests, logic) is done by the stronger model, see "Merge gate".
-- **Subagents.** Implementation tasks always run on the cheapest adequate model: the `implementer` agent
-  (`.claude/agents/implementer.md`, Haiku) does code, tests, docs, lint/CodeQL fixes and rebases; the `reviewer` agent
-  (`.claude/agents/reviewer.md`, Sonnet) does review passes; contracts, specifications and judgement calls stay with the
-  architect. Quality is protected by the review tiers and by hand-computed oracle numbers, not by a stronger
-  implementer. Always set `model` explicitly when starting an agent.
+- **Review** (code, tests, logic) is done by Sonnet 5.5, see "Merge gate".
+- **Subagents.** Implementation (code, tests, docs, lint/CodeQL fixes, rebases) runs on the `implementer` agent (`.claude/agents/implementer.md`, Sonnet). Strictly mechanical edits may run on `implementer-small` (`.claude/agents/implementer-small.md`, Haiku); anything else goes to `implementer`. The `reviewer` agent (`.claude/agents/reviewer.md`, Sonnet) does review passes; specifications and contracts are written by Opus. Quality is protected by the review tiers and by hand-computed oracle numbers. Always set `model` explicitly when starting an agent.
+- **Task size.** One `implementer` per work package: at most 6 files, about 300 changed lines, 80 turns. `implementer-small`: at most 3 files, about 150 changed lines, 40 turns. Every prompt to either agent has these lines, at the start of a line:
+
+  ```
+  Contract: <spec file and section>
+  Files: <comma-separated paths>
+  Stop: <when to stop and report>
+  Report: <what to return, at most 10 lines>
+  ```
+
+  Fixes go to a new agent with the findings; never resume one. If the prompt cannot name its files, split the task or finish the spec. `.claude/hooks/` enforces the model, the required lines, the file count and the ban on full test suites.
 
 ## Merge gate (before anything lands on `main`)
 - Implementation may be done with smaller/cheaper models. The review effort scales with the risk of the branch:
