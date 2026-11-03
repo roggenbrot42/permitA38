@@ -698,6 +698,42 @@ function expenseDialog(e, scan) {
 }
 
 /* ================= MONEY & TAXES ================= */
+/* Boss view of Money & Taxes (docs/specs/tax-burden-and-settings.md, UI): every figure is shown as the API returns it. */
+const TAXNOTE = 'Estimate only – not tax advice.';
+function reserveLine(f, year, cur) {
+  const r = f.reserve, thisYear = new Date().getFullYear();
+  if (year < thisYear) return 'Year closed';
+  if (!r.monthly) {
+    if (!r.due_year) return 'No further reserve needed';
+    return `Set aside ${eur(cur ? cur.tax_set_aside : r.owed_now)} now` + (year === thisYear && !f.extrapolated ? '; the monthly reserve starts once 60 days of the year have passed' : '');
+  }
+  return `Set aside <b>${eur(r.monthly)}</b> per month for the remaining ${r.months_left} months (${eur(r.remaining)} of ${eur(r.due_year)} still to reserve)` + (r.owed_now > 0 ? `, plus <b>${eur(r.owed_now)}</b> now` : '');
+}
+function taxBurdenCards(f, year, cur, s) {
+  const tp = f.tax_projected, o = f.tax_owed, ins = tp.insurance || {}, gmbh = f.company_type === 'gmbh';
+  const row = (l, v, cls = '') => `<tr><td>${l}</td><td class="num ${cls}" data-k="${esc(l)}">${eur(v)}</td></tr>`;
+  const vp = tp.vorsorge || {};
+  const burden = `<div class="card" id="card-tax-burden"><h2>Tax burden ${year}</h2><table>
+    ${gmbh ? row('Körperschaftsteuer (15 %)', tp.kst) + row('Solidaritätszuschlag on Körperschaftsteuer', tp.kst_soli)
+      : row('Einkommensteuer' + (tp.kg_added > 0 ? ' (incl. Kindergeld added back)' : ''), tp.est) + row('Solidaritätszuschlag', tp.soli) + (tp.church ? row('Kirchensteuer', tp.church) : '')}
+    ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)${tp.gewst_credit ? `<div class="small muted">incl. ${eur(tp.gewst_credit)} credited against income tax (§35 EStG)</div>` : ''}</td><td class="num" data-k="gewst">${eur(tp.gewst)}</td></tr>` : ''}
+    <tr><td><b>Total taxes (full year)</b></td><td class="num" data-k="tax_due"><b>${eur(tp.tax_due)}</b></td></tr>
+    ${tp.withheld > 0 ? row('Already withheld', tp.withheld) : ''}
+    ${tp.balance != null ? row('Expected back payment / refund', tp.balance) : ''}
+    <tr><td colspan="2"><b>Social insurance</b> (self-paid, full year)</td></tr>
+    ${row('Health insurance', ins.kv)}${row('Care insurance', ins.pv)}${row('Pension insurance', ins.rv)}${row('Unemployment insurance', ins.alv)}${ins.subsidy > 0 ? row('Employer subsidy', -ins.subsidy) : ''}
+    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(f.totals.vat_due)}</td></tr>
+    <tr><td><b>What stays with you</b> (months begun)</td><td class="num"><b class="${f.take_home >= 0 ? 'free-good' : 'free-bad'}" data-k="take_home">${eur(f.take_home)}</b></td></tr></table>
+    <details><summary class="small">How this was computed</summary><ul class="small">
+      <li>Taxable income (zvE): ${eur(tp.zve)}</li><li>Pension provision deduction: ${eur(vp.dA)}</li><li>Other provision deduction: ${eur(vp.dBO)}</li><li>Projected full-year profit: ${eur(f.projected_profit)}</li></ul></details>
+    <p class="small muted">Projected full-year profit: ${eur(f.projected_profit)} → tax rate ${num(f.effective_rate * 100, 1)} %. ${TAXNOTE} <a href="#/me/tax">Edit personal tax profile</a></p></div>`;
+  const owed = o ? `<div class="card" id="card-tax-owed"><h2>Owed on the profit booked so far (as of ${esc(fmtDate(o.as_of))})</h2><table>
+    ${row('Profit booked so far', o.profit_ytd)}${row('Taxes on it', o.tax_due)}${o.withheld > 0 ? row('Already withheld', o.withheld) : ''}
+    <tr><td><b>${o.owed < 0 ? 'Refund so far' : 'Owed'}</b></td><td class="num" data-k="owed"><b>${eur(Math.abs(o.owed))}</b></td></tr></table>
+    <p class="small muted">Advance payments (Vorauszahlungen) are not taken into account.</p></div>` : '';
+  const reserve = `<div class="card" id="card-reserve"><h2>Monthly reserve</h2><p id="reserve-line">${reserveLine(f, year, cur)}</p></div>`;
+  return burden + `<div>${owed}${reserve}</div>`;
+}
 PAGES.money = async (year) => {
   // the API accepts 2000..2100 only: clamp a typed or stale route instead of showing a validation error
   year = Math.min(2100, Math.max(2000, Math.trunc(+year) || new Date().getFullYear()));
@@ -712,6 +748,7 @@ PAGES.money = async (year) => {
   return `<div class="head"><div><h1>Money & Taxes</h1><div class="muted">${esc(typeName)}${f.kleinunternehmer ? ' · Kleinunternehmer' : ''} · ${s.accounting === 'accrual' ? 'by invoice date' : 'by payment date (EÜR)'}</div></div>
     <div class="row tight" style="flex:none;align-items:center"><button data-a="goto" data-to="money/${year - 1}" ${year <= 2000 ? 'disabled' : ''}>←</button><b>${year}</b><button data-a="goto" data-to="money/${year + 1}" ${year >= 2100 ? 'disabled' : ''}>→</button></div></div>
   ${f.warnings.map(w => `<div class="banner">⚠ ${esc(w)}</div>`).join('')}
+  ${!red && year === new Date().getFullYear() && !f.extrapolated ? '<div class="banner" id="not-extrapolated">Not yet extrapolated: until 60 days of the year have passed the figures are based on the profit booked so far, not on a projection to the full year.</div>' : ''}
   ${cur ? (red ? `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div></div></div>` : `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">Tax reserve (${num(f.effective_rate * 100, 1)} %)</div><div style="font-size:22px;font-weight:700">${th(cur.tax_set_aside)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div><div><div class="muted small">Social insurance</div><div style="font-size:22px;font-weight:700">${eur(cur.social)}</div></div></div>
     <div style="margin-top:10px">→ You can take home about <b class="${cur.take_home >= 0 ? 'free-good' : 'free-bad'}" style="font-size:20px">${th(cur.take_home)}</b> this month.</div></div>`) : ''}
   <div class="grid g4"><div class="card kpi"><div class="l">Revenue (net)</div><div class="v">${eur(T.revenue)}</div></div><div class="card kpi"><div class="l">Expenses (net)</div><div class="v">${eur(T.expenses)}</div></div><div class="card kpi ${T.profit < 0 ? 'bad' : 'good'}"><div class="l">Profit</div><div class="v">${eur(T.profit)}</div></div><div class="card kpi ${f.open_receivables ? 'warn' : ''}"><div class="l">Open receivables</div><div class="v">${eur(f.open_receivables)}</div></div></div>
@@ -720,15 +757,10 @@ PAGES.money = async (year) => {
     ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)</td><td class="num">${eur(ta.gewst)}</td></tr>` : '<tr><td>No business taxes (Freiberufler)</td><td class="num">–</td></tr>'}
     <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(T.vat_due)}</td></tr></table>
     <p class="small muted">Income tax, social insurance and take-home are shown to the owner only.</p>
-    <p class="small muted">Based on profit to date. Projected full-year profit: ${eur(f.projected_profit)}. Estimate only – not tax advice.</p></div>` : `<div class="card"><h2>Tax burden ${year}</h2><table>
-    ${f.company_type === 'gmbh' ? `<tr><td>Körperschaftsteuer (15 %)</td><td class="num">${eur(ta.kst)}</td></tr><tr><td>Solidaritätszuschlag</td><td class="num">${eur(ta.soli)}</td></tr>` : `<tr><td>Einkommensteuer</td><td class="num">${eur(ta.est)}</td></tr><tr><td>Solidaritätszuschlag</td><td class="num">${eur(ta.soli)}</td></tr>${ta.church ? `<tr><td>Kirchensteuer</td><td class="num">${eur(ta.church)}</td></tr>` : ''}`}
-    ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)${ta.gewst_credit ? `<div class="small muted">incl. ${eur(ta.gewst_credit)} credited against income tax (§35 EStG)</div>` : ''}</td><td class="num">${eur(ta.gewst)}</td></tr>` : ''}
-    <tr><td><b>Total income-based taxes</b></td><td class="num"><b>${eur(ta.total)}</b></td></tr><tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(T.vat_due)}</td></tr><tr><td>Health / pension insurance (your estimate)</td><td class="num">${eur(f.social_year)}</td></tr>
-    <tr><td><b>What stays with you</b></td><td class="num"><b class="${f.take_home >= 0 ? 'free-good' : 'free-bad'}">${eur(f.take_home)}</b></td></tr></table>
-    <p class="small muted">Based on profit to date. Projected full-year profit: ${eur(f.projected_profit)} → tax rate ${num(f.effective_rate * 100, 1)} % used for the monthly reserve. Estimate only – not tax advice.</p></div>`}
+    <p class="small muted">Based on profit to date. Projected full-year profit: ${eur(f.projected_profit)}. Estimate only – not tax advice.</p></div>` : taxBurdenCards(f, year, cur, s)}
   <div class="card"><h2>Expenses by category</h2>${Object.keys(f.categories).length ? `<table>${Object.entries(f.categories).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${eur(v)}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses this year.</div>'}</div></div>
   <div class="card"><h2>Month by month</h2>${chart}<div class="small muted"><span class="dot" style="background:var(--accent)"></span>revenue <span class="dot" style="background:var(--warn);margin-left:10px"></span>expenses</div>
-  <table style="margin-top:12px"><tr><th>Month</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">VAT due</th>${red ? '' : '<th class="num">Tax reserve</th><th class="num">Take-home</th>'}</tr>${f.months.map((x, i) => `<tr><td>${MN[i]}</td><td class="num">${eur(x.revenue)}</td><td class="num">${eur(x.expenses)}</td><td class="num ${x.profit < 0 ? 'free-bad' : ''}">${eur(x.profit)}</td><td class="num">${eur(x.vat_due)}</td>${red ? '' : `<td class="num">${th(x.tax_set_aside)}</td><td class="num"><b>${th(x.take_home)}</b></td>`}</tr>`).join('')}</table></div>`;
+  <table style="margin-top:12px"><tr><th>Month</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">VAT due</th>${red ? '' : '<th class="num">Tax reserve</th><th class="num">Social</th><th class="num">Take-home</th>'}</tr>${f.months.map((x, i) => `<tr><td>${MN[i]}</td><td class="num">${eur(x.revenue)}</td><td class="num">${eur(x.expenses)}</td><td class="num ${x.profit < 0 ? 'free-bad' : ''}">${eur(x.profit)}</td><td class="num">${eur(x.vat_due)}</td>${red ? '' : `<td class="num">${th(x.tax_set_aside)}</td><td class="num">${eur(x.social)}</td><td class="num"><b>${th(x.take_home)}</b></td>`}</tr>`).join('')}</table></div>`;
 };
 
 /* ================= TEAM ================= */
