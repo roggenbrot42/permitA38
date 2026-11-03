@@ -5,7 +5,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from .models import LEGACY_TAX_KEYS, PersonalTaxIn, Settings
+from .models import LEGACY_TAX_KEYS, HealthIn, PersonalTaxIn, Settings
 
 __all__ = ["DEFAULT_SETTINGS", "LEGACY_TAX_KEYS", "effective_personal_tax", "effective_settings"]
 
@@ -35,6 +35,13 @@ def _field_adapter(field: Any) -> TypeAdapter:
     return TypeAdapter(tp)
 
 
+def _accepts_bool(annotation: Any) -> bool:
+    return annotation is bool or bool in typing.get_args(annotation)
+
+
+_RESERVED = ("stored", "warnings")
+
+
 def _defensive(model: type[BaseModel], raw: Any, where: str) -> dict | None:
     """Validate ``raw`` field by field: an invalid value falls back to its default (logged), never an error.
     Unknown fields are kept. Returns None when the object cannot be built at all."""
@@ -59,6 +66,8 @@ def _defensive(model: type[BaseModel], raw: Any, where: str) -> dict | None:
                 clean[name] = None
             continue
         try:
+            if isinstance(value, bool) and not _accepts_bool(field.annotation):
+                raise ValidationError.from_exception_data("bool", [])
             _field_adapter(field).validate_python(value)
             clean[name] = value
         except ValidationError:
@@ -67,6 +76,12 @@ def _defensive(model: type[BaseModel], raw: Any, where: str) -> dict | None:
         return model(**clean).model_dump()
     except ValidationError:
         log.warning("personal tax profile: %s is inconsistent, using the default", where)
+        if model is HealthIn and isinstance(clean.get("pkv_basis_monthly"), (int, float)):
+            clean["pkv_basis_monthly"] = clean.get("pkv_monthly", 0)
+            try:
+                return model(**clean).model_dump()
+            except ValidationError:
+                pass
         try:
             return model().model_dump()
         except ValidationError:  # a required field is missing
@@ -77,5 +92,7 @@ def effective_personal_tax(raw_settings: dict) -> dict:
     """The stored personal tax profile (``personal_tax`` in the raw settings) over the defaults. A damaged or missing
     object, or field, falls back to its default; this never raises."""
     stored = raw_settings.get("personal_tax") if isinstance(raw_settings, dict) else None
+    if isinstance(stored, dict):  # the response adds these two keys itself
+        stored = {k: v for k, v in stored.items() if k not in _RESERVED}
     out = _defensive(PersonalTaxIn, stored, "personal_tax") if stored is not None else None
     return out if out is not None else PersonalTaxIn().model_dump()

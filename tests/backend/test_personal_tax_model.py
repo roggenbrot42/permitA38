@@ -5,6 +5,7 @@ from permita38.core.models import PersonalTaxIn
 from permita38.core.repository.sqlite import SQLiteRepository
 from permita38.core.service.personal_tax import PersonalTaxService
 from permita38.core.settings import effective_personal_tax
+from permita38.core.validation import MAX_MONEY
 
 
 @pytest.fixture
@@ -22,28 +23,31 @@ def ok(**kw):
 # (path in the body, minimum, maximum)
 BOUNDS = [
     (("church_tax_percent",), 0, 15),
-    (("other_income_year",), 0, 1e9),
-    (("other_deductions_year",), 0, 1e9),
-    (("other_insurance_year",), 0, 1e9),
+    (("other_income_year",), 0, MAX_MONEY),
+    (("other_deductions_year",), 0, MAX_MONEY),
+    (("other_insurance_year",), 0, MAX_MONEY),
     (("children", "count"), 0, 15),
     (("children", "pv_children_under_25"), 0, 15),
     (("health", "zusatzbeitrag_percent"), 0, 10),
     (("health", "pkv_monthly"), 0, 100_000),
+    (("health", "pkv_basis_monthly"), 0, 100_000),
     (("health", "pkv_care_monthly"), 0, 100_000),
     (("health", "pkv_employer_subsidy_monthly"), 0, 100_000),
     (("pension", "fixed_monthly"), 0, 100_000),
-    (("employment", "gross_year"), 0, 1e9),
+    (("employment", "gross_year"), 0, MAX_MONEY),
     (("employment", "steuerklasse"), 1, 6),
     (("employment", "bav_employee_year"), 0, 100_000),
     (("employment", "bav_employer_year"), 0, 100_000),
     (("employment", "vwl_employer_year"), 0, 10_000),
-    (("employment", "werbungskosten_year"), 0, 1e9),
-    (("employment", "withheld_year"), 0, 1e9),
+    (("employment", "werbungskosten_year"), 0, MAX_MONEY),
+    (("employment", "withheld_year"), 0, MAX_MONEY),
 ]
 
 
 def body(path, value):
     d = {"employment": {"gross_year": 1}} if path[0] == "employment" else {}
+    if path == ("health", "pkv_basis_monthly"):
+        d = {"health": {"pkv_monthly": 100_000}}
     node = d
     for key in path[:-1]:
         node = node.setdefault(key, {})
@@ -148,7 +152,8 @@ def test_damaged_object_falls_back_per_field():
     assert got["other_income_year"] == 0
     assert got["children"]["count"] == 2 and got["children"]["full_allowance"] is True
     assert got["children"]["pv_parent"] is False
-    assert got["health"]["mode"] == "gkv"  # inconsistent object: its defaults
+    assert got["health"]["mode"] == "pkv" and got["health"]["pkv_monthly"] == 100  # only the basis is clamped
+    assert got["health"]["pkv_basis_monthly"] == 100
     assert got["pension"]["mode"] == "none"
     assert got["unemployment"]["mode"] == "none"
     assert got["employment"] is None
@@ -170,25 +175,105 @@ def warnings_of(store, **kw):
     return PersonalTaxService(store).update(ok(**kw).model_dump())["warnings"]
 
 
-def test_warning_steuerklasse(store):
+@pytest.mark.parametrize("assessment", ["single", "joint"])
+@pytest.mark.parametrize("klasse", [1, 2, 3, 4, 5, 6])
+def test_warning_steuerklasse(store, assessment, klasse):
     msg = "Steuerklasse III/IV/V means married; check the assessment."
-    assert msg in warnings_of(store, employment={"gross_year": 1, "steuerklasse": 3})
-    assert msg not in warnings_of(store, employment={"gross_year": 1, "steuerklasse": 1})
-    assert msg not in warnings_of(store, assessment="joint", employment={"gross_year": 1, "steuerklasse": 3})
+    got = warnings_of(store, assessment=assessment, employment={"gross_year": 1, "steuerklasse": klasse})
+    fires = assessment == "single" and klasse in (3, 4, 5)
+    assert (got == [msg]) if fires else not got
 
 
-def test_warning_unemployment(store):
+@pytest.mark.parametrize("mode", ["voluntary", "voluntary_half"])
+def test_warning_unemployment(store, mode):
     msg = "Voluntary unemployment insurance is usually not possible next to an employment that is insured."
-    assert msg in warnings_of(store, employment={"gross_year": 1}, unemployment={"mode": "voluntary"})
-    assert msg not in warnings_of(
-        store, employment={"gross_year": 1, "sv_liable": False}, unemployment={"mode": "voluntary"}
-    )
-    assert msg not in warnings_of(store, unemployment={"mode": "voluntary"})
-    assert msg not in warnings_of(store, employment={"gross_year": 1})
+    assert warnings_of(store, employment={"gross_year": 1}, unemployment={"mode": mode}) == [msg]
+    assert not warnings_of(store, employment={"gross_year": 1, "sv_liable": False}, unemployment={"mode": mode})
+    assert not warnings_of(store, unemployment={"mode": mode})
+    assert not warnings_of(store, employment={"gross_year": 1})
 
 
 def test_warning_pkv_basis(store):
-    assert any("basic-cover" in w for w in warnings_of(store, health={"mode": "pkv", "pkv_monthly": 300}))
+    msg = (
+        "Enter the basic-cover share from your insurer's annual statement; "
+        "without it nothing of the premium counts as basic cover."
+    )
+    assert warnings_of(store, health={"mode": "pkv", "pkv_monthly": 300}) == [msg]
     assert not warnings_of(store, health={"mode": "pkv", "pkv_monthly": 300, "pkv_basis_monthly": 250})
     assert not warnings_of(store, health={"mode": "pkv"})
     assert not warnings_of(store, health={"mode": "gkv", "pkv_monthly": 300})
+
+
+def test_get_survives_reserved_keys(store):
+    svc = PersonalTaxService(store)
+    for stored in ({"stored": 1}, {"warnings": "x"}, {"stored": 1, "warnings": "x", "assessment": "joint"}):
+        store.save_settings({"personal_tax": stored})
+        got = svc.get()
+        assert got["stored"] is True and got["warnings"] is None
+    assert got["assessment"] == "joint"
+    assert "stored" not in effective_personal_tax({"personal_tax": {"stored": 1}})
+
+
+def test_bool_not_accepted_as_number():
+    got = effective_personal_tax(
+        {
+            "personal_tax": {
+                "children": {"count": True, "pv_children_under_25": True, "full_allowance": True},
+                "church_tax_percent": True,
+                "employment": {"gross_year": 5, "bav_employee_year": True},
+            }
+        }
+    )
+    assert got["children"]["count"] == 0 and got["children"]["pv_children_under_25"] == 0
+    assert got["children"]["full_allowance"] is True
+    assert got["church_tax_percent"] == 0
+    assert got["employment"]["gross_year"] == 5 and got["employment"]["bav_employee_year"] == 0
+    assert effective_personal_tax({"personal_tax": {"employment": {"gross_year": True}}})["employment"] is None
+
+
+def test_health_inconsistent_keeps_mode_and_premium():
+    got = effective_personal_tax(
+        {
+            "personal_tax": {
+                "health": {"mode": "pkv", "pkv_monthly": 100, "pkv_basis_monthly": 500, "krankengeld": False}
+            }
+        }
+    )
+    assert got["health"]["mode"] == "pkv" and got["health"]["pkv_monthly"] == 100
+    assert got["health"]["pkv_basis_monthly"] == 100 and got["health"]["krankengeld"] is False
+
+
+def test_employment_one_bad_optional_field():
+    got = effective_personal_tax({"personal_tax": {"employment": {"gross_year": 40000, "bav_employee_year": -1}}})
+    assert got["employment"]["gross_year"] == 40000 and got["employment"]["bav_employee_year"] == 0
+
+
+def test_unknown_fields_in_damaged_object_survive():
+    got = effective_personal_tax({"personal_tax": {"children": {"count": 99, "later": [1]}, "x": {"y": 2}}})
+    assert got["children"]["count"] == 0 and got["children"]["later"] == [1]
+    assert got["x"] == {"y": 2}
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf"), 16, -1, 2**70])
+def test_non_finite_and_out_of_range_fall_back(bad):
+    got = effective_personal_tax(
+        {"personal_tax": {"children": {"count": bad}, "church_tax_percent": bad, "other_income_year": bad}}
+    )
+    assert got["children"]["count"] == 0
+    assert got["church_tax_percent"] == 0
+    assert got["other_income_year"] == (16 if bad == 16 else 0)
+
+
+@pytest.mark.parametrize("field", ["children", "health", "pension", "unemployment"])
+def test_list_instead_of_nested_object(field):
+    got = effective_personal_tax({"personal_tax": {field: [1, 2]}})
+    assert got[field] == PersonalTaxIn().model_dump()[field]
+    assert effective_personal_tax({"personal_tax": {"employment": [1]}})["employment"] is None
+
+
+@pytest.mark.parametrize("stored", [{}, "x"])
+def test_stored_empty_or_string_reads_as_stored(store, stored):
+    store.save_settings({"personal_tax": stored})
+    got = PersonalTaxService(store).get()
+    assert got["stored"] is True
+    assert got["assessment"] == "single" and got["children"]["count"] == 0 and got["employment"] is None
