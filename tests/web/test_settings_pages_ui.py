@@ -160,7 +160,7 @@ def test_boss_my_settings_has_tax_summary_and_link(browser):
     expect(pg.locator("#tokens-card")).to_have_count(1)
     expect(pg.locator("#calendars")).to_have_count(1)
     tax.locator("a[href='#/me/tax']").click()
-    expect(pg.locator("#tax-profile-placeholder")).to_be_visible()
+    expect(pg.locator("#tax-profile")).to_be_visible()
     assert problems == []
     ctx.close()
 
