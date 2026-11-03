@@ -1,18 +1,14 @@
 """calc.finance tax integration: oracle cases F1 and F2 (docs/specs/tax-burden-and-settings.md), owed and reserve,
-warnings and the /finance redaction. ``today`` is pinned; the expected numbers are the spec's literals."""
+warnings (the /finance redaction is in test_finance_redaction.py). ``today`` is pinned; the expected numbers are the spec's literals."""
 
 from datetime import date
 from decimal import Decimal
 
 import pytest
-from fastapi.testclient import TestClient
 
 from permita38.core import calc
 from permita38.core.repository.sqlite import SQLiteRepository
 from permita38.core.service.personal_tax import NOT_SAVED_WARNING, PersonalTaxService
-
-from .conftest import PASSWORD
-from .transfer_helpers import login
 
 TODAY = date(2026, 5, 26)
 O1 = {}
@@ -299,59 +295,3 @@ def test_legacy_keys_are_ignored(repo):
     book(repo, 24000)
     f = calc.finance(repo, 2026, TODAY)
     assert f["tax_owed"]["owed"] == 1306.0 and f["months"][0]["social"] == 1085.0
-
-
-# -- /finance redaction ----------------------------------------------------------------------------------------
-FULL = {"est", "soli", "church", "social", "zve", "vorsorge", "insurance"}
-
-
-def _accountant(app, boss_client):
-    r = boss_client.post(
-        "/api/users", json={"username": "acc", "name": "A", "role": "accountant", "password": PASSWORD}
-    )
-    assert r.status_code == 200, r.text
-    return login(app, "acc")
-
-
-def _token_client(app, boss_client):
-    made = boss_client.post("/api/tokens", json={"label": "t", "read_only": True})
-    assert made.status_code == 201, made.text
-    c = TestClient(app)
-    c.headers["Authorization"] = f"Bearer {made.json()['token']}"
-    return c
-
-
-def _assert_redacted(f):
-    assert set(f["tax_actual"]) == set(f["tax_projected"]) == {"total", "rate", "gewst", "kst", "redacted"}
-    assert f["tax_actual"]["redacted"] is True
-    assert set(f["tax_owed"]) == {"as_of", "gewst", "kst", "redacted"} and f["tax_owed"]["redacted"] is True
-    assert set(f["reserve"]) == {"monthly", "months_left", "redacted"} and f["reserve"]["redacted"] is True
-    assert "social_year" in f and "take_home" in f and "social" in f["months"][0]
-
-
-def test_boss_session_sees_the_full_breakdown(boss_client):
-    boss_client.put("/api/settings/personal-tax", json={"church_tax_percent": 9})
-    f = boss_client.get("/api/finance", params={"year": date.today().year}).json()
-    assert FULL <= set(f["tax_actual"]) and FULL <= set(f["tax_projected"])
-    assert "redacted" not in f["tax_actual"]
-    assert {"owed", "est", "church", "withheld"} <= set(f["tax_owed"])
-    assert {"due_year", "withheld", "owed_now", "remaining", "balance"} <= set(f["reserve"])
-
-
-def test_accountant_and_tokens_see_only_the_redacted_keys(app, boss_client):
-    boss_client.put("/api/settings/personal-tax", json={"church_tax_percent": 9, "employment": {"gross_year": 40000}})
-    year = date.today().year
-    acc = _accountant(app, boss_client)
-    for c in (acc, _token_client(app, boss_client)):
-        _assert_redacted(c.get("/api/finance", params={"year": year}).json())
-    # a future year has tax_owed null; the redaction keeps it null
-    f = acc.get("/api/finance", params={"year": year + 1}).json()
-    assert f["tax_owed"] is None and set(f["reserve"]) == {"monthly", "months_left", "redacted"}
-
-
-def test_boss_api_token_is_redacted_too(app, boss_client):
-    made = boss_client.post("/api/tokens", json={"label": "script", "read_only": False})
-    assert made.status_code == 201, made.text
-    c = TestClient(app)
-    c.headers["Authorization"] = f"Bearer {made.json()['token']}"
-    _assert_redacted(c.get("/api/finance", params={"year": date.today().year}).json())

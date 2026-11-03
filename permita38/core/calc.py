@@ -319,17 +319,41 @@ def _floats(x: Any) -> Any:
     return x
 
 
+_PUBLIC_TOP = (
+    "year",
+    "months",
+    "totals",
+    "categories",
+    "open_receivables",
+    "kleinunternehmer",
+    "company_type",
+    "projected_profit",
+    "extrapolated",
+)
+_PUBLIC_MONTH = ("month", "revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due", "vat_set_aside")
+_PUBLIC_TAX = ("gewst", "kst", "kst_soli")
+_PUBLIC_OWED = ("as_of", "gewst", "kst", "kst_soli")
+
+
+def _pick(src: dict, keys: tuple[str, ...]) -> dict:
+    return {k: src[k] for k in keys if k in src}
+
+
 def redact_tax(result: dict) -> dict:
-    """The /finance result for a caller who may see business figures only (accountant, any API token)."""
-    out = dict(result)
+    """The /finance result for a caller who may see business figures only (accountant, any API token).
+
+    Built from allowlists at every level (docs/specs/tax-burden-and-settings.md, "/finance redaction"): a key added
+    to ``finance`` later stays hidden until it is listed here.
+    """
+    out = _pick(result, _PUBLIC_TOP)
+    out["months"] = [_pick(m, _PUBLIC_MONTH) for m in result.get("months") or []]
     for k in ("tax_actual", "tax_projected"):
-        t = result.get(k) or {}
-        out[k] = {x: t.get(x) for x in ("total", "rate", "gewst", "kst")} | {"redacted": True}
-    if result.get("tax_owed") is not None:
-        t = result["tax_owed"]
-        out["tax_owed"] = {x: t.get(x) for x in ("as_of", "gewst", "kst")} | {"redacted": True}
-    r = result.get("reserve") or {}
-    out["reserve"] = {x: r.get(x) for x in ("monthly", "months_left")} | {"redacted": True}
+        out[k] = _pick(result.get(k) or {}, _PUBLIC_TAX) | {"redacted": True}
+    owed = result.get("tax_owed")
+    out["tax_owed"] = None if owed is None else _pick(owed, _PUBLIC_OWED) | {"redacted": True}
+    out["reserve"] = {"redacted": True}
+    out["warnings"] = [w for w in result.get("warnings") or [] if w != NOT_SAVED_WARNING]
+    out["redacted"] = True
     return out
 
 
