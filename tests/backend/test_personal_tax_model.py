@@ -277,3 +277,22 @@ def test_stored_empty_or_string_reads_as_stored(store, stored):
     got = PersonalTaxService(store).get()
     assert got["stored"] is True
     assert got["assessment"] == "single" and got["children"]["count"] == 0 and got["employment"] is None
+
+
+@pytest.mark.parametrize("bad", ["2", "9.5", "", "abc"])
+def test_stored_strings_where_numbers_expected_fall_back(bad):
+    got = effective_personal_tax(
+        {
+            "personal_tax": {
+                "church_tax_percent": bad,
+                "children": {"count": bad, "pv_children_under_25": bad},
+                "health": {"pkv_monthly": bad, "krankengeld": bad},
+                "employment": {"gross_year": 100, "steuerklasse": bad, "bav_employee_year": bad},
+            }
+        }
+    )
+    assert got["church_tax_percent"] == 0
+    assert got["children"]["count"] == 0 and got["children"]["pv_children_under_25"] == 0
+    assert got["health"]["pkv_monthly"] == 0 and got["health"]["krankengeld"] is True
+    assert got["employment"]["gross_year"] == 100
+    assert got["employment"]["steuerklasse"] is None and got["employment"]["bav_employee_year"] == 0

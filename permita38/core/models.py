@@ -609,24 +609,24 @@ class TeamTimelineVisibilityIn(v.StrictRecord):
 
 
 # ---------------------------------------------------------------- personal tax profile (settings key personal_tax)
-_Count = Annotated[int, Field(ge=0, le=15)]
+_Count = v.StrictCount15
 
 
 class ChildrenIn(v.StrictRecord):
     count: _Count = 0
-    full_allowance: bool = False
-    pv_parent: bool = False
+    full_allowance: StrictBool = False
+    pv_parent: StrictBool = False
     pv_children_under_25: _Count = 0
 
 
 class HealthIn(v.StrictRecord):
     mode: Literal["gkv", "pkv", "none"] = "gkv"
-    krankengeld: bool = True
-    zusatzbeitrag_percent: Annotated[float, Field(ge=0, le=10, allow_inf_nan=False)] | None = None
-    pkv_monthly: v.MonthlyAmount = 0
-    pkv_basis_monthly: v.MonthlyAmount = 0
-    pkv_care_monthly: v.MonthlyAmount = 0
-    pkv_employer_subsidy_monthly: v.MonthlyAmount = 0
+    krankengeld: StrictBool = True
+    zusatzbeitrag_percent: v.StrictPercent10 | None = None
+    pkv_monthly: v.StrictMonthlyAmount = 0
+    pkv_basis_monthly: v.StrictMonthlyAmount = 0
+    pkv_care_monthly: v.StrictMonthlyAmount = 0
+    pkv_employer_subsidy_monthly: v.StrictMonthlyAmount = 0
 
     @model_validator(mode="after")
     def _basis_within_premium(self):
@@ -637,7 +637,7 @@ class HealthIn(v.StrictRecord):
 
 class PensionIn(v.StrictRecord):
     mode: Literal["none", "statutory_income", "statutory_regular", "fixed"] = "none"
-    fixed_monthly: v.MonthlyAmount = 0
+    fixed_monthly: v.StrictMonthlyAmount = 0
 
 
 class UnemploymentIn(v.StrictRecord):
@@ -645,24 +645,24 @@ class UnemploymentIn(v.StrictRecord):
 
 
 class EmploymentIn(v.StrictRecord):
-    gross_year: v.NonNegAmount
-    sv_liable: bool = True
-    steuerklasse: Annotated[int, Field(ge=1, le=6)] | None = None
-    bav_employee_year: Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False)] = 0
-    bav_employer_year: Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False)] = 0
-    vwl_employer_year: Annotated[float, Field(ge=0, le=10_000, allow_inf_nan=False)] = 0
-    werbungskosten_year: v.NonNegAmount = 0
-    withheld_year: v.NonNegAmount | None = None
+    gross_year: v.StrictNonNegAmount
+    sv_liable: StrictBool = True
+    steuerklasse: v.StrictTaxClass | None = None
+    bav_employee_year: v.StrictAmount100k = 0
+    bav_employer_year: v.StrictAmount100k = 0
+    vwl_employer_year: v.StrictAmount10k = 0
+    werbungskosten_year: v.StrictNonNegAmount = 0
+    withheld_year: v.StrictNonNegAmount | None = None
 
 
 class PersonalTaxIn(v.StrictRecord):
     """PUT /settings/personal-tax: the whole profile (replaces the stored one)."""
 
     assessment: Literal["single", "joint"] = "single"
-    church_tax_percent: Annotated[float, Field(ge=0, le=15, allow_inf_nan=False)] = 0
-    other_income_year: v.NonNegAmount = 0
-    other_deductions_year: v.NonNegAmount = 0
-    other_insurance_year: v.NonNegAmount = 0
+    church_tax_percent: v.StrictPercent15 = 0
+    other_income_year: v.StrictNonNegAmount = 0
+    other_deductions_year: v.StrictNonNegAmount = 0
+    other_insurance_year: v.StrictNonNegAmount = 0
     children: ChildrenIn = Field(default_factory=ChildrenIn)
     health: HealthIn = Field(default_factory=HealthIn)
     pension: PensionIn = Field(default_factory=PensionIn)

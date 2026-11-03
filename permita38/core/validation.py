@@ -184,6 +184,31 @@ Weekdays = Annotated[
 Tags = Annotated[list[Annotated[str, StringConstraints(max_length=200)]], Field(max_length=20), AfterValidator(_tags)]
 PayDays = Annotated[int, Field(ge=0, le=365)]
 Percent = Annotated[float, Field(ge=0, le=100, allow_inf_nan=False)]
+
+
+def _real_number(value: Any) -> Any:
+    """JSON numbers only: no strings, no booleans (an int is fine for a float field)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("must be a number")
+    return value
+
+
+def _real_int(value: Any) -> Any:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("must be an integer")
+    return value
+
+
+_NUM = BeforeValidator(_real_number)
+_INT = BeforeValidator(_real_int)
+StrictNonNegAmount = Annotated[float, Field(ge=0, le=MAX_MONEY, allow_inf_nan=False), _NUM]
+StrictMonthlyAmount = Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False), _NUM]
+StrictAmount100k = Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False), _NUM]
+StrictAmount10k = Annotated[float, Field(ge=0, le=10_000, allow_inf_nan=False), _NUM]
+StrictPercent10 = Annotated[float, Field(ge=0, le=10, allow_inf_nan=False), _NUM]
+StrictPercent15 = Annotated[float, Field(ge=0, le=15, allow_inf_nan=False), _NUM]
+StrictCount15 = Annotated[int, Field(ge=0, le=15), _INT]
+StrictTaxClass = Annotated[int, Field(ge=1, le=6), _INT]
 Minutes = Annotated[int, Field(ge=1, le=1440)]
 
 

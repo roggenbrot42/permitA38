@@ -128,10 +128,6 @@ def test_invalid_bodies_are_422_and_store_nothing(boss_client, body):
     assert boss_client.get(URL).json()["stored"] is False
 
 
-LAX = "production coerces numeric strings and bool/int (lax pydantic); the review asked for strict rejection"
-
-
-@pytest.mark.xfail(strict=True, reason=LAX)
 @pytest.mark.parametrize(
     "body",
     [
