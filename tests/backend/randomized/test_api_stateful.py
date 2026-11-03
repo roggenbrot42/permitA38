@@ -26,6 +26,7 @@ from permita38.core.config import Config
 from permita38.core.service import auth as auth_module
 from permita38.core.service import throttle as throttle_module
 from permita38.core.service import tokens as tokens_module
+from permita38.core.settings import LEGACY_TAX_KEYS
 
 from . import oracle
 from .conftest import FakeClock
@@ -146,6 +147,107 @@ USERNAMES = st.one_of(
 def maybe_none(strategy):
     """An optional field that may also be sent explicitly as null."""
     return st.one_of(st.none(), strategy)
+
+
+# ---------------------------------------------------------------- personal tax profile (PUT /settings/personal-tax)
+PT_DEFAULTS = {
+    "assessment": "single",
+    "church_tax_percent": 0,
+    "other_income_year": 0,
+    "other_deductions_year": 0,
+    "other_insurance_year": 0,
+    "children": {"count": 0, "full_allowance": False, "pv_parent": False, "pv_children_under_25": 0},
+    "health": {
+        "mode": "gkv",
+        "krankengeld": True,
+        "zusatzbeitrag_percent": None,
+        "pkv_monthly": 0,
+        "pkv_basis_monthly": 0,
+        "pkv_care_monthly": 0,
+        "pkv_employer_subsidy_monthly": 0,
+    },
+    "pension": {"mode": "none", "fixed_monthly": 0},
+    "unemployment": {"mode": "none"},
+    "employment": None,
+}
+_AMOUNT = st.integers(0, 5000)
+
+
+@st.composite
+def _health(draw):
+    out = draw(
+        st.fixed_dictionaries(
+            {},
+            optional={
+                "mode": st.sampled_from(["gkv", "pkv", "none"]),
+                "krankengeld": st.booleans(),
+                "zusatzbeitrag_percent": st.sampled_from([None, 0, 1.5, 2.9, 10]),
+                "pkv_care_monthly": _AMOUNT,
+                "pkv_employer_subsidy_monthly": _AMOUNT,
+            },
+        )
+    )
+    if draw(st.booleans()):  # the basis share may not exceed the premium, so both are given together
+        monthly = draw(_AMOUNT)
+        out |= {"pkv_monthly": monthly, "pkv_basis_monthly": draw(st.integers(0, monthly))}
+    return out
+
+
+_EMPLOYMENT = st.fixed_dictionaries(
+    {"gross_year": st.integers(0, 200_000)},
+    optional={
+        "sv_liable": st.booleans(),
+        "steuerklasse": st.sampled_from([None, 1, 3, 4, 6]),
+        "bav_employee_year": st.integers(0, 8000),
+        "bav_employer_year": st.integers(0, 8000),
+        "vwl_employer_year": st.integers(0, 480),
+        "werbungskosten_year": st.integers(0, 5000),
+        "withheld_year": st.one_of(st.none(), st.integers(0, 50_000)),
+    },
+)
+PROFILE = st.fixed_dictionaries(
+    {},
+    optional={
+        "assessment": st.sampled_from(["single", "joint"]),
+        "church_tax_percent": st.sampled_from([0, 8, 9]),
+        "other_income_year": _AMOUNT,
+        "other_deductions_year": _AMOUNT,
+        "other_insurance_year": _AMOUNT,
+        "children": st.fixed_dictionaries(
+            {},
+            optional={
+                "count": st.integers(0, 15),
+                "full_allowance": st.booleans(),
+                "pv_parent": st.booleans(),
+                "pv_children_under_25": st.integers(0, 15),
+            },
+        ),
+        "health": _health(),
+        "pension": st.fixed_dictionaries(
+            {},
+            optional={
+                "mode": st.sampled_from(["none", "statutory_income", "statutory_regular", "fixed"]),
+                "fixed_monthly": _AMOUNT,
+            },
+        ),
+        "unemployment": st.fixed_dictionaries(
+            {}, optional={"mode": st.sampled_from(["none", "voluntary", "voluntary_half"])}
+        ),
+        "employment": st.one_of(st.none(), _EMPLOYMENT),
+    },
+)
+
+
+def assert_profile(got: dict, sent: dict) -> None:
+    """``got`` is the sent profile over the defaults (replace, never merge with an earlier profile)."""
+    for key, default in PT_DEFAULTS.items():
+        value = sent.get(key, default)
+        if isinstance(default, dict):
+            value = default | value
+        if key == "employment" and value is not None:
+            value = {"sv_liable": True, "steuerklasse": None, "bav_employee_year": 0, "bav_employer_year": 0,
+                     "vwl_employer_year": 0, "werbungskosten_year": 0, "withheld_year": None} | value  # fmt: skip
+        assert got[key] == value, (key, got[key], value)
 
 
 class ApiMachine(RuleBasedStateMachine):
@@ -1061,39 +1163,34 @@ class ApiMachine(RuleBasedStateMachine):
         self.settings[key] = val
         self.dirty |= {"invoices", "expenses", "settings"}
 
-    @rule(
-        data=st.data(),
-        assessment=st.sampled_from(["single", "joint"]),
-        church=st.sampled_from([0, 8, 9]),
-        legacy=st.sampled_from(["social_monthly", "church_tax", "splitting", "other_income", "other_deductions"]),
-    )
-    def personal_tax_profile(self, data, assessment, church, legacy):
-        """The profile is stored by its own route (boss session only); PUT /settings refuses it and the legacy keys
-        (400 / 422, nothing changes) and GET /settings never shows any of them."""
+    @rule(data=st.data(), profile=PROFILE, legacy=st.sampled_from(sorted(LEGACY_TAX_KEYS)))
+    def personal_tax_profile(self, data, profile, legacy):
+        """The profile is stored by its own route (boss session only) and REPLACED by every successful PUT (fields the
+        body omits go back to their defaults). PUT /settings refuses the profile (400) and the legacy keys (422)
+        without changing the settings, and GET /settings never shows any of them."""
         self.tick()
         s = data.draw(self.actor())
-        body = {"assessment": assessment, "church_tax_percent": church}
-        r = self.call("PUT", "/settings/personal-tax", s, json=body)
+        r = self.call("PUT", "/settings/personal-tax", s, json=profile)
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
         else:
-            assert r.status_code == 200 and r.json()["stored"] is True
-            assert r.json()["assessment"] == assessment and r.json()["church_tax_percent"] == church
-            self.personal_tax = body
-        s = data.draw(self.actor())
-        r = self.call("PUT", "/settings", s, json={"personal_tax": {"assessment": "joint"}})
-        assert r.status_code == (self.gate(s, boss_only=True) or 400), r.text
-        r = self.call("PUT", "/settings", s, json={legacy: 1})
-        assert r.status_code == (self.gate(s, boss_only=True) or 422), r.text
+            assert r.status_code == 200, r.text
+            assert r.json()["stored"] is True and r.json()["warnings"] is not None
+            assert_profile(r.json(), profile)
+            self.personal_tax = profile
         boss = self._boss()
+        for body, code in (({"personal_tax": {"assessment": "joint"}}, 400), ({legacy: 1}, 422)):
+            s = data.draw(self.actor())
+            before = self.call("GET", "/settings", boss).json()
+            r = self.call("PUT", "/settings", s, json=body)
+            assert r.status_code == (self.gate(s, boss_only=True) or code), r.text
+            assert self.call("GET", "/settings", boss).json() == before, "a refused PUT /settings changed the settings"
         shown = self.call("GET", "/settings", boss).json()
-        assert not {"personal_tax", "social_monthly", "church_tax", "splitting", "other_income",
-                    "other_deductions"} & set(shown), "GET /settings shows tax profile data"  # fmt: skip
+        assert not {"personal_tax", *LEGACY_TAX_KEYS} & set(shown), "GET /settings shows tax profile data"
         got = self.call("GET", "/settings/personal-tax", boss).json()
         assert got["stored"] is (self.personal_tax is not None)
-        if self.personal_tax:
-            assert got["assessment"] == self.personal_tax["assessment"]
-            assert got["church_tax_percent"] == self.personal_tax["church_tax_percent"]
+        if self.personal_tax is not None:
+            assert_profile(got, self.personal_tax)
 
     # ------------------------------------------------------------------ rules: users
     @rule(
