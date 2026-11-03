@@ -3686,6 +3686,76 @@
         ]
       }
     },
+    "/api/settings/personal-tax": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "the personal tax profile (boss, signed in with a password)",
+        "operationId": "get_personal_tax_api_settings_personal_tax_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalTax"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "replace the personal tax profile (boss, signed in with a password)",
+        "operationId": "put_personal_tax_api_settings_personal_tax_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonalTaxIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonalTax"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/team/timeline": {
       "get": {
         "tags": [
@@ -10808,6 +10878,37 @@
         ],
         "title": "ChangePasswordPayload"
       },
+      "ChildrenIn": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 0.0,
+            "title": "Count",
+            "default": 0
+          },
+          "full_allowance": {
+            "type": "boolean",
+            "title": "Full Allowance",
+            "default": false
+          },
+          "pv_parent": {
+            "type": "boolean",
+            "title": "Pv Parent",
+            "default": false
+          },
+          "pv_children_under_25": {
+            "type": "integer",
+            "maximum": 15.0,
+            "minimum": 0.0,
+            "title": "Pv Children Under 25",
+            "default": 0
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "ChildrenIn"
+      },
       "CodePayload": {
         "properties": {
           "code": {
@@ -12786,6 +12887,81 @@
         "title": "DocumentResult",
         "description": "A saved offer or invoice plus its non-blocking planning warnings (never stored)."
       },
+      "EmploymentIn": {
+        "properties": {
+          "gross_year": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Gross Year"
+          },
+          "sv_liable": {
+            "type": "boolean",
+            "title": "Sv Liable",
+            "default": true
+          },
+          "steuerklasse": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 6.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steuerklasse"
+          },
+          "bav_employee_year": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Bav Employee Year",
+            "default": 0
+          },
+          "bav_employer_year": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Bav Employer Year",
+            "default": 0
+          },
+          "vwl_employer_year": {
+            "type": "number",
+            "maximum": 10000.0,
+            "minimum": 0.0,
+            "title": "Vwl Employer Year",
+            "default": 0
+          },
+          "werbungskosten_year": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Werbungskosten Year",
+            "default": 0
+          },
+          "withheld_year": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withheld Year"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "gross_year"
+        ],
+        "title": "EmploymentIn"
+      },
       "EnableResult": {
         "properties": {
           "token": {
@@ -13806,6 +13982,69 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HealthIn": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "gkv",
+              "pkv",
+              "none"
+            ],
+            "title": "Mode",
+            "default": "gkv"
+          },
+          "krankengeld": {
+            "type": "boolean",
+            "title": "Krankengeld",
+            "default": true
+          },
+          "zusatzbeitrag_percent": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zusatzbeitrag Percent"
+          },
+          "pkv_monthly": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Pkv Monthly",
+            "default": 0
+          },
+          "pkv_basis_monthly": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Pkv Basis Monthly",
+            "default": 0
+          },
+          "pkv_care_monthly": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Pkv Care Monthly",
+            "default": 0
+          },
+          "pkv_employer_subsidy_monthly": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Pkv Employer Subsidy Monthly",
+            "default": 0
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "HealthIn"
       },
       "ImpressumLookup": {
         "properties": {
@@ -14854,6 +15093,335 @@
           "password"
         ],
         "title": "PasswordPayload"
+      },
+      "PensionIn": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "none",
+              "statutory_income",
+              "statutory_regular",
+              "fixed"
+            ],
+            "title": "Mode",
+            "default": "none"
+          },
+          "fixed_monthly": {
+            "type": "number",
+            "maximum": 100000.0,
+            "minimum": 0.0,
+            "title": "Fixed Monthly",
+            "default": 0
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "PensionIn"
+      },
+      "PersonalTax": {
+        "properties": {
+          "assessment": {
+            "type": "string",
+            "title": "Assessment",
+            "default": "single"
+          },
+          "church_tax_percent": {
+            "type": "number",
+            "title": "Church Tax Percent",
+            "default": 0
+          },
+          "other_income_year": {
+            "type": "number",
+            "title": "Other Income Year",
+            "default": 0
+          },
+          "other_deductions_year": {
+            "type": "number",
+            "title": "Other Deductions Year",
+            "default": 0
+          },
+          "other_insurance_year": {
+            "type": "number",
+            "title": "Other Insurance Year",
+            "default": 0
+          },
+          "children": {
+            "$ref": "#/components/schemas/PersonalTaxChildren"
+          },
+          "health": {
+            "$ref": "#/components/schemas/PersonalTaxHealth"
+          },
+          "pension": {
+            "$ref": "#/components/schemas/PersonalTaxPension"
+          },
+          "unemployment": {
+            "$ref": "#/components/schemas/PersonalTaxUnemployment"
+          },
+          "employment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonalTaxEmployment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stored": {
+            "type": "boolean",
+            "title": "Stored",
+            "default": false
+          },
+          "warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warnings"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "PersonalTax",
+        "description": "Response of the personal tax profile; ``stored`` is false when the defaults are shown."
+      },
+      "PersonalTaxChildren": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "default": 0
+          },
+          "full_allowance": {
+            "type": "boolean",
+            "title": "Full Allowance",
+            "default": false
+          },
+          "pv_parent": {
+            "type": "boolean",
+            "title": "Pv Parent",
+            "default": false
+          },
+          "pv_children_under_25": {
+            "type": "integer",
+            "title": "Pv Children Under 25",
+            "default": 0
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "PersonalTaxChildren"
+      },
+      "PersonalTaxEmployment": {
+        "properties": {
+          "gross_year": {
+            "type": "number",
+            "title": "Gross Year",
+            "default": 0
+          },
+          "sv_liable": {
+            "type": "boolean",
+            "title": "Sv Liable",
+            "default": true
+          },
+          "steuerklasse": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Steuerklasse"
+          },
+          "bav_employee_year": {
+            "type": "number",
+            "title": "Bav Employee Year",
+            "default": 0
+          },
+          "bav_employer_year": {
+            "type": "number",
+            "title": "Bav Employer Year",
+            "default": 0
+          },
+          "vwl_employer_year": {
+            "type": "number",
+            "title": "Vwl Employer Year",
+            "default": 0
+          },
+          "werbungskosten_year": {
+            "type": "number",
+            "title": "Werbungskosten Year",
+            "default": 0
+          },
+          "withheld_year": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Withheld Year"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "PersonalTaxEmployment"
+      },
+      "PersonalTaxHealth": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "gkv"
+          },
+          "krankengeld": {
+            "type": "boolean",
+            "title": "Krankengeld",
+            "default": true
+          },
+          "zusatzbeitrag_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zusatzbeitrag Percent"
+          },
+          "pkv_monthly": {
+            "type": "number",
+            "title": "Pkv Monthly",
+            "default": 0
+          },
+          "pkv_basis_monthly": {
+            "type": "number",
+            "title": "Pkv Basis Monthly",
+            "default": 0
+          },
+          "pkv_care_monthly": {
+            "type": "number",
+            "title": "Pkv Care Monthly",
+            "default": 0
+          },
+          "pkv_employer_subsidy_monthly": {
+            "type": "number",
+            "title": "Pkv Employer Subsidy Monthly",
+            "default": 0
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "PersonalTaxHealth"
+      },
+      "PersonalTaxIn": {
+        "properties": {
+          "assessment": {
+            "type": "string",
+            "enum": [
+              "single",
+              "joint"
+            ],
+            "title": "Assessment",
+            "default": "single"
+          },
+          "church_tax_percent": {
+            "type": "number",
+            "maximum": 15.0,
+            "minimum": 0.0,
+            "title": "Church Tax Percent",
+            "default": 0
+          },
+          "other_income_year": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Other Income Year",
+            "default": 0
+          },
+          "other_deductions_year": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Other Deductions Year",
+            "default": 0
+          },
+          "other_insurance_year": {
+            "type": "number",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Other Insurance Year",
+            "default": 0
+          },
+          "children": {
+            "$ref": "#/components/schemas/ChildrenIn"
+          },
+          "health": {
+            "$ref": "#/components/schemas/HealthIn"
+          },
+          "pension": {
+            "$ref": "#/components/schemas/PensionIn"
+          },
+          "unemployment": {
+            "$ref": "#/components/schemas/UnemploymentIn"
+          },
+          "employment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EmploymentIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "PersonalTaxIn",
+        "description": "PUT /settings/personal-tax: the whole profile (replaces the stored one)."
+      },
+      "PersonalTaxPension": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "none"
+          },
+          "fixed_monthly": {
+            "type": "number",
+            "title": "Fixed Monthly",
+            "default": 0
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "PersonalTaxPension"
+      },
+      "PersonalTaxUnemployment": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "none"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "PersonalTaxUnemployment"
       },
       "Plan": {
         "properties": {
@@ -19722,6 +20290,23 @@
           "to"
         ],
         "title": "UnavailableIn"
+      },
+      "UnemploymentIn": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "none",
+              "voluntary",
+              "voluntary_half"
+            ],
+            "title": "Mode",
+            "default": "none"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "UnemploymentIn"
       },
       "UploadResult": {
         "properties": {

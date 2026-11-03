@@ -12,7 +12,7 @@ from permita38.core.repository.schema import TABLES
 from permita38.core.service.transfer import csvout, manifest
 from permita38.core.service.transfer.importer import LIST_REFERENCES, REFERENCES
 
-from .transfer_helpers import export_archive, make_instance, seed, zip_files
+from .transfer_helpers import export_archive, login, make_instance, seed, zip_files
 
 CANARIES = {
     "totp_secret": "JBSWY3DPEHPK3PXPCANARY",
@@ -241,3 +241,27 @@ def test_archive_entries_are_plain_unencrypted_files(source):
     with zipfile.ZipFile(io.BytesIO(blob)) as zf:
         for info in zf.infolist():
             assert stat.S_ISREG(info.external_attr >> 16) and not info.flag_bits & 1
+
+
+def test_personal_tax_and_legacy_keys_round_trip_through_export_and_import(source, tmp_path):
+    _, client, store, _ = source
+    profile = {"assessment": "joint", "church_tax_percent": 9, "other_income_year": 1200}
+    assert client.put("/api/settings/personal-tax", json=profile).status_code == 200
+    raw = store.settings()
+    raw["social_monthly"] = 321  # a legacy key from an old data folder
+    store.save_settings(raw)
+    stored = store.settings()["personal_tax"]
+    blob = export_archive(client)
+    exported = json.loads(zip_files(blob)["data/settings.json"])["settings"]
+    assert exported["personal_tax"] == stored and exported["social_monthly"] == 321
+
+    dst_app, dst_client = make_instance(tmp_path, "dst")
+    r = dst_client.post("/api/data/import/run", files={"file": ("a.zip", blob)}, data={"confirm": "true"})
+    assert r.status_code == 200, r.text
+    dst_store = dst_app.state.services.store
+    assert dst_store.settings()["personal_tax"] == stored
+    assert dst_store.settings()["social_monthly"] == 321  # imported unchanged, hidden and deleted lazily
+    again = login(dst_app, "boss")  # the import replaced the users, sign in again
+    got = again.get("/api/settings/personal-tax")
+    assert got.status_code == 200 and got.json()["stored"] is True and got.json()["assessment"] == "joint"
+    assert "social_monthly" not in again.get("/api/settings").json()

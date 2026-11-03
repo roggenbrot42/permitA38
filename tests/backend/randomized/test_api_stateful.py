@@ -181,6 +181,7 @@ class ApiMachine(RuleBasedStateMachine):
         self.m: dict[str, dict] = {c: {} for c in (*CRUD, "offers", "invoices", "users")}
         self.bodies: dict[str, dict] = {}  # last submitted body per document id
         self.settings = {"kleinunternehmer": False, "accounting": "eur"}
+        self.personal_tax: dict | None = None  # the stored profile (PUT /settings/personal-tax), boss session only
         self.graveyard: list[str] = []
         self.pw_of_boss = "boss-password-1"
         r = self.call("POST", "/auth/setup", json={"username": "boss", "name": "Bea Boss", "password": self.pw_of_boss})
@@ -1059,6 +1060,40 @@ class ApiMachine(RuleBasedStateMachine):
         assert r.json()["company_name"] == ""  # untouched fields are merged, not reset
         self.settings[key] = val
         self.dirty |= {"invoices", "expenses", "settings"}
+
+    @rule(
+        data=st.data(),
+        assessment=st.sampled_from(["single", "joint"]),
+        church=st.sampled_from([0, 8, 9]),
+        legacy=st.sampled_from(["social_monthly", "church_tax", "splitting", "other_income", "other_deductions"]),
+    )
+    def personal_tax_profile(self, data, assessment, church, legacy):
+        """The profile is stored by its own route (boss session only); PUT /settings refuses it and the legacy keys
+        (400 / 422, nothing changes) and GET /settings never shows any of them."""
+        self.tick()
+        s = data.draw(self.actor())
+        body = {"assessment": assessment, "church_tax_percent": church}
+        r = self.call("PUT", "/settings/personal-tax", s, json=body)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g
+        else:
+            assert r.status_code == 200 and r.json()["stored"] is True
+            assert r.json()["assessment"] == assessment and r.json()["church_tax_percent"] == church
+            self.personal_tax = body
+        s = data.draw(self.actor())
+        r = self.call("PUT", "/settings", s, json={"personal_tax": {"assessment": "joint"}})
+        assert r.status_code == (self.gate(s, boss_only=True) or 400), r.text
+        r = self.call("PUT", "/settings", s, json={legacy: 1})
+        assert r.status_code == (self.gate(s, boss_only=True) or 422), r.text
+        boss = self._boss()
+        shown = self.call("GET", "/settings", boss).json()
+        assert not {"personal_tax", "social_monthly", "church_tax", "splitting", "other_income",
+                    "other_deductions"} & set(shown), "GET /settings shows tax profile data"  # fmt: skip
+        got = self.call("GET", "/settings/personal-tax", boss).json()
+        assert got["stored"] is (self.personal_tax is not None)
+        if self.personal_tax:
+            assert got["assessment"] == self.personal_tax["assessment"]
+            assert got["church_tax_percent"] == self.personal_tax["church_tax_percent"]
 
     # ------------------------------------------------------------------ rules: users
     @rule(

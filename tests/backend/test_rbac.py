@@ -175,6 +175,8 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     # the team timeline: the matrix only decides access; the setting decides the level (service, 403 at `off`)
     ("GET", "/api/team/timeline"): ("team_timeline", "read", False),
     ("PUT", "/api/settings"): ("settings", "write", False),
+    ("GET", "/api/settings/personal-tax"): ("settings", "write", True),
+    ("PUT", "/api/settings/personal-tax"): ("settings", "write", True),
     # numbering and import management is boss-only: settings write at full scope
     ("GET", "/api/numbering/preview"): ("settings", "write", True),
     ("GET", "/api/numbering/status"): ("settings", "write", True),
@@ -347,6 +349,8 @@ def test_every_route_is_denied_exactly_where_the_matrix_says(app, clients):
 # Hand-written: the routes an API token can never use (credentials, two-factor, user administration, token management,
 # settings writes, numbering/import/calendar writes). Everything else under /api/auth is either public or `me`.
 SESSION_ONLY = {
+    ("GET", "/api/settings/personal-tax"),
+    ("PUT", "/api/settings/personal-tax"),
     ("POST", "/api/auth/change-password"),
     ("GET", "/api/auth/totp/status"),
     ("POST", "/api/auth/totp/setup"),
