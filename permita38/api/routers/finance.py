@@ -4,7 +4,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Query
 
 from permita38.api.deps import Needs, ServicesDep
-from permita38.core import calc
+from permita38.core import calc, rights
 from permita38.core.validation import ID_PATTERN
 
 router = APIRouter(tags=["finance"])
@@ -13,9 +13,13 @@ routers = [router]
 
 @router.get("/finance", summary="revenue, expenses, profit, VAT and tax estimates for a year")
 def finance(
-    _: Annotated[dict, Needs("finance")], services: ServicesDep, year: int | None = Query(None, ge=2000, le=2100)
+    user: Annotated[dict, Needs("finance")], services: ServicesDep, year: int | None = Query(None, ge=2000, le=2100)
 ) -> dict[str, Any]:
-    return calc.finance(services.store, year or date.today().year)
+    result = calc.finance(services.store, year or date.today().year)
+    # only the boss in a session sees the private breakdown (church tax, children, insurance, employment)
+    if rights.is_token(user) or rights.normalize_role(user.get("role")) != rights.BOSS:
+        return calc.redact_tax(result)
+    return result
 
 
 @router.get("/project-report", summary="hours, revenue, costs and margin per project")

@@ -82,16 +82,14 @@ def _soli(base: Decimal, r: TaxRules, joint: bool) -> Decimal:
     return _trunc2(min(base * r.soli_rate / _HUNDRED, (base - free) * r.soli_cap_rate / _HUNDRED))
 
 
-def estimate(profit: Any, year: int, settings: dict, profile: dict | None = None) -> dict:
+def estimate(profit: Decimal, year: int, settings: dict, profile: dict) -> dict:
     """Annual tax and social-insurance estimate for a business profit.
 
     ``profit`` may be negative; ``settings`` supplies ``company_type``, ``state`` and ``hebesatz``; ``profile`` is the
-    effective personal tax profile (``PersonalTaxIn`` shape; None = defaults, until B3 makes it required). Returns Decimals, see the spec for the keys.
+    effective personal tax profile (``PersonalTaxIn`` shape, required). Returns Decimals, see the spec for the keys.
     """
     r = rules_for(year)
-    profit = dec(profit)
     settings = settings or {}
-    profile = profile or {}
     ctype = settings.get("company_type") or "freiberufler"
     joint = _get(profile, "assessment", "single") == "joint"
     warnings: list[str] = [r.warning] if r.warning else []

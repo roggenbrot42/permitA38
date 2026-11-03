@@ -15,6 +15,8 @@ from typing import Any
 from . import tax
 from .holidays import holidays as de_holidays
 from .money import ZERO, dec, line_amount, q2, split_gross, to_float, vat_amount
+from .service.personal_tax import NOT_SAVED_WARNING, PersonalTaxService
+from .tax_rules import rules_for
 from .values import d, fnum  # noqa: F401  (re-exported: callers use calc.d and calc.fnum)
 
 log = logging.getLogger(__name__)
@@ -302,9 +304,38 @@ def trip_amounts(trip: dict) -> list[dict[str, Any]]:
     return out
 
 
+def _pos(x: Decimal) -> Decimal:
+    return x if x > 0 else ZERO
+
+
+def _floats(x: Any) -> Any:
+    """Decimals inside a result become cents-exact floats (the response boundary)."""
+    if isinstance(x, Decimal):
+        return to_float(x)
+    if isinstance(x, dict):
+        return {k: _floats(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [_floats(v) for v in x]
+    return x
+
+
+def redact_tax(result: dict) -> dict:
+    """The /finance result for a caller who may see business figures only (accountant, any API token)."""
+    out = dict(result)
+    for k in ("tax_actual", "tax_projected"):
+        t = result.get(k) or {}
+        out[k] = {x: t.get(x) for x in ("total", "rate", "gewst", "kst")} | {"redacted": True}
+    if result.get("tax_owed") is not None:
+        t = result["tax_owed"]
+        out["tax_owed"] = {x: t.get(x) for x in ("as_of", "gewst", "kst")} | {"redacted": True}
+    r = result.get("reserve") or {}
+    out["reserve"] = {x: r.get(x) for x in ("monthly", "months_left")} | {"redacted": True}
+    return out
+
+
 def finance(store, year, today=None):
     today = today or date.today()
-    s = store.settings()
+    s = raw = store.settings()
     klein = bool(s.get("kleinunternehmer"))
     accrual = s.get("accounting", "eur") == "accrual"
     months: list[dict[str, Any]] = [dict(month=m, **{k: ZERO for k in _MONEY_KEYS}) for m in range(1, 13)]
@@ -360,40 +391,88 @@ def finance(store, year, today=None):
 
     keys = (*_MONEY_KEYS, "profit", "vat_due")
     tot = {k: sum((m[k] for m in months), ZERO) for k in keys}
-    profit_f = float(tot["profit"])
-    # annualise the current year for the set-aside rate
+    profit_ytd = tot["profit"]
+    profile = PersonalTaxService(store).effective()
     if year == today.year:
-        frac = max((today - date(year, 1, 1)).days + 1, 30) / 365.0
-        projected = max(profit_f / min(frac, 1.0), 0)
+        days = (today - date(year, 1, 1)).days + 1
+        projected = _pos(q2(profit_ytd * 365 / min(max(days, 30), 365)))
     else:
-        projected = max(profit_f, 0)
-    proj_tax = tax.estimate(projected, year, s)
-    actual_tax = tax.estimate(profit_f, year, s)
-    rate = dec(proj_tax["rate"])
-    social_m = dec(s.get("social_monthly")) if s.get("company_type") != "gmbh" else ZERO
+        projected = _pos(profit_ytd)
+    proj = tax.estimate(projected, year, s, profile)
+    actual = tax.estimate(profit_ytd, year, s, profile)
+
+    # currently owed (no projection) and the monthly reserve, see docs/specs/tax-burden-and-settings.md
+    tax_owed: dict[str, Any] | None = None
+    owed_now = ZERO
+    if year <= today.year:
+        owed = actual["tax_due"] - actual["withheld"]
+        owed_now = _pos(owed)
+        tax_owed = dict(
+            as_of=today.isoformat() if year == today.year else f"{year}-12-31",
+            profit_ytd=profit_ytd,
+            est=actual["est"],
+            soli=actual["soli"],
+            church=actual["church"],
+            gewst=actual["gewst"],
+            kst=actual["kst"],
+            kst_soli=actual["kst_soli"],
+            tax_due=actual["tax_due"],
+            withheld=actual["withheld"],
+            owed=owed,
+        )
+    due_year = _pos(proj["tax_due"] - proj["withheld"])
+    if year < today.year:
+        months_left, remaining, monthly = 0, ZERO, ZERO
+    elif year == today.year:
+        months_left = 13 - today.month
+        remaining = _pos(due_year - owed_now)
+        monthly = q2(remaining / months_left)
+    else:
+        months_left, remaining = 12, due_year
+        monthly = q2(remaining / 12)
+    reserve = dict(
+        due_year=due_year,
+        withheld=proj["withheld"],
+        owed_now=owed_now,
+        remaining=remaining,
+        months_left=months_left,
+        monthly=monthly,
+        balance=proj["balance"],
+    )
     # social insurance paid so far (full year for past years, none for future ones)
     social_months = 12 if year < today.year else today.month if year == today.year else 0
+    social_m = q2(proj["social"] / 12)
+    first_reserve_month = 1 if year > today.year else today.month if year == today.year else 13
     for m in months:
-        set_aside = q2(max(m["profit"], ZERO) * rate)
-        m["tax_set_aside"] = to_float(set_aside)
+        aside = monthly if m["month"] >= first_reserve_month else ZERO
+        m["tax_set_aside"] = to_float(aside)
         m["social"] = to_float(social_m)
         m["vat_set_aside"] = to_float(m["vat_due"])
-        m["take_home"] = to_float(m["profit"] - set_aside - social_m)
+        m["take_home"] = to_float(m["profit"] - aside - social_m)
         for k in keys:
             m[k] = to_float(m[k])
     warnings = []
     if klein and tot["revenue"] > Decimal(str(tax.KLEIN_LIMIT_PREV)):
         warnings.append("Kleinunternehmer: revenue exceeds 25,000 EUR (prior-year limit). Check §19 UStG.")
+    if raw.get("personal_tax") is None:
+        warnings.append(NOT_SAVED_WARNING)
+    if rules_for(year).to_verify:
+        warnings.append(f"Some rates for {year} are not yet confirmed.")
+    for w in (*actual["warnings"], *proj["warnings"]):
+        if w not in warnings:
+            warnings.append(w)
     return dict(
         year=year,
         months=months,
         totals={k: to_float(v) for k, v in tot.items()},
-        tax_actual=actual_tax,
-        tax_projected=proj_tax,
-        projected_profit=r2(projected),
-        effective_rate=rnd(proj_tax["rate"], 4),
+        tax_actual=_floats(actual),
+        tax_projected=_floats(proj),
+        tax_owed=_floats(tax_owed),
+        reserve=_floats(reserve),
+        projected_profit=to_float(projected),
+        effective_rate=rnd(proj["rate"], 4),
         social_year=to_float(social_m * social_months),
-        take_home=to_float(tot["profit"] - dec(actual_tax["total"]) - social_m * social_months),
+        take_home=to_float(profit_ytd - actual["tax_due"] - social_m * social_months),
         categories={k: to_float(v) for k, v in sorted(cats.items(), key=lambda kv: -kv[1])},
         open_receivables=to_float(open_receivables),
         warnings=warnings,
