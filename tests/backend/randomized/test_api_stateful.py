@@ -88,6 +88,7 @@ class Session:
     token: str
     user_id: str | None
     iat: int
+    ver: int = 0  # the user's `pw_changed` when the token was issued (the API's `pwv` claim)
 
 
 def settle_default_date(exp: dict, act: dict, days: set[str]) -> None:
@@ -344,10 +345,12 @@ class ApiMachine(RuleBasedStateMachine):
         return r
 
     def valid(self, s: Session | None) -> bool:
+        # API rule (auth.user_from_token): the token's `pwv` must EQUAL the user's `pw_changed`, so every token issued
+        # before a password change dies, even within the same second.
         if s is None or s.user_id is None:
             return False
         u = self.m["users"].get(s.user_id)
-        return bool(u and u["active"] and s.iat + TTL >= self.clock.now and s.iat >= u["pw_changed"])
+        return bool(u and u["active"] and s.iat + TTL >= self.clock.now and s.ver == u["pw_changed"])
 
     def role_of(self, s: Session) -> str:
         return self.m["users"][s.user_id]["role"]
@@ -363,7 +366,12 @@ class ApiMachine(RuleBasedStateMachine):
     def mint(self, user_id: str) -> Session:
         """A fresh valid session for invariant checks, independent of the login flow."""
         svc = self.app.state.services
-        return Session(svc.auth.create_token(svc.store.get("users", user_id)), user_id, self.now)
+        return Session(
+            svc.auth.create_token(svc.store.get("users", user_id)),
+            user_id,
+            self.now,
+            self.m["users"][user_id]["pw_changed"],
+        )
 
     def do_login(self, username, password) -> Session | None:
         r = self.call("POST", "/auth/login", json={"username": username, "password": password})
@@ -380,7 +388,7 @@ class ApiMachine(RuleBasedStateMachine):
             body = r.json()
             assert body["user"]["username"] == key and body["user"]["role"] == user["role"]
             assert body["user"]["has_password"] is True
-            s = Session(body["token"], user["id"], self.now)
+            s = Session(body["token"], user["id"], self.now, user["pw_changed"])
             self.sessions.append(s)
             me = self.call("GET", "/auth/me", s)
             assert me.status_code == 200 and me.json()["id"] == user["id"]
@@ -615,8 +623,9 @@ class ApiMachine(RuleBasedStateMachine):
         else:
             assert r.status_code == 200, r.text
             u = self.m["users"][s.user_id]
-            u["password"], u["pw_changed"] = new, self.now
-            self.sessions.append(Session(r.json()["token"], s.user_id, self.now))
+            # API rule (auth.next_session_version): strictly greater than the old version
+            u["password"], u["pw_changed"] = new, max(self.now, u["pw_changed"] + 1)
+            self.sessions.append(Session(r.json()["token"], s.user_id, self.now, u["pw_changed"]))
 
     @rule(data=st.data())
     def anonymous_and_forged_probes(self, data):
@@ -1279,7 +1288,7 @@ class ApiMachine(RuleBasedStateMachine):
             username=norm, name="Renamed", role=role, active=active, weekly_hours=hours, workdays=[0, 1, 2, 3, 4]
         )
         if password:
-            old["password"], old["pw_changed"] = password, self.now
+            old["password"], old["pw_changed"] = password, max(self.now, old["pw_changed"] + 1)
         got = r.json()
         assert got["username"] == norm and got["role"] == role and got["active"] == active and got["has_password"]
         self.dirty |= {"users"}
