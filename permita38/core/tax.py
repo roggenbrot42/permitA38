@@ -3,9 +3,8 @@
 These are ESTIMATES for planning how much to set aside, not tax advice. All money is computed with exact
 :class:`~decimal.Decimal` arithmetic (``core/money.py``); the rule tables live in ``core/tax_rules/<year>.json``.
 
-Implemented here: employment wage, employee and self-paid contributions, Vorsorgeaufwendungen, the §32a tariff, Soli
-and church tax (algorithm steps 1-7, 10, 12). Children (step 8), Gewerbesteuer / §35 (step 9) and the GmbH (step 11)
-follow in the next work package: ``kg_added`` is 0, ``Z = T(zvE)`` and ``gewst``, ``kst`` and ``kst_soli`` are 0.
+Implements algorithm steps 1-12: employment, contributions, Vorsorgeaufwendungen, tariff, children (Guenstigerpruefung),
+Gewerbesteuer with the §35 credit, the GmbH, Soli and church tax.
 """
 
 from decimal import ROUND_DOWN, ROUND_FLOOR, Decimal
@@ -107,7 +106,7 @@ def estimate(profit: Any, year: int, settings: dict, profile: dict | None = None
     other_ins = dec(_get(profile, "other_insurance_year", 0))
     church_pct = dec(_get(profile, "church_tax_percent", 0))
 
-    biz = ZERO if ctype == "gmbh" else profit  # the GmbH profit is taxed in the company (next package)
+    biz = ZERO if ctype == "gmbh" else profit  # the GmbH profit is taxed in the company
 
     # 1. Employment wage
     tax_wage = sv_wage = emp_income = ZERO
@@ -206,21 +205,51 @@ def estimate(profit: Any, year: int, settings: dict, profile: dict | None = None
     sa = max(other_ded, r.sa_pauschbetrag * (2 if joint else 1))
     zve = _pos(sum_income - d_a - d_bo - sa)
 
-    # 7. Tariff (children: next package, so no Freibetrag and Z = T(zvE))
-    est_tarif = Decimal(est(zve, year, joint))
+    # 7./8. Tariff and children (Guenstigerpruefung, §31 EStG)
+    n_kids = int(dec(_get(children, "count", 0)))
+    f = 2 if (joint or bool(_get(children, "full_allowance", False))) else 1
+    kfb = (r.kinderfreibetrag + r.bea_freibetrag) * f
+    kg = _TWELVE * r.kindergeld_month * f / 2
+    z = zve
     kg_added = ZERO
-    z_base = est_tarif
+    kfb_used = 0
+    for _ in range(n_kids):
+        reduced = _pos(z - kfb)
+        if est(z, year, joint) - est(reduced, year, joint) > kg:
+            z = reduced
+            kg_added += kg
+            kfb_used += 1
+    est_tarif = Decimal(est(z, year, joint))
+    z_base = Decimal(est(_pos(zve - n_kids * kfb), year, joint))
+
+    # 9. Gewerbesteuer and §35 (gewerbe), 11. GmbH
+    hebesatz = dec(settings.get("hebesatz", 400))
+    messzahl = r.gew_messzahl / _HUNDRED
+    gewst = kst = kst_soli = credit = credit_z = ZERO
+    if ctype == "gewerbe":
+        ertrag = _pos(_floor0(profit / _HUNDRED) * _HUNDRED - r.gew_freibetrag)
+        mess = ertrag * messzahl
+        gewst = q2(mess * hebesatz / _HUNDRED)
+        positives = _pos(biz) + _pos(emp_income) + _pos(other_income)
+        share = _pos(biz) / positives if positives > 0 else ZERO
+        limit = min(r.gew_credit_factor * mess, gewst)
+        credit = min(limit, q2(est_tarif * share))
+        credit_z = min(limit, q2(z_base * share))
+    elif ctype == "gmbh":
+        kst = _trunc2(_floor0(_pos(profit)) * r.kst_rate / _HUNDRED)
+        kst_soli = _trunc2(kst * r.soli_rate / _HUNDRED)
+        gewst = q2(_floor0(_pos(profit) / _HUNDRED) * _HUNDRED * messzahl * hebesatz / _HUNDRED)
 
     # 10. Taxes
-    income_est = est_tarif + kg_added
-    soli_base = _pos(z_base)
+    income_est = est_tarif - credit + kg_added
+    soli_base = _pos(z_base - credit_z)
     soli = _soli(soli_base, r, joint)
     church = _trunc2(z_base * church_pct / _HUNDRED)
     income_taxes = income_est + soli + church
 
     # 12. Result
     social = kv + pv + self_rv + alv_self + ee_kv + ee_pv + ee_rv + ee_alv - subsidy
-    tax_due = income_taxes
+    tax_due = income_taxes + gewst + kst + kst_soli
     total = tax_due + social
     return dict(
         profit=profit,
@@ -228,19 +257,19 @@ def estimate(profit: Any, year: int, settings: dict, profile: dict | None = None
         est=income_est,
         soli=soli,
         church=church,
-        gewst=ZERO,
-        kst=ZERO,
-        gewst_credit=ZERO,
+        gewst=gewst,
+        kst=kst,
+        gewst_credit=credit,
         income_tax_total=income_taxes,
         total=total,
         rate=tax_due / profit if profit > 0 else ZERO,
         zve=zve,
-        kst_soli=ZERO,
+        kst_soli=kst_soli,
         tax_due=tax_due,
         withheld=withheld if withheld is not None else ZERO,
         est_tarif=est_tarif,
         kg_added=kg_added,
-        kfb_used=0,
+        kfb_used=kfb_used,
         zuschlag_base=z_base,
         soli_base=soli_base,
         vorsorge=dict(A=a, H=h, dA=d_a, B=b, O=o, C=cap, dBO=d_bo),

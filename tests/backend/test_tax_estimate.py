@@ -1,4 +1,4 @@
-"""Tax engine oracle cases O1, O5, O7 of docs/specs/tax-burden-and-settings.md (2026 table), plus properties."""
+"""Tax engine oracle cases O1-O7 of docs/specs/tax-burden-and-settings.md (2026 table), plus properties."""
 
 from decimal import Decimal as D
 
@@ -11,8 +11,17 @@ SET = {"company_type": "freiberufler", "state": "BY", "hebesatz": 400}
 KG_FALSE = {"health": {"mode": "gkv", "krankengeld": False}}
 
 
-def est(profit, profile, year=2026):
-    return tax.estimate(D(profit), year, SET, profile)
+def est(profit, profile, year=2026, **sett):
+    return tax.estimate(D(profit), year, {**SET, **sett}, profile)
+
+
+O2_PROFILE = {
+    "assessment": "joint",
+    "church_tax_percent": 9,
+    "children": {"count": 2, "pv_children_under_25": 2},
+    "health": {"mode": "pkv", "pkv_monthly": 600, "pkv_basis_monthly": 480, "pkv_care_monthly": 60},
+    "pension": {"mode": "fixed", "fixed_monthly": 500},
+}
 
 
 def test_o1_freiberufler_gkv_krankengeld():
@@ -107,3 +116,110 @@ def test_vorsorge_and_soli_invariants(p, profile, income):
     assert v["dBO"] >= v["B"]
     assert v["dA"] <= v["H"]
     assert r["soli"] <= r["soli_base"] * D("0.055")
+
+
+def _o2_common(r):
+    assert r["social"] == D(13920)
+    v = r["vorsorge"]
+    assert (v["A"], v["H"], v["dA"]) == (D(6000), D(61652), D(6000))
+    assert (v["B"], v["O"], v["C"], v["dBO"]) == (D(6480), D(1440), D(2800), D(6480))
+
+
+def test_o2_kindergeld_wins():
+    r = est(90000, O2_PROFILE)
+    _o2_common(r)
+    assert r["zve"] == D(77448)
+    assert tax.est(77448, 2026, True) - tax.est(77448 - 9756, 2026, True) == 2962
+    assert r["kfb_used"] == 0 and r["kg_added"] == 0
+    assert r["est_tarif"] == 13616 and r["est"] == D(13616)
+    assert r["zuschlag_base"] == 7856 and r["soli"] == 0
+    assert r["church"] == D("707.04")
+    assert r["income_tax_total"] == D("14323.04")
+    assert r["total"] == D("28243.04")
+
+
+def test_o3_freibetraege_win_soli_milderungszone():
+    r = est(200000, O2_PROFILE)
+    _o2_common(r)
+    assert r["zve"] == D(187448)
+    assert r["kfb_used"] == 2 and r["kg_added"] == D(6216)
+    assert r["est_tarif"] == 48260 and r["est"] == D(54476)
+    assert r["zuschlag_base"] == 48260 and r["soli_base"] == 48260
+    assert r["soli"] == D("899.64")
+    assert r["church"] == D("4343.40")
+    assert r["income_tax_total"] == D("59719.04")
+    assert r["total"] == D("73639.04")
+
+
+O4_PROFILE = {
+    "church_tax_percent": 8,
+    "children": {"count": 1, "pv_parent": True, "pv_children_under_25": 1},
+    "health": {"mode": "gkv", "krankengeld": False},
+    "pension": {"mode": "statutory_income"},
+    "unemployment": {"mode": "voluntary"},
+}
+
+
+def test_o4_gewerbe_with_child_and_section_35():
+    r = est(80000, O4_PROFILE, company_type="gewerbe", hebesatz=450)
+    i = r["insurance"]
+    assert i["kv"] == D("11787.72") and i["pv"] == D("2511.00")
+    assert i["rv"] == D("14880.00") and i["alv"] == D("1233.96")
+    assert r["social"] == D("30412.68")
+    v = r["vorsorge"]
+    assert v["A"] == D(14880) and v["dA"] == D(14880)
+    assert v["B"] == D("14298.72") and v["O"] == D("1233.96") and v["dBO"] == D("14298.72")
+    assert r["zve"] == D("50785.28")
+    assert tax.est(50785.28, 2026) - tax.est(50785.28 - 4878, 2026) == 1686
+    assert r["kfb_used"] == 1 and r["kg_added"] == D(1554)
+    assert r["est_tarif"] == 9139
+    assert r["gewst"] == D("8741.25") and r["gewst_credit"] == D("7770.00")
+    assert r["est"] == D("2923.00")
+    assert r["zuschlag_base"] == 9139 and r["soli_base"] == 1369 and r["soli"] == 0
+    assert r["church"] == D("731.12")
+    assert r["income_tax_total"] == D("3654.12")
+    assert r["tax_due"] == D("12395.37")
+    assert r["total"] == D("42808.05")
+
+
+def test_o6_gmbh():
+    profile = {
+        "employment": {"gross_year": 60000, "sv_liable": False},
+        "health": {"mode": "pkv", "pkv_monthly": 700, "pkv_basis_monthly": 560, "pkv_care_monthly": 70},
+        "pension": {"mode": "fixed", "fixed_monthly": 400},
+    }
+    r = est(100000, profile, company_type="gmbh", hebesatz=400)
+    assert r["kst"] == D("15000.00") and r["kst_soli"] == D("825.00") and r["gewst"] == D("14000.00")
+    assert r["gewst_credit"] == 0
+    assert r["emp_income"] == D(58770) and r["social"] == D(14040)
+    v = r["vorsorge"]
+    assert (v["A"], v["dA"], v["B"], v["O"], v["dBO"]) == (D(4800), D(4800), D(7560), D(1680), D(7560))
+    assert r["zve"] == D(46374)
+    assert r["est"] == D(9297) and r["income_tax_total"] == D("9297.00")
+    assert r["tax_due"] == D("39122.00")
+    assert r["total"] == D("53162.00")
+
+
+@settings(max_examples=60, deadline=None)
+@given(p=st.integers(0, 400_000), n=st.integers(0, 4), joint=st.booleans(), full=st.booleans())
+def test_guenstigerpruefung_never_worse_than_kindergeld(p, n, joint, full):
+    profile = {
+        "assessment": "joint" if joint else "single",
+        "children": {"count": n, "full_allowance": full},
+    }
+    r = est(p, profile)
+    # Kindergeld only: tariff on zvE, nothing added
+    assert r["est"] <= D(tax.est(r["zve"], 2026, joint))
+    assert r["kfb_used"] <= n
+
+
+@settings(max_examples=60, deadline=None)
+@given(p=st.integers(-50_000, 300_000), other=st.integers(0, 50_000), hs=st.integers(0, 600))
+def test_credit_zero_without_positive_income_and_bounded(p, other, hs):
+    r = est(p, {"other_income_year": other}, company_type="gewerbe", hebesatz=hs)
+    assert r["gewst_credit"] <= r["gewst"]
+    if p <= 0:  # business share 0: no section 35 credit
+        assert r["gewst_credit"] == 0
+    r0 = est(p, {}, company_type="gewerbe", hebesatz=hs)
+    if p <= 0:
+        assert r0["gewst"] == 0 and r0["gewst_credit"] == 0
