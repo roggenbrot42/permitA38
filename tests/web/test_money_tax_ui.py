@@ -113,7 +113,17 @@ def test_cards_show_the_response_values(browser, srv):
     # extrapolation note
     assert (pg.locator("#not-extrapolated").count() == 1) == (not f["extrapolated"])
     if not f["extrapolated"]:
-        assert "Not yet extrapolated" in pg.locator("#not-extrapolated").text_content()
+        banner = norm(pg.locator("#not-extrapolated").text_content())
+        assert "Not yet extrapolated" in banner
+        assert (
+            "The full-year estimate starts after 60 days of the year; until then the figures cover only the profit "
+            "booked so far." in banner
+        )
+    # the current month's cumulative set-aside is labelled (footnote + tooltip); the data has this month's profit
+    assert norm(pg.locator("#month-footnote").text_content()) == (
+        "Current month includes the catch-up of tax on the profit so far."
+    )
+    assert pg.locator("#main table td[title^='Current month includes']").count() == 1
     # month columns: set-aside and take-home as returned, "–" for a month that has not begun
     rows = pg.locator("#main table:has(th:text-is('Take-home')) tr").all()[1:]
     assert len(rows) == 12
