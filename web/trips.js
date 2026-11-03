@@ -87,8 +87,8 @@ PAGES.trips = async (id, step) => {
 };
 function tripListHTML() {
   const list = S.d.trips || [];
-  return `<div class="head"><div><h1>Business trips</h1><div class="muted">Allowance, mileage and the bills of each trip, with a checklist of what to collect.</div></div>${can('trips', 'write') ? '<button class="primary" data-a="newTrip">+ New trip</button>' : ''}</div>
-  <div class="card">${list.length ? `<table class="trip-list"><caption class="sr-only">Business trips</caption><tr><th scope="col">Period</th><th scope="col">Destination</th><th scope="col">Purpose</th><th scope="col" class="num">Allowance</th><th scope="col" class="num">Mileage</th><th scope="col" class="num">Bills</th><th scope="col">Status</th></tr>${list.map(tripRowHTML).join('')}</table>` : '<div class="empty">No business trips yet.</div>'}</div>`;
+  return `<div class="head"><div><h1>Business trips</h1><div class="muted">Budget and bills of each trip, with a checklist of what to collect.</div></div>${can('trips', 'write') ? '<button class="primary" data-a="newTrip">+ New trip</button>' : ''}</div>
+  <div class="card">${list.length ? `<table class="trip-list"><caption class="sr-only">Business trips</caption><tr><th scope="col">Period</th><th scope="col">Destination</th><th scope="col">Purpose</th><th scope="col" class="num">Budget (actual / estimate)</th><th scope="col" class="num">Bills</th><th scope="col">Status</th></tr>${list.map(tripRowHTML).join('')}</table>` : '<div class="empty">No business trips yet.</div>'}</div>`;
 }
 function tripRowHTML(t) {
   const period = `${fmtDate(t.start.slice(0, 10))} – ${fmtDate(t.end.slice(0, 10))}`;
@@ -96,8 +96,7 @@ function tripRowHTML(t) {
   return `<tr><td class="nowrap"><a href="#/trips/${esc(t.id)}">${esc(period)}</a></td>
     <td>${esc(destinationOf(t))}</td>
     <td>${esc(t.purpose || '')}${t.title ? `<div class="small muted">${esc(t.title)}</div>` : ''}</td>
-    <td class="num">${eur(t.allowance_total)}</td>
-    <td class="num">${num(t.mileage_km, 1)} km<div class="small muted">${eur(t.mileage_total)}</div></td>
+    <td class="num nowrap">${eurC(tripCents(t.items_actual_total ?? 0))} / ${eurC(tripCents(t.items_expected_total ?? 0))}</td>
     <td class="num">${t.bills?.count ?? 0}<div class="small muted">${eur(t.bills?.net)}</div></td>
     <td><span class="pill ${final ? 'good' : ''}">${final ? 'Final' : 'Draft'}</span></td></tr>`;
 }
@@ -435,7 +434,7 @@ function expensesHTML(t, ro) {
   const canBill = !ro && can('expenses', 'write');
   const rows = [];
   for (const i of items) rows.push({ date: i.date, html: itemRowHTML(i, bills.filter(b => b.trip_item_id === i.id), ro, canBill) });
-  (t.mileage || []).forEach((m, k) => rows.push({ date: m.date, html: carRowHTML(m, k) }));
+  (t.mileage || []).forEach((m, k) => rows.push({ date: m.date, html: carRowHTML(m, k, ro) }));
   for (const b of bills.filter(b => !b.trip_item_id || !planned.has(b.trip_item_id))) rows.push({ date: b.date, html: unplannedRowHTML(b, t, canBill) });
   rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   const addSel = ro ? '' : `<div class="trip-add"><label for="t_add_item">Add item</label>
@@ -446,9 +445,7 @@ function expensesHTML(t, ro) {
     <div class="table-wrap"><table class="lines trip-items"><caption class="sr-only">Planned costs of the trip, with the bills booked against them</caption>
       <thead><tr><th scope="col">Date</th><th scope="col">Category</th><th scope="col">Description</th><th scope="col" class="num">Expected</th><th scope="col" class="num">Actual</th><th scope="col">Receipt</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>${rows.length ? rows.map(r => r.html).join('') : '<tr><td colspan="7" class="muted">No planned costs or bills yet.</td></tr>'}</tbody></table></div>
-    <div class="trip-totals">${tripTotalsHTML(t)}</div>
-    <h2>Mileage with a private car</h2>
-    ${mileageTableHTML(t, ro)}`;
+    <div class="trip-totals">${tripTotalsHTML(t)}</div>`;
 }
 /** The footer: the server's totals (planning figures, exact cents here). The expected total has no mileage when car rows are listed. */
 function tripTotalsHTML(t) {
@@ -479,27 +476,18 @@ function itemRowHTML(i, bills, ro, canBill) {
   return `<tr data-item="${esc(i.id)}"><td class="nowrap">${esc(i.date_to ? `${fmtDate(i.date)} – ${fmtDate(i.date_to)}` : fmtDate(i.date))}</td>
     <td>${esc(label)}</td><td>${esc(desc)}${outside}</td><td class="num">${exp}</td><td class="num">${esc(actual)}</td><td>${receiptHTML(bills)}</td><td>${acts}</td></tr>`;
 }
-function carRowHTML(m, k) {
+function carRowHTML(m, k, ro) {
   const cost = TRIP_PAGE.rate != null ? eur(kmCost(m.km, TRIP_PAGE.rate)) : '—';
   return `<tr data-mileage="${k}"><td class="nowrap">${esc(fmtDate(m.date))}</td><td>Car (private)</td>
     <td>${esc(`${m.from || ''} → ${m.to || ''}, ${num(m.km, 1)} km`)}${m.purpose ? ` · ${esc(m.purpose)}` : ''}</td>
-    <td class="num">${TRIP_PAGE.rate != null ? `<span title="${APPROX_TIP}">approx. ${esc(cost)}</span>` : esc(cost)}</td><td class="num"></td><td><span class="muted">—</span></td><td></td></tr>`;
+    <td class="num">${TRIP_PAGE.rate != null ? `<span title="${APPROX_TIP}">approx. ${esc(cost)}</span>` : esc(cost)}</td><td class="num"></td><td><span class="muted">—</span></td>
+    <td>${ro ? '' : `<button type="button" class="ghost sm" data-a="tripMileageEdit" data-k="${k}" aria-label="Edit mileage ${k + 1}">Edit</button>`}</td></tr>`;
 }
 function unplannedRowHTML(b, t, canBill) {
   const acts = canBill ? `<button type="button" class="ghost sm" data-a="editExpense" data-id="${esc(b.id)}" data-trip="${esc(t.id)}" aria-label="Edit bill ${esc(b.vendor || '')}">Edit bill</button>` : '';
   return `<tr data-bill="${esc(b.id)}"><td class="nowrap">${esc(fmtDate(b.date))}</td><td>${esc(b.category || '')}</td>
     <td>${esc(b.vendor || '')}<div class="small muted">not planned</div></td><td class="num"><span class="muted">—</span></td>
     <td class="num">${eurC(billCents(b))}</td><td>${receiptHTML([b])}</td><td>${acts}</td></tr>`;
-}
-function mileageTableHTML(t, ro) {
-  const list = t.mileage || [];
-  const rows = list.map((m, k) => `<tr data-mileage="${k}"><td class="nowrap">${esc(fmtDate(m.date))}</td><td>${esc(m.from || '')}</td><td>${esc(m.to || '')}</td>
-      <td class="num">${num(m.km, 1)}</td><td class="num">${TRIP_PAGE.rate != null ? `<span title="${APPROX_TIP}">approx. ${esc(eur(kmCost(m.km, TRIP_PAGE.rate)))}</span>` : '—'}</td><td>${esc(m.purpose || '')}</td>
-      <td>${ro ? '' : `<button type="button" class="ghost sm" data-a="tripMileageEdit" data-k="${k}" aria-label="Edit mileage ${k + 1}">Edit</button>`}</td></tr>`).join('');
-  return `<div class="table-wrap"><table class="lines trip-table"><caption class="sr-only">Mileage with a private car</caption>
-      <thead><tr><th scope="col">Date</th><th scope="col">From</th><th scope="col">To</th><th scope="col" class="num">km</th><th scope="col" class="num">Cost</th><th scope="col">Purpose</th><th scope="col"><span class="sr-only">Edit</span></th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="7" class="muted">No mileage yet.</td></tr>'}</tbody></table></div>
-    ${ro ? '' : '<p><button type="button" class="ghost sm" data-a="tripMileageAdd">+ Add mileage</button></p>'}`;
 }
 A.tripAddItem = el => {
   const type = el.value;
@@ -584,7 +572,6 @@ function tripItemFrom(type, o, item) {
   }
   return it;
 }
-A.tripMileageAdd = () => tripMileageDialog(null);
 A.tripMileageEdit = el => tripMileageDialog(+el.dataset.k);
 /** The private car: a mileage row (existing fields and rules), not an item. */
 function tripMileageDialog(k) {

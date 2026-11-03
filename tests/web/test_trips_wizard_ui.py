@@ -717,9 +717,8 @@ def test_a_car_mileage_row_is_listed_and_saved_with_the_trip(browser):
     pg.fill("#f_purpose", "Site visit")
     pg.click("#m-save")
     expect(pg.locator("#t_step")).to_contain_text("42,5 km")
-    expect(pg.locator("#t_step tr[data-mileage]", has_text="Site visit")).to_have_count(
-        2
-    )  # items table and mileage table
+    expect(pg.locator("#t_step tr[data-mileage]", has_text="Site visit")).to_have_count(1)  # one table, no mileage table
+    expect(pg.locator("#t_step")).not_to_contain_text("Mileage with a private car")
     assert api.trip["mileage"][-1]["km"] == 42.5
     assert problems == []
     ctx.close()
