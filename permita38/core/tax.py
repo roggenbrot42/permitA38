@@ -122,7 +122,7 @@ def estimate(profit: Any, year: int, settings: dict, profile: dict | None = None
         sv_wage = gross + vwl + bav_er - sv_free
         wk = max(dec(emp.get("werbungskosten_year")), r.an_pauschbetrag)
         emp_income = _pos(tax_wage - wk)
-        sv_liable = bool(emp.get("sv_liable", True))
+        sv_liable = bool(_get(emp, "sv_liable", True))
         if emp.get("withheld_year") is not None:
             withheld = dec(emp.get("withheld_year"))
 
@@ -130,7 +130,7 @@ def estimate(profit: Any, year: int, settings: dict, profile: dict | None = None
     mode = _get(health, "mode", "gkv")
     krankengeld = bool(_get(health, "krankengeld", True))
     zusatz = dec(_get(health, "zusatzbeitrag_percent", r.kv_zusatz_average))
-    n_children = int(dec(_get(children, "pv_children_under_25", 0)))
+    n_children = max(0, int(dec(_get(children, "pv_children_under_25", 0))))
     pv_total = r.pv_rate
     if not _get(children, "pv_parent", False):
         pv_total += r.pv_childless_surcharge
@@ -141,7 +141,7 @@ def estimate(profit: Any, year: int, settings: dict, profile: dict | None = None
         kv_m = min(q2(sv_wage / _TWELVE), r.bbg_kv_month)
         rv_m = min(q2(sv_wage / _TWELVE), r.bbg_rv_month)
         employer_pv = r.pv_employer_share_sn if settings.get("state") == "SN" else r.pv_employer_share
-        if mode != "pkv":
+        if mode == "gkv":
             ee_kv = _TWELVE * q2(kv_m * (r.kv_rate_general / 2 + zusatz / 2) / _HUNDRED)
             ee_pv = _TWELVE * q2(kv_m * (pv_total - employer_pv) / _HUNDRED)
         ee_rv = _TWELVE * q2(rv_m * (r.rv_rate / 2) / _HUNDRED)
@@ -206,7 +206,7 @@ def estimate(profit: Any, year: int, settings: dict, profile: dict | None = None
     zve = _pos(sum_income - d_a - d_bo - sa)
 
     # 7./8. Tariff and children (Guenstigerpruefung, §31 EStG)
-    n_kids = int(dec(_get(children, "count", 0)))
+    n_kids = max(0, int(dec(_get(children, "count", 0))))
     f = 2 if (joint or bool(_get(children, "full_allowance", False))) else 1
     kfb = (r.kinderfreibetrag + r.bea_freibetrag) * f
     kg = _TWELVE * r.kindergeld_month * f / 2
@@ -223,7 +223,7 @@ def estimate(profit: Any, year: int, settings: dict, profile: dict | None = None
     z_base = Decimal(est(_pos(zve - n_kids * kfb), year, joint))
 
     # 9. Gewerbesteuer and §35 (gewerbe), 11. GmbH
-    hebesatz = dec(settings.get("hebesatz", 400))
+    hebesatz = dec(_get(settings, "hebesatz", 400), Decimal(400))  # null / "" / invalid: default 400
     messzahl = r.gew_messzahl / _HUNDRED
     gewst = kst = kst_soli = credit = credit_z = ZERO
     if ctype == "gewerbe":
