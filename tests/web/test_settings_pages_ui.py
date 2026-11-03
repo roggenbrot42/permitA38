@@ -68,7 +68,9 @@ def open_app(browser, me, stored=True, page="settings"):
                     "timer": None,
                     "states": {"SN": "Sachsen"},
                     "conflicts": [],
-                    "templates": [{"id": "t1", "name": "Classic", "layout": "classic", "language": "de", "accent": "#123456"}],
+                    "templates": [
+                        {"id": "t1", "name": "Classic", "layout": "classic", "language": "de", "accent": "#123456"}
+                    ],
                     "data_dir": "/demo",
                     "features": {},
                 },

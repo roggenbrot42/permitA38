@@ -9,6 +9,7 @@ pytest.importorskip("playwright.sync_api")
 
 from tests.web.test_impressum_prefill import PASSWORD, Server, chromium  # noqa: E402,F401  (shared harness)
 
+
 def de_eur(n):
     """The page's de-DE currency format (Intl): 3570 -> '3.570,00 €' with a no-break space before the sign."""
     whole, cents = f"{abs(n):.2f}".split(".")
@@ -80,8 +81,12 @@ def test_accountant_sees_business_taxes_only(browser, srv):
     assert de_eur(3570) in text
     boss_tok = httpx.post(srv.base + "/api/auth/login", json={"username": "boss", "password": PASSWORD}).json()["token"]
     boss = httpx.get(srv.base + "/api/finance", headers={"Authorization": "Bearer " + boss_tok}).json()
-    assert "redacted" not in boss and boss["tax_actual"]["gewst"] == 3570.0 and boss["tax_actual"]["withheld"] == 4243.17
-    seeded = [31337, 77123, 4243.17] + [boss["tax_actual"][k] for k in ("zve", "est", "social", "tax_due", "emp_income")]
+    assert (
+        "redacted" not in boss and boss["tax_actual"]["gewst"] == 3570.0 and boss["tax_actual"]["withheld"] == 4243.17
+    )
+    seeded = [31337, 77123, 4243.17] + [
+        boss["tax_actual"][k] for k in ("zve", "est", "social", "tax_due", "emp_income")
+    ]
     for v in seeded:
         assert v > 1000
         for shown in (de_eur(v), f"{v}"):

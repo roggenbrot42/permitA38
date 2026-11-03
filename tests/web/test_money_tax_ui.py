@@ -109,7 +109,14 @@ def test_cards_show_the_response_values(browser, srv):
             assert v in line, (v, line)
         assert (fmt(r["owed_now"]) in line) == (r["owed_now"] > 0)
     else:
-        assert line.startswith("Set aside") or line == "No further reserve needed"
+        if not r["due_year"]:
+            assert line == "No further reserve needed"
+        else:
+            cur = f["months"][date.today().month - 1]
+            assert line.startswith(f"Set aside {fmt(cur['tax_set_aside'])} now"), line
+            assert ("the monthly reserve starts once 60 days of the year have passed" in line) == (
+                not f["extrapolated"]
+            )
     # extrapolation note
     assert (pg.locator("#not-extrapolated").count() == 1) == (not f["extrapolated"])
     if not f["extrapolated"]:
