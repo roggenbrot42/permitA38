@@ -969,7 +969,7 @@ TRIP_MAX_MILEAGE = 100
 TRIP_MAX_LEGS = 60
 TRIP_MAX_ITEMS = 100
 TRIP_LEG_MODES = Literal["train", "flight", "car", "taxi", "bus", "other"]
-TRIP_ITEM_CATEGORIES = Literal["hotel", "train", "flight", "taxi", "other"]
+TRIP_ITEM_CATEGORIES = Literal["hotel", "train", "flight", "taxi", "other", "meals", "parking", "toll", "rental_car", "fuel", "local_transport", "baggage", "seat_booking", "visa", "event_ticket", "phone", "insurance", "tips", "fees", "gift"]
 
 
 class TripPlace(BaseModel):

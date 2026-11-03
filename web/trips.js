@@ -15,9 +15,12 @@ const TRIP_MEAL_TEXT = { breakfast: 'breakfast', lunch: 'lunch', dinner: 'dinner
 const TRIP_CHECK_CATEGORY = { accommodation: 'Accommodation', transportation: 'Transportation', material: 'Material' };
 const TRIP_CC = [['project', 'Charge to the customer or project above'], ['general', 'General: not charged to a customer or project'], ['', 'Not decided yet']];
 const TRIP_MODES = [['', '—'], ['train', 'Train'], ['flight', 'Flight'], ['car', 'Car'], ['taxi', 'Taxi'], ['bus', 'Bus'], ['other', 'Other']];
-const TRIP_ITEM_TYPES = [['hotel', 'Hotel'], ['train', 'Train'], ['flight', 'Flight'], ['car', 'Car (private)'], ['taxi', 'Taxi / other transport'], ['other', 'Other']];
-const TRIP_ITEM_LABEL = { hotel: 'Hotel', train: 'Train', flight: 'Flight', taxi: 'Taxi / other', other: 'Other' };
-const TRIP_ITEM_CATEGORY = { hotel: 'Accommodation', train: 'Transportation', flight: 'Transportation', taxi: 'Transportation', other: 'Other' };
+const TRIP_ITEM_TYPES = [['hotel', 'Hotel'], ['train', 'Train'], ['flight', 'Flight'], ['car', 'Car (private)'], ['taxi', 'Taxi / other transport'], ['other', 'Other'],
+['meals', 'Meals / catering'], ['parking', 'Parking'], ['toll', 'Tolls / vignette'], ['rental_car', 'Rental car'], ['fuel', 'Fuel'], ['local_transport', 'Public transport / local pass'], ['baggage', 'Baggage / luggage fees'], ['seat_booking', 'Seat reservation / booking fees'], ['visa', 'Visa / entry fees'], ['event_ticket', 'Conference / event ticket'], ['phone', 'Phone / internet / roaming'], ['insurance', 'Travel insurance'], ['tips', 'Cloakroom / tips'], ['fees', 'Fees (currency exchange, postage)'], ['gift', 'Gift to a business partner']];
+const TRIP_ITEM_LABEL = { hotel: 'Hotel', train: 'Train', flight: 'Flight', taxi: 'Taxi / other', other: 'Other',
+  meals: 'Meals / catering', parking: 'Parking', toll: 'Tolls / vignette', rental_car: 'Rental car', fuel: 'Fuel', local_transport: 'Public transport / local pass', baggage: 'Baggage / luggage fees', seat_booking: 'Seat reservation / booking fees', visa: 'Visa / entry fees', event_ticket: 'Conference / event ticket', phone: 'Phone / internet / roaming', insurance: 'Travel insurance', tips: 'Cloakroom / tips', fees: 'Fees (currency exchange, postage)', gift: 'Gift to a business partner' };
+const TRIP_ITEM_CATEGORY = { hotel: 'Accommodation', train: 'Transportation', flight: 'Transportation', taxi: 'Transportation', other: 'Other',
+  meals: 'Business meals', parking: 'Transportation', toll: 'Transportation', rental_car: 'Transportation', fuel: 'Transportation', local_transport: 'Transportation', baggage: 'Transportation', seat_booking: 'Transportation', visa: 'Other', event_ticket: 'Training', phone: 'Phone & internet', insurance: 'Insurance', tips: 'Other', fees: 'Fees & bank', gift: 'Gifts' };
 let TRIP_PAGE = null;          // the open trip page: {trip (last stored Trip), step, ro, legs (working itinerary), rate}
 let TRIP_PREVIEW_TIMER = null, TRIP_PREVIEW_SEQ = 0;
 let TRIP_REGION = null, TRIP_COUNTRY_OPTS = null;
@@ -536,7 +539,7 @@ function tripItemDialog(type, item) {
     flight: [...route, { k: 'text', l: 'Carrier or note', row: 2 }],
     taxi: [{ k: 'from', l: 'From', row: 1 }, { k: 'to', l: 'To', row: 1 }, { k: 'date', l: 'Date', t: 'date' }],
     other: [{ k: 'text', l: 'Description' }, { k: 'date', l: 'Date', t: 'date' }],
-  }[type] || [];
+  }[type] || [{ k: 'text', l: type === 'gift' ? 'Recipient and occasion' : 'Description', ...(type === 'gift' ? { h: 'Deductible only up to 50 € net per recipient and year (§ 4 Abs. 5 Nr. 1 EStG); above that none of it is. Note recipient and occasion.' } : {}) }, { k: 'date', l: 'Date', t: 'date' }];
   fields.push({ k: 'expected', l: 'Expected € (planning figure)', t: 'number', h: 'Not part of the statement, the allowance or VAT.' });
   openForm({
     title: `${item ? 'Edit' : 'Add'} ${TRIP_ITEM_LABEL[type] || type}`, fields, vals: v,

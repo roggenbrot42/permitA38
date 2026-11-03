@@ -106,10 +106,31 @@ def test_item_without_expected_is_allowed(boss_client):
     assert "expected" not in trip["items"][0]
 
 
-def test_item_category_is_one_of_the_five_types(boss_client):
+def test_item_category_is_one_of_the_known_types(boss_client):
     assert boss_client.post("/api/trips", json=trip_body(items=[item(category="food")])).status_code == 422
     assert boss_client.post("/api/trips", json=trip_body(items=[item(category="car")])).status_code == 422
-    for category in ("hotel", "train", "flight", "taxi", "other"):
+    for category in (
+        "hotel",
+        "train",
+        "flight",
+        "taxi",
+        "other",
+        "meals",
+        "parking",
+        "toll",
+        "rental_car",
+        "fuel",
+        "local_transport",
+        "baggage",
+        "seat_booking",
+        "visa",
+        "event_ticket",
+        "phone",
+        "insurance",
+        "tips",
+        "fees",
+        "gift",
+    ):
         assert boss_client.post("/api/trips", json=trip_body(items=[item(category=category)])).status_code == 200
 
 
