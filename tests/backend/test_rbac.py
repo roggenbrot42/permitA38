@@ -292,6 +292,13 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("POST", "/api/receipts/{scan_id}/parts"): ("expenses", "write", False),
     ("DELETE", "/api/receipts/{scan_id}"): ("expenses", "write", False),
     ("POST", "/api/receipts/ocr/install"): ("settings", "write", True),
+    # document scan: invoices, offers, attachments and customers (discard: without customers); see the test below
+    ("POST", "/api/document-scans"): ("invoices", "write", False),
+    ("GET", "/api/document-scans"): ("invoices", "read", False),
+    ("GET", "/api/document-scans/{scan_id}"): ("invoices", "read", False),
+    ("GET", "/api/document-scans/{scan_id}/pages/{page}"): ("invoices", "read", False),
+    ("POST", "/api/document-scans/{scan_id}/confirm"): ("invoices", "write", False),
+    ("DELETE", "/api/document-scans/{scan_id}"): ("invoices", "write", False),
 }
 
 
@@ -306,6 +313,13 @@ def test_declared_rights_equal_the_hand_written_table(app):
                 op = "read" if method == "GET" else "write"
                 assert sorted(reqs) == [("attachments", op, False), ("expenses", op, False)], (method, path, reqs)
                 reqs = [("expenses", op, False)]
+            if path.startswith("/api/document-scans"):
+                op = "read" if method == "GET" else "write"
+                areas = ["attachments", "invoices", "offers"]
+                if method != "DELETE":
+                    areas = sorted(areas + ["customers"])
+                assert sorted(reqs) == [(a, op, False) for a in areas], (method, path, reqs)
+                reqs = [("invoices", op, False)]
             assert len(reqs) == 1, (method, path, reqs)
             actual[(method, path)] = reqs[0]
     assert actual == EXPECTED
@@ -620,6 +634,8 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
             'DROP TABLE "receipt_scans"; ALTER TABLE "expenses" DROP COLUMN "paid_on";'
             ' ALTER TABLE "expenses" DROP COLUMN "invoice_no";'
         )
+    if "document_scans" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.execute('DROP TABLE "document_scans"')
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)

@@ -115,7 +115,9 @@ SHORT_MAX = 200  # bound of ``v.Short``
 
 # --------------------------------------------------------------------------------------------------------------------
 
-_AMOUNT = re.compile(r"(?<![\d.,])(-\s?)?(\d{1,3}(?:[.,]\d{3})+[.,]\d{2}|\d+(?:[.,]|, )\d{2})(-(?=\s|$))?(?!\d|[.,]\d)")
+_AMOUNT = re.compile(
+    r"(?<![\d.,])(-\s?)?(\d{1,3}(?:[.,]\d{3})+[.,]\d{2}|\d+(?:[.,]|, )\d{2}|\d{1,3}(?:\.\d{3})+,-|\d+,-)(-(?=\s|$))?(?!\d|[.,]\d)"
+)
 _PERCENT = re.compile(r"(?<![\d.,])(\d{1,2}(?:[.,]\d{1,2})?)\s*%")
 _DATE_NUM = re.compile(r"(?<![\d./])(\d{1,2})\. ?(\d{1,2})\. ?(\d{4}|\d{2})(?!\d)")
 _DATE_ISO = re.compile(r"(?<!\d)(\d{4})-(\d{2})-(\d{2})(?!\d)")
@@ -277,12 +279,21 @@ def drop_overlap(words: list[Word]) -> list[Word]:
 
 def parse_amount(text: str) -> Decimal | None:
     """One amount token (``1.234,56``, ``1,234.56``, ``12,50``, ``12.50``, ``-1,00``, ``1,00-``) to a ``Decimal``."""
-    m = _AMOUNT.fullmatch(text.strip().replace("−", "-").strip("€ ").removeprefix("EUR").strip())
+    m = _AMOUNT.fullmatch(
+        re.sub(r"(?i)(?<=\d)\s?(?:euro|eur)$", "", text.strip())
+        .replace("−", "-")
+        .strip("€ ")
+        .removeprefix("EUR")
+        .strip()
+    )
     return _amount_of(m) if m else None
 
 
 def _amount_of(m: re.Match) -> Decimal:
-    value = Decimal(re.sub(r"\D", "", m.group(2)[:-2]) + "." + m.group(2)[-2:])
+    if m.group(2).endswith(",-"):  # "2.500,-" is 2500.00
+        value = Decimal(re.sub(r"\D", "", m.group(2)) + ".00")
+    else:
+        value = Decimal(re.sub(r"\D", "", m.group(2)[:-2]) + "." + m.group(2)[-2:])
     return -value if (m.group(1) or m.group(3)) else value
 
 

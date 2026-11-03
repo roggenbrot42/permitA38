@@ -121,4 +121,5 @@ def test_only_the_release_job_can_write_contents():
         for name, job in load(path)["jobs"].items():
             perms = job.get("permissions")
             if isinstance(perms, dict) and perms.get("contents") == "write":
-                assert (path.name, name) == ("release.yaml", "publish")
+                # ocr-tools publishes the pinned OCR package as a GitHub prerelease
+                assert (path.name, name) in {("release.yaml", "publish"), ("ocr-tools.yaml", "publish")}

@@ -244,3 +244,6 @@ tr.pp-detail > td { background: var(--bg); padding: 8px 12px; }
 .vc-list .vc-add { font-weight: 600; color: var(--accent); border-top: 1px solid var(--line); border-radius: 0 0 6px 6px; margin-top: 2px; }
 .vc-list .vc-add[aria-selected=true] { color: #fff; }
 .vc-list .vc-empty { cursor: default; }
+.ds-zone { border: 2px dashed var(--line); text-align: center; padding: 10px; }
+.ds-fields { min-width: 0; }
+#ds_totals td.num, #ds_totals th.num { text-align: right; font-variant-numeric: tabular-nums; }

@@ -398,3 +398,42 @@ def test_allocations_employee_and_supplier_rows_with_nullable_owner_columns(repo
         with pytest.raises(integrity_error(repo)):  # exactly one owner
             repo.save("allocations", dict(bad))
     assert len(repo.list("allocations")) == 2
+
+
+# ------------------------------------------------------------------ document scans
+def test_document_scans_sha256_is_unique(repo):
+    repo.save("document_scans", {"status": "queued", "sha256": "d" * 64, "doc_key": "k1"})
+    with pytest.raises(integrity_error(repo)):  # unique index idx_document_scans_sha256
+        repo.save("document_scans", {"status": "queued", "sha256": "d" * 64, "doc_key": "k2"})
+    assert len(repo.list("document_scans")) == 1
+
+
+def test_document_scans_absent_sha256_may_repeat(repo):
+    repo.save("document_scans", {"status": "queued", "doc_key": "k1"})
+    repo.save("document_scans", {"status": "queued", "doc_key": "k2"})
+    assert len(repo.list("document_scans")) == 2
+    repo.save("document_scans", {"status": "queued", "sha256": "e" * 64, "doc_key": "k3"})
+    with pytest.raises(integrity_error(repo)):
+        repo.save("document_scans", {"status": "queued", "sha256": "e" * 64, "doc_key": "k4"})
+
+
+def test_document_scans_find_by_doc_key_and_status(repo):
+    a = repo.save("document_scans", {"status": "queued", "sha256": "a" * 64, "doc_key": "k1"})
+    b = repo.save("document_scans", {"status": "done", "sha256": "b" * 64, "doc_key": "k1"})
+    c = repo.save("document_scans", {"status": "done", "sha256": "c" * 64, "doc_key": "k2"})
+    assert sorted(r["id"] for r in repo.find("document_scans", doc_key="k1")) == sorted([a["id"], b["id"]])
+    assert sorted(r["id"] for r in repo.find("document_scans", status="done")) == sorted([b["id"], c["id"]])
+    assert repo.find("document_scans", doc_key="k1", status="done") == [b]
+    assert repo.find("document_scans", doc_key="none") == []
+
+
+def test_document_scans_json_columns_and_unknown_fields_round_trip(repo):
+    draft = {"date": "2026-03-10", "net": None, "vendor": "Café Müller"}
+    doc = {"items": [{"d": "x"}], "payment": {"kind": "cash"}}
+    row = repo.save(
+        "document_scans",
+        {"status": "flagged", "sha256": "e" * 64, "draft": draft, "doc": doc, "flags": ["no_total"], "future": {"k": [1]}},
+    )  # fmt: skip
+    got = repo.get("document_scans", row["id"])
+    assert got["draft"] == draft and got["doc"] == doc and got["flags"] == ["no_total"]
+    assert got["future"] == {"k": [1]}
