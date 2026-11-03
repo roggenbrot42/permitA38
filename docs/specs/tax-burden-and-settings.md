@@ -476,9 +476,12 @@ base_m 1 318.33 (floor); kv 16.9 % → 222.80/month → **2 673.60**; pv 4.2 % �
 **F-cases (finance level).** Unless stated: settings `freiberufler`, `state` BY, Hebesatz 400; profile `{}` (= O1
 profile: single, GKV voluntary with Krankengeld, average Zusatzbeitrag 2.9, childless, no church tax); one paid invoice
 (no VAT) dated **2026-02-10**; `calc.finance(repo, year, today)` with a pinned `today`. Month lists are Jan…Dec;
-"null" = `take_home` of a month that has not begun. Recomputed on 2026-11-03 (amendment) with an independent
-plain-Python script from the rate tables (tariff, GKV/PV, Vorsorge, Soli) and cross-checked against the engine's
-`tax.estimate`; the month figures follow by hand from the rules in "Integration". **Changed** values are marked.
+"null" = `take_home` of a month that has not begun. Provenance (2026-11-03 amendment): the tax figures of the
+O1-profile cases (F1, F3–F6, F8, F10, F11) were recomputed with an independent plain-Python script from the rate
+tables (tariff, GKV/PV, Vorsorge, Soli) and cross-checked against the engine's `tax.estimate`; F2, F7 and F9 take
+their tax figures from the independently verified O5 and O4 intermediates and were checked against the engine (F7's
+balance and owed by engine and by hand); the month figures (set-aside, social, take-home, sums) of all cases were
+derived by hand from the rules in "Integration". **Changed** values are marked.
 
 **F1 – owed and reserve, O1 profile.** `today = 2026-05-26` (day 146), 24 000 booked. projected = q2(24 000 × 365 /
 146) = **60 000.00**, `extrapolated` true → `tax_projected` = O1, due_year **9 634.00**. `tax_actual` on 24 000:
@@ -586,7 +589,8 @@ projected **24 000.00**, `extrapolated` false; `2028-02-29` (day 60) → **146 0
     withheld (when > 0), **owed** (or "refund so far" when negative), and the note "Advance payments
     (Vorauszahlungen) are not taken into account."
   * "Monthly reserve" line in the same card group: "Set aside <monthly> per month for the remaining <months_left>
-    months (<remaining> of <due_year> still to reserve)"; past years show "Year closed" instead.
+    months (<remaining> of <due_year> still to reserve)", followed by "plus <owed_now> now" when `owed_now > 0` (the
+    current month's card shows `owed_now + monthly`); past years show "Year closed" instead.
     Before day 60 (`extrapolated` false in the current year) and when `monthly` is 0 the line reads "Set aside
     <current month's tax_set_aside> now; the monthly reserve starts once 60 days of the year have passed" (or "No
     further reserve needed" when `due_year` is 0).
@@ -709,8 +713,10 @@ of that code.
   `_PUBLIC_TAX`, `_PUBLIC_OWED`), adds `redacted: true` at the top level and in each reduced block, `reserve =
   {redacted: true}`, drops `NOT_SAVED_WARNING`. `web/app2.js`: branch on `f.redacted` as listed in "What a non-boss
   sees"; "–" for a `null` take-home. A6 later reworks the cards and keeps this behaviour.
-* Tests, backend (`calc.redact_tax(calc.finance(repo, y, TODAY))` with a pinned `TODAY` and
-  `y ∈ {TODAY.year − 1, TODAY.year, TODAY.year + 1}`, no literal year in this file except the pinned `TODAY`):
+* Tests, backend (`calc.redact_tax(calc.finance(repo, y, TODAY))` with `TODAY = date(2027, 3, 15)` pinned and
+  `y ∈ {TODAY.year − 1, TODAY.year, TODAY.year + 1}`; every date is derived from `TODAY` – F9 books its invoice at
+  `date(TODAY.year − 1, 2, 10)` and is the `y = TODAY.year − 1` case; the current and future years fall back to the
+  2026 table, which is fine for key sets – so no other literal year appears in this file):
   * **exact key sets, boss view** (unredacted result): top level `{year, months, totals, tax_actual, tax_projected,
     tax_owed, reserve, projected_profit, extrapolated, effective_rate, social_year, take_home, categories,
     open_receivables, warnings, kleinunternehmer, company_type}`; month `{month, revenue, vat_out, expenses, vat_in,
