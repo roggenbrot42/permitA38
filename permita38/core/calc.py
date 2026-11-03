@@ -331,6 +331,7 @@ _PUBLIC_TOP = (
     "extrapolated",
 )
 _PUBLIC_MONTH = ("month", "revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due", "vat_set_aside")
+_PUBLIC_TOTALS = ("revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due")
 _PUBLIC_TAX = ("gewst", "kst", "kst_soli")
 _PUBLIC_OWED = ("as_of", "gewst", "kst", "kst_soli")
 
@@ -346,6 +347,7 @@ def redact_tax(result: dict) -> dict:
     to ``finance`` later stays hidden until it is listed here.
     """
     out = _pick(result, _PUBLIC_TOP)
+    out["totals"] = _pick(result.get("totals") or {}, _PUBLIC_TOTALS)
     out["months"] = [_pick(m, _PUBLIC_MONTH) for m in result.get("months") or []]
     for k in ("tax_actual", "tax_projected"):
         out[k] = _pick(result.get(k) or {}, _PUBLIC_TAX) | {"redacted": True}

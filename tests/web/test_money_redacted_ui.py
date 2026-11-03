@@ -9,6 +9,13 @@ pytest.importorskip("playwright.sync_api")
 
 from tests.web.test_impressum_prefill import PASSWORD, Server, chromium  # noqa: E402,F401  (shared harness)
 
+def de_eur(n):
+    """The page's de-DE currency format (Intl): 3570 -> '3.570,00 €' with a no-break space before the sign."""
+    whole, cents = f"{abs(n):.2f}".split(".")
+    groups = f"{int(whole):,}".replace(",", ".")
+    return f"{'-' if n < 0 else ''}{groups},{cents}\u00a0€"
+
+
 FORBIDDEN = ("NaN", "undefined", "Einkommensteuer", "Take-home", "Tax reserve", "What stays with you")
 
 
@@ -20,18 +27,25 @@ def srv(tmp_path):
     r = httpx.put(
         s.base + "/api/settings/personal-tax",
         headers=h,
-        json={"church_tax_percent": 9, "other_income_year": 31337, "employment": {"gross_year": 77123}},
+        json={
+            "church_tax_percent": 9,
+            "other_income_year": 31337,
+            "employment": {"gross_year": 77123, "sv_liable": True, "steuerklasse": 1, "withheld_year": 4243.17},
+        },
     )
     assert r.status_code == 200, r.text
     cust = httpx.post(s.base + "/api/customers", headers=h, json={"name": "Demo GmbH"}).json()
     inv = httpx.post(
         s.base + "/api/invoices",
         headers=h,
-        json={"customer_id": cust["id"], "lines": [{"description": "Work", "qty": 1, "price": 5000}]},
+        json={"customer_id": cust["id"], "lines": [{"description": "Work", "qty": 1, "price": 50000}]},
     ).json()
     iso = date.today().isoformat()
-    httpx.post(s.base + f"/api/invoices/{inv['id']}/finalize", headers=h, json={"date": iso})
-    httpx.post(s.base + f"/api/invoices/{inv['id']}/pay", headers=h, json={"paid_date": iso})
+    r = httpx.post(s.base + f"/api/invoices/{inv['id']}/finalize", headers=h, json={"date": iso})
+    assert r.status_code == 200, r.text
+    full = httpx.get(s.base + f"/api/invoices/{inv['id']}", headers=h).json()
+    r = httpx.put(s.base + f"/api/invoices/{inv['id']}", headers=h, json={**full, "status": "paid", "paid_date": iso})
+    assert r.status_code == 200, r.text
     r = httpx.post(
         s.base + "/api/users",
         headers=h,
@@ -62,8 +76,17 @@ def test_accountant_sees_business_taxes_only(browser, srv):
     for bad in FORBIDDEN:
         assert bad not in text, bad
     assert not [h for h in pg.locator("th").all_text_contents() if h in ("Tax reserve", "Take-home")]
-    for sentinel in ("31337", "77123"):
-        assert sentinel not in text
+    # Gewerbesteuer on 50 000 profit, Hebesatz 400: (50 000 - 24 500) x 3.5 % x 400 % = 3 570.00 (actual, not projected)
+    assert de_eur(3570) in text
+    boss_tok = httpx.post(srv.base + "/api/auth/login", json={"username": "boss", "password": PASSWORD}).json()["token"]
+    boss = httpx.get(srv.base + "/api/finance", headers={"Authorization": "Bearer " + boss_tok}).json()
+    assert "redacted" not in boss and boss["tax_actual"]["gewst"] == 3570.0 and boss["tax_actual"]["withheld"] == 4243.17
+    seeded = [31337, 77123, 4243.17] + [boss["tax_actual"][k] for k in ("zve", "est", "social", "tax_due", "emp_income")]
+    for v in seeded:
+        assert v > 1000
+        for shown in (de_eur(v), f"{v}"):
+            assert shown not in text, shown
+    assert not any(str(v) in text for v in ("31337", "77123", "4243.17"))
     assert not problems
     ctx.close()
 

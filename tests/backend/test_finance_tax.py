@@ -110,6 +110,7 @@ def test_f2_owed_and_reserve_with_employment(repo):
     assert social(f) == [0.0] * 12 and f["social_year"] == 0.0
     assert th(f) == [0.0, 8000.0, 0.0, 0.0, -2417.75] + [None] * 7
     assert f["take_home"] == 5582.25
+    assert_sums(f, 5)
 
 
 def test_f3_early_lump_sum_january_boundary(repo):
@@ -174,7 +175,7 @@ def test_f6_december_boundary(repo):
     assert p["social"] == 5446.8 and p["zve"] == 19793.19 and p["tax_due"] == 1519.0
     assert f["tax_owed"]["owed"] == 1306.0
     r = f["reserve"]
-    assert (r["months_left"], r["remaining"], r["monthly"]) == (1, 213.0, 213.0)
+    assert (r["months_left"], r["remaining"], r["monthly"], r["owed_now"]) == (1, 213.0, 213.0, 1306.0)
     assert aside(f) == [0.0] * 11 + [1519.0]
     assert social(f) == [453.9] * 12
     assert th(f) == [-453.9, 23546.1] + [-453.9] * 9 + [-1972.9]
@@ -187,18 +188,19 @@ def test_f7_refund_is_never_added_to_take_home(repo):
     book(repo, 8000)
     f = calc.finance(repo, 2026, TODAY)
     assert f["tax_projected"]["tax_due"] == 13147.0 and f["tax_projected"]["balance"] == -6853.0
-    assert f["tax_owed"]["owed"] == -11115.0
+    assert f["tax_owed"]["owed"] == -11115.0 and f["tax_owed"]["withheld"] == 20000.0
     r = f["reserve"]
     assert (r["owed_now"], r["due_year"], r["remaining"], r["monthly"]) == (0.0, 0.0, 0.0, 0.0)
     assert aside(f) == [0.0] * 12 and social(f) == [0.0] * 12
     assert th(f) == [0.0, 8000.0, 0.0, 0.0, 0.0] + [None] * 7
     assert f["take_home"] == 8000.0
+    assert_sums(f, 5)
 
 
 def test_f8a_nothing_booked(repo):
     profile(repo, O1)
     f = calc.finance(repo, 2026, TODAY)
-    assert f["projected_profit"] == 0.0
+    assert f["projected_profit"] == 0.0 and f["extrapolated"] is True
     assert f["tax_projected"]["tax_due"] == f["tax_actual"]["tax_due"] == 0.0
     assert f["tax_actual"]["social"] == 3432.96
     assert f["tax_owed"]["owed"] == 0.0
@@ -207,17 +209,49 @@ def test_f8a_nothing_booked(repo):
     assert aside(f) == [0.0] * 12
     assert th(f) == [-286.08] * 5 + [None] * 7
     assert f["take_home"] == -1430.4 and f["social_year"] == 1430.4
+    assert_sums(f, 5)
 
 
 def test_f8b_negative_profit(repo):
     profile(repo, O1)
     repo.save("expenses", {"date": "2026-02-10", "net": 5000, "vat": 0})
     f = calc.finance(repo, 2026, TODAY)
-    assert f["totals"]["profit"] == -5000.0 and f["projected_profit"] == 0.0
+    assert f["totals"]["profit"] == -5000.0 and f["projected_profit"] == 0.0 and f["extrapolated"] is True
+    assert f["tax_projected"]["social"] == 3432.96 and f["tax_projected"]["tax_due"] == 0.0
     assert f["tax_actual"]["tax_due"] == 0.0 and f["tax_actual"]["social"] == 3432.96
     assert f["tax_owed"]["owed"] == 0.0
     assert th(f)[1] == -5286.08
-    assert f["take_home"] == -6430.4
+    assert f["take_home"] == -6430.4 and f["social_year"] == 1430.4
+    assert_sums(f, 5)
+
+
+def test_gmbh_corporate_taxes_literal(repo):
+    # 2026 table: KSt 15 %, Soli 5.5 % of the KSt, Messzahl 3.5 %, Hebesatz 400; no income, so no personal tax (spec O6)
+    repo.save_settings({"company_type": "gmbh", "state": "BY", "hebesatz": 400})
+    profile(repo, O1)
+    book(repo, 100000, "2026-02-10")
+    f = calc.finance(repo, 2026, date(2027, 3, 15))
+    # kst 100000 x 15 % = 15000.00; kst_soli 15000 x 5.5 % = 825.00; gewst 100000 x 3.5 % x 400 % = 14000.00
+    for t in (f["tax_actual"], f["tax_projected"]):
+        assert (t["kst"], t["kst_soli"], t["gewst"]) == (15000.0, 825.0, 14000.0)
+        assert t["est"] == 0.0 and t["tax_due"] == 29825.0  # 15000 + 825 + 14000
+    o = f["tax_owed"]
+    assert (o["kst"], o["kst_soli"], o["gewst"], o["tax_due"], o["owed"]) == (15000.0, 825.0, 14000.0, 29825.0, 29825.0)
+    red = calc.redact_tax(f)
+    assert set(red["tax_actual"]) == set(red["tax_projected"]) == {"gewst", "kst", "kst_soli", "redacted"}
+    assert (
+        red["tax_actual"]
+        == red["tax_projected"]
+        == {"gewst": 14000.0, "kst": 15000.0, "kst_soli": 825.0, "redacted": True}
+    )
+    assert red["tax_owed"] == {
+        "as_of": "2026-12-31",
+        "gewst": 14000.0,
+        "kst": 15000.0,
+        "kst_soli": 825.0,
+        "redacted": True,
+    }
+    assert red["company_type"] == "gmbh" and red["reserve"] == {"redacted": True}
 
 
 def test_f9_gewerbe_past_year_literal(repo):
@@ -295,3 +329,51 @@ def test_legacy_keys_are_ignored(repo):
     book(repo, 24000)
     f = calc.finance(repo, 2026, TODAY)
     assert f["tax_owed"]["owed"] == 1306.0 and f["months"][0]["social"] == 1085.0
+
+
+def test_boundary_day_1(repo):
+    """1 January: day 1, no projection; the booked 24 000 is taxed as F4 (tax 1 306, social 5 208 / 12 = 434)."""
+    profile(repo, O1)
+    book(repo, 24000, "2026-01-01")
+    f = calc.finance(repo, 2026, date(2026, 1, 1))
+    assert f["projected_profit"] == 24000.0 and f["extrapolated"] is False
+    assert f["tax_projected"]["tax_due"] == f["tax_actual"]["tax_due"] == 1306.0
+    assert f["tax_owed"]["owed"] == 1306.0 and f["tax_owed"]["as_of"] == "2026-01-01"
+    r = f["reserve"]
+    assert (r["owed_now"], r["remaining"], r["months_left"], r["monthly"]) == (1306.0, 0.0, 12, 0.0)
+    assert aside(f) == [1306.0] + [0.0] * 11
+    assert social(f) == [434.0] + [0.0] * 11 and f["social_year"] == 434.0
+    assert th(f) == [22260.0] + [None] * 11 and f["take_home"] == 22260.0  # 24000 - 1306 - 434
+    assert_sums(f, 1)
+
+
+def test_boundary_day_59_booked_on_the_day(repo):
+    """28 February 2026 (day 59): no projection although the profit was booked that very day."""
+    profile(repo, O1)
+    book(repo, 24000, "2026-02-28")
+    f = calc.finance(repo, 2026, date(2026, 2, 28))
+    assert f["projected_profit"] == 24000.0 and f["extrapolated"] is False
+    assert f["tax_projected"]["tax_due"] == 1306.0 and f["tax_owed"]["owed"] == 1306.0
+    r = f["reserve"]
+    assert (r["owed_now"], r["remaining"], r["months_left"], r["monthly"]) == (1306.0, 0.0, 11, 0.0)
+    assert aside(f) == [0.0, 1306.0] + [0.0] * 10
+    assert social(f) == [434.0, 434.0] + [0.0] * 10 and f["social_year"] == 868.0
+    assert th(f) == [-434.0, 22260.0] + [None] * 10 and f["take_home"] == 21826.0
+    assert_sums(f, 2)
+
+
+def test_boundary_day_60_booked_on_the_day(repo):
+    """1 March 2026 (day 60): 24 000 x 365 / 60 = 146 000 is projected (as F5), the profit sits in March."""
+    profile(repo, O1)
+    book(repo, 24000, "2026-03-01")
+    f = calc.finance(repo, 2026, date(2026, 3, 1))
+    assert f["projected_profit"] == 146000.0 and f["extrapolated"] is True
+    assert f["tax_projected"]["tax_due"] == 46437.93 and f["tax_projected"]["social"] == 15135.84
+    assert f["tax_owed"]["owed"] == 1306.0
+    r = f["reserve"]
+    assert (r["months_left"], r["remaining"], r["monthly"]) == (10, 45131.93, 4513.19)
+    assert aside(f) == [0.0, 0.0, 5819.19] + [4513.19] * 9
+    assert social(f) == [1261.32] * 3 + [0.0] * 9 and f["social_year"] == 3783.96
+    # 24000 - 5819.19 - 1261.32 = 16919.49 in March, -1261.32 before
+    assert th(f) == [-1261.32, -1261.32, 16919.49] + [None] * 9 and f["take_home"] == 14396.85
+    assert_sums(f, 3)
