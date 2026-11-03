@@ -306,7 +306,7 @@ def test_list_shows_period_destination_purpose_and_figures(browser):
     row = pg.locator("table.trip-list tr", has_text="Workshop at the customer's site")
     expect(row).to_contain_text("09.11.2026 – 11.11.2026")
     expect(row).to_contain_text("Hamburg (Germany)")
-    expect(row).to_contain_text("120,00 € / 150,00 €")  # budget: actual / estimate
+    expect(row).to_contain_text("206,55 € / 236,55 €")  # budget: actual / estimate, both with the mileage cost 86,55
     expect(row).not_to_contain_text("288,5 km")  # allowance and mileage have no column any more
     expect(pg.locator("table.trip-list th")).not_to_contain_text(["Allowance", "Mileage"])
     expect(row).to_contain_text("180,00")

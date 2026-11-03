@@ -96,7 +96,7 @@ function tripRowHTML(t) {
   return `<tr><td class="nowrap"><a href="#/trips/${esc(t.id)}">${esc(period)}</a></td>
     <td>${esc(destinationOf(t))}</td>
     <td>${esc(t.purpose || '')}${t.title ? `<div class="small muted">${esc(t.title)}</div>` : ''}</td>
-    <td class="num nowrap">${eurC(tripCents(t.items_actual_total ?? 0))} / ${eurC(tripCents(t.items_expected_total ?? 0))}</td>
+    <td class="num nowrap">${eurC(tripCents(t.items_actual_total ?? 0) + tripCents(t.mileage_total ?? 0))} / ${eurC(tripCents(t.items_expected_total ?? 0) + tripCents(t.mileage_total ?? 0))}</td>
     <td class="num">${t.bills?.count ?? 0}<div class="small muted">${eur(t.bills?.net)}</div></td>
     <td><span class="pill ${final ? 'good' : ''}">${final ? 'Final' : 'Draft'}</span></td></tr>`;
 }
