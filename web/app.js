@@ -86,7 +86,7 @@ function readForm(fields, base) {
   return o;
 }
 function openForm({ title, fields, vals = {}, save, del, wide, extra = '', saveLabel = 'Save', note = '' }) {
-  modal(`<h2>${esc(title)}</h2>${note}${formHTML(fields, vals)}${extra}<div class="actions">${del ? '<button class="danger" id="m-del" style="margin-right:auto">Delete</button>' : ''}<button id="m-cancel">Cancel</button><button class="primary" id="m-save">${esc(saveLabel)}</button></div>`, wide);
+  modal(`<div class="modal-scroll"><h2>${esc(title)}</h2>${note}${formHTML(fields, vals)}${extra}</div><div class="actions">${del ? '<button class="danger" id="m-del" style="margin-right:auto">Delete</button>' : ''}<button id="m-cancel">Cancel</button><button class="primary" id="m-save">${esc(saveLabel)}</button></div>`, wide);
   const token = MODAL_SEQ, mine = () => token === MODAL_SEQ;
   let busy = false;   // a second Enter or click while a save runs is ignored (no double bill)
   $('#m-cancel').onclick = closeModal;

@@ -290,10 +290,9 @@ A+B and C are independent; D needs both; E needs only the contract; F needs the 
 
 ## Later (specified only when scheduled)
 
-* **Bill/invoice extraction from PDF/image**: text-layer extraction first (no OCR), then local OCR (e.g. Tesseract) and/or a
-  vision model; each file parsed in a subprocess with a timeout and memory limit, attachment rules of `core/` unchanged;
-  produces the same `expense.create` proposal and links the stored original.
-* **E-invoice XML (XRechnung/ZUGFeRD)**: deterministic parser, no model needed; same proposal kind.
+* **Bill/invoice extraction from PDF/image and e-invoice XML**: moved to [`receipt-scan.md`](receipt-scan.md), which is
+  deterministic and needs no model. Its section "Vision model" extends this spec (images in `ModelProvider.complete`, a
+  separate consent id for images) and keeps rule 5: what a model read is never booked without a human.
 * **Bank statement matching** (after CAMT/MT940 import exists): proposal kind `payment.match` (invoice <-> transaction,
   confidence from deterministic rules first, model only to rank ambiguous cases); marking an invoice paid stays a human
   approval.

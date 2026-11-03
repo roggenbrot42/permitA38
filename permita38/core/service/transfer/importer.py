@@ -46,6 +46,8 @@ REFERENCES: dict[str, str] = {
     "allocation_id": "allocations",
     "decided_by": "users",
     "login_user_id": "users",
+    "expense_id": "expenses",
+    "created_by": "users",
 }
 LIST_REFERENCES: dict[str, tuple[str, str]] = {  # (collection, column) -> target collection
     "projects.member_ids": ("projects", "users"),
@@ -57,6 +59,7 @@ ATTACHMENT_COLUMNS = (
     ("invoices", "original_pdf"),
     ("offers", "original_pdf"),
     ("incoming_offers", "attachment"),
+    ("receipt_scans", "attachment"),
 )
 SHA_RE = re.compile(r"[0-9a-f]{64}")
 #: what core/service/auth.hash_password produces

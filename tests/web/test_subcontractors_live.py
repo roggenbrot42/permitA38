@@ -103,7 +103,11 @@ def test_boss_accepts_an_offer_and_sees_the_server_numbers(browser, srv):
             "received_on": monday().isoformat(),
             "lines": [{"description": "Frontend development", "quantity": 80, "unit": "h", "unit_price": 80}],
             "project_id": srv.project["id"],
-            "plan": {"start": monday().isoformat(), "end": (monday() + timedelta(days=27)).isoformat(), "hours_per_week": 20},
+            "plan": {
+                "start": monday().isoformat(),
+                "end": (monday() + timedelta(days=27)).isoformat(),
+                "hours_per_week": 20,
+            },
         },
     )
     assert offer.status_code == 201, offer.text

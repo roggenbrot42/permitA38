@@ -5,6 +5,16 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- **Receipt scan**: *Upload receipts* (or drag files onto Expenses) reads PDFs, photos and e-invoices (XRechnung, ZUGFeRD)
+  locally. A bill whose amounts, VAT and payment add up is booked automatically; anything else waits under *Needs your
+  check* with the reasons, a table of the checks and the detected fields marked on the bill. Duplicates are refused.
+  Restaurants are booked as Business meals at 70 %, tips as an extra line, foreign VAT rates stay flagged. New fields
+  *Bill date*, *Paid on* and *Invoice number* on expenses. See `docs/receipt-scan.md`.
+- **OCR on request for Windows**: a boss can download Tesseract from GitHub (size and host shown first, fixed checksum,
+  per device, about 59 MB). The package is built by the manual workflow `ocr-tools.yaml` and published as a pre-release
+  that never shows as the project's latest release. New route `POST /api/receipts/ocr/install`.
+
 ## [0.4.0-alpha.5] - 2026-10-27
 
 Fifth alpha. Adds the business trip wizard (a step-by-step trip page with a three-row itinerary and an expenses table

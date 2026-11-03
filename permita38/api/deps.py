@@ -21,6 +21,7 @@ from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.plan_service import PlanningService
 from permita38.core.service.procurement import ProcurementService
+from permita38.core.service.receipts import ReceiptService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.sanity import SanityService
@@ -44,6 +45,7 @@ class Services:
     auth: AuthService
     totp: TotpService
     records: RecordService
+    receipts: ReceiptService
     sales: SalesService
     time: TimeService
     settings: SettingsService
@@ -71,19 +73,21 @@ class Services:
         user_agent = f"permitA38/{__version__} (+https://github.com/roggenbrot42/permitA38)"
         calendar = CalendarService(store, calendar_fetcher or SafeFetcher(user_agent))
         busy = CalendarBusyProvider(store, on_request=calendar.schedule_stale_refresh)
+        sanity = SanityService(store)
         return cls(
             busy=busy,
             planning=PlanningService(store, busy),
             allocations=AllocationService(store),
             suppliers=SupplierService(store),
             procurement=ProcurementService(store),
-            sanity=SanityService(store),
+            sanity=sanity,
             trips=TripService(store),
             config=config,
             store=store,
             auth=auth,
             totp=TotpService(auth),
             records=records,
+            receipts=ReceiptService(store, records, config, sanity),
             sales=SalesService(store, records),
             imports=ImportService(store, numbering=None),
             time=TimeService(store),

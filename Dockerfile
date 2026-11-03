@@ -39,6 +39,11 @@ RUN groupadd --system --gid 10001 permita \
     && mkdir /data /app \
     && chown permita:permita /data
 
+# local OCR for the receipt scan (optional program, Apache-2.0)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=builder /opt/venv /opt/venv
 COPY web /app/web
 

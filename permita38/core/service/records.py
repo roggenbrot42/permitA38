@@ -21,6 +21,8 @@ VIEW_COLLECTIONS = {"projects", "tasks"}
 RESPONSE_ONLY = ("sanity_warnings", "planning_warnings")
 
 
+SCAN_PREFIX = "scan:"
+
 _IMPORT_FIELDS = (
     "imported",
     "original_number",
@@ -103,7 +105,15 @@ class RecordService:
         data["supplier_id"] = supplier_id
         return self._write(me, "expenses", data, expense, keep_vendor=True)
 
-    def _write(self, me: dict, coll: str, data: dict, old: dict | None, keep_vendor: bool = False) -> dict:
+    def create_scanned(self, me: dict, data: dict, scan_id: str) -> dict:
+        """Book a scanned receipt (docs/specs/receipt-scan.md): the normal expense write rules, and the only way to set
+        ``external_id = "scan:<scan id>"``."""
+        data = {k: v for k, v in data.items() if k not in ("id", "created", "updated")}
+        return self._write(me, "expenses", data, None, scan_id=scan_id)
+
+    def _write(
+        self, me: dict, coll: str, data: dict, old: dict | None, keep_vendor: bool = False, scan_id: str | None = None
+    ) -> dict:
         for k in RESPONSE_ONLY:  # advisory warnings are computed per response, never stored
             data.pop(k, None)
         sc = _scope(me, coll, "write")
@@ -128,6 +138,13 @@ class RecordService:
             data = self.prepare_document(data, old)
             self._check_document_amounts(data)
         elif coll == "expenses":
+            # `scan:<id>` marks a booked receipt scan: a client can neither set nor drop it; other values are untouched
+            if str(data.get("external_id") or "").startswith(SCAN_PREFIX):
+                data.pop("external_id")
+            if old and str(old.get("external_id") or "").startswith(SCAN_PREFIX):
+                data["external_id"] = old["external_id"]
+            if scan_id:
+                data["external_id"] = SCAN_PREFIX + scan_id
             if data.get("trip_id"):  # a bill belongs to a trip the user may see (rights of the trips area)
                 trip = self.store.get("trips", data["trip_id"])
                 tsc = rights.scope_for(me, "trips", "read")
@@ -275,6 +292,8 @@ class RecordService:
                     if e.get("invoice_id") == rid:
                         e.pop("invoice_id", None)
                         self.store.save("entries", e)
+            if coll == "expenses":  # the scan row of a booked receipt goes with its expense (a re-upload works again)
+                self.store.delete_where("receipt_scans", expense_id=rid)
             self.store.delete(coll, rid)
 
     def list_users(self, me: dict) -> list[dict]:

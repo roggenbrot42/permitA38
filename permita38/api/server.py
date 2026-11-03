@@ -30,6 +30,7 @@ from .routers import (
     incoming_offers,
     numbering,
     planning,
+    receipts,
     records,
     sales,
     settings,
@@ -77,6 +78,7 @@ def all_routers() -> list:
         trips,
         data_transfer,
         tokens,
+        receipts,
     )
     return [router for module in modules for router in module.routers]
 

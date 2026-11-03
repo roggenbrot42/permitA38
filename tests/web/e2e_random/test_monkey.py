@@ -423,7 +423,9 @@ class Monkey:
             except Exception:
                 pass
             try:
-                if self.page.evaluate("() => document.querySelector('#modal-root').children.length > 0") and self.page.query_selector("#m-cancel"):
+                if self.page.evaluate(
+                    "() => document.querySelector('#modal-root').children.length > 0"
+                ) and self.page.query_selector("#m-cancel"):
                     self.say("episode: the form was refused, closing it")
                     self.page.click("#m-cancel", timeout=CLICK_TIMEOUT, no_wait_after=True)
             except Exception:
@@ -500,7 +502,9 @@ class Monkey:
                 except Exception:
                     # the dialog left the page while we clicked: a navigation started by the previous move closes dialogs
                     # (the app's render), so there was no Cancel to test. Anything else is a real failure.
-                    if p.query_selector("#m-cancel") or p.evaluate("() => document.querySelector('#modal-root').children.length > 0"):
+                    if p.query_selector("#m-cancel") or p.evaluate(
+                        "() => document.querySelector('#modal-root').children.length > 0"
+                    ):
                         raise
                     return
                 assert p.evaluate("() => document.querySelector('#modal-root').children.length === 0"), (

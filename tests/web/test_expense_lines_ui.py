@@ -292,6 +292,99 @@ def test_png_preview_is_shown_before_saving_and_zoom_buttons_work(ui):
     assert ui.get_attribute("#e_preview_open", "href").startswith("blob:")
 
 
+def test_on_a_landscape_screen_the_bill_sits_right_of_the_fields_and_is_tall(ui):
+    ui.set_viewport_size({"width": 1600, "height": 900})
+    open_new(ui)
+    choose(ui, "bill.png", PNG, "image/png")
+    ui.wait_for_selector("#e_preview img")
+    field = ui.locator("#f_vendor").bounding_box()
+    stage = ui.locator("#e_stage").bounding_box()
+    assert stage["x"] >= field["x"] + field["width"]  # beside the fields, not under them
+    dlg = ui.locator("#modal-root .modal").bounding_box()
+    assert stage["height"] > 0.7 * 900  # as tall as the dialog allows
+    assert stage["width"] < 0.6 * dlg["width"]  # A4 portrait ratio, not wider than 60 % of the dialog
+    assert dlg["width"] > 0.95 * 1600
+    assert stage["y"] + stage["height"] <= 900  # no scrolling needed to see all of it
+    ui.locator("#f_description").scroll_into_view_if_needed()
+    assert ui.locator("#m-save").count() == 1
+
+
+LANDSCAPE_SIZES = [
+    (1280, 720),
+    (1366, 768),
+    (1600, 900),
+    (1920, 1080),
+    (1920, 950),
+    (2560, 1440),
+    (3440, 1440),
+    (1536, 738),
+]  # last: 1920x1080 at 125 % zoom
+
+
+def assert_panel_inside_dialog(pg, w: int, h: int):
+    """The preview (with its padding) lies inside the dialog and the dialog inside the window; Save stays reachable."""
+    dlg = pg.locator("#modal-root .modal").bounding_box()
+    pv = pg.locator("#e_preview").bounding_box()
+    pad = 22  # the dialog's padding
+    assert dlg["y"] >= -0.5 and dlg["y"] + dlg["height"] <= h + 0.5, (dlg, h)
+    assert dlg["x"] >= -0.5 and dlg["x"] + dlg["width"] <= w + 0.5, (dlg, w)
+    assert pv["y"] + pv["height"] <= dlg["y"] + dlg["height"] - pad + 1, (pv, dlg)
+    assert pv["x"] + pv["width"] <= dlg["x"] + dlg["width"] - pad + 1, (pv, dlg)
+    assert pv["height"] > 0.5 * h
+    side = pg.locator("#e_preview").evaluate("e => e.parentElement.getBoundingClientRect().toJSON()")
+    assert side["width"] / side["height"] == pytest.approx(1 / 2**0.5, abs=0.01)  # A4 portrait, 1 : sqrt(2)
+    save = pg.locator("#m-save").bounding_box()
+    assert save["y"] + save["height"] <= dlg["y"] + dlg["height"] and save["y"] >= 0
+    assert (
+        pg.evaluate("document.querySelector('#e_stage, .exp-pdf').getBoundingClientRect().bottom")
+        <= pv["y"] + pv["height"] + 1
+    )
+
+
+@pytest.mark.parametrize("w,h", LANDSCAPE_SIZES)
+@pytest.mark.parametrize("case", ["image", "nine_lines", "pdf"])
+def test_the_bill_panel_stays_inside_the_dialog_and_the_dialog_inside_the_window(ui, w, h, case):
+    ui.set_viewport_size({"width": w, "height": h})
+    open_new(ui)
+    if case == "pdf":
+        choose(ui, "bill.pdf", PDF, "application/pdf")
+        ui.wait_for_selector("#e_preview iframe")
+    else:
+        choose(ui, "bill.png", PNG, "image/png")
+        ui.wait_for_selector("#e_preview img")
+    if case == "nine_lines":
+        ui.check("#f_itemise")
+        ui.wait_for_selector("#e_lines tr[data-line]")
+        for n in range(1, 9):
+            ui.click("[data-a=addLine]")
+            ui.wait_for_function("n => document.querySelectorAll('#e_lines tr[data-line]').length === n", arg=n + 1)
+    assert_panel_inside_dialog(ui, w, h)
+    if case == "nine_lines":  # the fields scroll on their own, the bill stays where it is
+        before = ui.locator("#e_preview").bounding_box()
+        ui.evaluate("document.querySelector('.modal-scroll').scrollTop = 99999")
+        assert ui.locator("#e_preview").bounding_box() == before
+        assert_panel_inside_dialog(ui, w, h)
+
+
+def test_on_a_portrait_screen_the_bill_stays_under_the_fields(ui):
+    ui.set_viewport_size({"width": 800, "height": 1200})
+    open_new(ui)
+    choose(ui, "bill.png", PNG, "image/png")
+    ui.wait_for_selector("#e_preview img")
+    assert ui.locator("#e_preview").bounding_box()["y"] > ui.locator("#f_vendor").bounding_box()["y"]
+    assert ui.locator("#e_preview").bounding_box()["x"] < 200
+
+
+def test_a_long_receipt_fits_the_width_so_it_stays_readable(ui):
+    ui.set_viewport_size({"width": 1600, "height": 900})
+    open_new(ui)
+    choose(ui, "long.png", make_png(400, 1600), "image/png")
+    ui.wait_for_selector("#e_preview img")
+    ui.wait_for_function("document.querySelector('#e_img').naturalWidth === 400")
+    ui.click("#e_preview [data-a=zoomFit]")
+    assert zoom(ui) == 100  # the pane is wider than the photo: never shrunk to fit its height
+
+
 def test_zoom_is_clamped_to_25_and_800_percent(ui):
     open_new(ui)
     choose(ui, "bill.png", PNG, "image/png")
@@ -305,11 +398,16 @@ def test_zoom_is_clamped_to_25_and_800_percent(ui):
 
 
 def test_wheel_keyboard_and_drag(ui):
+    ui.set_viewport_size(
+        {"width": 1400, "height": 700}
+    )  # the pane is shorter than the 900 px photo, so it can be dragged both ways
     open_new(ui)
     choose(ui, "bill.png", PNG, "image/png")
     ui.wait_for_selector("#e_preview img")
     ui.click("#e_preview [data-a=zoom100]")
-    ui.locator("#e_preview").scroll_into_view_if_needed()  # the supplier fields sit above the preview: on a 1000 px window its centre is below the fold
+    ui.locator(
+        "#e_preview"
+    ).scroll_into_view_if_needed()  # the supplier fields sit above the preview: on a 1000 px window its centre is below the fold
     box = ui.locator("#e_preview").bounding_box()
     ui.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
     ui.mouse.wheel(0, -200)
@@ -332,10 +430,10 @@ def test_wheel_keyboard_and_drag(ui):
     cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
     ui.mouse.move(cx, cy)
     ui.mouse.down()
-    ui.mouse.move(cx - 80, cy - 40, steps=5)
+    ui.mouse.move(cx - 80, cy + 40, steps=5)  # the stage starts scrolled to the bottom, so pan down
     ui.mouse.up()
     after = ui.locator("#e_preview img").bounding_box()
-    assert after["x"] == pytest.approx(before["x"] - 80, abs=3) and after["y"] == pytest.approx(before["y"] - 40, abs=3)
+    assert after["x"] == pytest.approx(before["x"] - 80, abs=3) and after["y"] == pytest.approx(before["y"] + 40, abs=3)
 
 
 def test_pdf_preview_uses_an_iframe_and_always_offers_a_new_tab(ui):

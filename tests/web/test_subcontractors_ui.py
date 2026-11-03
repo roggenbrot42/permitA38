@@ -95,7 +95,14 @@ SUP_P = {
     "tags": [],
     "iban": "DE89370400440532013000",
 }
-SUP_RC = {**SUP_P, "id": "8b2c3d4e", "name": "Example Cloud Ltd (Demo)", "country": "IE", "vat_mode": "eu_reverse_charge", "supplier_no": "L-0005"}
+SUP_RC = {
+    **SUP_P,
+    "id": "8b2c3d4e",
+    "name": "Example Cloud Ltd (Demo)",
+    "country": "IE",
+    "vat_mode": "eu_reverse_charge",
+    "supplier_no": "L-0005",
+}
 
 
 def offer_w1():
@@ -133,7 +140,9 @@ def forecast():
 def forecast_without_external():
     f = forecast()
     for w in f["weeks"]:
-        w.update(external_capacity=0.0, external_assigned=0.0, external_gap=0.0, external_cost=0.0, external_by_project=[])
+        w.update(
+            external_capacity=0.0, external_assigned=0.0, external_gap=0.0, external_cost=0.0, external_by_project=[]
+        )
     f["totals"].update(external_capacity=0.0, external_gap=0.0, external_cost=0.0, margin=20000.0)
     return f
 
@@ -182,7 +191,16 @@ class FakeApi:
             return _json(
                 route,
                 200,
-                {"me": me, "settings": {}, "timer": None, "states": {}, "conflicts": [], "templates": [], "data_dir": "", "features": {}},
+                {
+                    "me": me,
+                    "settings": {},
+                    "timer": None,
+                    "states": {},
+                    "conflicts": [],
+                    "templates": [],
+                    "data_dir": "",
+                    "features": {},
+                },
             )
         if path == "projects":
             return _json(route, 200, copy.deepcopy(PROJECTS))
@@ -223,17 +241,27 @@ class FakeApi:
         if path == "plan/scenarios":
             return _json(route, 200, [])
         if path == "forecast":
-            return _json(route, 200, forecast() if query.get("include_external") != ["0"] else forecast_without_external())
+            return _json(
+                route, 200, forecast() if query.get("include_external") != ["0"] else forecast_without_external()
+            )
         if path == "plan/day-table":
             return _json(route, 200, {"days": [], "scope_names": {}})
         if path == "plan/simulate":
-            return _json(route, 200, forecast() if (body or {}).get("include_external", True) else forecast_without_external())
+            return _json(
+                route, 200, forecast() if (body or {}).get("include_external", True) else forecast_without_external()
+            )
         if path == "team/timeline":
             start = query["start"][0]
-            ext = fixture("team_timeline_external")  # the contract's windows are in March 2026: moved into the shown window
+            ext = fixture(
+                "team_timeline_external"
+            )  # the contract's windows are in March 2026: moved into the shown window
             for x in ext["external"]:
                 x["windows"] = [{"start": start, "end": (date.fromisoformat(start) + timedelta(days=4)).isoformat()}]
-            return _json(route, 200, {"level": "full", "start": start, "end": query["end"][0], "people": [], "holidays": {}, **ext})
+            return _json(
+                route,
+                200,
+                {"level": "full", "start": start, "end": query["end"][0], "people": [], "holidays": {}, **ext},
+            )
         if path == "finance":
             return _json(route, 200, self.finance(query))
         if path == "finance/commitments":
@@ -253,9 +281,16 @@ class FakeApi:
             if query.get("q"):
                 rows = [s for s in rows if query["q"][0].lower() in s["name"].lower()]
             if me["role"] == "employee":
-                rows = [fixture("supplier_employee_view") if s["id"] == "5d1c0aa2" else {k: s[k] for k in ("id", "name", "kind", "tags", "active")} for s in rows]
+                rows = [
+                    fixture("supplier_employee_view")
+                    if s["id"] == "5d1c0aa2"
+                    else {k: s[k] for k in ("id", "name", "kind", "tags", "active")}
+                    for s in rows
+                ]
             return _json(route, 200, copy.deepcopy(rows))
         if path == "suppliers" and m == "POST":
+            if getattr(self, "fail_create", False):
+                return _json(route, 422, {"detail": "Supplier name is not allowed (demo)"})
             row = {**body, "id": "5a5a5a5a"}
             self.suppliers.append(row)
             return _json(route, 201, {**row, "sanity_warnings": []})
@@ -290,7 +325,14 @@ class FakeApi:
                 rows = [o for o in rows if o["supplier_id"] == query["supplier_id"][0]]
             return _json(route, 200, rows)
         if path == "incoming-offers" and m == "POST":
-            row = {**fixture("offer_w1"), **body, "id": "9b3e5999", "status": "received", "effective_status": "received", "allocation_id": None}
+            row = {
+                **fixture("offer_w1"),
+                **body,
+                "id": "9b3e5999",
+                "status": "received",
+                "effective_status": "received",
+                "allocation_id": None,
+            }
             self.offers.append(row)
             return _json(route, 201, {**row, "planning_warnings": []})
         if path.startswith("incoming-offers/"):
@@ -310,7 +352,12 @@ class FakeApi:
             act = parts[2]
             if act == "accept":
                 return self.accept(route, o, body)
-            new = {"review": "under_review", "reject": "rejected", "reopen": "under_review", "unaccept": "under_review"}[act]
+            new = {
+                "review": "under_review",
+                "reject": "rejected",
+                "reopen": "under_review",
+                "unaccept": "under_review",
+            }[act]
             o.update(status=new, effective_status=new)
             if act == "reject":
                 o["decision_note"] = body.get("reason")
@@ -336,7 +383,19 @@ class FakeApi:
         return _json(route, 200, [])
 
     def finance(self, query):
-        months = [{"revenue": 0, "expenses": 0, "profit": 0, "vat_due": 0, "tax_set_aside": 0, "vat_set_aside": 0, "social": 0, "take_home": 0} for _ in range(12)]
+        months = [
+            {
+                "revenue": 0,
+                "expenses": 0,
+                "profit": 0,
+                "vat_due": 0,
+                "tax_set_aside": 0,
+                "vat_set_aside": 0,
+                "social": 0,
+                "take_home": 0,
+            }
+            for _ in range(12)
+        ]
         z = {"est": 0, "soli": 0, "total": 0, "kst": 0, "church": 0, "gewst": 0}
         return {
             "months": months,
@@ -424,7 +483,9 @@ def test_supplier_list_shows_commitments_and_filters(browser):
     q = api.calls("GET", "suppliers")[-1][2]
     assert q["kind"] == ["person-capacity"] and q["active"] == ["true"]
     pg.select_option("#sup_kind", "")
-    expect(pg.locator("#sup-table tr[data-id]")).to_have_count(3)  # the reset list has rendered; typing before it would land in the replaced input
+    expect(pg.locator("#sup-table tr[data-id]")).to_have_count(
+        3
+    )  # the reset list has rendered; typing before it would land in the replaced input
     pg.fill("#sup_q", "print")
     pg.press("#sup_q", "Enter")
     expect(pg.locator("#sup-table tr[data-id]")).to_have_count(1)
@@ -458,7 +519,9 @@ def test_new_subcontractor_form_sends_capacity_fields(browser):
     expect(dlg.locator("#sup_cap")).to_be_visible()
     pg.fill("#f_tags", "backend, Demo")
     dlg.get_by_role("button", name="Save").click()
-    assert pg.locator("#toast").inner_text() == "A subcontractor needs the hours per week they can offer"  # refused before any request
+    assert (
+        pg.locator("#toast").inner_text() == "A subcontractor needs the hours per week they can offer"
+    )  # refused before any request
     assert not api.calls("POST", "suppliers")
     pg.fill("#sup_weekly", "24")
     pg.fill("#sup_rate", "80")
@@ -527,12 +590,22 @@ def test_delete_of_a_used_supplier_shows_the_server_message(browser):
 
 
 # ---------------------------------------------------------------- vendor adoption
-def test_vendor_banner_and_adoption_check_then_link(browser):
-    api = FakeApi()
+def test_expenses_page_has_no_vendor_banner_suppliers_page_offers_the_link(browser):
+    api = FakeApi()  # 4 expenses with a vendor that is no supplier
     ctx, pg, problems = open_app(browser, api, page="expenses")
-    banner = pg.locator(".sup-vendor-banner")
-    expect(banner).to_contain_text("4 expenses have a vendor without a supplier")
-    banner.get_by_role("button", name="Review and link").click()
+    expect(pg.locator("h1")).to_have_text("Expenses")
+    assert pg.locator(".sup-vendor-banner").count() == 0
+    assert "without a supplier" not in pg.locator("#app").inner_text()
+    pg.goto(pg.url.split("#")[0] + "#/suppliers")
+    expect(pg.get_by_role("button", name="Link vendors from expenses (4)")).to_be_visible()
+    assert problems == []
+    ctx.close()
+
+
+def test_vendor_link_and_adoption_check_then_link(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api, page="suppliers")
+    pg.get_by_role("button", name="Link vendors from expenses (4)").click()
     dlg = pg.locator("#modal-root .modal")
     expect(dlg.locator(".sup-adopt tr")).to_have_count(3)  # header + 2 groups
     expect(dlg.locator("#ad_sup0")).to_have_value("7a1b2c3d")  # best existing supplier of the group
@@ -560,8 +633,8 @@ def test_vendor_banner_and_adoption_check_then_link(browser):
 
 def test_adoption_check_keeps_the_choices_that_link_then_sends(browser):
     api = FakeApi()
-    ctx, pg, problems = open_app(browser, api, page="expenses")
-    pg.locator(".sup-vendor-banner").get_by_role("button", name="Review and link").click()
+    ctx, pg, problems = open_app(browser, api, page="suppliers")
+    pg.get_by_role("button", name="Link vendors from expenses (4)").click()
     dlg = pg.locator("#modal-root .modal")
     expect(dlg.locator("#ad_sup0")).to_have_value("7a1b2c3d")
     dlg.locator("#ad_sup0").select_option("__new__")
@@ -575,23 +648,29 @@ def test_adoption_check_keeps_the_choices_that_link_then_sends(browser):
     calls = api.calls("POST", "suppliers/adopt-vendors")
     assert [c[3]["dry_run"] for c in calls] == [True, False]
     assert calls[0][3]["items"] == calls[1][3]["items"]  # the link sends what the check showed
-    assert calls[0][3]["items"][0] == {"vendors": ["Demo Print Shop GmbH", "demo print shop"], "create": {"name": "Demo Print Studio", "kind": "company"}}
+    assert calls[0][3]["items"][0] == {
+        "vendors": ["Demo Print Shop GmbH", "demo print shop"],
+        "create": {"name": "Demo Print Studio", "kind": "company"},
+    }
     assert problems == []
     ctx.close()
 
 
-def test_no_vendor_banner_when_all_vendors_are_linked(browser):
+def test_no_vendor_link_when_all_vendors_are_linked(browser):
     api = FakeApi()
     api.vendor_suggestions = {"groups": [], "unlinked_expenses": 0}
-    ctx, pg, problems = open_app(browser, api, page="expenses")
-    assert pg.locator(".sup-vendor-banner").count() == 0
+    ctx, pg, problems = open_app(browser, api, page="suppliers")
+    expect(pg.get_by_role("button", name="+ New supplier")).to_be_visible()
+    assert pg.get_by_role("button", name="Link vendors from expenses").count() == 0
     assert problems == []
     ctx.close()
 
 
-def test_employee_gets_no_vendor_banner_and_no_suggestions(browser):
-    # the employee may read projects (the start page needs them); no suppliers write right: no banner, no request
-    api = FakeApi(me={**EMPLOYEE, "permissions": {**EMPLOYEE["permissions"], "projects": {"read": "all", "write": "none"}}})
+def test_employee_gets_no_vendor_link_and_no_suggestions(browser):
+    # the employee may read projects (the start page needs them); no suppliers write right: no link, no request
+    api = FakeApi(
+        me={**EMPLOYEE, "permissions": {**EMPLOYEE["permissions"], "projects": {"read": "all", "write": "none"}}}
+    )
     ctx, pg, problems = open_app(browser, api, page="expenses")
     pg.wait_for_timeout(300)
     assert pg.locator(".sup-vendor-banner").count() == 0
@@ -608,8 +687,10 @@ def test_expense_dialog_links_supplier_allocation_and_reverse_charge(browser):
     dlg = pg.locator("#modal-root .modal")
     expect(dlg.locator("#f_allocation_id")).to_be_hidden()
     expect(dlg.locator("#f_reverse_charge")).to_be_hidden()
-    pg.select_option("#f_supplier_id", "5d1c0aa2")
-    expect(dlg.locator("#f_vendor")).to_have_value("Example Freelance Studio (Demo)")
+    expect(dlg.locator("#f_supplier_id")).to_be_hidden()  # one Vendor field: a vendor named like a supplier links to it
+    pg.fill("#f_vendor", "example freelance studio (demo)")
+    expect(dlg.locator("#f_supplier_id")).to_have_value("5d1c0aa2")
+    expect(dlg.locator("#e_vendor_sup")).to_contain_text("Example Freelance Studio (Demo)")
     pg.wait_for_selector("#f_allocation_id option[value=c04d77e1]", state="attached")
     expect(dlg.locator("#f_allocation_id")).to_be_visible()
     assert api.calls("GET", "finance/commitments")[-1][2]["supplier_id"] == ["5d1c0aa2"]
@@ -619,10 +700,11 @@ def test_expense_dialog_links_supplier_allocation_and_reverse_charge(browser):
     pg.wait_for_selector("#modal-root .modal", state="detached")
     body = api.calls("POST", "expenses")[0][3]
     assert body["supplier_id"] == "5d1c0aa2" and body["allocation_id"] == "c04d77e1" and body["reverse_charge"] is False
-    assert body["vendor"] == "Example Freelance Studio (Demo)"
+    # the server writes the supplier's exact name into `vendor`, so the spelling typed here does not stay
+    assert body["vendor"] == "example freelance studio (demo)"
     # reverse charge supplier: flag proposed, VAT typed as self-assessed amount
     pg.click("[data-a=editExpense]")
-    pg.select_option("#f_supplier_id", "8b2c3d4e")
+    pg.fill("#f_vendor", "Example Cloud Ltd (Demo)")
     expect(pg.locator("#f_reverse_charge")).to_be_checked()
     expect(pg.locator("#f_allocation_id")).to_be_hidden()  # not a subcontractor
     pg.fill("#f_gross", "3091.88")
@@ -638,15 +720,255 @@ def test_expense_dialog_links_supplier_allocation_and_reverse_charge(browser):
     ctx.close()
 
 
+def test_a_vendor_that_is_no_supplier_stays_free_text_and_unlinks(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api, page="expenses")
+    pg.click("[data-a=editExpense]")
+    dlg = pg.locator("#modal-root .modal")
+    pg.fill("#f_vendor", "Demo Print Shop GmbH")
+    expect(dlg.locator("#f_supplier_id")).to_have_value("7a1b2c3d")
+    pg.fill("#f_vendor", "Trattoria Beispiel")
+    expect(dlg.locator("#f_supplier_id")).to_have_value("")
+    expect(dlg.locator("#e_vendor_sup")).to_be_hidden()
+    pg.fill("#f_gross", "23.80")
+    dlg.get_by_role("button", name="Save").click()
+    pg.wait_for_selector("#modal-root .modal", state="detached")
+    body = api.calls("POST", "expenses")[0][3]
+    assert body["vendor"] == "Trattoria Beispiel" and body["supplier_id"] is None
+    assert problems == []
+    ctx.close()
+
+
 def test_expense_dialog_keeps_an_inactive_supplier_selectable(browser):
     inactive = {**SUP_P, "active": False}
     api = FakeApi(suppliers=[SUP_S, inactive])
-    api.expenses = [{"id": "ee000009", "date": "2026-03-01", "vendor": "Demo Print Shop GmbH", "net": 10.0, "vat": 1.9, "vat_rate": 19, "deductible": 100, "supplier_id": "7a1b2c3d", "category": "Software"}]
+    api.expenses = [
+        {
+            "id": "ee000009",
+            "date": "2026-03-01",
+            "vendor": "Demo Print Shop GmbH",
+            "net": 10.0,
+            "vat": 1.9,
+            "vat_rate": 19,
+            "deductible": 100,
+            "supplier_id": "7a1b2c3d",
+            "category": "Software",
+        }
+    ]
     ctx, pg, problems = open_app(browser, api, page="expenses")
     expect(pg.locator("tr[data-id=ee000009]")).to_contain_text("supplier")
     pg.click("tr[data-id=ee000009] td >> nth=0")
     expect(pg.locator("#f_supplier_id")).to_have_value("7a1b2c3d")
     assert pg.locator("#f_supplier_id option[value='7a1b2c3d']").inner_text().endswith("(inactive)")
+    assert problems == []
+    ctx.close()
+
+
+# ---------------------------------------------------------------- vendor combobox
+def open_bill(browser, api=None):
+    api = api or FakeApi()
+    ctx, pg, problems = open_app(browser, api, page="expenses")
+    pg.click("[data-a=editExpense]")
+    return api, ctx, pg, problems, pg.locator("#modal-root .modal")
+
+
+def options(pg):
+    return pg.locator("#modal-root .vc-list li[role=option]")
+
+
+def test_vendor_list_opens_on_focus_and_click_with_names_and_numbers(browser):
+    api, ctx, pg, problems, dlg = open_bill(browser)
+    expect(dlg.locator(".vc-arrow")).to_be_visible()
+    expect(dlg.locator("#f_vendor")).to_have_attribute("role", "combobox")
+    expect(dlg.locator(".vc-list")).to_be_hidden()
+    pg.focus("#f_vendor")
+    expect(dlg.locator(".vc-list")).to_be_visible()
+    expect(options(pg)).to_have_count(3)  # empty field: every active supplier, no add row
+    expect(options(pg).first).to_contain_text("Example Freelance Studio (Demo)")
+    expect(options(pg).first).to_contain_text("L-0003")
+    pg.keyboard.press("Escape")
+    expect(dlg).to_be_visible()
+    expect(dlg.locator(".vc-list")).to_be_hidden()
+    dlg.locator(".vc-arrow").click()  # the arrow opens it, a second click closes it
+    expect(dlg.locator(".vc-list")).to_be_visible()
+    dlg.locator(".vc-arrow").click()
+    expect(dlg.locator(".vc-list")).to_be_hidden()
+    pg.click("#f_vendor")
+    expect(dlg.locator(".vc-list")).to_be_visible()
+    # the list stays inside the dialog and the window
+    lb, db = dlg.locator(".vc-list").bounding_box(), dlg.bounding_box()
+    assert lb["x"] >= db["x"] and lb["x"] + lb["width"] <= db["x"] + db["width"] and lb["y"] + lb["height"] <= 900
+    assert problems == []
+    ctx.close()
+
+
+def test_vendor_list_filters_anywhere_in_the_name_ignoring_case(browser):
+    api, ctx, pg, problems, dlg = open_bill(browser)
+    pg.click("#f_vendor")
+    pg.keyboard.type("PRINT")
+    expect(options(pg)).to_have_count(2)  # the supplier and the add row
+    expect(options(pg).first).to_contain_text("Demo Print Shop GmbH")
+    expect(dlg.locator("#f_supplier_id")).to_have_value("")  # typing alone does not link
+    pg.keyboard.type("x")
+    expect(options(pg)).to_have_count(1)
+    expect(options(pg).first).to_have_text("+ Add as new supplier")
+    assert problems == []
+    ctx.close()
+
+
+def test_vendor_list_keyboard_pick_links_and_enter_does_not_save(browser):
+    api, ctx, pg, problems, dlg = open_bill(browser)
+    pg.fill("#f_gross", "11.90")
+    pg.click("#f_vendor")
+    pg.keyboard.type("cloud")
+    pg.keyboard.press("ArrowDown")
+    expect(options(pg).first).to_have_attribute("aria-selected", "true")
+    pg.keyboard.press("Enter")
+    expect(dlg).to_be_visible()
+    assert api.calls("POST", "expenses") == []  # Enter in the list picks, it does not save
+    expect(dlg.locator("#f_vendor")).to_have_value("Example Cloud Ltd (Demo)")
+    expect(dlg.locator("#f_supplier_id")).to_have_value("8b2c3d4e")
+    expect(dlg.locator("#e_vendor_sup")).to_contain_text("Linked to supplier L-0005 Example Cloud Ltd (Demo)")
+    expect(pg.locator("#f_reverse_charge")).to_be_checked()  # as before: a reverse-charge supplier proposes the flag
+    expect(dlg.locator(".vc-list")).to_be_hidden()
+    pg.keyboard.press("Enter")  # the list is closed: now Enter saves, as everywhere in the dialog
+    pg.wait_for_selector("#modal-root .modal", state="detached")
+    assert api.calls("POST", "expenses")[0][3]["supplier_id"] == "8b2c3d4e"
+    assert problems == []
+    ctx.close()
+
+
+def test_vendor_list_mouse_pick_and_arrow_wraps(browser):
+    api, ctx, pg, problems, dlg = open_bill(browser)
+    pg.click("#f_vendor")
+    pg.keyboard.press("ArrowUp")  # from nothing selected to the last row
+    expect(options(pg).nth(2)).to_have_attribute("aria-selected", "true")
+    options(pg).nth(1).click()
+    expect(dlg.locator("#f_supplier_id")).to_have_value("7a1b2c3d")
+    expect(dlg.locator("#f_vendor")).to_have_value("Demo Print Shop GmbH")
+    pg.fill("#f_vendor", "Trattoria Beispiel")  # anything else is free text again
+    expect(dlg.locator("#f_supplier_id")).to_have_value("")
+    expect(dlg.locator("#e_vendor_sup")).to_be_hidden()
+    assert problems == []
+    ctx.close()
+
+
+def test_add_as_new_supplier_creates_links_and_keeps_the_dialog(browser):
+    api, ctx, pg, problems, dlg = open_bill(browser)
+    pg.click("#f_vendor")
+    pg.keyboard.type("Trattoria Beispiel")
+    expect(options(pg)).to_have_count(1)
+    options(pg).first.click()
+    expect(dlg.locator("#f_supplier_id")).to_have_value("5a5a5a5a")
+    expect(dlg.locator("#e_vendor_sup")).to_contain_text("Linked to supplier Trattoria Beispiel")
+    assert api.calls("POST", "suppliers")[0][3] == {"name": "Trattoria Beispiel", "kind": "company"}
+    pg.click("#f_vendor")  # the new supplier is in the list now
+    expect(options(pg)).to_have_count(4)
+    assert problems == []
+    ctx.close()
+
+
+def test_a_typed_name_alone_never_creates_a_supplier(browser):
+    api, ctx, pg, problems, dlg = open_bill(browser)
+    pg.fill("#f_gross", "23.80")
+    pg.fill("#f_vendor", "Trattoria Beispiel")
+    dlg.get_by_role("button", name="Save").click()
+    pg.wait_for_selector("#modal-root .modal", state="detached")
+    assert api.calls("POST", "suppliers") == []
+    assert api.calls("POST", "expenses")[0][3]["supplier_id"] is None
+    ctx.close()
+
+
+def test_a_failed_create_shows_the_error_and_leaves_the_text(browser):
+    api = FakeApi()
+    api.fail_create = True
+    api, ctx, pg, problems, dlg = open_bill(browser, api)
+    pg.click("#f_vendor")
+    pg.keyboard.type("Trattoria Beispiel")
+    pg.keyboard.press("ArrowDown")
+    pg.keyboard.press("Enter")
+    expect(pg.locator("#toast, .toast").first).to_contain_text("not allowed")
+    expect(dlg.locator("#f_vendor")).to_have_value("Trattoria Beispiel")
+    expect(dlg.locator("#f_supplier_id")).to_have_value("")
+    expect(dlg).to_be_visible()
+    ctx.close()
+
+
+def test_no_add_row_without_the_suppliers_write_right(browser):
+    me = {**BOSS, "permissions": perms(suppliers={"read": "all", "write": "none"})}
+    api, ctx, pg, problems, dlg = open_bill(browser, FakeApi(me=me))
+    pg.click("#f_vendor")
+    pg.keyboard.type("Trattoria Beispiel")
+    expect(dlg.locator(".vc-list")).to_contain_text("No supplier matches")
+    assert pg.locator(".vc-add").count() == 0
+    ctx.close()
+
+
+def test_without_the_suppliers_right_the_vendor_is_a_plain_field(browser):
+    me = {
+        **BOSS,
+        "permissions": perms(
+            suppliers={"read": "none", "write": "none"}, procurement={"read": "none", "write": "none"}
+        ),
+    }
+    api, ctx, pg, problems, dlg = open_bill(browser, FakeApi(me=me))
+    assert pg.locator(".vc").count() == 0 and pg.locator("#f_vendor").get_attribute("role") is None
+    ctx.close()
+
+
+def test_a_hostile_supplier_name_is_shown_as_text(browser):
+    evil = {**SUP_P, "id": "6e6e6e6e", "name": "<img src=x onerror=window.__pwn=1>Evil", "supplier_no": "<b>9</b>"}
+    api, ctx, pg, problems, dlg = open_bill(browser, FakeApi(suppliers=[SUP_S, evil]))
+    pg.click("#f_vendor")
+    expect(options(pg).nth(1)).to_contain_text("<img src=x onerror=window.__pwn=1>Evil")
+    assert pg.locator(".vc-list img, .vc-list b").count() == 0
+    options(pg).nth(1).click()
+    expect(dlg.locator("#e_vendor_sup")).to_contain_text("<b>9</b>")
+    assert pg.evaluate("window.__pwn === undefined")
+    ctx.close()
+
+
+def test_a_linked_inactive_supplier_stays_linked_and_listed(browser):
+    inactive = {**SUP_P, "active": False}
+    api = FakeApi(suppliers=[SUP_S, inactive])
+    api.expenses = [
+        {
+            "id": "ee000009",
+            "date": "2026-03-01",
+            "vendor": "Demo Print Shop GmbH",
+            "net": 10.0,
+            "vat": 1.9,
+            "vat_rate": 19,
+            "deductible": 100,
+            "supplier_id": "7a1b2c3d",
+            "category": "Software",
+        }
+    ]
+    ctx, pg, problems = open_app(browser, api, page="expenses")
+    pg.click("tr[data-id=ee000009] td >> nth=0")
+    expect(pg.locator("#f_supplier_id")).to_have_value("7a1b2c3d")
+    expect(pg.locator("#e_vendor_sup")).to_contain_text("Demo Print Shop GmbH")
+    pg.click("#f_vendor")
+    expect(options(pg)).to_have_count(2)  # the linked name shows every supplier
+    expect(options(pg).nth(1)).to_contain_text("(inactive)")
+    ctx.close()
+
+
+def test_a_draft_vendor_that_matches_a_supplier_links_when_the_dialog_opens(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api, page="expenses")
+    pg.evaluate(
+        "expenseDialog({date: '2026-03-01', vendor: 'demo print shop gmbh', description: '', category: 'Other', deductible: 100, vat_rate: 19, gross: 11.9})"
+    )
+    pg.wait_for_selector("#f_vendor")
+    expect(pg.locator("#f_supplier_id")).to_have_value("7a1b2c3d")
+    expect(pg.locator("#e_vendor_sup")).to_contain_text("Linked to supplier L-0004 Demo Print Shop GmbH")
+    pg.evaluate("closeModal()")
+    pg.evaluate(
+        "expenseDialog({date: '2026-03-01', vendor: 'Unknown Kiosk', category: 'Other', deductible: 100, vat_rate: 19, gross: 5})"
+    )
+    pg.wait_for_selector("#f_vendor")
+    expect(pg.locator("#f_supplier_id")).to_have_value("")
     assert problems == []
     ctx.close()
 
@@ -701,9 +1023,14 @@ def test_accept_capacity_offer_shows_server_result_and_warnings_once(browser):
     expect(dlg.locator("#ac_result")).to_contain_text("6.400,00")
     expect(dlg.locator("#ac_result")).to_contain_text("Demo project P")
     expect(dlg.locator("#ac_result")).to_contain_text("02.03.2026 – 27.03.2026")
-    expect(dlg.locator(".proc-warnings li[data-code='allocation.no_demand']")).to_contain_text("nothing is planned there")
+    expect(dlg.locator(".proc-warnings li[data-code='allocation.no_demand']")).to_contain_text(
+        "nothing is planned there"
+    )
     assert pg.locator("#plnWarn").count() == 0  # the dialog shows the warnings: no second banner behind it
-    assert api.calls("POST", "incoming-offers/9b3e51c7/accept")[0][3] == {"confirm_warnings": [], "project_id": "a1b2c3d4"}
+    assert api.calls("POST", "incoming-offers/9b3e51c7/accept")[0][3] == {
+        "confirm_warnings": [],
+        "project_id": "a1b2c3d4",
+    }
     dlg.locator("#ac_close").click()
     expect(pg.locator("h1 .pill")).to_have_text("accepted")
     expect(pg.locator(".proc-alloc")).to_contain_text("6.400,00")
@@ -729,7 +1056,9 @@ def test_accept_needs_confirmation_of_the_weekly_hours_warning(browser):
     dlg.locator("#ac_submit").click()
     expect(dlg.locator("#ac_result")).to_be_visible()
     reqs = api.calls("POST", "incoming-offers/9b3e51c7/accept")
-    assert reqs[0][3]["confirm_warnings"] == [] and reqs[1][3]["confirm_warnings"] == ["allocation.exceeds_weekly_hours"]
+    assert reqs[0][3]["confirm_warnings"] == [] and reqs[1][3]["confirm_warnings"] == [
+        "allocation.exceeds_weekly_hours"
+    ]
     expect(dlg.locator(".proc-warnings li[data-code='allocation.exceeds_weekly_hours']")).to_have_count(1)
     assert problems == []
     ctx.close()
@@ -854,13 +1183,47 @@ def test_accepted_offer_edit_sends_only_the_allowed_changes(browser):
 
 
 OFFER_IN_FIELDS = {
-    "supplier_id", "reference", "title", "received_on", "valid_until", "lines", "vat_rate", "vat_mode", "plan",
-    "project_id", "contract_id", "attachment", "decision_note", "notes",
+    "supplier_id",
+    "reference",
+    "title",
+    "received_on",
+    "valid_until",
+    "lines",
+    "vat_rate",
+    "vat_mode",
+    "plan",
+    "project_id",
+    "contract_id",
+    "attachment",
+    "decision_note",
+    "notes",
 }
 SUPPLIER_IN_FIELDS = {
-    "name", "supplier_no", "kind", "active", "street", "zip", "city", "country", "vat_id", "tax_number", "vat_mode", "contact",
-    "email", "phone", "notes", "iban", "bic", "bank_name", "payment_terms_days", "payment_terms_note", "tags", "weekly_hours",
-    "workdays", "rate", "unavailable",
+    "name",
+    "supplier_no",
+    "kind",
+    "active",
+    "street",
+    "zip",
+    "city",
+    "country",
+    "vat_id",
+    "tax_number",
+    "vat_mode",
+    "contact",
+    "email",
+    "phone",
+    "notes",
+    "iban",
+    "bic",
+    "bank_name",
+    "payment_terms_days",
+    "payment_terms_note",
+    "tags",
+    "weekly_hours",
+    "workdays",
+    "rate",
+    "unavailable",
 }
 
 
@@ -920,7 +1283,12 @@ def test_accountant_reads_offers_without_buttons(browser):
     api = FakeApi(me=ACCOUNTANT)
     ctx, pg, problems = open_app(browser, api, page="incoming/9b3e51c7")
     expect(pg.locator("h1")).to_contain_text("ANG-2026-117")
-    assert pg.locator("[data-a=offAccept], [data-a=offReject], [data-a=offEdit], [data-a=offDelete], [data-a=offReview]").count() == 0
+    assert (
+        pg.locator(
+            "[data-a=offAccept], [data-a=offReject], [data-a=offEdit], [data-a=offDelete], [data-a=offReview]"
+        ).count()
+        == 0
+    )
     pg.goto(f"{ORIGIN}/#/incoming")
     expect(pg.locator("h1")).to_contain_text("Incoming offers")
     assert pg.locator("[data-a=offNew]").count() == 0  # the accountant does not record offers
@@ -973,7 +1341,12 @@ def test_customer_dominance_hint_is_dismissible(browser):
             "field": None,
             "confirmable": False,
             "message": "Demo Customer A made 83 % of the revenue of the last 12 months.",
-            "details": {"customer_id": "c0ffee01", "customer_name": "Demo Customer A", "share_percent": 83.0, "to": "2026-03-02"},
+            "details": {
+                "customer_id": "c0ffee01",
+                "customer_name": "Demo Customer A",
+                "share_percent": 83.0,
+                "to": "2026-03-02",
+            },
         }
     ]
     ctx, pg, problems = open_app(browser, api, page="money")

@@ -8,11 +8,10 @@ from pydantic import BaseModel
 
 from permita38.api.deps import Needs, ServicesDep
 from permita38.core.filetypes import INLINE_TYPES
-from permita38.core.filetypes import magic_ok as _magic_ok
+from permita38.core.uploads import MAX_UPLOAD, check_upload
 
 router = APIRouter(prefix="/attachments", tags=["files"])
 routers = [router]
-MAX_UPLOAD = 15 * 1024 * 1024
 
 # Attachment responses may only be framed by the same origin and cannot run scripts or load anything external.
 # No `sandbox` directive: it would disable the browser's PDF viewer.
@@ -31,12 +30,7 @@ def _quoted(name: str) -> str:
 @router.post("", response_model=Uploaded, summary="upload a bill, photo or logo")
 def upload(file: UploadFile, _: Annotated[dict, Needs("attachments", "write")], services: ServicesDep):
     blob = file.file.read(MAX_UPLOAD + 1)
-    if len(blob) > MAX_UPLOAD:
-        raise HTTPException(413, "File too large (max 15 MB)")
-    filename = file.filename or "file.bin"
-    ext = os.path.splitext(filename)[1].lower()
-    if ext in INLINE_TYPES and not _magic_ok(ext, blob):
-        raise HTTPException(415, f"The file content does not match its {ext} extension")
+    filename, _ext = check_upload(file.filename, blob)
     return {"name": services.store.save_attachment(filename, blob)}
 
 

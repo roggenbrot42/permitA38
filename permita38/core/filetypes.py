@@ -23,4 +23,11 @@ def magic_ok(ext: str, blob: bytes) -> bool:
         return blob[:4] == b"RIFF" and blob[8:12] == b"WEBP"
     if ext == ".gif":
         return blob.startswith(b"GIF8")
+    if ext == ".xml":
+        head = blob[:4096].lstrip(b"\xef\xbb\xbf \t\r\n")
+        return (
+            head.startswith(b"<")
+            or blob[:2] in (b"\xff\xfe", b"\xfe\xff")
+            or blob[:4] in (b"<\x00?\x00", b"\x00<\x00?")
+        )
     return True
