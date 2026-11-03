@@ -134,7 +134,9 @@ either (they are gone, see above). For a caller who is not the boss **or** is au
 (`rights.is_token`):
 
 * `tax_actual` and `tax_projected` contain **only** `total`, `rate`, `gewst`, `kst` and `redacted: true`;
-* `tax_owed` and `reserve` (see "Integration") contain **only** `gewst`, `kst` and `redacted: true`;
+* `tax_owed` (see "Integration") contains **only** `as_of`, `gewst`, `kst` and `redacted: true`; `reserve` contains
+  **only** `monthly`, `months_left` and `redacted: true` (`monthly` is visible anyway through the months'
+  `tax_set_aside`);
 * `social_year`, `take_home` and the months' `social` / `tax_set_aside` / `take_home` stay (aggregates).
 
 The boss in a session gets the full breakdown. The redaction is a function `calc.redact_tax(result) -> dict` applied
@@ -472,14 +474,15 @@ remaining 6 147 − 1 885 = **4 262.00**, monthly **532.75**.
     (Vorauszahlungen) are not taken into account."
   * "Monthly reserve" line in the same card group: "Set aside <monthly> per month for the remaining <months_left>
     months (<remaining> of <due_year> still to reserve)"; past years show "Year closed" instead.
-  * Redacted response: totals only (Tax burden: total, Gewerbesteuer, KSt; Currently owed: Gewerbesteuer, KSt), no
-    expandable list. Link "Edit personal tax profile" for the boss.
+  * Redacted response: totals only (Tax burden: total, Gewerbesteuer, KSt; Currently owed: Gewerbesteuer, KSt;
+    reserve line: monthly and months left), no expandable list. Link "Edit personal tax profile" for the boss.
 
 ## Work packages
 
 Implementer: **Sonnet** (maintainer instruction overrides the Haiku default). One package = one branch = one pull
 request, at most 6 files and about 300 changed lines (AGENTS.md "Task size"). Order: B1 → B2a → B2b and A1 → A2 → A3
-can run in parallel; B3 needs A2 and B2b; A4 needs A1 and A3; A5 needs A3; A6 needs B3. All packages ship in one
+can run in parallel; B3 needs A2 and B2b; A4 needs A1 and A3; A5 needs A4 (it extends `web/taxprofile.js`); A6
+needs B3 and A4 (both own `web/app2.js`). All packages ship in one
 release. Every prompt carries the four lines below verbatim (`Contract`, `Files`, `Stop`, `Report`), with
 `Contract: docs/specs/tax-burden-and-settings.md, <section>`.
 
@@ -577,11 +580,13 @@ release. Every prompt carries the four lines below verbatim (`Contract`, `Files`
 **A6 – Money & Taxes cards.** Tier **Standard**.
 * Contract: "UI" (Money & Taxes), "Integration in `calc.finance`" (field names).
 * Files: `web/app2.js`, `tests/web/test_money_tax_ui.py` (new).
-* Tests: social block, "Currently owed" card with F1 numbers from a seeded data folder, refund wording when owed is
-  negative, monthly reserve line, redacted view for the accountant.
+* Tests: the live server uses `date.today()` (no clock pinning in `tests/web/`), so the test seeds a data folder,
+  reads `GET /api/finance` and asserts that the rendered social block, "Currently owed" card and monthly reserve line
+  show exactly the response values (formatted); refund wording when `owed` is negative; the accountant sees only
+  Gewerbesteuer/KSt and the reserve line, no expandable list. The F1/F2 numbers are pinned in B3's backend tests.
 * Stop / Report: as A1.
 
-## Open questions for the tax adviser
+## Open questions for the maintainer / tax adviser
 
 1. **Rates TO VERIFY**: Sachsen employee care share 2.3 % (2026); half voluntary ALV contribution 51.42 vs 51.43;
    rounding of the Gewerbesteuer-Messbetrag; truncation of church tax to cents; all 2025 values except tariff, Soli
