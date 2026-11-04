@@ -707,6 +707,22 @@ def test_flight_taxi_and_other_dialogs_store_their_fields(browser):
     ctx.close()
 
 
+def test_a_gift_item_shows_the_limit_hint_and_is_saved_with_its_category(browser):
+    api = WizardApi(ME, copy.deepcopy(CONTRACT_TRIP))
+    ctx, pg, problems = open_app(browser, api)
+    open_trip(pg, "t7f3k2m9qa", "expenses")
+    pg.select_option("#t_add_item", "gift")
+    pg.wait_for_selector("#f_text")
+    expect(pg.locator("#modal-root .modal")).to_contain_text("50 €")
+    pg.fill("#f_text", "Demo partner, project kickoff")
+    pg.fill("#f_date", "2026-11-10")
+    pg.click("#m-save")
+    expect(pg.locator("tr[data-item]", has_text="Demo partner")).to_have_count(1)
+    assert api.trip["items"][-1]["category"] == "gift"
+    assert problems == []
+    ctx.close()
+
+
 def test_a_car_mileage_row_is_listed_and_saved_with_the_trip(browser):
     api = WizardApi(ME, copy.deepcopy(CONTRACT_TRIP))
     ctx, pg, problems = open_app(browser, api)
