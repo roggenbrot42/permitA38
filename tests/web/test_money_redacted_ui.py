@@ -7,7 +7,9 @@ import pytest
 
 pytest.importorskip("playwright.sync_api")
 
-from tests.web.test_impressum_prefill import PASSWORD, Server, chromium  # noqa: E402,F401  (shared harness)
+from tests.web.test_impressum_prefill import PASSWORD, Server, chromium  # noqa: E402  (shared harness)
+
+_FIXTURES = (chromium,)  # the pytest fixture is registered by importing it here; referenced so the import is used
 
 
 def de_eur(n):

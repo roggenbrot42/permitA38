@@ -252,3 +252,11 @@ def test_sub_cent_input_is_clamped_so_no_line_has_a_negative_net():
     for (g, _), (n, v) in zip([(D("0.0099"), 19)] * 4, out, strict=True):
         assert D(0) <= v <= g
         assert n == g - v and n >= 0
+
+
+def test_invalid_number_is_not_logged_with_its_value(caplog):
+    sentinel = "SENTINEL-secret-123x"
+    with caplog.at_level("DEBUG"):
+        assert dec(sentinel, default=Decimal("0")) == Decimal("0")
+    assert caplog.records
+    assert all(sentinel not in r.getMessage() and sentinel not in str(r.args) for r in caplog.records)
