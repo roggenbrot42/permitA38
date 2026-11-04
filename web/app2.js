@@ -331,7 +331,7 @@ A.docToInvoice = async () => { await persistDoc(); const r = await api('POST', `
 A.billTimeInto = () => A.billTime({ dataset: { cust: DOC.customer_id } });
 
 /* ================= EXPENSES ================= */
-const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & coworking', 'Travel', 'Transportation', 'Accommodation', 'Material', 'Business meals', 'Marketing', 'Insurance', 'Phone & internet', 'Training', 'Subcontractors', 'Fees & bank', 'Other'];
+const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & coworking', 'Travel', 'Transportation', 'Accommodation', 'Material', 'Business meals', 'Gifts', 'Marketing', 'Insurance', 'Phone & internet', 'Training', 'Subcontractors', 'Fees & bank', 'Other'];
 // The two tiles on the Expenses page, as /api/finance counts them (core/calc.py `finance`): the cost on the paid date under
 // `eur` (empty = bill date) and on the bill date under `accrual`, the input VAT always on the bill date; a business meal
 // counts its own deductible shares line by line; a Kleinunternehmer's cost is the gross and has no input VAT.

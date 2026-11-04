@@ -124,6 +124,8 @@ CONTRACT_TRIP = {
     "allowance_total": 56.0,
     "mileage_km": 288.5,
     "mileage_total": 86.55,
+    "items_actual_total": 120.0,
+    "items_expected_total": 150.0,
     "rules_version": "2025-12-05",
     "days": [DAY_09, DAY_10, DAY_11],
     "bills": {"count": 2, "net": 180.0, "vat": 12.6},
@@ -304,8 +306,9 @@ def test_list_shows_period_destination_purpose_and_figures(browser):
     row = pg.locator("table.trip-list tr", has_text="Workshop at the customer's site")
     expect(row).to_contain_text("09.11.2026 – 11.11.2026")
     expect(row).to_contain_text("Hamburg (Germany)")
-    expect(row).to_contain_text("56,00")
-    expect(row).to_contain_text("288,5 km")
+    expect(row).to_contain_text("206,55 € / 236,55 €")  # budget: actual / estimate, both with the mileage cost 86,55
+    expect(row).not_to_contain_text("288,5 km")  # allowance and mileage have no column any more
+    expect(pg.locator("table.trip-list th")).not_to_contain_text(["Allowance", "Mileage"])
     expect(row).to_contain_text("180,00")
     expect(row).to_contain_text("Draft")
     expect(pg.locator("[data-a=newTrip]")).to_have_count(1)

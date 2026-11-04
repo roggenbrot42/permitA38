@@ -4,7 +4,12 @@ planned items with their ids, ``trip_item_id`` on bills, the planning totals and
 Expected figures are hand-computed in the comments; nothing here calls the code under test to compute an expectation.
 """
 
+import re
+from pathlib import Path
+
 from .test_trips_api import _pdf_text, make_trip, trip_body
+
+WEB = Path(__file__).parents[2] / "web"
 
 LEG = {"depart": "2026-11-09T08:30", "from": "Berlin", "to": "Hamburg", "mode": "train"}
 
@@ -106,10 +111,31 @@ def test_item_without_expected_is_allowed(boss_client):
     assert "expected" not in trip["items"][0]
 
 
-def test_item_category_is_one_of_the_five_types(boss_client):
+def test_item_category_is_one_of_the_known_types(boss_client):
     assert boss_client.post("/api/trips", json=trip_body(items=[item(category="food")])).status_code == 422
     assert boss_client.post("/api/trips", json=trip_body(items=[item(category="car")])).status_code == 422
-    for category in ("hotel", "train", "flight", "taxi", "other"):
+    for category in (
+        "hotel",
+        "train",
+        "flight",
+        "taxi",
+        "other",
+        "meals",
+        "parking",
+        "toll",
+        "rental_car",
+        "fuel",
+        "local_transport",
+        "baggage",
+        "seat_booking",
+        "visa",
+        "event_ticket",
+        "phone",
+        "insurance",
+        "tips",
+        "fees",
+        "gift",
+    ):
         assert boss_client.post("/api/trips", json=trip_body(items=[item(category=category)])).status_code == 200
 
 
@@ -393,3 +419,18 @@ def test_hundred_items_get_a_hundred_unique_ids(boss_client):
     ids = [i["id"] for i in trip["items"]]
     assert len(ids) == 100
     assert len(set(ids)) == 100
+
+
+def test_web_item_types_labels_and_expense_categories_are_consistent():
+    trips = (WEB / "trips.js").read_text(encoding="utf-8")
+    cats = re.search(r"const EXP_CATS = \[(.*?)\];", (WEB / "app2.js").read_text(encoding="utf-8")).group(1)
+    exp = set(re.findall(r"'([^']+)'", cats))
+
+    def block(name: str) -> str:
+        return re.search(rf"const {name} = (.*?);\n", trips, re.S).group(1)
+
+    types = set(re.findall(r"\['(\w+)', '", block("TRIP_ITEM_TYPES"))) - {"car"}  # car is a mileage row, not an item
+    labels = set(re.findall(r"(\w+): '", block("TRIP_ITEM_LABEL")))
+    mapping = dict(re.findall(r"(\w+): '([^']+)'", block("TRIP_ITEM_CATEGORY")))
+    assert types == labels == set(mapping)
+    assert set(mapping.values()) <= exp

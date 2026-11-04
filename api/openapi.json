@@ -20546,7 +20546,22 @@
               "train",
               "flight",
               "taxi",
-              "other"
+              "other",
+              "meals",
+              "parking",
+              "toll",
+              "rental_car",
+              "fuel",
+              "local_transport",
+              "baggage",
+              "seat_booking",
+              "visa",
+              "event_ticket",
+              "phone",
+              "insurance",
+              "tips",
+              "fees",
+              "gift"
             ],
             "title": "Category"
           },
