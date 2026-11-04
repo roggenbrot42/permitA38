@@ -54,6 +54,7 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 | **Gantt chart** for the overall plan and project subtasks | later |
 | **Settings split into business and user**: today one page mixes business data, personal user settings, tax details, company type and hourly rates | maintainer request, later; spec: [`specs/tax-burden-and-settings.md`](specs/tax-burden-and-settings.md) (part A) |
 | **Real tax burden estimate** for Freiberufler and Gewerbetreibende: income tax, trade tax, and health care and pension from the known percentages, instead of a flat reserve | maintainer request, later; spec: [`specs/tax-burden-and-settings.md`](specs/tax-burden-and-settings.md) (part B); needs a tax adviser check |
+| **Tax adviser review checklist**: rates and rules of the tax estimate that still need a professional confirmation | [`tax-adviser-review.md`](tax-adviser-review.md) |
 
 ## v0.4.0-alpha.5 (bugfix only)
 

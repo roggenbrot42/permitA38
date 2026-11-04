@@ -37,3 +37,5 @@ assessment*. Hints never block saving.
 
 Capital gains, foreign income, loss carry-forwards, the spouse's church tax and individual special cases. Rates of a
 year that are not yet confirmed are listed with the estimate.
+
+Rates and rules that still need a professional review: see [`docs/tax-adviser-review.md`](tax-adviser-review.md).
