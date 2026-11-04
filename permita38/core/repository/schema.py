@@ -289,6 +289,20 @@ TABLES: dict[str, Table] = {
                 Index("idx_receipt_scans_expense_id", ("expense_id",)),
             ),
         ),
+        # scanned old offers and invoices (docs/specs/document-scan.md)
+        Table(
+            "document_scans",
+            _cols(
+                _BASE + "status:str sha256:str doc_key:str attachment:str filename:str engine:str kind:str draft:json "
+                "doc:json flags:json record_coll:str record_id:str batch_id:str created_by:id" + _EXTRA
+            ),
+            (
+                Index("idx_document_scans_sha256", ("sha256",), unique=True),
+                Index("idx_document_scans_status", ("status",)),
+                Index("idx_document_scans_doc_key", ("doc_key",)),
+                Index("idx_document_scans_record_id", ("record_id",)),
+            ),
+        ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
 }
@@ -306,6 +320,7 @@ INTERNAL_COLLECTIONS = [
     "calendar_sources",
     "calendar_events",
     "receipt_scans",
+    "document_scans",
 ]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]

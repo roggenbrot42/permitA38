@@ -22,6 +22,7 @@ from .routers import (
     auth,
     calendars,
     data_transfer,
+    document_scans,
     files,
     finance,
     health,
@@ -79,6 +80,7 @@ def all_routers() -> list:
         data_transfer,
         tokens,
         receipts,
+        document_scans,
     )
     return [router for module in modules for router in module.routers]
 

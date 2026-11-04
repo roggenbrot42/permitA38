@@ -526,6 +526,72 @@ class ReceiptScan(Record):
     created_by: str | None = None
 
 
+_SCAN_RATES = (0, 5, 7, 16, 19)
+ScanQty = Annotated[Decimal, Field(ge=-v.MAX_QTY, le=v.MAX_QTY, max_digits=18, decimal_places=6)]
+ScanPrice = Annotated[Decimal, Field(ge=-v.MAX_MONEY, le=v.MAX_MONEY, max_digits=18, decimal_places=6)]
+
+
+class DocumentScanLineIn(v.StrictRecord):
+    description: Annotated[str, StringConstraints(min_length=1, max_length=2000)]
+    quantity: ScanQty
+    unit: Annotated[str, StringConstraints(max_length=30)] | None = None
+    price: ScanPrice
+
+
+class DocumentScanCustomerIn(v.StrictRecord):
+    name: v.Name
+    street: v.Short | None = None
+    zip: Annotated[str, StringConstraints(max_length=20)] | None = None
+    city: v.Short | None = None
+    country: Annotated[str, StringConstraints(max_length=100)] | None = None
+    vat_id: Annotated[str, StringConstraints(max_length=30)] | None = None
+    email: Annotated[str, StringConstraints(max_length=254)] | None = None
+
+
+class DocumentScanConfirmIn(v.StrictRecord):
+    """Adding a scanned old offer or invoice (docs/specs/document-scan.md): the values the user checked."""
+
+    kind: Literal["invoice", "offer"]
+    number: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)]
+    date: v.ISODate
+    due_date: v.OptDate = None
+    valid_until: v.OptDate = None
+    service_from: v.OptDate = None
+    service_to: v.OptDate = None
+    customer_id: v.OptId = None
+    customer: DocumentScanCustomerIn | None = None
+    vat_rate: Annotated[Decimal, Field(ge=0, le=100, max_digits=6, decimal_places=2)]
+    lines: Annotated[list[DocumentScanLineIn], Field(min_length=1, max_length=200)]
+    accept_totals_mismatch: bool = False  # needed when the lines do not give the printed totals
+
+    @model_validator(mode="after")
+    def _check(self):
+        if (self.customer_id is None) == (self.customer is None):
+            raise ValueError("give either customer_id or customer")
+        if self.vat_rate not in _SCAN_RATES:
+            raise ValueError("vat_rate must be one of 0, 5, 7, 16 or 19")
+        v.check_period(self.service_from, self.service_to, "service period end")
+        return self
+
+
+class DocumentScan(Record):
+    """A scanned old offer or invoice: a flagged one is not a document until it is added (lenient response model)."""
+
+    status: str = "flagged"  # flagged | added | discarded | undone
+    kind: str | None = None
+    attachment: str | None = None
+    filename: str | None = None
+    engine: str | None = None
+    draft: dict | None = None
+    doc: dict | None = None
+    flags: list | None = None
+    notes: list | None = None
+    record_coll: str | None = None
+    record_id: str | None = None
+    batch_id: str | None = None
+    created_by: str | None = None
+
+
 class LineIn(v.CheckedBody):
     model_config = ConfigDict(extra="allow")
     description: v.Desc = ""

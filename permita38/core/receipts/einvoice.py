@@ -8,10 +8,11 @@ parsing, in every encoding, and only the standard library parser is used.
 import codecs
 import re
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from xml.parsers import expat
 
-from permita38.core.receipts.extraction import Adjustment, Extraction, Item, VatGroup
+from permita38.core.receipts.extraction import Adjustment, Extraction, Item, Party, VatGroup  # noqa: F401  (Party is re-exported)
 
 MAX_XML_BYTES = 20_000_000
 _LIMIT = Decimal("1e15")
@@ -334,4 +335,74 @@ def parse_einvoice(data: bytes) -> Extraction:
         return _ubl(root)
     if root.tag == "CrossIndustryInvoice":
         return _cii(root)
+    raise EInvoiceError("not_an_invoice")
+
+
+# ---- buyer and document type (docs/specs/document-scan.md, "Reading" rule 9) -------------------------------------
+
+_PARTY_CAP = 200
+
+
+@dataclass
+class EInvoiceDoc:
+    """``parse_einvoice`` plus what an offer or invoice scan needs: the UNTDID 1001 type code and the buyer."""
+
+    extraction: Extraction
+    type_code: str | None  # "380" invoice, "381" credit note, "384" correction; a UBL CreditNote without code is "381"
+    buyer: Party
+
+
+def _short(value: str | None) -> str | None:
+    return value[:_PARTY_CAP] if value else None
+
+
+def _ubl_buyer(root: ET.Element) -> Party:
+    party = _find(root, "AccountingCustomerParty", "Party")
+    vat = None
+    for ts in _kids(party, "PartyTaxScheme"):
+        if (_text(ts, "TaxScheme", "ID") or "VAT").upper() == "VAT":
+            vat = _text(ts, "CompanyID")
+            break
+    return Party(
+        name=_short(_text(party, "PartyLegalEntity", "RegistrationName") or _text(party, "PartyName", "Name")),
+        street=_short(_text(party, "PostalAddress", "StreetName")),
+        zip=_short(_text(party, "PostalAddress", "PostalZone")),
+        city=_short(_text(party, "PostalAddress", "CityName")),
+        country=_short(_text(party, "PostalAddress", "Country", "IdentificationCode")),
+        vat_id=_short(vat),
+        email=_short(_text(party, "Contact", "ElectronicMail")),
+    )
+
+
+def _cii_buyer(root: ET.Element) -> Party:
+    trade = _find(root, "SupplyChainTradeTransaction")
+    buyer = _find(trade, "ApplicableHeaderTradeAgreement", "BuyerTradeParty")
+    vat = None
+    for reg in _kids(buyer, "SpecifiedTaxRegistration"):
+        node = _find(reg, "ID")
+        if node is not None and (node.get("schemeID") or "VA").upper() == "VA":
+            vat = (node.text or "").strip() or None
+            break
+    return Party(
+        name=_short(_text(buyer, "Name")),
+        street=_short(_text(buyer, "PostalTradeAddress", "LineOne")),
+        zip=_short(_text(buyer, "PostalTradeAddress", "PostcodeCode")),
+        city=_short(_text(buyer, "PostalTradeAddress", "CityName")),
+        country=_short(_text(buyer, "PostalTradeAddress", "CountryID")),
+        vat_id=_short(vat),
+        email=_short(
+            _text(buyer, "DefinedTradeContact", "EmailURIUniversalCommunication", "URIID")
+            or _text(buyer, "URIUniversalCommunication", "URIID")
+        ),
+    )
+
+
+def read_einvoice(data: bytes) -> EInvoiceDoc:
+    """Like ``parse_einvoice`` (same ``Extraction``), and also the buyer party and the document type code."""
+    root = parse_xml_safely(data)
+    if root.tag in ("Invoice", "CreditNote"):
+        code = "381" if root.tag == "CreditNote" else _text(root, "InvoiceTypeCode")
+        return EInvoiceDoc(_ubl(root), code, _ubl_buyer(root))
+    if root.tag == "CrossIndustryInvoice":
+        return EInvoiceDoc(_cii(root), _text(_find(root, "ExchangedDocument"), "TypeCode"), _cii_buyer(root))
     raise EInvoiceError("not_an_invoice")

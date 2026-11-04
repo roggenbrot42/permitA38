@@ -32,6 +32,7 @@ NO_UPGRADE_NEEDED: dict[str, str] = {
     "c6d8d0be": "0012-suppliers: adds tables and nullable expense columns; absent means no supplier",
     "f12b52ff": "0013-trip_item_id: adds a nullable expense column; absent means an unplanned bill",
     "f3fcc516": "0014-receipt_scans: adds a table and nullable expense columns; absent paid_on means paid on the bill date",
+    "2fe799c1": "0015-document_scans: adds a table; without rows no old document was scanned",
 }
 
 

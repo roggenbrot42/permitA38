@@ -8,14 +8,12 @@ write anything if a single row is an error (all-or-nothing).
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import zipfile
 import zlib
 from dataclasses import dataclass, field
 from decimal import Decimal
-from difflib import SequenceMatcher
-from typing import Any, Callable
+from typing import Any
 
 from permita38.core.errors import ServiceError
 from permita38.core.money import dec, line_amount, q2, to_float, vat_amount
@@ -26,6 +24,23 @@ from permita38.core.settings import effective_settings
 
 from . import values as V
 from .mapping import auto_map, parse_mapping_file
+from .shared import (
+    FUZZY_MATCH,
+    IMPORT_HOOKS,
+    text_or_none,
+)
+from .shared import (
+    CustomerIndex as _CustomerIndex,
+)
+from .shared import (
+    customer_key as _customer_key,
+)
+from .shared import (
+    customer_record as _customer_record,
+)
+from .shared import (
+    digest as _digest,
+)
 from .tables import Table, check_size, read_table
 from .xlsx_reader import XlsxError, open_guarded_zip
 
@@ -33,16 +48,7 @@ KINDS = {"invoices": "invoices", "offers": "offers", "customers": "customers", "
 DOC_KINDS = ("invoices", "offers")
 ALLOWED_STATUS = {"invoices": ("draft", "sent", "paid", "cancelled"),
                   "offers": ("draft", "sent", "accepted", "rejected")}  # fmt: skip
-FUZZY_MATCH = 0.9
 MAX_PDF_BYTES = 20 * 1024 * 1024
-LEGAL_FORMS = {"gmbh", "ag", "kg", "ug", "ohg", "gbr", "mbh", "co", "e", "k", "se", "ev"}
-_EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,20}$")
-
-
-#: Extension point for the accounting module (not implemented yet): every hook is called inside the import
-#: transaction with (collection, saved record) for each imported document or expense, and must raise to abort it.
-#: Hooks are registered at start-up: ``importer.service.IMPORT_HOOKS.append(fn)``.
-IMPORT_HOOKS: list[Callable[[str, dict], None]] = []
 
 
 @dataclass
@@ -712,100 +718,8 @@ def _note_similar(out: _Outcome) -> None:
         )
 
 
-def text_or_none(value, limit: int, what: str) -> str | None:
-    return V.text(value, limit, what)
-
-
 def text_or_empty(value) -> str:
     return "" if V.is_blank(value) else str(value).strip()
-
-
-def _normalized_name(name: str, strip_legal: bool = True) -> str:
-    words = re.sub(r"[^a-z0-9äöüß]+", " ", (name or "").casefold()).split()
-    while strip_legal and words and words[-1] in LEGAL_FORMS:
-        words.pop()
-    return " ".join(words)
-
-
-def _customer_key(rec: dict) -> str:
-    return (
-        rec.get("vat_id") or rec.get("tax_number") or rec.get("email") or rec.get("customer_no") or rec.get("name", "")
-    )
-
-
-def _customer_record(values: dict, required: bool = False) -> dict:
-    name = text_or_none(values.get("name", values.get("customer_name")), 200, "customer name")
-    rec: dict[str, Any] = {
-        "name": name,
-        "customer_no": text_or_none(values.get("customer_no"), 60, "customer number"),
-        "vat_id": (text_or_none(values.get("vat_id"), 30, "VAT ID") or "").replace(" ", "").upper() or None,
-        "tax_number": text_or_none(values.get("tax_number"), 30, "tax number"),
-        "email": (text_or_none(values.get("email"), 254, "email") or "").lower() or None,
-        "phone": text_or_none(values.get("phone"), 60, "phone"),
-        "street": text_or_none(values.get("street"), 200, "street"),
-        "zip": text_or_none(values.get("zip"), 20, "postal code"),
-        "city": text_or_none(values.get("city"), 200, "city"),
-        "country": text_or_none(values.get("country"), 100, "country"),
-        "contact": text_or_none(values.get("contact"), 200, "contact"),
-        "notes": text_or_none(values.get("notes"), 5000, "notes"),
-    }
-    if rec["email"] and not _EMAIL.match(rec["email"]):
-        raise V.CellError("email is not a valid address")
-    rec = {k: v for k, v in rec.items() if v is not None}
-    if required and not any(rec.get(k) for k in ("name", "customer_no", "vat_id", "tax_number", "email")):
-        raise V.CellError("customer is missing")
-    if required and not rec.get("name"):
-        rec.setdefault("name", rec.get("customer_no") or rec.get("vat_id") or rec.get("email") or "Imported customer")
-    if not required and not rec.get("name"):
-        raise V.CellError("customer name is missing")
-    return rec
-
-
-class _CustomerIndex:
-    """Matches customers by VAT ID, tax number, email, customer number, then normalised name (exact or >= 0.9)."""
-
-    def __init__(self, existing: list[dict], merge_similar: bool = False):
-        self.merge_similar = merge_similar
-        self.items: list[dict] = []
-        for c in existing:
-            self.add(c)
-
-    def add(self, rec: dict) -> None:
-        self.items.append(rec)
-
-    def find(self, rec: dict) -> tuple[dict | None, float]:
-        for key in ("vat_id", "tax_number", "email", "customer_no"):
-            if rec.get(key):
-                for c in self.items:
-                    if c.get(key) and str(c[key]).lower() == str(rec[key]).lower():
-                        return c, 1.0
-        name = _normalized_name(rec.get("name", ""))
-        if not name:
-            return None, 0.0
-        best, best_score = None, 0.0
-        exact_name = _normalized_name(rec.get("name", ""), strip_legal=False)
-        for c in self.items:
-            other = _normalized_name(c.get("name", ""))
-            if not other:
-                continue
-            if _normalized_name(c.get("name", ""), strip_legal=False) == exact_name:
-                score = 1.0
-            elif other == name:
-                score = 0.95  # same name, different legal form (GmbH vs AG): similar, never exact
-            elif re.findall(r"\d+", name) != re.findall(r"\d+", other):
-                continue  # "Schmidt Bau 1" and "Schmidt Bau 2" are different customers
-            else:
-                score = SequenceMatcher(None, name, other).ratio()
-            if score > best_score:
-                best, best_score = c, score
-        if best is not None and (best_score == 1.0 or (best_score >= FUZZY_MATCH and self.merge_similar)):
-            return best, round(best_score, 3)
-        return None, round(best_score, 3)
-
-
-def _digest(record: dict) -> str:
-    """Fingerprint of a whole record: detects any change after the import (timestamps have 1 s resolution)."""
-    return hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
 def _hash(*parts: Any) -> str:

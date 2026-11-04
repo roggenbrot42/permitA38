@@ -17,6 +17,7 @@ from permita38.core.service.auth import AuthService
 from permita38.core.service.busy import BusyTimeProvider
 from permita38.core.service.calendar.busy_provider import CalendarBusyProvider
 from permita38.core.service.calendar.service import CalendarService, ResourceFetcher
+from permita38.core.service.document_scans import DocumentScanService
 from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.personal_tax import PersonalTaxService
@@ -47,6 +48,7 @@ class Services:
     totp: TotpService
     records: RecordService
     receipts: ReceiptService
+    document_scans: DocumentScanService
     sales: SalesService
     time: TimeService
     settings: SettingsService
@@ -90,6 +92,7 @@ class Services:
             totp=TotpService(auth),
             records=records,
             receipts=ReceiptService(store, records, config, sanity),
+            document_scans=DocumentScanService(store, config),
             sales=SalesService(store, records),
             imports=ImportService(store, numbering=None),
             time=TimeService(store),

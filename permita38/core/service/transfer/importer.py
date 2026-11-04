@@ -60,6 +60,7 @@ ATTACHMENT_COLUMNS = (
     ("offers", "original_pdf"),
     ("incoming_offers", "attachment"),
     ("receipt_scans", "attachment"),
+    ("document_scans", "attachment"),
 )
 SHA_RE = re.compile(r"[0-9a-f]{64}")
 #: what core/service/auth.hash_password produces

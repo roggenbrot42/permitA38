@@ -114,7 +114,7 @@ PAGES.customer = async id => {
 };
 function docTable(rows) {
   if (!rows.length) return '<div class="empty">Nothing here yet.</div>';
-  return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${d.number ? esc(d.number) : '<span class="muted">No number yet</span>'}</b><div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${eur(docTotal(d))}</td><td>${statusPill(coll, d)}</td></tr>`).join('')}</table>`;
+  return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${d.number ? esc(d.number) : '<span class="muted">No number yet</span>'}</b>${d.imported ? ' <span class="pill">imported</span>' : ''}<div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${eur(docTotal(d))}</td><td>${statusPill(coll, d)}</td></tr>`).join('')}</table>`;
 }
 function statusPill(coll, d) {
   const late = coll === 'invoices' && d.status === 'sent' && d.due_date && d.due_date < todayISO();
@@ -181,11 +181,12 @@ A.editTask = el => {
 /* ================= OFFERS & INVOICES ================= */
 PAGES.sales = async (tab = 'invoices') => {
   await loadAll(['offers', 'invoices', 'customers', 'projects', 'entries']);
+  await DS.load();   // document scan: the scans that wait for a check (docscan.js)
   const rep = await api('GET', 'project-report'), unbilled = Object.values(rep).reduce((a, r) => a + r.unbilled_revenue, 0);
   const rows = S.d[tab].map(d => [tab, d]);
   const sum = (f) => S.d.invoices.filter(f).reduce((a, i) => a + docTotal(i), 0);
-  return `<div class="head"><div><h1>Offers & Invoices</h1><div class="muted">Offer → accepted → project → invoice.</div></div><div class="row tight" style="flex:none"><button data-a="newDoc" data-coll="offers">+ Offer</button><button class="primary" data-a="newDoc" data-coll="invoices">+ Invoice</button></div></div>
-  <div class="grid g3"><div class="card kpi warn"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a data-a="billTime" class="small">Invoice tracked time →</a></div><div class="card kpi"><div class="l">Outstanding</div><div class="v">${eur(sum(i => i.status === 'sent'))}</div></div><div class="card kpi bad"><div class="l">Overdue</div><div class="v">${eur(sum(i => i.status === 'sent' && i.due_date && i.due_date < todayISO()))}</div></div></div>
+  return `<div class="head"><div><h1>Offers & Invoices</h1><div class="muted">Offer → accepted → project → invoice.</div></div><div class="row tight" style="flex:none">${DS.uploadButton()}<button data-a="newDoc" data-coll="offers">+ Offer</button><button class="primary" data-a="newDoc" data-coll="invoices">+ Invoice</button></div></div>
+  ${DS.pageTop()}${DS.flaggedSection()}<div class="grid g3"><div class="card kpi warn"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a data-a="billTime" class="small">Invoice tracked time →</a></div><div class="card kpi"><div class="l">Outstanding</div><div class="v">${eur(sum(i => i.status === 'sent'))}</div></div><div class="card kpi bad"><div class="l">Overdue</div><div class="v">${eur(sum(i => i.status === 'sent' && i.due_date && i.due_date < todayISO()))}</div></div></div>
   <div class="tabs"><a href="#/sales/invoices" class="${tab === 'invoices' ? 'on' : ''}">Invoices</a><a href="#/sales/offers" class="${tab === 'offers' ? 'on' : ''}">Offers</a></div><div class="card">${docTable(rows)}</div>`;
 };
 A.newDoc = el => { location.hash = `#/doc/${el.dataset.coll}/new${el.dataset.cust ? '-' + el.dataset.cust : ''}`; };

@@ -14,8 +14,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from permita38.core.receipts import ocr, qrcodes, textrules
-from permita38.core.receipts.einvoice import EInvoiceError, parse_einvoice
-from permita38.core.receipts.extraction import Code, ReadResult, Word, cap_words, to_jsonable
+from permita38.core.receipts.einvoice import EInvoiceDoc, EInvoiceError, read_einvoice
+from permita38.core.receipts.extraction import Code, Extraction, ReadResult, Word, cap_words, to_jsonable
 
 MAX_FILE_BYTES = 50_000_000
 MAX_TEXT_CHARS = 200_000
@@ -62,6 +62,12 @@ def _kind(head: bytes) -> str:
     return "unknown"
 
 
+def _with_buyer(doc: EInvoiceDoc) -> Extraction:
+    """The e-invoice values plus the buyer and the type code, which travel in the JSON to the document rules."""
+    doc.extraction.buyer, doc.extraction.type_code = doc.buyer, doc.type_code
+    return doc.extraction
+
+
 def _fail(code: str, total: int = 0) -> ReadResult:
     return ReadResult(engine="none", pages_total=total, error=code)
 
@@ -84,7 +90,9 @@ def read(path: str, *, tesseract: str | None, languages: str, timeout_s: int) ->
     kind = _kind(data[:16])
     if kind == "xml":
         try:
-            return ReadResult(engine="einvoice", extraction=parse_einvoice(data), pages_read=1, pages_total=1)
+            return ReadResult(
+                engine="einvoice", extraction=_with_buyer(read_einvoice(data)), pages_read=1, pages_total=1
+            )
         except EInvoiceError:
             return _fail("unreadable")
     if kind == "pdf":
@@ -106,9 +114,9 @@ def _read_pdf(path: str, tesseract: str | None, languages: str, left) -> ReadRes
         if total == 0:
             return _fail("unreadable")
         words, read_pages = pdfread.read_text(pdf)
-        invoice = pdfread.embedded_einvoice(pdf)
+        invoice = pdfread.embedded_einvoice_doc(pdf)
         if invoice is not None:
-            return ReadResult("einvoice", words, invoice, read_pages, total)
+            return ReadResult("einvoice", words, _with_buyer(invoice), read_pages, total)
         if pdfread.usable_chars(words) >= pdfread.MIN_TEXT_CHARS:
             result = ReadResult("pdf_text", words, None, read_pages, total)
             result.codes = _pdf_codes(pdf, min(total, pdfread.MAX_OCR_PAGES))

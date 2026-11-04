@@ -8469,7 +8469,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UploadResult"
+                  "$ref": "#/components/schemas/permita38__api__routers__receipts__UploadResult"
                 }
               }
             }
@@ -8519,7 +8519,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ScanList"
+                  "$ref": "#/components/schemas/permita38__api__routers__receipts__ScanList"
                 }
               }
             }
@@ -8579,7 +8579,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/UploadResult"
+                  "$ref": "#/components/schemas/permita38__api__routers__receipts__UploadResult"
                 }
               }
             }
@@ -8840,7 +8840,312 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConfirmResult"
+                  "$ref": "#/components/schemas/permita38__api__routers__receipts__ConfirmResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/document-scans": {
+      "post": {
+        "tags": [
+          "document-scans"
+        ],
+        "summary": "scan an old document",
+        "operationId": "upload_api_document_scans_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_api_document_scans_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/permita38__api__routers__document_scans__UploadResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "document-scans"
+        ],
+        "summary": "scanned documents that need a check",
+        "operationId": "list_scans_api_document_scans_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "const": "flagged",
+              "type": "string",
+              "default": "flagged",
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/permita38__api__routers__document_scans__ScanList"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/document-scans/{scan_id}": {
+      "get": {
+        "tags": [
+          "document-scans"
+        ],
+        "summary": "one scanned document",
+        "operationId": "get_scan_api_document_scans__scan_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScanOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "document-scans"
+        ],
+        "summary": "discard a flagged document",
+        "operationId": "discard_api_document_scans__scan_id__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/document-scans/{scan_id}/pages/{page}": {
+      "get": {
+        "tags": [
+          "document-scans"
+        ],
+        "summary": "PNG of one page of a scanned PDF (150 dpi)",
+        "operationId": "page_image_api_document_scans__scan_id__pages__page__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "image/png": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/document-scans/{scan_id}/confirm": {
+      "post": {
+        "tags": [
+          "document-scans"
+        ],
+        "summary": "save a flagged document",
+        "operationId": "confirm_api_document_scans__scan_id__confirm_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "scan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scan Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentScanConfirmIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/permita38__api__routers__document_scans__ConfirmResult"
                 }
               }
             }
@@ -10263,6 +10568,20 @@
         ],
         "title": "Body_upload_api_attachments_post"
       },
+      "Body_upload_api_document_scans_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_api_document_scans_post"
+      },
       "Body_upload_api_receipts_post": {
         "properties": {
           "file": {
@@ -11273,22 +11592,6 @@
         },
         "type": "object",
         "title": "ConfirmIn"
-      },
-      "ConfirmResult": {
-        "properties": {
-          "expense": {
-            "$ref": "#/components/schemas/ConfirmExpense"
-          },
-          "scan": {
-            "$ref": "#/components/schemas/ScanResult"
-          }
-        },
-        "type": "object",
-        "required": [
-          "expense",
-          "scan"
-        ],
-        "title": "ConfirmResult"
       },
       "Contract": {
         "properties": {
@@ -12886,6 +13189,276 @@
         "type": "object",
         "title": "DocumentResult",
         "description": "A saved offer or invoice plus its non-blocking planning warnings (never stored)."
+      },
+      "DocumentScanConfirmIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "invoice",
+              "offer"
+            ],
+            "title": "Kind"
+          },
+          "number": {
+            "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Number"
+          },
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "valid_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Until"
+          },
+          "service_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service From"
+          },
+          "service_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service To"
+          },
+          "customer_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Id"
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DocumentScanCustomerIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "vat_rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Vat Rate"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentScanLineIn"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Lines"
+          },
+          "accept_totals_mismatch": {
+            "type": "boolean",
+            "title": "Accept Totals Mismatch",
+            "default": false
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "kind",
+          "number",
+          "date",
+          "vat_rate",
+          "lines"
+        ],
+        "title": "DocumentScanConfirmIn",
+        "description": "Adding a scanned old offer or invoice (docs/specs/document-scan.md): the values the user checked."
+      },
+      "DocumentScanCustomerIn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "street": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Street"
+          },
+          "zip": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zip"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "vat_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 30
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Id"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 254
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DocumentScanCustomerIn"
+      },
+      "DocumentScanLineIn": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Description"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000000.0,
+                "minimum": -10000000.0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 30
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": -1000000000.0
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Price"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "description",
+          "quantity",
+          "price"
+        ],
+        "title": "DocumentScanLineIn"
       },
       "EmploymentIn": {
         "properties": {
@@ -16132,6 +16705,34 @@
         "title": "ReceiptConfirmIn",
         "description": "Saving a scanned receipt (docs/specs/receipt-scan.md): the expense plus the flags the user accepted."
       },
+      "RecordRef": {
+        "properties": {
+          "collection": {
+            "type": "string",
+            "title": "Collection"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "number": {
+            "type": "string",
+            "title": "Number"
+          },
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          }
+        },
+        "type": "object",
+        "required": [
+          "collection",
+          "id",
+          "number",
+          "year"
+        ],
+        "title": "RecordRef"
+      },
       "RecoveryCodesResult": {
         "properties": {
           "recovery_codes": {
@@ -16215,21 +16816,155 @@
         ],
         "title": "RevokeAllResult"
       },
-      "ScanList": {
+      "ScanOut": {
         "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ScanResult"
-            },
-            "type": "array",
-            "title": "Items"
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "default": "flagged"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine"
+          },
+          "flags": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flags"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft"
+          },
+          "doc": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Doc"
+          },
+          "attachment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attachment"
+          },
+          "record_coll": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Coll"
+          },
+          "record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Id"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "id"
         ],
-        "title": "ScanList"
+        "title": "ScanOut",
+        "description": "A scanned document as sent to a client (the stored file name, the hash and the duplicate key stay on the server)."
       },
       "ScanResult": {
         "properties": {
@@ -20308,37 +21043,6 @@
         "type": "object",
         "title": "UnemploymentIn"
       },
-      "UploadResult": {
-        "properties": {
-          "outcome": {
-            "type": "string",
-            "enum": [
-              "booked",
-              "flagged"
-            ],
-            "title": "Outcome"
-          },
-          "scan": {
-            "$ref": "#/components/schemas/ScanResult"
-          },
-          "expense": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Expense"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "outcome",
-          "scan"
-        ],
-        "title": "UploadResult"
-      },
       "Uploaded": {
         "properties": {
           "name": {
@@ -20824,6 +21528,132 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "permita38__api__routers__document_scans__ConfirmResult": {
+        "properties": {
+          "record": {
+            "$ref": "#/components/schemas/RecordRef"
+          },
+          "scan": {
+            "$ref": "#/components/schemas/ScanOut"
+          }
+        },
+        "type": "object",
+        "required": [
+          "record",
+          "scan"
+        ],
+        "title": "ConfirmResult"
+      },
+      "permita38__api__routers__document_scans__ScanList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScanOut"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ScanList"
+      },
+      "permita38__api__routers__document_scans__UploadResult": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "added",
+              "flagged"
+            ],
+            "title": "Status"
+          },
+          "scan": {
+            "$ref": "#/components/schemas/ScanOut"
+          },
+          "record": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "scan"
+        ],
+        "title": "UploadResult"
+      },
+      "permita38__api__routers__receipts__ConfirmResult": {
+        "properties": {
+          "expense": {
+            "$ref": "#/components/schemas/ConfirmExpense"
+          },
+          "scan": {
+            "$ref": "#/components/schemas/ScanResult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "expense",
+          "scan"
+        ],
+        "title": "ConfirmResult"
+      },
+      "permita38__api__routers__receipts__ScanList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScanResult"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ScanList"
+      },
+      "permita38__api__routers__receipts__UploadResult": {
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "booked",
+              "flagged"
+            ],
+            "title": "Outcome"
+          },
+          "scan": {
+            "$ref": "#/components/schemas/ScanResult"
+          },
+          "expense": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Expense"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "outcome",
+          "scan"
+        ],
+        "title": "UploadResult"
       },
       "permita38__api__routers__records___result___locals___Result__1": {
         "properties": {

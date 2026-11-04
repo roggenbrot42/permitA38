@@ -9,6 +9,7 @@ import pytest
 
 from permita38.core.config import ScanConfig
 from permita38.core.receipts import runner
+from permita38.core.receipts.einvoice import read_einvoice
 from tests.backend.receipt_helpers import UBL, receipt_pdf
 
 SCAN = ScanConfig(timeout_s=5, tesseract_path="/nonexistent/tesseract")
@@ -31,6 +32,8 @@ def test_real_worker_reads_an_einvoice(tmp_path):
     path.write_text(UBL, encoding="utf-8")
     res = runner.read_file(str(path), SCAN)
     assert res.engine == "einvoice" and res.extraction.invoice_no == "RE-2026-0042"
+    doc = read_einvoice(UBL.encode())
+    assert res.extraction.type_code == doc.type_code and res.extraction.buyer == doc.buyer
 
 
 @pytest.mark.parametrize("data, error", [(b"", "empty"), (b"%PDF-1.4 broken", "unreadable")])

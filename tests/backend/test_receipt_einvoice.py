@@ -4,7 +4,7 @@ from decimal import Decimal as D
 
 import pytest
 
-from permita38.core.receipts.einvoice import EInvoiceError, parse_einvoice
+from permita38.core.receipts.einvoice import EInvoiceError, Party, parse_einvoice, read_einvoice
 from tests.backend.receipt_helpers import CII, UBL
 
 
@@ -115,3 +115,57 @@ def test_absurd_exponents_are_refused_without_building_digits():
     assert _to_decimal("1E-999999999") is None
     assert _to_decimal("1E+20") is None
     assert _to_decimal("12.50") == D("12.50")
+
+
+def test_read_einvoice_gives_the_same_extraction_plus_type_and_buyer():
+    for xml in (UBL, CII):
+        doc = read_einvoice(xml.encode())
+        assert doc.extraction == parse_einvoice(xml.encode())
+    assert read_einvoice(UBL.encode()).type_code == "380"
+    assert read_einvoice(CII.encode()).type_code == "381"
+    assert read_einvoice(UBL.encode()).buyer == Party()  # the fixtures have no buyer
+
+
+def test_ubl_buyer_and_credit_note_root():
+    buyer = (
+        "<cac:AccountingCustomerParty><cac:Party>"
+        "<cac:PostalAddress><cbc:StreetName>Kundenweg 5</cbc:StreetName><cbc:CityName>Kundenstadt</cbc:CityName>"
+        "<cbc:PostalZone>54321</cbc:PostalZone><cac:Country><cbc:IdentificationCode>DE</cbc:IdentificationCode></cac:Country></cac:PostalAddress>"
+        "<cac:PartyTaxScheme><cbc:CompanyID>DE555666777</cbc:CompanyID><cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme></cac:PartyTaxScheme>"
+        "<cac:PartyLegalEntity><cbc:RegistrationName>Beispiel Kunde GmbH</cbc:RegistrationName></cac:PartyLegalEntity>"
+        "<cac:Contact><cbc:ElectronicMail>kunde@example.invalid</cbc:ElectronicMail></cac:Contact>"
+        "</cac:Party></cac:AccountingCustomerParty>"
+    )
+    xml = UBL.replace("</cac:AccountingSupplierParty>", "</cac:AccountingSupplierParty>" + buyer)
+    doc = read_einvoice(xml.encode())
+    assert doc.buyer == Party(
+        "Beispiel Kunde GmbH", "Kundenweg 5", "54321", "Kundenstadt", "DE", "DE555666777", "kunde@example.invalid"
+    )
+    assert doc.extraction.vendor == "Musterhotel GmbH"  # the receipt result is unchanged
+    credit = xml.replace("<cbc:InvoiceTypeCode>380<", "<cbc:InvoiceTypeCode>384<")
+    assert read_einvoice(credit.encode()).type_code == "384"
+
+
+def test_cii_buyer():
+    buyer = (
+        "<ram:BuyerTradeParty><ram:Name>Beispiel Kunde GmbH</ram:Name>"
+        "<ram:DefinedTradeContact><ram:EmailURIUniversalCommunication><ram:URIID>kunde@example.invalid</ram:URIID>"
+        "</ram:EmailURIUniversalCommunication></ram:DefinedTradeContact>"
+        "<ram:PostalTradeAddress><ram:PostcodeCode>54321</ram:PostcodeCode><ram:LineOne>Kundenweg 5</ram:LineOne>"
+        "<ram:CityName>Kundenstadt</ram:CityName><ram:CountryID>DE</ram:CountryID></ram:PostalTradeAddress>"
+        '<ram:SpecifiedTaxRegistration><ram:ID schemeID="VA">DE555666777</ram:ID></ram:SpecifiedTaxRegistration>'
+        "</ram:BuyerTradeParty>"
+    )
+    xml = CII.replace("</ram:SellerTradeParty>", "</ram:SellerTradeParty>" + buyer)
+    doc = read_einvoice(xml.encode())
+    assert doc.buyer == Party(
+        "Beispiel Kunde GmbH", "Kundenweg 5", "54321", "Kundenstadt", "DE", "DE555666777", "kunde@example.invalid"
+    )
+    assert doc.extraction == parse_einvoice(xml.encode())
+
+
+def test_read_einvoice_refuses_like_parse():
+    with pytest.raises(EInvoiceError):
+        read_einvoice(b"<!DOCTYPE x><Invoice/>")
+    with pytest.raises(EInvoiceError):
+        read_einvoice(b"<Other/>")

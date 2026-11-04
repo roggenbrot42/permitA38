@@ -90,6 +90,23 @@ class Qr:
 
 
 @dataclass
+class Party:
+    """The buyer of an e-invoice. Every field is optional and cut to a fixed length."""
+
+    name: str | None = None
+    street: str | None = None
+    zip: str | None = None
+    city: str | None = None
+    country: str | None = None
+    vat_id: str | None = None
+    email: str | None = None
+
+
+MAX_PARTY_CHARS = 200
+MAX_TYPE_CODE_CHARS = 10
+
+
+@dataclass
 class Extraction:
     vendor: str | None = None
     vat_id: str | None = None
@@ -121,6 +138,8 @@ class Extraction:
     einvoice_sums: dict[str, Decimal] = field(default_factory=dict)  # EN 16931 terms by id: "BT-106", "BT-109", ...
     # source words of a value: "total", "vendor", "item:3", "vat_group:0", ... The overlay boxes are built from these.
     sources: dict[str, list[Word]] = field(default_factory=dict)
+    buyer: Party | None = None  # e-invoice only (docs/specs/document-scan.md, "Reading" rule 9)
+    type_code: str | None = None  # UNTDID 1001 code of an e-invoice: "380", "381", "384"
 
 
 @dataclass
@@ -161,11 +180,22 @@ def _record(cls: type, data: dict) -> Any:
     return cls(**{k: _money(v) if k in _MONEY else v for k, v in data.items() if k in known})
 
 
+def _short(value: Any, limit: int) -> str | None:
+    """A string cut to ``limit`` characters; anything that is not a string is dropped."""
+    return value[:limit] if isinstance(value, str) and value else None
+
+
+def _party(data: Any) -> Party | None:
+    if not isinstance(data, dict):
+        return None
+    return Party(**{f.name: _short(data.get(f.name), MAX_PARTY_CHARS) for f in fields(Party)})
+
+
 def extraction_from_json(data: dict) -> Extraction:
     plain = {
         k: v
         for k, v in data.items()
-        if k not in ("items", "vat_groups", "adjustments", "competing_totals", "sources", "qr")
+        if k not in ("items", "vat_groups", "adjustments", "competing_totals", "sources", "qr", "buyer", "type_code")
     }
     out: Extraction = _record(Extraction, {k: v for k, v in plain.items() if k != "einvoice_sums"})
     out.items = [_record(Item, x) for x in data.get("items") or []]
@@ -186,6 +216,8 @@ def extraction_from_json(data: dict) -> Extraction:
             printed_total=_money(q.get("printed_total")),
             printed_from_ocr=bool(q.get("printed_from_ocr")),
         )
+    out.buyer = _party(data.get("buyer"))
+    out.type_code = _short(data.get("type_code"), MAX_TYPE_CODE_CHARS)
     out.sources = {k: [Word(**w) for w in v] for k, v in (data.get("sources") or {}).items()}
     return out
 

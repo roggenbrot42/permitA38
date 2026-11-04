@@ -36,7 +36,7 @@ def test_table_and_columns_are_declared():
 
 def test_migration_exists_in_every_dialect():
     for dialect in ("sqlite", "postgresql", "mariadb"):
-        assert [m.file_name for m in list_migrations(dialect)][-1] == "0014-receipt_scans.sql"
+        assert "0014-receipt_scans.sql" in [m.file_name for m in list_migrations(dialect)]
 
 
 def test_scan_round_trip_with_json_columns_and_unknown_fields(repo):
