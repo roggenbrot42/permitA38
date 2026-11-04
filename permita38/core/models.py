@@ -279,6 +279,10 @@ class UserIn(v.CheckedBody):
         return sorted(days)
 
 
+#: tax inputs that moved into the personal tax profile; no longer settings
+LEGACY_TAX_KEYS = ("social_monthly", "church_tax", "splitting", "other_income", "other_deductions")
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="allow")
     company_name: str = ""
@@ -310,11 +314,6 @@ class Settings(BaseModel):
     invoice_reset: str = "yearly"  # never | yearly | monthly (see core/numbering.py)
     offer_reset: str = "yearly"
     numbering_shared: bool = False  # invoices and offers share one sequence
-    social_monthly: float = 0
-    church_tax: float = 0
-    splitting: bool = False
-    other_income: float = 0
-    other_deductions: float = 0
     planning_min_rate: float = 0
     planning_default_win_probability: float = 100
     subcontractor_hint_hours_per_week: float = 30
@@ -675,6 +674,128 @@ class TeamTimelineVisibilityIn(v.StrictRecord):
     accountant: TeamLevel = "off"
 
 
+# ---------------------------------------------------------------- personal tax profile (settings key personal_tax)
+_Count = v.StrictCount15
+
+
+class ChildrenIn(v.StrictRecord):
+    count: _Count = 0
+    full_allowance: StrictBool = False
+    pv_parent: StrictBool = False
+    pv_children_under_25: _Count = 0
+
+
+class HealthIn(v.StrictRecord):
+    mode: Literal["gkv", "pkv", "none"] = "gkv"
+    krankengeld: StrictBool = True
+    zusatzbeitrag_percent: v.StrictPercent10 | None = None
+    pkv_monthly: v.StrictMonthlyAmount = 0
+    pkv_basis_monthly: v.StrictMonthlyAmount = 0
+    pkv_care_monthly: v.StrictMonthlyAmount = 0
+    pkv_employer_subsidy_monthly: v.StrictMonthlyAmount = 0
+
+    @model_validator(mode="after")
+    def _basis_within_premium(self):
+        if self.pkv_basis_monthly > self.pkv_monthly:
+            raise ValueError("pkv_basis_monthly must not exceed pkv_monthly")
+        return self
+
+
+class PensionIn(v.StrictRecord):
+    mode: Literal["none", "statutory_income", "statutory_regular", "fixed"] = "none"
+    fixed_monthly: v.StrictMonthlyAmount = 0
+
+
+class UnemploymentIn(v.StrictRecord):
+    mode: Literal["none", "voluntary", "voluntary_half"] = "none"
+
+
+class EmploymentIn(v.StrictRecord):
+    gross_year: v.StrictNonNegAmount
+    sv_liable: StrictBool = True
+    steuerklasse: v.StrictTaxClass | None = None
+    bav_employee_year: v.StrictAmount100k = 0
+    bav_employer_year: v.StrictAmount100k = 0
+    vwl_employer_year: v.StrictAmount10k = 0
+    werbungskosten_year: v.StrictNonNegAmount = 0
+    withheld_year: v.StrictNonNegAmount | None = None
+
+
+class PersonalTaxIn(v.StrictRecord):
+    """PUT /settings/personal-tax: the whole profile (replaces the stored one)."""
+
+    assessment: Literal["single", "joint"] = "single"
+    church_tax_percent: v.StrictPercent15 = 0
+    other_income_year: v.StrictNonNegAmount = 0
+    other_deductions_year: v.StrictNonNegAmount = 0
+    other_insurance_year: v.StrictNonNegAmount = 0
+    children: ChildrenIn = Field(default_factory=ChildrenIn)
+    health: HealthIn = Field(default_factory=HealthIn)
+    pension: PensionIn = Field(default_factory=PensionIn)
+    unemployment: UnemploymentIn = Field(default_factory=UnemploymentIn)
+    employment: EmploymentIn | None = None
+
+
+class PersonalTaxChildren(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    count: int = 0
+    full_allowance: bool = False
+    pv_parent: bool = False
+    pv_children_under_25: int = 0
+
+
+class PersonalTaxHealth(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    mode: str = "gkv"
+    krankengeld: bool = True
+    zusatzbeitrag_percent: float | None = None
+    pkv_monthly: float = 0
+    pkv_basis_monthly: float = 0
+    pkv_care_monthly: float = 0
+    pkv_employer_subsidy_monthly: float = 0
+
+
+class PersonalTaxPension(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    mode: str = "none"
+    fixed_monthly: float = 0
+
+
+class PersonalTaxUnemployment(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    mode: str = "none"
+
+
+class PersonalTaxEmployment(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    gross_year: float = 0
+    sv_liable: bool = True
+    steuerklasse: int | None = None
+    bav_employee_year: float = 0
+    bav_employer_year: float = 0
+    vwl_employer_year: float = 0
+    werbungskosten_year: float = 0
+    withheld_year: float | None = None
+
+
+class PersonalTax(BaseModel):
+    """Response of the personal tax profile; ``stored`` is false when the defaults are shown."""
+
+    model_config = ConfigDict(extra="allow")
+    assessment: str = "single"
+    church_tax_percent: float = 0
+    other_income_year: float = 0
+    other_deductions_year: float = 0
+    other_insurance_year: float = 0
+    children: PersonalTaxChildren = Field(default_factory=PersonalTaxChildren)
+    health: PersonalTaxHealth = Field(default_factory=PersonalTaxHealth)
+    pension: PersonalTaxPension = Field(default_factory=PersonalTaxPension)
+    unemployment: PersonalTaxUnemployment = Field(default_factory=PersonalTaxUnemployment)
+    employment: PersonalTaxEmployment | None = None
+    stored: bool = False
+    warnings: list[str] | None = None
+
+
 class SettingsIn(v.StrictRecord):
     """PUT /settings: any subset of the settings, each value checked."""
 
@@ -707,17 +828,23 @@ class SettingsIn(v.StrictRecord):
     invoice_reset: Literal["never", "yearly", "monthly"] = "yearly"
     offer_reset: Literal["never", "yearly", "monthly"] = "yearly"
     numbering_shared: bool = False
-    social_monthly: v.NonNegAmount = 0
-    church_tax: Annotated[float, Field(ge=0, le=15, allow_inf_nan=False)] = 0
-    splitting: bool = False
-    other_income: v.NonNegAmount = 0
-    other_deductions: v.NonNegAmount = 0
     planning_min_rate: v.Rate = 0
     planning_default_win_probability: v.Percent = 100
     subcontractor_hint_hours_per_week: Annotated[float, Field(ge=1, le=168, allow_inf_nan=False)] = 30
     subcontractor_hint_weeks: Annotated[int, Field(ge=1, le=104)] = 12
     customer_dominance_percent: Annotated[float, Field(ge=1, le=100, allow_inf_nan=False)] = 83
     team_timeline_visibility: TeamTimelineVisibilityIn = TeamTimelineVisibilityIn()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_tax_keys_removed(cls, data):
+        if isinstance(data, dict):
+            for key in LEGACY_TAX_KEYS:
+                if key in data:
+                    raise ValueError(
+                        f"{key} was removed; use the personal tax profile (PUT /api/settings/personal-tax)"
+                    )
+        return data
 
     @field_validator("state")
     @classmethod

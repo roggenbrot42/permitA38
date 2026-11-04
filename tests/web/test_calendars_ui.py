@@ -1,4 +1,4 @@
-"""Browser tests of Settings → Calendars: real UI, real API, fake calendar server (the fetcher injection point)."""
+"""Browser tests of My settings → Calendars: real UI, real API, fake calendar server (the fetcher injection point)."""
 
 import glob
 import os
@@ -82,7 +82,7 @@ def ui(browser, srv):
         "console", lambda m: m.type == "error" and "status of" not in m.text and problems.append("console: " + m.text)
     )
     pg.on("dialog", lambda d: d.accept())
-    pg.goto(srv.base + "/#/settings")
+    pg.goto(srv.base + "/#/me")
     pg.wait_for_selector("#cal_link")
     yield pg
     assert problems == [], problems

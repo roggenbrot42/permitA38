@@ -396,12 +396,32 @@ class FakeApi:
             }
             for _ in range(12)
         ]
-        z = {"est": 0, "soli": 0, "total": 0, "kst": 0, "church": 0, "gewst": 0}
+        z = {"est": 0, "soli": 0, "total": 0, "kst": 0, "kst_soli": 0, "church": 0, "gewst": 0}
+        projected = {
+            **z,
+            "tax_due": 0,
+            "zve": 0,
+            "withheld": 0,
+            "balance": None,
+            "insurance": {"kv": 0, "pv": 0, "rv": 0, "alv": 0, "subsidy": 0},
+            "vorsorge": {"dA": 0, "dBO": 0},
+        }
         return {
             "months": months,
             "totals": {"revenue": 0, "expenses": 0, "profit": 0, "vat_due": 0},
             "tax_actual": z,
-            "tax_projected": z,
+            "tax_projected": projected,
+            "tax_owed": {"as_of": "2026-01-01", "profit_ytd": 0, "tax_due": 0, "withheld": 0, "owed": 0},
+            "reserve": {
+                "monthly": 0,
+                "due_year": 0,
+                "months_left": 0,
+                "remaining": 0,
+                "owed_now": 0,
+                "withheld": 0,
+                "balance": 0,
+            },
+            "extrapolated": True,
             "warnings": [],
             "company_type": "freiberufler",
             "kleinunternehmer": False,

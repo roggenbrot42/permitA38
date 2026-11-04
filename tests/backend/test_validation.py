@@ -4,6 +4,8 @@ from datetime import date, timedelta
 
 import pytest
 
+from .conftest import _login
+
 TODAY = date.today()
 
 
@@ -179,7 +181,6 @@ def test_settings_validation(boss_client):
         {"invoice_pattern": "RE-{year}"},  # needs {n}
         {"offer_pattern": "{0}-{n}"},
         {"default_template": "../../etc"},
-        {"social_monthly": -5},
     ):
         _422(c.put("/api/settings", json=bad))
     ok = c.put("/api/settings", json={"state": "BY", "hebesatz": 410})
@@ -188,6 +189,49 @@ def test_settings_validation(boss_client):
     pattern = c.put("/api/numbering", json={"type": "invoice", "pattern": "R{year}/{n:05d}"})
     assert pattern.status_code == 200 and pattern.json()["applied"] is True
     assert c.get("/api/settings").json()["invoice_pattern"] == "R{year}/{n:05d}"
+
+
+LEGACY = ("social_monthly", "church_tax", "splitting", "other_income", "other_deductions")
+PROFILE = {"assessment": "joint", "church_tax_percent": 9}
+
+
+@pytest.mark.parametrize("key", LEGACY)
+def test_legacy_tax_keys_are_refused_and_nothing_is_stored(app, boss_client, key):
+    store = app.state.services.store
+    store.save_settings({**store.settings(), "personal_tax": PROFILE})
+    before = store.settings()
+    detail = _422(boss_client.put("/api/settings", json={"state": "BY", key: 5}))
+    assert key in str(detail) and "personal tax profile" in str(detail)
+    assert store.settings() == before
+
+
+def test_personal_tax_is_refused_in_put_settings(app, boss_client):
+    store = app.state.services.store
+    store.save_settings({**store.settings(), "personal_tax": PROFILE})
+    r = boss_client.put("/api/settings", json={"state": "BY", "personal_tax": {"assessment": "single"}})
+    assert r.status_code == 400 and "PUT /api/settings/personal-tax" in r.json()["detail"]
+    assert store.settings()["personal_tax"] == PROFILE
+    assert store.settings().get("state") != "BY"
+
+
+def test_stored_legacy_keys_and_profile_are_hidden_and_deleted_lazily(app, boss_client):
+    store = app.state.services.store
+    hidden = ("personal_tax", *LEGACY)
+    legacy = {"social_monthly": 500, "church_tax": 9, "splitting": True, "other_income": 1, "other_deductions": 2}
+    store.save_settings({**store.settings(), **legacy, "personal_tax": PROFILE})
+    accountant = boss_client.post(
+        "/api/users", json={"username": "acc", "name": "Acc", "role": "accountant", "password": "correct horse battery"}
+    )
+    assert accountant.status_code == 200, accountant.text
+    acc = _login(app, "acc", "correct horse battery")
+    for c in (boss_client, acc):
+        assert not set(hidden) & set(c.get("/api/bootstrap").json()["settings"])
+    assert not set(hidden) & set(boss_client.get("/api/settings").json())
+    assert not set(hidden) & set(boss_client.put("/api/settings", json={"state": "BY"}).json())
+    raw = store.settings()
+    assert not set(LEGACY) & set(raw)
+    assert raw["personal_tax"] == PROFILE
+    acc.close()
 
 
 def test_user_numbers_and_workdays(boss_client):

@@ -15,6 +15,8 @@ from typing import Any
 from . import tax
 from .holidays import holidays as de_holidays
 from .money import ZERO, dec, line_amount, q2, split_gross, to_float, vat_amount
+from .service.personal_tax import NOT_SAVED_WARNING, PersonalTaxService
+from .tax_rules import rules_for
 from .values import d, fnum  # noqa: F401  (re-exported: callers use calc.d and calc.fnum)
 
 log = logging.getLogger(__name__)
@@ -302,9 +304,64 @@ def trip_amounts(trip: dict) -> list[dict[str, Any]]:
     return out
 
 
+def _pos(x: Decimal) -> Decimal:
+    return x if x > 0 else ZERO
+
+
+def _floats(x: Any) -> Any:
+    """Decimals inside a result become cents-exact floats (the response boundary)."""
+    if isinstance(x, Decimal):
+        return to_float(x)
+    if isinstance(x, dict):
+        return {k: _floats(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [_floats(v) for v in x]
+    return x
+
+
+_PUBLIC_TOP = (
+    "year",
+    "months",
+    "totals",
+    "categories",
+    "open_receivables",
+    "kleinunternehmer",
+    "company_type",
+    "projected_profit",
+    "extrapolated",
+)
+_PUBLIC_MONTH = ("month", "revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due", "vat_set_aside")
+_PUBLIC_TOTALS = ("revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due")
+_PUBLIC_TAX = ("gewst", "kst", "kst_soli")
+_PUBLIC_OWED = ("as_of", "gewst", "kst", "kst_soli")
+
+
+def _pick(src: dict, keys: tuple[str, ...]) -> dict:
+    return {k: src[k] for k in keys if k in src}
+
+
+def redact_tax(result: dict) -> dict:
+    """The /finance result for a caller who may see business figures only (accountant, any API token).
+
+    Built from allowlists at every level (docs/specs/tax-burden-and-settings.md, "/finance redaction"): a key added
+    to ``finance`` later stays hidden until it is listed here.
+    """
+    out = _pick(result, _PUBLIC_TOP)
+    out["totals"] = _pick(result.get("totals") or {}, _PUBLIC_TOTALS)
+    out["months"] = [_pick(m, _PUBLIC_MONTH) for m in result.get("months") or []]
+    for k in ("tax_actual", "tax_projected"):
+        out[k] = _pick(result.get(k) or {}, _PUBLIC_TAX) | {"redacted": True}
+    owed = result.get("tax_owed")
+    out["tax_owed"] = None if owed is None else _pick(owed, _PUBLIC_OWED) | {"redacted": True}
+    out["reserve"] = {"redacted": True}
+    out["warnings"] = [w for w in result.get("warnings") or [] if w != NOT_SAVED_WARNING]
+    out["redacted"] = True
+    return out
+
+
 def finance(store, year, today=None):
     today = today or date.today()
-    s = store.settings()
+    s = raw = store.settings()
     klein = bool(s.get("kleinunternehmer"))
     accrual = s.get("accounting", "eur") == "accrual"
     months: list[dict[str, Any]] = [dict(month=m, **{k: ZERO for k in _MONEY_KEYS}) for m in range(1, 13)]
@@ -360,40 +417,99 @@ def finance(store, year, today=None):
 
     keys = (*_MONEY_KEYS, "profit", "vat_due")
     tot = {k: sum((m[k] for m in months), ZERO) for k in keys}
-    profit_f = float(tot["profit"])
-    # annualise the current year for the set-aside rate
-    if year == today.year:
-        frac = max((today - date(year, 1, 1)).days + 1, 30) / 365.0
-        projected = max(profit_f / min(frac, 1.0), 0)
+    profit_ytd = tot["profit"]
+    profile = PersonalTaxService(store).effective()
+    days = (today - date(year, 1, 1)).days + 1
+    extrapolated = year == today.year and days >= 60
+    if extrapolated:
+        projected = _pos(q2(profit_ytd * 365 / min(days, 365)))
     else:
-        projected = max(profit_f, 0)
-    proj_tax = tax.estimate(projected, year, s)
-    actual_tax = tax.estimate(profit_f, year, s)
-    rate = dec(proj_tax["rate"])
-    social_m = dec(s.get("social_monthly")) if s.get("company_type") != "gmbh" else ZERO
-    # social insurance paid so far (full year for past years, none for future ones)
-    social_months = 12 if year < today.year else today.month if year == today.year else 0
+        projected = _pos(profit_ytd)
+    proj = tax.estimate(projected, year, s, profile)
+    actual = tax.estimate(profit_ytd, year, s, profile)
+
+    # currently owed (no projection) and the monthly reserve, see docs/specs/tax-burden-and-settings.md
+    tax_owed: dict[str, Any] | None = None
+    owed_now = ZERO
+    if year <= today.year:
+        owed = actual["tax_due"] - actual["withheld"]
+        owed_now = _pos(owed)
+        tax_owed = dict(
+            as_of=today.isoformat() if year == today.year else f"{year}-12-31",
+            profit_ytd=profit_ytd,
+            est=actual["est"],
+            soli=actual["soli"],
+            church=actual["church"],
+            gewst=actual["gewst"],
+            kst=actual["kst"],
+            kst_soli=actual["kst_soli"],
+            tax_due=actual["tax_due"],
+            withheld=actual["withheld"],
+            owed=owed,
+        )
+    due_year = _pos(proj["tax_due"] - proj["withheld"])
+    if year < today.year:
+        months_left, remaining, monthly = 0, ZERO, ZERO
+    elif year == today.year:
+        months_left = 13 - today.month
+        remaining = _pos(due_year - owed_now)
+        monthly = q2(remaining / months_left)
+    else:
+        months_left, remaining = 12, due_year
+        monthly = q2(remaining / 12)
+    reserve = dict(
+        due_year=due_year,
+        withheld=proj["withheld"],
+        owed_now=owed_now,
+        remaining=remaining,
+        months_left=months_left,
+        monthly=monthly,
+        balance=proj["balance"],
+    )
+    # months that have begun (c) and the month the set-aside starts in (s), see the spec "Months"
+    counted = 12 if year < today.year else today.month if year == today.year else 0
+    start = 12 if year < today.year else today.month if year == today.year else 1
+    self_social = sum((proj["insurance"][k] for k in ("kv", "pv", "rv", "alv")), ZERO) - proj["insurance"]["subsidy"]
+    social_m = q2(self_social / 12)
+    take_home = ZERO
     for m in months:
-        set_aside = q2(max(m["profit"], ZERO) * rate)
-        m["tax_set_aside"] = to_float(set_aside)
-        m["social"] = to_float(social_m)
+        n = m["month"]
+        aside = ZERO if n < start else owed_now + monthly if n == start else monthly
+        m["tax_set_aside"] = to_float(aside)
         m["vat_set_aside"] = to_float(m["vat_due"])
-        m["take_home"] = to_float(m["profit"] - set_aside - social_m)
+        if n <= counted:
+            m["social"] = to_float(social_m)
+            th = m["profit"] - aside - social_m
+            take_home += th
+            m["take_home"] = to_float(th)
+        else:
+            m["social"] = 0.0
+            m["take_home"] = None
         for k in keys:
             m[k] = to_float(m[k])
     warnings = []
     if klein and tot["revenue"] > Decimal(str(tax.KLEIN_LIMIT_PREV)):
         warnings.append("Kleinunternehmer: revenue exceeds 25,000 EUR (prior-year limit). Check §19 UStG.")
+    if raw.get("personal_tax") is None:
+        warnings.append(NOT_SAVED_WARNING)
+    if rules_for(year).to_verify:
+        warnings.append(f"Some rates for {year} are not yet confirmed.")
+    for w in (*actual["warnings"], *proj["warnings"]):
+        if w not in warnings:
+            warnings.append(w)
     return dict(
         year=year,
         months=months,
         totals={k: to_float(v) for k, v in tot.items()},
-        tax_actual=actual_tax,
-        tax_projected=proj_tax,
-        projected_profit=r2(projected),
-        effective_rate=rnd(proj_tax["rate"], 4),
-        social_year=to_float(social_m * social_months),
-        take_home=to_float(tot["profit"] - dec(actual_tax["total"]) - social_m * social_months),
+        tax_actual=_floats(actual),
+        tax_projected=_floats(proj),
+        tax_owed=_floats(tax_owed),
+        reserve=_floats(reserve),
+        projected_profit=to_float(projected),
+        extrapolated=extrapolated,
+        effective_rate=rnd(proj["rate"], 4),
+        social_year=to_float(social_m * counted),
+        take_home=to_float(take_home),
         categories={k: to_float(v) for k, v in sorted(cats.items(), key=lambda kv: -kv[1])},
         open_receivables=to_float(open_receivables),
         warnings=warnings,

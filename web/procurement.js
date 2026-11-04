@@ -288,8 +288,9 @@
       <div class="small muted">Commitments are planned costs from accepted offers, not expenses. They do not enter the VAT figures above.</div>` : '<div class="empty small">No open commitments.</div>'}</div>`;
   const moneyPage = PAGES.money;
   PAGES.money = async (...a) => {
-    const html = await moneyPage(...a);
-    if (!can('procurement')) return html;
+    if (!can('procurement')) return moneyPage(...a);
+    let html = '';
+    try { html = await moneyPage(...a); } catch (e) { html = `<div class="banner">Money figures could not be loaded: ${esc(e.message || e)}</div>`; }
     try { return html + window.procCommitmentsHTML(await api('GET', 'finance/commitments')); } catch { return html; }
   };
 })();

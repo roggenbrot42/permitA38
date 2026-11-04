@@ -54,7 +54,7 @@ def dec(value: Any, default: Decimal | None = ZERO) -> Decimal:
 def _fail(value: Any, default: Decimal | None = None) -> Decimal:
     if default is None:
         raise ValueError(f"not a valid number: {value!r}")
-    log.warning("ignoring invalid number %r", value)
+    log.warning("ignoring invalid number of type %s", type(value).__name__)
     return default
 
 

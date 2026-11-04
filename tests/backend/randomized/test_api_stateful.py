@@ -26,6 +26,7 @@ from permita38.core.config import Config
 from permita38.core.service import auth as auth_module
 from permita38.core.service import throttle as throttle_module
 from permita38.core.service import tokens as tokens_module
+from permita38.core.settings import LEGACY_TAX_KEYS
 
 from . import oracle
 from .conftest import FakeClock
@@ -87,6 +88,7 @@ class Session:
     token: str
     user_id: str | None
     iat: int
+    ver: int = 0  # the user's `pw_changed` when the token was issued (the API's `pwv` claim)
 
 
 def settle_default_date(exp: dict, act: dict, days: set[str]) -> None:
@@ -148,6 +150,107 @@ def maybe_none(strategy):
     return st.one_of(st.none(), strategy)
 
 
+# ---------------------------------------------------------------- personal tax profile (PUT /settings/personal-tax)
+PT_DEFAULTS = {
+    "assessment": "single",
+    "church_tax_percent": 0,
+    "other_income_year": 0,
+    "other_deductions_year": 0,
+    "other_insurance_year": 0,
+    "children": {"count": 0, "full_allowance": False, "pv_parent": False, "pv_children_under_25": 0},
+    "health": {
+        "mode": "gkv",
+        "krankengeld": True,
+        "zusatzbeitrag_percent": None,
+        "pkv_monthly": 0,
+        "pkv_basis_monthly": 0,
+        "pkv_care_monthly": 0,
+        "pkv_employer_subsidy_monthly": 0,
+    },
+    "pension": {"mode": "none", "fixed_monthly": 0},
+    "unemployment": {"mode": "none"},
+    "employment": None,
+}
+_AMOUNT = st.integers(0, 5000)
+
+
+@st.composite
+def _health(draw):
+    out = draw(
+        st.fixed_dictionaries(
+            {},
+            optional={
+                "mode": st.sampled_from(["gkv", "pkv", "none"]),
+                "krankengeld": st.booleans(),
+                "zusatzbeitrag_percent": st.sampled_from([None, 0, 1.5, 2.9, 10]),
+                "pkv_care_monthly": _AMOUNT,
+                "pkv_employer_subsidy_monthly": _AMOUNT,
+            },
+        )
+    )
+    if draw(st.booleans()):  # the basis share may not exceed the premium, so both are given together
+        monthly = draw(_AMOUNT)
+        out |= {"pkv_monthly": monthly, "pkv_basis_monthly": draw(st.integers(0, monthly))}
+    return out
+
+
+_EMPLOYMENT = st.fixed_dictionaries(
+    {"gross_year": st.integers(0, 200_000)},
+    optional={
+        "sv_liable": st.booleans(),
+        "steuerklasse": st.sampled_from([None, 1, 3, 4, 6]),
+        "bav_employee_year": st.integers(0, 8000),
+        "bav_employer_year": st.integers(0, 8000),
+        "vwl_employer_year": st.integers(0, 480),
+        "werbungskosten_year": st.integers(0, 5000),
+        "withheld_year": st.one_of(st.none(), st.integers(0, 50_000)),
+    },
+)
+PROFILE = st.fixed_dictionaries(
+    {},
+    optional={
+        "assessment": st.sampled_from(["single", "joint"]),
+        "church_tax_percent": st.sampled_from([0, 8, 9]),
+        "other_income_year": _AMOUNT,
+        "other_deductions_year": _AMOUNT,
+        "other_insurance_year": _AMOUNT,
+        "children": st.fixed_dictionaries(
+            {},
+            optional={
+                "count": st.integers(0, 15),
+                "full_allowance": st.booleans(),
+                "pv_parent": st.booleans(),
+                "pv_children_under_25": st.integers(0, 15),
+            },
+        ),
+        "health": _health(),
+        "pension": st.fixed_dictionaries(
+            {},
+            optional={
+                "mode": st.sampled_from(["none", "statutory_income", "statutory_regular", "fixed"]),
+                "fixed_monthly": _AMOUNT,
+            },
+        ),
+        "unemployment": st.fixed_dictionaries(
+            {}, optional={"mode": st.sampled_from(["none", "voluntary", "voluntary_half"])}
+        ),
+        "employment": st.one_of(st.none(), _EMPLOYMENT),
+    },
+)
+
+
+def assert_profile(got: dict, sent: dict) -> None:
+    """``got`` is the sent profile over the defaults (replace, never merge with an earlier profile)."""
+    for key, default in PT_DEFAULTS.items():
+        value = sent.get(key, default)
+        if isinstance(default, dict):
+            value = default | value
+        if key == "employment" and value is not None:
+            value = {"sv_liable": True, "steuerklasse": None, "bav_employee_year": 0, "bav_employer_year": 0,
+                     "vwl_employer_year": 0, "werbungskosten_year": 0, "withheld_year": None} | value  # fmt: skip
+        assert got[key] == value, (key, got[key], value)
+
+
 class ApiMachine(RuleBasedStateMachine):
     def __init__(self):
         super().__init__()
@@ -181,6 +284,7 @@ class ApiMachine(RuleBasedStateMachine):
         self.m: dict[str, dict] = {c: {} for c in (*CRUD, "offers", "invoices", "users")}
         self.bodies: dict[str, dict] = {}  # last submitted body per document id
         self.settings = {"kleinunternehmer": False, "accounting": "eur"}
+        self.personal_tax: dict | None = None  # the stored profile (PUT /settings/personal-tax), boss session only
         self.graveyard: list[str] = []
         self.pw_of_boss = "boss-password-1"
         r = self.call("POST", "/auth/setup", json={"username": "boss", "name": "Bea Boss", "password": self.pw_of_boss})
@@ -241,10 +345,12 @@ class ApiMachine(RuleBasedStateMachine):
         return r
 
     def valid(self, s: Session | None) -> bool:
+        # API rule (auth.user_from_token): the token's `pwv` must EQUAL the user's `pw_changed`, so every token issued
+        # before a password change dies, even within the same second.
         if s is None or s.user_id is None:
             return False
         u = self.m["users"].get(s.user_id)
-        return bool(u and u["active"] and s.iat + TTL >= self.clock.now and s.iat >= u["pw_changed"])
+        return bool(u and u["active"] and s.iat + TTL >= self.clock.now and s.ver == u["pw_changed"])
 
     def role_of(self, s: Session) -> str:
         return self.m["users"][s.user_id]["role"]
@@ -260,7 +366,12 @@ class ApiMachine(RuleBasedStateMachine):
     def mint(self, user_id: str) -> Session:
         """A fresh valid session for invariant checks, independent of the login flow."""
         svc = self.app.state.services
-        return Session(svc.auth.create_token(svc.store.get("users", user_id)), user_id, self.now)
+        return Session(
+            svc.auth.create_token(svc.store.get("users", user_id)),
+            user_id,
+            self.now,
+            self.m["users"][user_id]["pw_changed"],
+        )
 
     def do_login(self, username, password) -> Session | None:
         r = self.call("POST", "/auth/login", json={"username": username, "password": password})
@@ -277,7 +388,7 @@ class ApiMachine(RuleBasedStateMachine):
             body = r.json()
             assert body["user"]["username"] == key and body["user"]["role"] == user["role"]
             assert body["user"]["has_password"] is True
-            s = Session(body["token"], user["id"], self.now)
+            s = Session(body["token"], user["id"], self.now, user["pw_changed"])
             self.sessions.append(s)
             me = self.call("GET", "/auth/me", s)
             assert me.status_code == 200 and me.json()["id"] == user["id"]
@@ -512,8 +623,9 @@ class ApiMachine(RuleBasedStateMachine):
         else:
             assert r.status_code == 200, r.text
             u = self.m["users"][s.user_id]
-            u["password"], u["pw_changed"] = new, self.now
-            self.sessions.append(Session(r.json()["token"], s.user_id, self.now))
+            # API rule (auth.next_session_version): strictly greater than the old version
+            u["password"], u["pw_changed"] = new, max(self.now, u["pw_changed"] + 1)
+            self.sessions.append(Session(r.json()["token"], s.user_id, self.now, u["pw_changed"]))
 
     @rule(data=st.data())
     def anonymous_and_forged_probes(self, data):
@@ -1060,6 +1172,35 @@ class ApiMachine(RuleBasedStateMachine):
         self.settings[key] = val
         self.dirty |= {"invoices", "expenses", "settings"}
 
+    @rule(data=st.data(), profile=PROFILE, legacy=st.sampled_from(sorted(LEGACY_TAX_KEYS)))
+    def personal_tax_profile(self, data, profile, legacy):
+        """The profile is stored by its own route (boss session only) and REPLACED by every successful PUT (fields the
+        body omits go back to their defaults). PUT /settings refuses the profile (400) and the legacy keys (422)
+        without changing the settings, and GET /settings never shows any of them."""
+        self.tick()
+        s = data.draw(self.actor())
+        r = self.call("PUT", "/settings/personal-tax", s, json=profile)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g
+        else:
+            assert r.status_code == 200, r.text
+            assert r.json()["stored"] is True and r.json()["warnings"] is not None
+            assert_profile(r.json(), profile)
+            self.personal_tax = profile
+        boss = self._boss()
+        for body, code in (({"personal_tax": {"assessment": "joint"}}, 400), ({legacy: 1}, 422)):
+            s = data.draw(self.actor())
+            before = self.call("GET", "/settings", boss).json()
+            r = self.call("PUT", "/settings", s, json=body)
+            assert r.status_code == (self.gate(s, boss_only=True) or code), r.text
+            assert self.call("GET", "/settings", boss).json() == before, "a refused PUT /settings changed the settings"
+        shown = self.call("GET", "/settings", boss).json()
+        assert not {"personal_tax", *LEGACY_TAX_KEYS} & set(shown), "GET /settings shows tax profile data"
+        got = self.call("GET", "/settings/personal-tax", boss).json()
+        assert got["stored"] is (self.personal_tax is not None)
+        if self.personal_tax is not None:
+            assert_profile(got, self.personal_tax)
+
     # ------------------------------------------------------------------ rules: users
     @rule(
         data=st.data(),
@@ -1147,7 +1288,7 @@ class ApiMachine(RuleBasedStateMachine):
             username=norm, name="Renamed", role=role, active=active, weekly_hours=hours, workdays=[0, 1, 2, 3, 4]
         )
         if password:
-            old["password"], old["pw_changed"] = password, self.now
+            old["password"], old["pw_changed"] = password, max(self.now, old["pw_changed"] + 1)
         got = r.json()
         assert got["username"] == norm and got["role"] == role and got["active"] == active and got["has_password"]
         self.dirty |= {"users"}

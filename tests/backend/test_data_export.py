@@ -12,7 +12,8 @@ from permita38.core.repository.schema import TABLES
 from permita38.core.service.transfer import csvout, manifest
 from permita38.core.service.transfer.importer import LIST_REFERENCES, REFERENCES
 
-from .transfer_helpers import export_archive, make_instance, seed, zip_files
+from .conftest import PASSWORD
+from .transfer_helpers import build_zip, export_archive, login, make_instance, seed, zip_files
 
 CANARIES = {
     "totp_secret": "JBSWY3DPEHPK3PXPCANARY",
@@ -241,3 +242,93 @@ def test_archive_entries_are_plain_unencrypted_files(source):
     with zipfile.ZipFile(io.BytesIO(blob)) as zf:
         for info in zf.infolist():
             assert stat.S_ISREG(info.external_attr >> 16) and not info.flag_bits & 1
+
+
+LEGACY_VALUES = {
+    "social_monthly": 321,
+    "church_tax": 9,
+    "splitting": True,
+    "other_income": 1500,
+    "other_deductions": 40,
+}
+
+
+def _archive_with_settings(client, tmp_path, patch):
+    """The export of ``client`` with ``patch`` applied to the settings in data/settings.json (hashes fixed)."""
+    files = zip_files(export_archive(client))
+    doc = json.loads(files["data/settings.json"])
+    patch(doc["settings"])
+    files["data/settings.json"] = json.dumps(doc).encode()
+    return build_zip(files, tmp_path / "patched.zip").read_bytes()
+
+
+def _import(client, blob):
+    return client.post("/api/data/import/run", files={"file": ("a.zip", blob)}, data={"confirm": "true"})
+
+
+def test_personal_tax_and_all_legacy_keys_round_trip_through_export_and_import(source, tmp_path):
+    _, client, store, _ = source
+    profile = {"assessment": "joint", "church_tax_percent": 9, "other_income_year": 1200}
+    assert client.put("/api/settings/personal-tax", json=profile).status_code == 200
+    raw = store.settings()
+    raw.update(LEGACY_VALUES)  # legacy keys from an old data folder
+    store.save_settings(raw)
+    stored = store.settings()["personal_tax"]
+    blob = export_archive(client)
+    exported = json.loads(zip_files(blob)["data/settings.json"])["settings"]
+    assert exported["personal_tax"] == stored
+    assert all(exported[k] == v for k, v in LEGACY_VALUES.items())
+
+    dst_app, dst_client = make_instance(tmp_path, "dst")
+    r = _import(dst_client, blob)
+    assert r.status_code == 200, r.text
+    dst_store = dst_app.state.services.store
+    assert dst_store.settings()["personal_tax"] == stored
+    assert all(dst_store.settings()[k] == v for k, v in LEGACY_VALUES.items())  # imported unchanged
+    again = login(dst_app, "boss")  # the import replaced the users, sign in again
+    got = again.get("/api/settings/personal-tax")
+    assert got.status_code == 200 and got.json()["stored"] is True and got.json()["assessment"] == "joint"
+    shown = again.get("/api/settings").json()
+    assert not ({"personal_tax", *LEGACY_VALUES} & set(shown))  # hidden after the import
+    assert again.put("/api/settings", json={"company_name": "Demo 2"}).status_code == 200
+    after = dst_store.settings()
+    assert not set(LEGACY_VALUES) & set(after)  # deleted lazily on the first successful PUT /settings
+    assert after["personal_tax"] == stored
+
+
+@pytest.mark.parametrize("damaged", [{}, "text", {"stored": 1}, {"warnings": "x"}, {"children": "x"}, [1], 7])
+def test_import_with_a_damaged_personal_tax_reads_as_defaults(source, tmp_path, damaged):
+    _, client, _, _ = source
+    blob = _archive_with_settings(client, tmp_path, lambda st: st.update(personal_tax=damaged))
+    dst_app, dst_client = make_instance(tmp_path, "dst")
+    r = _import(dst_client, blob)
+    assert r.status_code == 200, r.text
+    got = login(dst_app, "boss").get("/api/settings/personal-tax")
+    assert got.status_code == 200, got.text
+    assert got.json()["stored"] is True and got.json()["assessment"] == "single"
+    assert got.json()["children"]["count"] == 0 and got.json()["employment"] is None
+
+
+@pytest.mark.parametrize("role", ["employee", "accountant", "member"])
+def test_a_non_boss_cannot_import_a_profile(source, tmp_path, role):
+    _, client, _, _ = source
+    client.put("/api/settings/personal-tax", json={"assessment": "joint"})
+    blob = export_archive(client)
+    dst_app, dst_client = make_instance(tmp_path, "dst")
+    r = dst_client.post("/api/users", json={"username": "other", "name": "O", "role": role, "password": PASSWORD})
+    assert r.status_code == 200, r.text
+    other = login(dst_app, "other")
+    for path in ("/api/data/import/run", "/api/data/import/preview"):
+        resp = other.post(path, files={"file": ("a.zip", blob)}, data={"confirm": "true"})
+        assert resp.status_code == 403, (role, path)
+    assert "personal_tax" not in dst_app.state.services.store.settings()
+
+
+def test_an_imported_profile_is_not_shown_by_get_settings(source, tmp_path):
+    _, client, _, _ = source
+    client.put("/api/settings/personal-tax", json={"assessment": "joint"})
+    dst_app, dst_client = make_instance(tmp_path, "dst")
+    assert _import(dst_client, export_archive(client)).status_code == 200
+    again = login(dst_app, "boss")
+    assert "personal_tax" in dst_app.state.services.store.settings()
+    assert "personal_tax" not in again.get("/api/settings").json()

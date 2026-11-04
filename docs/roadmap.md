@@ -52,8 +52,8 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 | **Merge-import** into an instance that already has data (id remapping, conflict policy) | planned; v1 import needs an empty instance |
 | **Automatic receipt scan** from PDF/image and e-invoice XML (clean bills are booked, ambiguous ones flagged, duplicates refused) | user guide [`receipt-scan.md`](receipt-scan.md), spec [`specs/receipt-scan.md`](specs/receipt-scan.md); local, no AI provider needed; OCR on Windows is a download on request (package built by a manual workflow, pending its first run); Full review tier; in progress on a feature branch |
 | **Gantt chart** for the overall plan and project subtasks | later |
-| **Settings split into business and user**: today one page mixes business data, personal user settings, tax details, company type and hourly rates | maintainer request, later |
-| **Real tax burden estimate** for Freiberufler and Gewerbetreibende: income tax, trade tax, and health care and pension from the known percentages, instead of a flat reserve | maintainer request, later; needs current rates and a tax adviser check |
+| **Settings split into business and user**: today one page mixes business data, personal user settings, tax details, company type and hourly rates | maintainer request, later; spec: [`specs/tax-burden-and-settings.md`](specs/tax-burden-and-settings.md) (part A) |
+| **Real tax burden estimate** for Freiberufler and Gewerbetreibende: income tax, trade tax, and health care and pension from the known percentages, instead of a flat reserve | maintainer request, later; spec: [`specs/tax-burden-and-settings.md`](specs/tax-burden-and-settings.md) (part B); needs a tax adviser check |
 
 ## v0.4.0-alpha.5 (bugfix only)
 
@@ -71,7 +71,7 @@ decides.
 
 | Item | Status |
 |---|---|
-| **Accounting** (chart of accounts SKR03/SKR04, journal, receipts) and the **German VAT return (UStVA)** | spec: [`specs/ustva.md`](specs/ustva.md); boxes need the tax adviser |
+| **Accounting** (chart of accounts SKR03/SKR04, journal, receipts) and the **German VAT return (UStVA)** | spec: [`specs/ustva.md`](specs/ustva.md); boxes need the tax adviser. To do: Gewerbesteuer and income tax are booked correctly in the double bookkeeping (accounts for Steuern, Rückstellungen, non-deductible Einkommensteuer), not as ordinary expenses |
 | **Time tracking element** on the Today page: one row with description, project and task, manual entry (start, stop, date, duration, Add) and timer mode, with a click on the timer to show the earnings instead of the time | spec: [`specs/time-tracking-element.md`](specs/time-tracking-element.md); Light review tier |
 | **Project capacity**: people and subcontractors are allocated to projects; a project's demand is covered by its own pool, contracts only state what is owed | spec: [`specs/project-capacity.md`](specs/project-capacity.md) (draft, architect sign-off pending); Full review tier |
 | **Fix: contract customer rule and the customer's accepted items** (contract refused for another customer's project; items view after accepting an offer) | spec: [`specs/contract-items.md`](specs/contract-items.md) (draft, architect sign-off pending); Full review tier |

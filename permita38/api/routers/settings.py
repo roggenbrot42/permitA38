@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.core import rights
-from permita38.core.models import Settings, SettingsIn
+from permita38.core.models import PersonalTax, PersonalTaxIn, Settings, SettingsIn
 
 router = APIRouter(tags=["settings"])
 routers = [router]
@@ -41,3 +41,26 @@ class SettingsResult(Settings):
 def update_settings(body: SettingsIn, _: Annotated[dict, Needs("settings", "write")], services: ServicesDep):
     saved = services.settings.update(body.model_dump(exclude_unset=True))
     return {**saved, "sanity_warnings": services.sanity.settings_warnings(saved)}
+
+
+@router.get(
+    "/settings/personal-tax",
+    response_model=PersonalTax,
+    summary="the personal tax profile (boss, signed in with a password)",
+    dependencies=[SessionOnly],
+)
+def get_personal_tax(_: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep):
+    return services.personal_tax.get()
+
+
+@router.put(
+    "/settings/personal-tax",
+    response_model=PersonalTax,
+    summary="replace the personal tax profile (boss, signed in with a password)",
+    dependencies=[SessionOnly],
+)
+def put_personal_tax(
+    body: PersonalTaxIn, _: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep
+):
+    data = body.model_dump(exclude={"stored", "warnings"})
+    return services.personal_tax.update(data)

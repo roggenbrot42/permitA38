@@ -20,6 +20,7 @@ from permita38.core.service.calendar.service import CalendarService, ResourceFet
 from permita38.core.service.document_scans import DocumentScanService
 from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
+from permita38.core.service.personal_tax import PersonalTaxService
 from permita38.core.service.plan_service import PlanningService
 from permita38.core.service.procurement import ProcurementService
 from permita38.core.service.receipts import ReceiptService
@@ -51,6 +52,7 @@ class Services:
     sales: SalesService
     time: TimeService
     settings: SettingsService
+    personal_tax: PersonalTaxService
     impressum: ImpressumService
     imports: ImportService
     calendar: CalendarService
@@ -95,6 +97,7 @@ class Services:
             imports=ImportService(store, numbering=None),
             time=TimeService(store),
             settings=SettingsService(store),
+            personal_tax=PersonalTaxService(store),
             team_timeline=TeamTimelineService(store),
             transfer=TransferService(store, config.data_dir / "tmp"),
             tokens=TokenService(store),

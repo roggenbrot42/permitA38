@@ -699,11 +699,49 @@ function expenseDialog(e, scan) {
 }
 
 /* ================= MONEY & TAXES ================= */
+/* Boss view of Money & Taxes (docs/specs/tax-burden-and-settings.md, UI): every figure is shown as the API returns it. */
+const CURMONTH = 'Current month includes the catch-up of tax on the profit so far.';
+const TAXNOTE = 'Estimate only – not tax advice.';
+function reserveLine(f, year, cur) {
+  const r = f.reserve, thisYear = new Date().getFullYear();
+  if (year < thisYear) return 'Year closed';
+  if (!r.monthly) {
+    if (!r.due_year) return 'No further reserve needed';
+    return `Set aside ${eur(cur ? cur.tax_set_aside : r.owed_now)} now` + (year === thisYear && !f.extrapolated ? '; the monthly reserve starts once 60 days of the year have passed' : '');
+  }
+  return `Set aside <b>${eur(r.monthly)}</b> per month for the remaining ${r.months_left} months (${eur(r.remaining)} of ${eur(r.due_year)} still to reserve)` + (r.owed_now > 0 ? `, plus <b>${eur(r.owed_now)}</b> now` : '');
+}
+function taxBurdenCards(f, year, cur, s) {
+  const tp = f.tax_projected, o = f.tax_owed, ins = tp.insurance || {}, gmbh = f.company_type === 'gmbh';
+  const row = (l, v, cls = '') => `<tr><td>${l}</td><td class="num ${cls}" data-k="${esc(l)}">${eur(v)}</td></tr>`;
+  const vp = tp.vorsorge || {};
+  const burden = `<div class="card" id="card-tax-burden"><h2>Tax burden ${year}</h2><table>
+    ${gmbh ? row('Körperschaftsteuer (15 %)', tp.kst) + row('Solidaritätszuschlag on Körperschaftsteuer', tp.kst_soli)
+      : row('Einkommensteuer' + (tp.kg_added > 0 ? ' (incl. Kindergeld added back)' : ''), tp.est) + row('Solidaritätszuschlag', tp.soli) + (tp.church ? row('Kirchensteuer', tp.church) : '')}
+    ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)${tp.gewst_credit ? `<div class="small muted">incl. ${eur(tp.gewst_credit)} credited against income tax (§35 EStG)</div>` : ''}</td><td class="num" data-k="gewst">${eur(tp.gewst)}</td></tr>` : ''}
+    <tr><td><b>Total taxes (full year)</b></td><td class="num" data-k="tax_due"><b>${eur(tp.tax_due)}</b></td></tr>
+    ${tp.withheld > 0 ? row('Already withheld', tp.withheld) : ''}
+    ${tp.balance != null ? row('Expected back payment / refund', tp.balance) : ''}
+    <tr><td colspan="2"><b>Social insurance</b> (self-paid, full year)</td></tr>
+    ${row('Health insurance', ins.kv)}${row('Care insurance', ins.pv)}${row('Pension insurance', ins.rv)}${row('Unemployment insurance', ins.alv)}${ins.subsidy > 0 ? row('Employer subsidy', -ins.subsidy) : ''}
+    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(f.totals.vat_due)}</td></tr>
+    <tr><td><b>What stays with you</b> (months begun)</td><td class="num"><b class="${f.take_home != null && f.take_home >= 0 ? 'free-good' : 'free-bad'}" data-k="take_home">${eur(f.take_home)}</b></td></tr></table>
+    <details><summary class="small">How this was computed</summary><ul class="small">
+      <li>Taxable income (zvE): ${eur(tp.zve)}</li><li>Pension provision deduction: ${eur(vp.dA)}</li><li>Other provision deduction: ${eur(vp.dBO)}</li><li>Projected full-year profit: ${eur(f.projected_profit)}</li></ul></details>
+    <p class="small muted">Projected full-year profit: ${eur(f.projected_profit)} → tax rate ${num(f.effective_rate * 100, 1)} %. ${TAXNOTE} <a href="#/me/tax">Edit personal tax profile</a></p></div>`;
+  const owed = o ? `<div class="card" id="card-tax-owed"><h2>Owed on the profit booked so far (as of ${esc(fmtDate(o.as_of))})</h2><table>
+    ${row('Profit booked so far', o.profit_ytd)}${row('Taxes on it', o.tax_due)}${o.withheld > 0 ? row('Already withheld', o.withheld) : ''}
+    <tr><td><b>${o.owed < 0 ? 'Refund so far' : 'Owed'}</b></td><td class="num" data-k="owed"><b>${eur(Math.abs(o.owed))}</b></td></tr></table>
+    <p class="small muted">Advance payments (Vorauszahlungen) are not taken into account.</p></div>` : '';
+  const reserve = `<div class="card" id="card-reserve"><h2>Monthly reserve</h2><p id="reserve-line">${reserveLine(f, year, cur)}</p></div>`;
+  return burden + `<div>${owed}${reserve}</div>`;
+}
 PAGES.money = async (year) => {
   // the API accepts 2000..2100 only: clamp a typed or stale route instead of showing a validation error
   year = Math.min(2100, Math.max(2000, Math.trunc(+year) || new Date().getFullYear()));
   const f = await api('GET', 'finance?year=' + year), s = S.settings, m = new Date().getMonth(), cur = year === new Date().getFullYear() ? f.months[m] : null;
   const T = f.totals, ta = f.tax_actual, tp = f.tax_projected;
+  const red = !!f.redacted, th = v => v == null ? '–' : eur(v);   // non-boss: business figures only; null take-home = "–"
   const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const mx = Math.max(100, ...f.months.map(x => Math.max(x.revenue, x.expenses, 0))), H = 170, bw = 900 / 12;
   const chart = `<svg class="chart" viewBox="0 0 940 ${H + 28}"><g transform="translate(36,6)">${[0, .5, 1].map(k => `<line x1="0" x2="900" y1="${H - H * k}" y2="${H - H * k}" stroke="var(--line)"/><text x="-6" y="${H - H * k + 4}" text-anchor="end">${num(mx * k, 0)}</text>`).join('')}
@@ -712,18 +750,19 @@ PAGES.money = async (year) => {
   return `<div class="head"><div><h1>Money & Taxes</h1><div class="muted">${esc(typeName)}${f.kleinunternehmer ? ' · Kleinunternehmer' : ''} · ${s.accounting === 'accrual' ? 'by invoice date' : 'by payment date (EÜR)'}</div></div>
     <div class="row tight" style="flex:none;align-items:center"><button data-a="goto" data-to="money/${year - 1}" ${year <= 2000 ? 'disabled' : ''}>←</button><b>${year}</b><button data-a="goto" data-to="money/${year + 1}" ${year >= 2100 ? 'disabled' : ''}>→</button></div></div>
   ${f.warnings.map(w => `<div class="banner">⚠ ${esc(w)}</div>`).join('')}
-  ${cur ? `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">Tax reserve (${num(f.effective_rate * 100, 1)} %)</div><div style="font-size:22px;font-weight:700">${eur(cur.tax_set_aside)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div><div><div class="muted small">Social insurance</div><div style="font-size:22px;font-weight:700">${eur(cur.social)}</div></div></div>
-    <div style="margin-top:10px">→ You can take home about <b class="${cur.take_home >= 0 ? 'free-good' : 'free-bad'}" style="font-size:20px">${eur(cur.take_home)}</b> this month.</div></div>` : ''}
+  ${!red && year === new Date().getFullYear() && !f.extrapolated ? '<div class="banner" id="not-extrapolated">Not yet extrapolated. The full-year estimate starts after 60 days of the year; until then the figures cover only the profit booked so far.</div>' : ''}
+  ${cur ? (red ? `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div></div></div>` : `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">Tax reserve (${num(f.effective_rate * 100, 1)} %)</div><div style="font-size:22px;font-weight:700">${eur(cur.tax_set_aside)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div><div><div class="muted small">Social insurance</div><div style="font-size:22px;font-weight:700">${eur(cur.social)}</div></div></div>
+    <div style="margin-top:10px">→ You can take home about <b class="${cur.take_home != null && cur.take_home >= 0 ? 'free-good' : 'free-bad'}" style="font-size:20px">${th(cur.take_home)}</b> this month.</div></div>`) : ''}
   <div class="grid g4"><div class="card kpi"><div class="l">Revenue (net)</div><div class="v">${eur(T.revenue)}</div></div><div class="card kpi"><div class="l">Expenses (net)</div><div class="v">${eur(T.expenses)}</div></div><div class="card kpi ${T.profit < 0 ? 'bad' : 'good'}"><div class="l">Profit</div><div class="v">${eur(T.profit)}</div></div><div class="card kpi ${f.open_receivables ? 'warn' : ''}"><div class="l">Open receivables</div><div class="v">${eur(f.open_receivables)}</div></div></div>
-  <div class="grid g2"><div class="card"><h2>Tax burden ${year}</h2><table>
-    ${f.company_type === 'gmbh' ? `<tr><td>Körperschaftsteuer (15 %)</td><td class="num">${eur(ta.kst)}</td></tr><tr><td>Solidaritätszuschlag</td><td class="num">${eur(ta.soli)}</td></tr>` : `<tr><td>Einkommensteuer</td><td class="num">${eur(ta.est)}</td></tr><tr><td>Solidaritätszuschlag</td><td class="num">${eur(ta.soli)}</td></tr>${ta.church ? `<tr><td>Kirchensteuer</td><td class="num">${eur(ta.church)}</td></tr>` : ''}`}
-    ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)${ta.gewst_credit ? `<div class="small muted">incl. ${eur(ta.gewst_credit)} credited against income tax (§35 EStG)</div>` : ''}</td><td class="num">${eur(ta.gewst)}</td></tr>` : ''}
-    <tr><td><b>Total income-based taxes</b></td><td class="num"><b>${eur(ta.total)}</b></td></tr><tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(T.vat_due)}</td></tr><tr><td>Health / pension insurance (your estimate)</td><td class="num">${eur(f.social_year)}</td></tr>
-    <tr><td><b>What stays with you</b></td><td class="num"><b class="${f.take_home >= 0 ? 'free-good' : 'free-bad'}">${eur(f.take_home)}</b></td></tr></table>
-    <p class="small muted">Based on profit to date. Projected full-year profit: ${eur(f.projected_profit)} → tax rate ${num(f.effective_rate * 100, 1)} % used for the monthly reserve. Estimate only – not tax advice.</p></div>
+  <div class="grid g2">${red ? `<div class="card"><h2>Business taxes ${year}</h2><table>
+    ${f.company_type === 'gmbh' ? `<tr><td>Körperschaftsteuer (15 %)</td><td class="num">${eur(ta.kst)}</td></tr><tr><td>Solidaritätszuschlag on Körperschaftsteuer</td><td class="num">${eur(ta.kst_soli)}</td></tr>` : ''}
+    ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)</td><td class="num">${eur(ta.gewst)}</td></tr>` : '<tr><td>No business taxes (Freiberufler)</td><td class="num">–</td></tr>'}
+    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(T.vat_due)}</td></tr></table>
+    <p class="small muted">Income tax, social insurance and take-home are shown to the owner only.</p>
+    <p class="small muted">Based on profit to date. Projected full-year profit: ${eur(f.projected_profit)}. Estimate only – not tax advice.</p></div>` : taxBurdenCards(f, year, cur, s)}
   <div class="card"><h2>Expenses by category</h2>${Object.keys(f.categories).length ? `<table>${Object.entries(f.categories).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${eur(v)}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses this year.</div>'}</div></div>
   <div class="card"><h2>Month by month</h2>${chart}<div class="small muted"><span class="dot" style="background:var(--accent)"></span>revenue <span class="dot" style="background:var(--warn);margin-left:10px"></span>expenses</div>
-  <table style="margin-top:12px"><tr><th>Month</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">VAT due</th><th class="num">Tax reserve</th><th class="num">Take-home</th></tr>${f.months.map((x, i) => `<tr><td>${MN[i]}</td><td class="num">${eur(x.revenue)}</td><td class="num">${eur(x.expenses)}</td><td class="num ${x.profit < 0 ? 'free-bad' : ''}">${eur(x.profit)}</td><td class="num">${eur(x.vat_due)}</td><td class="num">${eur(x.tax_set_aside)}</td><td class="num"><b>${eur(x.take_home)}</b></td></tr>`).join('')}</table></div>`;
+  <table style="margin-top:12px"><tr><th>Month</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">VAT due</th>${red ? '' : '<th class="num">Tax reserve</th><th class="num">Social</th><th class="num">Take-home</th>'}</tr>${f.months.map((x, i) => `<tr><td>${MN[i]}</td><td class="num">${eur(x.revenue)}</td><td class="num">${eur(x.expenses)}</td><td class="num ${x.profit < 0 ? 'free-bad' : ''}">${eur(x.profit)}</td><td class="num">${eur(x.vat_due)}</td>${red ? '' : `<td class="num"${cur && i === m ? ' title="' + CURMONTH + '"' : ''}>${eur(x.tax_set_aside)}</td><td class="num">${eur(x.social)}</td><td class="num"><b>${th(x.take_home)}</b></td>`}</tr>`).join('')}</table>${cur && !red ? `<p class="small muted" id="month-footnote">${CURMONTH}</p>` : ''}</div>`;
 };
 
 /* ================= TEAM ================= */
@@ -754,39 +793,38 @@ A.editUser = el => {
 /* ================= SETTINGS ================= */
 PAGES.settings = async () => {
   S.settings = await api('GET', 'settings'); await loadAll(['templates']);
-  const st = await api.get('auth/status', { noAuthRedirect: true }), s = S.settings;
+  const s = S.settings;
   const f = (k, l, t = 'text', extra = '') => fieldHTML({ k, l, t, ...extra }, s);
   const tpls = S.d.templates || [];
-  return `<div class="head"><div><h1>Settings</h1></div><button class="primary" data-a="saveSettings">Save settings</button></div>
-  <div class="grid g2"><div class="card"><h2>Your business</h2>${f('company_name', 'Business name')}${f('owner_name', 'Your name (signature)')}${f('street', 'Street & number')}<div class="row">${f('zip', 'ZIP')}${f('city', 'City')}</div><div class="row">${f('email', 'E-mail')}${f('phone', 'Phone')}</div>${f('website', 'Website')}<div class="row">${f('tax_number', 'Tax number (Steuernr.)')}${f('vat_id', 'VAT ID (USt-IdNr.)')}</div>
-    <h3 style="margin-top:12px">Bank</h3>${f('bank_name', 'Bank')}<div class="row">${f('iban', 'IBAN')}${f('bic', 'BIC')}</div>
-    <div class="field"><label>Logo for documents (JPEG)</label><input type="file" id="logo_file" accept="image/jpeg">${s.logo ? '<div class="small muted">A logo is set. Choose a new file to replace it.</div>' : ''}</div></div>
-  <div class="card"><h2>Company type & taxes (Germany)</h2>
-    ${fieldHTML({ k: 'company_type', l: 'Company type', t: 'select', o: [['freiberufler', 'Freiberufler (EÜR, no trade tax)'], ['gewerbe', 'Gewerbetreibender / Einzelunternehmen'], ['gmbh', 'UG / GmbH']] }, s)}
+  const hebesatz = ['gewerbe', 'gmbh'].includes(s.company_type);
+  return `<div class="head"><div><h1>Business settings</h1><div class="muted">Your business, documents and data. Personal items (profile, tax profile, calendars, tokens) are under <a href="#/me">My settings</a>.</div></div><button class="primary" data-a="saveSettings">Save settings</button></div>
+  <div class="grid g2"><div class="card" id="card-identity"><h2>Business identity</h2>${f('company_name', 'Business name')}${f('owner_name', 'Your name (signature)')}${f('street', 'Street & number')}<div class="row">${f('zip', 'ZIP')}${f('city', 'City')}</div><div class="row">${f('email', 'E-mail')}${f('phone', 'Phone')}</div>${f('website', 'Website')}<div class="row">${f('tax_number', 'Tax number (Steuernr.)')}${f('vat_id', 'VAT ID (USt-IdNr.)')}</div></div>
+  <div class="card" id="card-bank"><h2>Bank and logo</h2>${f('bank_name', 'Bank')}<div class="row">${f('iban', 'IBAN')}${f('bic', 'BIC')}</div>
+    <div class="field"><label>Logo for documents (JPEG)</label><input type="file" id="logo_file" accept="image/jpeg">${s.logo ? '<div class="small muted">A logo is set. Choose a new file to replace it.</div>' : ''}</div></div></div>
+  <div class="card" id="card-tax"><h2>Business tax set-up</h2>
+    ${fieldHTML({ k: 'company_type', l: 'Company type', t: 'select', o: [['freiberufler', 'Freiberufler (EÜR, no trade tax)'], ['gewerbe', 'Gewerbetreibender / Einzelunternehmen'], ['gmbh', 'UG / GmbH']] }, s).replace('<select ', '<select data-change="settingsCompanyType" ')}
     ${fieldHTML({ k: 'state', l: 'Federal state (public holidays)', t: 'select', o: Object.entries(S.states || {}) }, s)}
     ${f('kleinunternehmer', 'Kleinunternehmer (§19 UStG) – no VAT on invoices', 'check')}
-    <div class="row">${fieldHTML({ k: 'vat_rate', l: 'Default VAT %', t: 'select', o: [19, 7, 0] }, s)}${f('hebesatz', 'Gewerbesteuer Hebesatz %', 'number')}</div>
+    <div class="row">${fieldHTML({ k: 'vat_rate', l: 'Default VAT %', t: 'select', o: [19, 7, 0] }, s)}<div id="hebesatz_wrap" ${hebesatz ? '' : 'hidden'}>${f('hebesatz', 'Gewerbesteuer Hebesatz %', 'number')}</div></div>
     ${fieldHTML({ k: 'accounting', l: 'Revenue counted…', t: 'select', o: [['eur', 'when paid (EÜR / Ist-Versteuerung)'], ['accrual', 'when invoiced (Soll)']] }, s)}
-    <div class="row">${f('social_monthly', 'Health/care/pension per month €', 'number')}${f('church_tax', 'Church tax %', 'number', { h: '0, 8 or 9' })}</div>
-    <div class="row">${f('other_income', 'Other taxable income / year €', 'number')}${f('other_deductions', 'Other deductions / year €', 'number')}</div>${f('splitting', 'Joint assessment (Ehegattensplitting)', 'check')}
-    <p class="small muted">Tax figures are planning estimates (Einkommensteuer tariff §32a, Soli, Gewerbesteuer incl. §35 credit). Always confirm with your Steuerberater.</p></div></div>
-  <div class="card"><h2>Defaults</h2><div class="row">${f('default_rate', 'Default hourly rate €', 'number')}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div><p class="small">Document numbers: <a href="#/numbering">Numbering</a> (patterns, next number, preview, history).</p></div>
-  <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Document templates</h2><div class="right auto"><button data-a="editTemplate">+ New template</button></div></div><table>${S.templates.map(t => `<tr><td><b>${esc(t.name)}</b> <span class="muted small">${esc(t.layout)} · ${esc(t.language)}</span></td><td><span class="dot" style="background:${esc(t.accent)}"></span></td><td class="right"><button class="sm" data-a="editTemplate" data-id="${t.id}">${tpls.find(x => x.id === t.id) ? 'Edit' : 'Copy & customise'}</button></td></tr>`).join('')}</table></div>
+    <p class="small muted">Tax figures are planning estimates (Einkommensteuer tariff §32a, Soli, Gewerbesteuer incl. §35 credit). Always confirm with your Steuerberater.</p></div>
+  <div class="card" id="card-defaults"><h2>Documents and defaults</h2><div class="row">${f('default_rate', 'Default hourly rate €', 'number')}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div><p class="small">Document numbers: <a href="#/numbering">Numbering</a> (patterns, next number, preview, history).</p>
+    <h3 style="margin-top:12px">Document templates</h3><div class="row" style="align-items:center"><div class="right auto"><button data-a="editTemplate">+ New template</button></div></div><table>${S.templates.map(t => `<tr><td><b>${esc(t.name)}</b> <span class="muted small">${esc(t.layout)} · ${esc(t.language)}</span></td><td><span class="dot" style="background:${esc(t.accent)}"></span></td><td class="right"><button class="sm" data-a="editTemplate" data-id="${t.id}">${tpls.find(x => x.id === t.id) ? 'Edit' : 'Copy & customise'}</button></td></tr>`).join('')}</table></div>
   ${teamVisibilityCard()}
-  ${await calendarsCard()}
-  ${await tokensCard()}
-  <div class="card"><h2>Data & sync</h2><p>Data folder on this device:<br><code>${esc(S.data_dir || '')}</code></p><p class="muted small">Put this folder inside a Syncthing-shared folder and start permitA38 with <code>permita38 --data &lt;that folder&gt;</code> on each device. See the README for details.</p>
+  <div class="card" id="card-data"><h2>Data & sync</h2><p>Data folder on this device:<br><code>${esc(S.data_dir || '')}</code></p><p class="muted small">Put this folder inside a Syncthing-shared folder and start permitA38 with <code>permita38 --data &lt;that folder&gt;</code> on each device. See the README for details.</p>
     ${can('settings', 'write') && scopeOf('settings') === 'all' ? `<h3 style="margin-top:12px">Data transfer</h3>
     <p class="small"><a href="#/dataexport">Data export and import</a>: a copy of all your data, or fill a new empty instance.</p>
     <p class="small"><a href="#/import">Import documents from another tool</a>: offers, invoices, customers and expenses.</p>` : ''}</div>`;
 };
+A.settingsCompanyType = el => { const w = $('#hebesatz_wrap'); if (w) w.hidden = !['gewerbe', 'gmbh'].includes(el.value); };
 A.saveSettings = async () => {
   const s = { ...S.settings };
   const txt = ['company_name', 'owner_name', 'street', 'zip', 'city', 'email', 'phone', 'website', 'tax_number', 'vat_id', 'bank_name', 'iban', 'bic', 'company_type', 'state', 'accounting', 'default_template'];
-  const nums = ['hebesatz', 'social_monthly', 'church_tax', 'other_income', 'other_deductions', 'default_rate', 'payment_days', 'offer_valid_days', 'vat_rate'];
+  const nums = ['hebesatz', 'default_rate', 'payment_days', 'offer_valid_days', 'vat_rate'];
   txt.forEach(k => { const e = $('#f_' + k); if (e) s[k] = e.value; });
   nums.forEach(k => { const e = $('#f_' + k); if (e) s[k] = e.value === '' ? 0 : parseFloat(e.value); });
-  ['kleinunternehmer', 'splitting'].forEach(k => s[k] = $('#f_' + k).checked);
+  s.kleinunternehmer = $('#f_kleinunternehmer').checked;
+  delete s.personal_tax;
   if ($('#f_tl_employee')) s.team_timeline_visibility = { employee: $('#f_tl_employee').value, accountant: $('#f_tl_accountant').value };
   const lf = $('#logo_file').files[0];
   if (lf) s.logo = (await api.upload(lf)).name;
