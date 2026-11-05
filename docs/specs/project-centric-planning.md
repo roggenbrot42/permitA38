@@ -140,8 +140,8 @@ M2. **Revenue** (decided, D1): no weekly revenue and no "assumed" revenue from c
   (`personal: true` → `kind: internal`, unless a customer is set).
 * A customer project needs a `customer_id` when it is created or changed (`ProjectIn`, 422). The database does not
   require it: legacy customer projects without a customer but with documents stay `customer` (migration rule), and
-  deleting a customer does not touch `projects.customer_id` today (dangling ids are the subject of D7).
-* A default internal project **"Administration"** with the fixed id `internal-administration` is inserted by the
+  deleting a customer does not touch `projects.customer_id` today (the reference guards of db-guards-v2 part B guard `projects` against deletion while referenced; `customer_id` stays unguarded).
+* A default internal project **"Administration"** with the fixed id `internaladmin` is inserted by the
   migration when no row with that id exists (`INSERT ... WHERE NOT EXISTS`, idempotent). It can be renamed and
   archived, not deleted (409).
 
@@ -171,55 +171,46 @@ M2. **Revenue** (decided, D1): no weekly revenue and no "assumed" revenue from c
 * `incoming_offer.hours_mismatch` is removed (the two figures can no longer differ).
 * Existing subcontractor assignments are **not** converted: they keep their `hours_per_week`; the owner edits them.
 
-### Strict schema (work package 0 and the migration)
+### Strict schema (guards, `docs/specs/db-guards-v2.md`)
 
-**Infrastructure (WP0).** `schema.py` gains a dialect-neutral `Check(name, expr)` on `Table`, with a small expression
-vocabulary that `dialect.py` renders per dialect (no raw SQL strings in `schema.py`):
-`not_null(col)`, `non_blank(col)`, `one_of(col, values)`, `exactly_one(col_a, col_b)`, `range(col, lo, hi,
-lo_open=False)`, `iso_date(col)` (SQLite `date(col) IS col`; PostgreSQL/MariaDB a regex plus a cast check),
-`not_before(col_a, col_b)` (`col_a >= col_b` when both are set), `max_days(col_a, col_b, n)`,
-`implies(cond, cond)` and `null(col)`. The existing `allocations_one_owner` CHECK moves into `schema.py`. The
-"migrated SQLite equals `schema.py`" test compares the CHECK constraints as well (parsed from `sqlite_master.sql`,
-normalised), and a new test inserts one violating row per constraint and expects the database to refuse it, in
-SQLite always and in PostgreSQL/MariaDB where the test containers run.
+This work uses the trigger guards of PR #91 (`docs/specs/db-constraints.md`) and the new guard kinds of
+`docs/specs/db-guards-v2.md` (its part A, guard machinery, and part B, reference guards, `0017-reference-guards`, are
+done in their own PRs **before** this migration). A guard refuses only **new or changed** values. Existing rows are
+grandfathered and reported by `check-db` under the same code. There are no table CHECKs, no table rebuild and no
+rejects table (D6 and D7 decided this way, 2026-11-05).
 
-**Rows that violate a new constraint are never dropped silently** (recommended, Open decision D6). The migration first
-copies them into a new table `migration_rejects` (`id`, `migration_id`, `table_name`, `row_id`, `reason`, `row` JSON,
-`created`), then rebuilds the table without them. `permita38 migrate --status` prints the reject count per table, the
-health endpoint reports it, and the boss sees a banner "N records could not be migrated, see Settings → Data". A
-CLI command `permita38 rejects list|restore <id>` (restore validates the row against the current rules first)
-belongs to the same work package.
+**Migration `NNNN-project-planning`** (one file per dialect; `requires` = the head at merge time, `0018` if part B
+is merged first). Order inside the file:
 
-**SQLite rebuild.** Inside the runner's transaction (no `BEGIN`/`COMMIT` in the file): create `<t>_new` with the
-constraints, `INSERT INTO migration_rejects SELECT ... WHERE NOT (<checks>)`, apply the repairs below, `INSERT INTO
-<t>_new SELECT ... WHERE <checks>`, `DROP TABLE <t>`, `ALTER TABLE <t>_new RENAME TO <t>`, recreate the indexes.
-PostgreSQL/MariaDB: the same rejects and repairs, then `ALTER TABLE ... ADD CONSTRAINT`.
+1. Schema: `ALTER TABLE projects ADD COLUMN kind`, then `ALTER TABLE projects DROP COLUMN personal` (`DROP COLUMN`
+   keeps the other triggers and indexes; no guard reads `personal`).
+2. Data fixes (v1 guards stay active; none of these trips them):
+   * `kind` = `customer` when `customer_id` is set **or** an offer, contract or invoice refers to the project, else
+     `internal` (a `personal` project with a customer becomes `customer`). Backfill before the drop of `personal`.
+   * contracts and allocations with both hour fields: `total_hours` = NULL (the planner already used `hours_per_week`).
+   * `projects.status` NULL → `active`, `allocations.status` NULL → `active`, `contracts.status` NULL → `confirmed`.
+   * `INSERT ... SELECT ... WHERE NOT EXISTS` of the internal project **"Administration"** with the fixed id
+     `internaladmin` (matches `ID_PATTERN`).
+3. `CREATE TRIGGER` for the guard instances below, declared in `schema.GUARDS` with the kinds of v2 part A.
 
-**Constraints and repairs of migration `0016-project-planning`** (one file per dialect, `requires` = current head):
+| Table | Guard instances (kind: columns) |
+|---|---|
+| projects | `required: kind`, `one_of: kind` (customer, internal), `one_of: status` (from `ProjectIn` Literal), `required: name`, `implies: kind = internal ⇒ customer_id blank`, `range: budget_hours` (0, 100000, min exclusive) |
+| allocations | `required: project_id, start, end`, `one_of: status` (active, cancelled), `exactly_one: hours_per_week, total_hours`, `range: hours_per_week` (0, 80, min exclusive), `range: total_hours` (0, 100000, min exclusive), `max_days: start, end, 1830`, `range: rate` (0, 10000), `implies: status = cancelled ⇒ cancelled_from set`, `implies: status = active ⇒ cancelled_from blank`, `implies: supplier_id set ⇒ rate set`, `implies: user_id set ⇒ incoming_offer_id blank`. Owner exclusivity stays the existing table CHECK `allocations_one_owner` |
+| contracts | `required: title, start, end`, `one_of: status` (confirmed, done), `exactly_one: hours_per_week, total_hours`, `range: hours_per_week` (0, 168, min exclusive), `range: total_hours` (0, 100000, min exclusive), `range: rate` (0, 10000) |
 
-| Table | Constraint | Existing rows that violate it |
-|---|---|---|
-| projects | `kind` NOT NULL, `one_of(kind, customer, internal)` | repaired: `customer` when `customer_id` is set **or** an offer, contract or invoice references the project; else `internal` (a `personal` project with a customer becomes `customer`) |
-| projects | `non_blank(name)` | repaired to `(unnamed project)` |
-| projects | `status` NOT NULL, `one_of(status, active, paused, done, archived)` | NULL → `active`; any other value → rejects |
-| projects | `implies(kind = internal, customer_id IS NULL)` | follows from the kind repair |
-| projects | `iso_date(start)`, `iso_date(end)`, `not_before(end, start)` | rejects |
-| projects | `range(budget_hours, 0, 100000, lo_open)`, `range(rate, 0, <v.Rate max>)` | rejects |
-| allocations | `exactly_one(user_id, supplier_id)` (exists), `project_id` NOT NULL | rejects |
-| allocations | `start`, `end` NOT NULL, `iso_date`, `not_before(end, start)`, `max_days(start, end, 1830)` | rejects |
-| allocations | `exactly_one(hours_per_week, total_hours)` | both set → `total_hours` set NULL (today's engines use `hours_per_week` first, so no number changes); none → rejects |
-| allocations | `range(hours_per_week, 0, 80, lo_open)`, `range(total_hours, 0, 100000, lo_open)` | rejects |
-| allocations | `status` NOT NULL, `one_of(status, active, cancelled)` | NULL → `active`; other → rejects |
-| allocations | `implies(status = cancelled, cancelled_from IS NOT NULL)`, `implies(status = active, cancelled_from IS NULL)`, `iso_date(cancelled_from)` | rejects |
-| allocations | `implies(supplier_id IS NOT NULL, rate IS NOT NULL)`, `range(rate, 0, <v.Rate max>)`, `implies(user_id IS NOT NULL, incoming_offer_id IS NULL)` | rejects |
-| contracts | `non_blank(title)`, `start`, `end` NOT NULL, `iso_date`, `not_before(end, start)` | rejects |
-| contracts | `exactly_one(hours_per_week, total_hours)` | both → `total_hours` NULL (the engine used `hours_per_week`); none → rejects (the planner skipped them anyway) |
-| contracts | ranges of `hours_per_week`, `total_hours`, `rate` as in `ContractIn` | rejects |
-| contracts | `status` NOT NULL, `one_of(status, confirmed, done)` | NULL → `confirmed`; other → rejects |
+**The API is tightened in this PR first** (a guard is never stricter than every write path; a step-0 audit of every
+write path, including import, transfer and procurement accept, comes before the guard):
+* `projects.budget_hours` > 0 (`TotalHours` allows 0 today).
+* `total_hours` > 0 on contracts, plans and allocations (`TotalHours` allows 0 today; a new exclusive type
+  `PositiveTotalHours`).
+* exactly one of `hours_per_week` / `total_hours` on `ContractIn` and `AllocationIn` (422 otherwise).
+* `contracts.hours_per_week` stays at most 168: a contract no longer belongs to one person, so 80 would be wrong for a
+  team contract. Allocations stay at most 80 (one person).
 
-Foreign keys are **not** part of this migration (Open decision D7). `transfer/upgrades.py` (data export/import of
-older versions) and the importer must produce rows that pass these constraints (same repairs; a row that cannot be
-repaired is reported in the import result, never written).
+**Data transfer:** an `UPGRADES` hook in `transfer/upgrades.py` maps `personal` to `kind` for archives of older heads
+(same rule as the data fix) and applies the hour-field fix. Restores suspend the guard kinds that v2 allows (never the
+number guard); the importer reports a row it cannot fix instead of writing it.
 
 ## API contract (binding; backend and web UI are built against it in parallel)
 
@@ -367,23 +358,23 @@ Calendar: state BY. Between 09.11.2026 and 18.12.2026 there is no public holiday
 | E5c | Eve 40 h, assigned to Ash 10 h/week until Thu 31.12.2026. Week of 28.12.2026 (no holiday in that week) | 10 / 5 available days of the week = 2/day, on the 4 days inside the period | supply 8 h in that week. Same for a subcontractor with 10 h/week: 8 h. **Week of 21.12.2026** (25.12. holiday): 10 / 4 = 2.5/day on 4 days = 10 h (today's subcontractor rule gives 2/day on 4 days = 8 h; at 90.00 that is 900.00 instead of 720.00 planned cost, see D14) |
 | E6 | Incoming offer from Sam: one line 24 h × 90.00 = 2,160.00 net; plan 09.11.–04.12. with `hours_per_week` 6 | Accept: total assignment 24 h, rate 90.00, `hours_per_week` ignored | Assignment total 24, planned net 2,160.00, no warning. Edit to 30 h: planned net 2,700.00, info `assignment.differs_from_offer`: "Planned 30 h / 2,700.00 € differ from the offer's 24 h / 2,160.00 € (6 h / 540.00 € more)." |
 | E7 | E1 plus offer O1 on Orchard, total 10 h 16.11.–04.12., win probability 50 % | Contracts first: K2 already took every leftover hour until 04.12. O1 covered 0 | O1 shortfall 10, `offer.shortfall`; Orchard shortfall_contracts 26, shortfall_worst_case 36, shortfall_expected 26 + 5 = 31, status `short` |
-| E8 | Migration: projects (a) `personal` 1, no customer; (b) `personal` 0, no customer; (c) `personal` 1 with customer; (d) status NULL; (e) end before start. Contracts (f) both hour fields; (g) none. Allocation (h) employee with `incoming_offer_id` | Repairs and rejects per the table | (a) internal, (b) internal, (c) customer, (d) `active`, (e) in `migration_rejects` and not in `projects`; (f) `total_hours` NULL, (g) rejected; (h) rejected. `migrate --status` reports 3 rejects. `internal-administration` exists once after two runs |
+| E8 | Migration: projects (a) `personal` 1, no customer; (b) `personal` 0, no customer, no documents; (c) `personal` 1 with customer; (d) `personal` 0, no customer, one contract; (e) status NULL. Contracts (f) both hour fields; (g) `total_hours` 0 (grandfathered). Allocation (h) employee with `incoming_offer_id` (grandfathered) | Data fixes and guards per the section above | (a) internal, (b) internal, (c) customer, (d) customer, (e) `active`; (f) `total_hours` NULL; (g) kept, re-saving it unchanged succeeds, changing its title succeeds, `check-db` reports `range.bounds`; (h) kept and reported by `check-db` (`state.implies:<guard>`). A new contract with `total_hours` 0 is refused by the API (422) and by the guard. `internaladmin` exists once after two runs; the `personal` column is gone |
 
 ## Work packages (fresh Sonnet agents, one each; backend and web UI in parallel against the contract)
 
 | WP | Content | Depends on |
 |---|---|---|
-| WP0 | `Check` in `schema.py`, rendering in `dialect.py` (3 dialects), CHECK comparison in the schema test, refusal tests, `migration_rejects` table, `migrate --status`/health/CLI `rejects` | – |
-| WP1 | Migration `0016-project-planning` (3 dialects), `kind`, constraints and repairs, "Administration", models (`ProjectIn.kind`, `ContractIn`, `AllocationIn`, `IncomingPlanIn`), `transfer/upgrades.py`, importer; E8 | WP0 |
+| WP0 | Not part of this work: guard kinds (db-guards-v2 part A) and reference guards (part B) land first in their own PRs | – |
+| WP1 | Step-0 write-path audit, API tightening, migration `NNNN-project-planning` (3 dialects), `kind`, data fixes, guard instances in `schema.GUARDS`, "Administration", models (`ProjectIn.kind`, `ContractIn`, `AllocationIn`, `IncomingPlanIn`), `transfer/upgrades.py`, importer; E8 | WP0 |
 | WP2 | `planning/spread.py` and supply (S1–S5) with E4, E5, E5b; switch `allocations`, `procurement`, `planning_warnings`, `external_capacity` to it | – |
 | WP3 | Demand, attribution, covering, verdicts (D1–D6, C1–C6, M1–M2) as pure functions; E1–E3, E7 | WP2 |
 | WP4 | Service and API: `GET /api/plan`, simulate, apply, suggestions, warnings on save, allocations API, incoming accept (E6), team timeline, removals; `api/openapi.json`; randomized model updated | WP1, WP3 |
-| WP5 | Web UI against the contract with E1/E7 fixtures: planner overview (week rows, project and item verdicts with explanation and "Assign"), assignment dialog for people and subcontractors, project form `kind`, offer plan without assignee, rejects banner | contract only; integration after WP4 |
+| WP5 | Web UI against the contract with E1/E7 fixtures: planner overview (week rows, project and item verdicts with explanation and "Assign"), assignment dialog for people and subcontractors, project form `kind`, offer plan without assignee | contract only; integration after WP4 |
 | WP6 | `docs/planning.md` rewritten with E1 as the walkthrough; superseded headers | WP4 |
 
 ## Review tier
 
-**Full** (capacity numbers, money of subcontractor cost and margin, a storage migration that repairs and rejects data):
+**Full** (capacity numbers, money of subcontractor cost and margin, a storage migration with data fixes and new guards):
 code review, test review, and a logic review that recomputes E1–E8 by hand. The randomized suites run once before
 the merge (records, data model and import are touched).
 
@@ -396,8 +387,8 @@ the merge (records, data model and import are touched).
 | D3 | How a weekly contract counts a partial week (start or end mid-week) | **decided: pro rata over Mon–Fri** (D2 rule) |
 | D4 | Over-assignment | **decided: warn only, never scale** (S3) |
 | D5 | Booked attribution: the week's weekly items first, then total items earliest end first | **decided: yes** |
-| D6 | Rows that violate a new rule at migration time | **open again**: conflicts with the guards decision of PR #91, see below |
-| D7 | Foreign keys | **open**, options below |
+| D6 | Rows that violate a new rule at migration time | **decided: grandfathered** by the trigger guards (PR #91), reported by `check-db`; no rejects table |
+| D7 | Foreign keys | **decided: reference triggers** (db-guards-v2 part B, own PR) |
 | D8 | Remove "Allocate my capacity" | **decided: yes** |
 | D9 | `personal` | **decided: removed altogether** |
 | D10 | Calendar busy time and capacity | **decided: only out-of-office and all-day blocks reduce capacity**; ordinary busy events do not |
@@ -406,6 +397,5 @@ the merge (records, data model and import are touched).
 | D13 | Subcontractors are never scaled or checked for over-assignment | **decided: yes** |
 | D14 | Subcontractors: holidays and their own unavailable windows (vacation mid-project) are days off; weekly hours move to the other days of the week like an employee's | **decided** (changes the planned cost of existing subcontractor assignments with a holiday in their period, E5c; the release notes name it) |
 
-Still open: D6/D7 wait for PR #91 (database guards). Recommendation: build on its trigger guards instead of table
-CHECKs and a rejects table (the "Strict schema" section is rewritten then), and guard references with triggers for
-new and changed values. The migration of this work becomes `0017` with `requires` = the guards migration.
+All decisions are taken. Implementation starts when db-guards-v2 parts A and B are merged (WP2 and WP3 do not touch
+storage and may start earlier).
