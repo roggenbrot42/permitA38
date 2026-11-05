@@ -237,3 +237,45 @@ def test_offer_to_invoice_with_existing_or_no_project_works(boss_client):
     assert r.status_code == 200 and r.json()["project_id"] == p["id"]
     off = c.post("/api/offers", json={"lines": LINES}).json()
     assert c.post(f"/api/offers/{off['id']}/to-invoice").status_code == 200
+
+
+# ------------------------------------------------------------------ legacy timer without its project
+def _plant_timer(app, c, project_id):
+    import time
+
+    store = app.state.services.store
+    assert store.get("projects", project_id) is None
+    store.save("timers", {"id": _uid(c), "running": True, "started": int(time.time()) - 600, "project_id": project_id})
+
+
+def test_stop_timer_of_a_deleted_project_books_the_time_without_it(boss_client, app):
+    c = boss_client
+    _plant_timer(app, c, GHOST)
+    r = c.post("/api/timer/stop", json={})
+    assert r.status_code == 200, r.text
+    entries = c.get("/api/entries").json()
+    assert len(entries) == 1
+    assert entries[0]["minutes"] == 10 and entries[0].get("project_id") is None
+    assert entries[0]["user_id"] == _uid(c)
+    assert c.get("/api/timer").json()["running"] is False
+
+
+def test_start_timer_books_the_old_timer_of_a_deleted_project_without_it(boss_client, app):
+    c = boss_client
+    p = _project(c)
+    _plant_timer(app, c, GHOST)
+    r = c.post("/api/timer/start", json={"project_id": p["id"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["running"] is True and r.json()["project_id"] == p["id"]
+    entries = c.get("/api/entries").json()
+    assert len(entries) == 1
+    assert entries[0]["minutes"] == 10 and entries[0].get("project_id") is None
+
+
+def test_entry_with_a_malformed_project_id_is_refused(boss_client):
+    c = boss_client
+    r = c.post("/api/entries", json={"user_id": _uid(c), "date": TODAY, "minutes": 15, "project_id": "bad id!"})
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["loc"] == ["body", "project_id"]
+    assert r.json()["detail"][0]["msg"] == "String should match pattern '^[0-9a-z]{6,32}$'"
+    assert c.get("/api/entries").json() == []

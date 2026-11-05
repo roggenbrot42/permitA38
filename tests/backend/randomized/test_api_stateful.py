@@ -1646,7 +1646,9 @@ class ApiMachine(RuleBasedStateMachine):
                     assert r.status_code == 422 and r.json() == {"detail": "A capacity offer needs a project"}
                     return
                 if project is None:  # the project was deleted after the offer named it
-                    assert r.status_code == 422 and r.json() == {"detail": "Unknown project"}
+                    assert r.status_code == 422 and r.json() == {
+                        "detail": "The offer's project no longer exists; set another project on the offer first."
+                    }
                     return
                 if old["hours"] == 0:
                     assert r.status_code == 422 and r.json() == {"detail": "A capacity offer needs an hour line"}
@@ -1663,7 +1665,9 @@ class ApiMachine(RuleBasedStateMachine):
                 pid = old["project_id"]
                 project = self.m["projects"].get(pid) if pid else None
                 if pid and project is None:  # a named project must still exist (a flat offer may name none)
-                    assert r.status_code == 422 and r.json() == {"detail": "Unknown project"}
+                    assert r.status_code == 422 and r.json() == {
+                        "detail": "The offer's project no longer exists; set another project on the offer first."
+                    }
                     return
                 if project is not None and project["status"] in ("done", "archived"):
                     assert r.status_code == 409 and r.json() == {"detail": "The project is closed"}

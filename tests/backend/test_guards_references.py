@@ -329,3 +329,12 @@ def test_an_unrelated_record_can_always_be_deleted(repo):
     c = repo.save("customers", {"name": "Demo customer"})
     assert repo.delete("customers", c["id"]) is True
     assert repo.delete("projects", p["id"]) is True
+
+
+# ------------------------------------------------------------------ check-db finds the legacy dangling values
+@pytest.mark.parametrize(("table", "col", "target"), CASES)
+def test_check_db_names_a_planted_dangling_reference(repo, unguarded, table, col, target):
+    ghost = f"ghost-{table}-{col}"
+    saved = unguarded(repo, table, build(repo, table, col, ghost), "ref.dangling")
+    found = integrity.IntegrityService(repo).run(only=["ref.dangling"])
+    assert [(f.code, f.collection, f.id, f.field) for f in found] == [("ref.dangling", table, saved["id"], col)]
