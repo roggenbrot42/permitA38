@@ -523,6 +523,30 @@ def cover(items: Sequence[Item], bookings: Sequence[Booking], supply: Supply, ow
     # the team's unassigned hours of each day). Internal projects never appear here.
 ```
 
+```python
+# planner/views.py (WP4a: the JSON of GET /api/plan, pure; the service in WP4b loads the data and calls it)
+def verdict_warnings(verdicts: Sequence[ProjectVerdict], names: Mapping[str, str]) -> list[dict]
+    # contract.shortfall / offer.shortfall (warning, message = the item's explanation, details {project_id, item_id,
+    #   kind, shortfall, weekly_shortfalls}); project.no_supply (warning) for a customer project with remaining
+    #   demand and supply 0; booked.unattributed (info) when booked_unattributed > 0; contract.no_project (info) per
+    #   item of the scope without a project. Order: projects as in the verdicts, then items.
+def plan_json(
+    supply: Supply, owners: Sequence[Owner], assignments: Sequence[Assignment], verdicts: Sequence[ProjectVerdict],
+    internal: Sequence[dict],            # [{project_id, name, budget_hours: float | None, booked: float}]
+    names: Mapping[str, str], subcontractor_cost: Mapping[str, Decimal], invoiced: Mapping[str, Decimal],
+    warnings: Sequence[dict], user_id: str | None = None, project_id: str | None = None,
+) -> dict
+    # the body of GET /api/plan exactly as in "API contract"; weeks = the ISO weeks of supply.lo..supply.hi; with
+    #   user_id only that person in weeks and people (subcontractor_hours then 0); with project_id only that scope in
+    #   projects ("unassigned" = the scope without a project); hours rounded to 2; money float(q2(...)).
+    # Customer project: contract_value = sum of contract item values; margin = contract_value - subcontractor_cost.
+    # Item: invoiced = invoiced.get(id, 0) for contracts, 0 for offers; open = value - invoiced; offers also carry
+    #   expected_value = q2(value x win), contracts expected_value null.
+    # Internal project entry: {project_id, name, kind: "internal", assigned (future hours of its assignments in
+    #   the range), booked, budget_hours, status: "over_budget" if budget_hours and booked + assigned > budget_hours
+    #   else "ok"}; the caller passes the warning internal.over_budget in "warnings".
+```
+
 Confirmed implementation details (WP3 review, 2026-11-05): `WeekShortfall.supply` is the item's covered share of that
 week (demand − shortfall); a shortfall or a weekly shortfall counts only when it rounds above 0 at 2 decimals; a total
 item whose window has no day after today (it ended undelivered) keeps its whole remaining as shortfall; suggestions
