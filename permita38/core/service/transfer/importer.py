@@ -593,8 +593,8 @@ def validate(path: Path, store: Repository, *, allow_no_users: bool = False, tod
     return plan
 
 
-def _check_numbers(plan: Plan) -> None:
-    """The number guard is never suspended: duplicate invoice or offer numbers refuse the whole archive."""
+def _normalise_and_check_numbers(plan: Plan) -> None:
+    """Drop empty numbers, then refuse duplicates: the number guard is never suspended."""
     for coll in NUMBERED:
         recs = plan.records.get(coll, [])
         for rec in recs:
@@ -603,7 +603,7 @@ def _check_numbers(plan: Plan) -> None:
         if dup:
             plan.error(
                 "numbering.duplicate",
-                f"data/{coll}.json contains duplicate numbers: {', '.join(dup)}.",
+                f"data/{coll}.json contains duplicate numbers: {', '.join(dup)}. Run `permita38 check-db` on the source to see the records.",
                 f"data/{coll}.json",
             )
 
@@ -699,7 +699,7 @@ def _validate(plan: Plan, reader: ArchiveReader, store: Repository, today: date)
     _check_semantics(plan)
     if plan.errors:
         return
-    _check_numbers(plan)
+    _normalise_and_check_numbers(plan)
     if plan.errors:
         return
     _check_references(plan)

@@ -330,14 +330,12 @@ def main(argv: list[str] | None = None):
             print("Backup written to", services.store.backup(args.dest))
             return
         if command == "import-json":
-            from permita38.core.repository.importer import import_json
+            from permita38.core.repository.importer import ImportRefused, import_json
 
             services.store.startup()
             try:
                 report = import_json(services.store, args.old_data_dir)
-            except ValueError as e:
-                if not str(e).startswith("numbering.duplicate"):
-                    raise
+            except ImportRefused as e:
                 print(str(e), file=sys.stderr)
                 sys.exit(1)
             for coll, n in report.imported.items():

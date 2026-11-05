@@ -22,6 +22,14 @@ NUMBERED = ("invoices", "offers")
 _FILE_RE = re.compile(r"^[0-9a-z]{6,32}\.json$")
 
 
+class ImportRefused(ValueError):
+    """The import was refused as a whole; ``code`` names the reason (e.g. ``numbering.duplicate``)."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
 @dataclass
 class ImportReport:
     imported: dict[str, int] = field(default_factory=dict)
@@ -66,6 +74,7 @@ def _read_new(repo: Repository, folder: Path, coll: str) -> Iterable[tuple[str, 
     """(id, record) of the files that would be imported (valid JSON, valid id, not stored yet)."""
     if not folder.is_dir():
         return
+    seen: set[str] = set()
     for p in sorted(folder.iterdir()):
         if not _FILE_RE.match(p.name):
             continue
@@ -78,6 +87,9 @@ def _read_new(repo: Repository, folder: Path, coll: str) -> Iterable[tuple[str, 
         rid = rec.get("id") or p.stem
         if not ID_RE.match(str(rid)) or repo.get(coll, rid):
             continue
+        if rid in seen:  # the write loop skips a second file with the same id too
+            continue
+        seen.add(rid)
         yield rid, rec
 
 
@@ -94,7 +106,11 @@ def _check_numbers(repo: Repository, old: Path) -> None:
         taken = {n for n in stored if isinstance(n, str) and n}
         dup = sorted({*dup, *(n for n in incoming if n in taken)})
         if dup:
-            raise ValueError(f"numbering.duplicate: duplicate {coll} numbers, nothing was imported: {', '.join(dup)}")
+            raise ImportRefused(
+                "numbering.duplicate",
+                f"numbering.duplicate: duplicate {coll} numbers, nothing was imported: {', '.join(dup)}."
+                " Run `permita38 check-db` to see the records.",
+            )
 
 
 def import_json(repo: Repository, old_dir: Path) -> ImportReport:

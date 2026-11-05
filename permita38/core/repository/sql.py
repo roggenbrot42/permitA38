@@ -69,6 +69,16 @@ class SQLRepository(Repository):
         """Column names the database really has for ``table`` (None = assume the schema as described)."""
         return None
 
+    def _guard_triggers(self) -> set[str]:
+        """Names of the guard triggers the database currently has."""
+        raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
+
+    def _drop_guard(self, name: str) -> None:
+        raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
+
+    def _create_guard(self, statement: str) -> None:
+        raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
+
     @abstractmethod
     def _open(self) -> None:
         """Open the connection (idempotent)."""
@@ -275,9 +285,7 @@ class SQLRepository(Repository):
             self._ensure()
             if not self._depth:
                 raise RuntimeError("guards_suspended() is only allowed inside transaction()")
-            if self.dialect.name != "sqlite":
-                raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
-            existing = {r[0] for r in self._rows("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+            existing = self._guard_triggers()
             live: dict[str, set[str] | None] = {}
             drops: list[str] = []
             creates: list[str] = []
@@ -290,15 +298,24 @@ class SQLRepository(Repository):
                 for stmt in self.dialect.guard_sql(g):
                     m = re.match(r'CREATE TRIGGER "([^"]+)"', stmt)
                     if m and m.group(1) in existing:
-                        drops.append(f"DROP TRIGGER {self.dialect.quote(m.group(1))}")
+                        drops.append(m.group(1))
                         creates.append(stmt)
-            for stmt in drops:
-                self._exec(stmt)
+            for name in drops:
+                self._drop_guard(name)
             try:
                 yield
-            finally:
+            except BaseException as exc:
+                # re-create the guards, but never let a failure here hide the original error
                 for stmt in creates:
-                    self._exec(stmt)
+                    try:
+                        self._create_guard(stmt)
+                    except Exception as e2:
+                        if hasattr(exc, "add_note"):  # Python 3.11+
+                            exc.add_note(f"re-creating a guard failed too: {e2!r}")
+                raise
+            else:
+                for stmt in creates:
+                    self._create_guard(stmt)
 
     # ------------------------------------------------------------------ value coding
     def _coerce(self, col: Column, v: Any) -> tuple[bool, Any]:
