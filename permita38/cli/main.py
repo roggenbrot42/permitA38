@@ -330,15 +330,21 @@ def main(argv: list[str] | None = None):
             print("Backup written to", services.store.backup(args.dest))
             return
         if command == "import-json":
-            from permita38.core.repository.importer import import_json
+            from permita38.core.repository.importer import ImportRefused, import_json
 
             services.store.startup()
-            report = import_json(services.store, args.old_data_dir)
+            try:
+                report = import_json(services.store, args.old_data_dir)
+            except ImportRefused as e:
+                print(str(e), file=sys.stderr)
+                sys.exit(1)
             for coll, n in report.imported.items():
                 print(f"  {coll}: {n} imported, {report.skipped.get(coll, 0)} skipped")
             print(f"settings imported: {report.settings}; attachments copied: {report.attachments}")
             for line in report.usernames_derived:
                 print("  username derived:", line)
+            for w in report.warnings:
+                print(f"  warning: {w['code']} {w['collection']}/{w['id']}")
             if report.users_without_password:
                 print(
                     "These users have no password yet and cannot log in: "

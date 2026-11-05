@@ -264,16 +264,24 @@ def test_year_query_parameters_are_range_checked(boss_client):
 
 
 # ------------------------------------------------------------------ already-stored damaged records
-def _damage(app):
+def _damage(app, plant):
     """Records as an older version, a bug or another synced device could have left in the database."""
     store = app.state.services.store
     uid = store.list("users")[0]["id"]
+
     cust = store.save("customers", {"name": "C", "rate": "abc"})
     proj = store.save("projects", {"name": "P", "customer_id": cust["id"], "rate": float("nan") if False else "x"})
-    store.save("absences", {"start": "garbage", "user_id": uid})
+    plant(store, "absences", {"start": "garbage", "user_id": uid}, "format.date")
     store.save("absences", {"start": "2026-10-19", "end": "2026-10-22"})  # no owner
-    store.save("absences", {"start": "2026-10-22", "end": "2026-10-19", "user_id": uid})  # reversed
-    store.save("contracts", {"title": "bad", "start": "nope", "end": "2026-12-31", "hours_per_week": 5})
+    plant(
+        store, "absences", {"start": "2026-10-22", "end": "2026-10-19", "user_id": uid}, "state.period_reversed"
+    )  # reversed
+    plant(
+        store,
+        "contracts",
+        {"title": "bad", "start": "nope", "end": "2026-12-31", "hours_per_week": 5},
+        ("format.date", "state.period_reversed"),
+    )
     store.save("contracts", {"title": "text", "start": "2026-01-01", "end": "2026-12-31", "hours_per_week": "lots"})
     store.save(
         "contracts",
@@ -285,12 +293,13 @@ def _damage(app):
             "user_ids": [uid],
         },
     )
-    store.save("expenses", {"date": "2026-13-45", "net": 1})
+    plant(store, "expenses", {"date": "2026-13-45", "net": 1}, "format.date")
     store.save("expenses", {"date": TODAY.isoformat(), "net": "many", "vat": "x", "deductible": "y"})
-    store.save("entries", {"user_id": uid, "date": "not-a-date", "minutes": 60})
+    plant(store, "entries", {"user_id": uid, "date": "not-a-date", "minutes": 60}, "format.date")
     store.save("entries", {"user_id": uid, "date": TODAY.isoformat(), "minutes": "sixty", "project_id": proj["id"]})
     store.save("entries", {"user_id": uid, "date": TODAY.isoformat(), "minutes": 90, "project_id": proj["id"]})
-    store.save(
+    plant(
+        store,
         "invoices",
         {
             "status": "paid",
@@ -298,6 +307,7 @@ def _damage(app):
             "date": "x",
             "lines": [{"qty": "a", "price": None}, "junk", {"qty": 2, "price": 10}],
         },
+        "format.date",
     )
     store.save("invoices", {"status": "sent", "date": TODAY.isoformat(), "lines": "not-a-list"})
     store.save("offers", {"status": "sent", "plan": {"start": "bad", "end": "worse"}})
@@ -317,8 +327,8 @@ def _damage(app):
     return uid
 
 
-def test_damaged_stored_records_never_break_aggregate_endpoints(app, boss_client):
-    uid = _damage(app)
+def test_damaged_stored_records_never_break_aggregate_endpoints(app, boss_client, unguarded):
+    uid = _damage(app, unguarded)
     c = boss_client
     assert c.get("/api/forecast").status_code == 200
     assert c.get("/api/forecast", params={"weeks": 156}).status_code == 200
@@ -332,7 +342,7 @@ def test_damaged_stored_records_never_break_aggregate_endpoints(app, boss_client
     assert any(w["confirmed"] > 0 for w in fc["weeks"]), "the valid contract is still planned"
 
 
-def test_damaged_stored_records_do_not_break_the_odd_users_dashboard(app, boss_client):
-    _damage(app)
+def test_damaged_stored_records_do_not_break_the_odd_users_dashboard(app, boss_client, unguarded):
+    _damage(app, unguarded)
     odd = next(u for u in boss_client.get("/api/users").json() if u["username"] == "odd")
     assert boss_client.get("/api/dashboard", params={"user_id": odd["id"]}).status_code == 200

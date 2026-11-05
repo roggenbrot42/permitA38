@@ -12,6 +12,12 @@ Invoice numbers must be unique and sequential (§ 14 UStG in Germany). Gaps have
 skips numbers on its own and does not let you delete a numbered invoice (cancel it instead; it keeps its number).
 Before you change a number mid-year, talk to your tax advisor.
 
+The database itself refuses a second invoice with the same number, and a second offer with the same number (the check
+is per table). The refusal is answered with HTTP 409 and the code `numbering.duplicate`. A restore from a data export
+or an `import-json` whose data holds a duplicate number is refused as a whole; nothing is written and the message lists
+the numbers. Numbers stored by an earlier version are kept as they are: `permita38 check-db` reports a duplicate as an
+error and the server logs it once at startup (numbers only). Finalizing further invoices is not blocked.
+
 ## Pattern
 
 A pattern is literal text plus tokens:
@@ -80,6 +86,12 @@ be skipped), `duplicate` (the number is already used), `pattern_change` (existin
 The counter of a period is created on first use. If none exists, it is seeded from the existing documents: the
 highest number that the current pattern produces for a document of that period (numbers of other formats, or with a
 year/month that differs from the document date, are ignored; there is no count fallback). Numbers in use are always skipped, so a finalize can never produce a duplicate.
+
+## Known limitation
+
+A database that already holds duplicate numbers from before this version keeps them: an issued number cannot be
+changed. `permita38 check-db` lists them. Such a database cannot be restored from an export or via import-json until the
+duplicates are resolved; talk to your tax adviser about correcting the affected invoices.
 
 ## Concurrency
 

@@ -1,7 +1,6 @@
 # Spec: database guards for numbering and basic formats
 
-Status: **spec, not scheduled** (2026-11-05). Depends on [`db-integrity-check.md`](db-integrity-check.md) (`check-db`)
-being merged first. Review tier: **Full** (numbering, storage layer, every write path).
+Status: **ready for implementation** (2026-11-05; `check-db` merged in PR #89). Review tier: **Full** (numbering, storage layer, every write path).
 
 ## Goal
 
@@ -50,6 +49,12 @@ BEGIN SELECT RAISE(ABORT, 'permita38:numbering.duplicate'); END;
 
 The `NOT EXISTS (... same id, same value)` clause on INSERT is what grandfathers a row that is only re-saved (the
 upsert fires the INSERT trigger first). Plus an index `idx_<table>_number` on `number` so the lookups stay fast.
+
+**Every** INSERT trigger carries the grandfathering clause, not only the number guard: the repository always
+writes with an upsert, so the INSERT trigger fires on every re-save of an existing row. For a one-column guard the
+clause is `NOT EXISTS (SELECT 1 FROM t WHERE "id" = NEW."id" AND col IS NEW.col)`; for the `order` guard both columns
+(`... AND "start" IS NEW."start" AND "end" IS NEW."end"`). The UPDATE trigger fires only when a guarded column
+changes (`BEFORE UPDATE OF col` plus `NEW.col IS NOT OLD.col`).
 
 Every guard's code is the **same code `check-db` uses** for the stored-data finding, so a refused write and the
 report speak the same language.
@@ -117,18 +122,36 @@ accordingly.
 ## Storage layer
 
 - `repository/base.py`: `class ConstraintViolation(Exception)` with `code` (the part after `permita38:`) and
-  `collection`. `SQLRepository.save` / `save_many` translate a driver `IntegrityError` whose message starts with
+  `collection`. `SQLRepository.save` translates a driver `IntegrityError` (`save_many` calls `save`, so it is covered) whose message starts with
   `permita38:` into it; other integrity errors are re-raised unchanged. The transaction is rolled back as today.
 - API: one exception handler maps `ConstraintViolation` to **409** `{"detail": "The database refused the change
   (<code>).", "code": "<code>"}`. Services that already check (finalize, the importer) keep their own friendlier
   messages; the guard only fires when a check was missed.
 - **Verbatim restore.** The transfer import (`core/service/transfer/importer.py`, into an empty instance) and
   `import-json` copy existing data, which may contain grandfathered violations; on an empty database they are all
-  INSERTs, so the guards would refuse them. Add `Repository.guards_suspended()`, a context manager allowed **only
-  inside** `transaction()`: SQLite drops the guard triggers and recreates them from `schema.py` before the
-  transaction commits (DDL is transactional in SQLite; a rollback restores them). Use it only in those two restore
-  paths, never in the document importer (new data must obey). After the restore, run the `check-db` rules for the
-  guard codes and add their findings as warnings to the import report.
+  INSERTs, so the guards would refuse them. Add `Repository.guards_suspended(kinds)`, a context manager allowed
+  **only inside** `transaction()`: SQLite drops the guard triggers of the given kinds and recreates them from
+  `schema.py` before the transaction commits (DDL is transactional in SQLite; a rollback restores them). Use it only
+  in those two restore paths, never in the document importer (new data must obey), and only for the kinds `date`,
+  `non_negative` and `order`. After the restore, run the `check-db` rules for those codes and add their findings as
+  warnings to the import report.
+- **Step-0 results (2026-11-05):** every live write path already satisfies every guard; only the transfer import,
+  `import-json` and rows written before the guards can violate them. Consequences: `invoices/from-time` copies stored
+  entry dates and `apply_scenario` applies stored changes without re-validating, so a legacy bad value there ends as
+  a 409 from the guard. That is accepted; `check-db` reports the source row.
+- **`import-json` may write into a non-empty database** (it skips existing ids). Its up-front duplicate check
+  compares the incoming numbers with each other **and** with the numbers already stored. It uses
+  `guards_suspended` like the transfer import.
+- **Empty numbers:** both restore paths drop `number` when it is `""` before the up-front check and before writing
+  (one shared helper, so check and write agree).
+- **The number guard is never suspended** (maintainer decision 2026-11-05: "there must be no duplicate invoice
+  numbers"). `guards_suspended` rejects the kind `unique` with `ValueError`. A restore or import whose data holds a
+  duplicate invoice or offer number fails as a whole (nothing is written) with the import's usual error shape; the
+  message lists the duplicate numbers (code `numbering.duplicate`). The restore paths check this up front, before
+  writing, so the user gets the list rather than the first trigger error.
+- **Existing duplicates** (possible only in data written before the guards): reported by `check-db` as errors and
+  logged once at server startup at ERROR level (numbers only, no other record data). Finalizing further invoices is
+  **not** blocked: an issued invoice may not be renumbered, so a block would stop invoicing with no legal way out.
 - Run the new storage behaviour through `tests/backend/test_repository_contract.py`.
 
 ## Tests
@@ -139,8 +162,11 @@ accordingly.
 - Upgrade test: a database at the previous head with a duplicate invoice number and a reversed period migrates
   without error; the rows are unchanged; `check-db` reports both.
 - API: a forced duplicate (bypass `numbering.py` with a monkeypatched allocator) gives 409 with the code, not 500.
-- Restore: a transfer export that contains a duplicate number imports into an empty instance with a warning; the
-  guards exist again afterwards (`sqlite_master`); a failing restore leaves the guards in place.
+- Restore: a transfer export with a reversed period imports into an empty instance with a warning and the guards
+  exist again afterwards (`sqlite_master`); a transfer export (and an `import-json` folder) with a duplicate invoice
+  number is refused as a whole, nothing written, message lists the number; a failing restore leaves the guards in
+  place; `guards_suspended({"unique"})` raises `ValueError`.
+- Startup: a database with a grandfathered duplicate logs one ERROR line naming the number.
 - Step 0 list as a test: for each guarded column, one request per write path with a valid edge value (`minutes` = 1,
   `rate` = 0, `start == end`) succeeds.
 - Randomized suites once before merge (`make test-summary SUITES="random"`): this touches numbering and every write
@@ -151,7 +177,7 @@ accordingly.
 `docs/numbering.md` (legal note: the database now refuses duplicate numbers), `docs/validation.md` (a third layer
 after hard limits and sanity checks), `docs/porting-to-postgres.md` (see above), `CHANGELOG.md`.
 
-## Open questions for the maintainer
+## Decided
 
-- Should a grandfathered duplicate invoice number block **finalizing further invoices** until it is resolved, or only
-  be reported? This spec only reports it.
+- No duplicate invoice or offer numbers, ever, for new data and restores (maintainer, 2026-11-05). Old duplicates are
+  reported and logged, not blocking (see "Storage layer").

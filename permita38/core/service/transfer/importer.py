@@ -16,6 +16,13 @@ from permita38.core.filetypes import INLINE_TYPES, magic_ok
 from permita38.core.numbering import PatternError, parse_pattern, period_key
 from permita38.core.repository import Repository
 from permita38.core.repository.base import ID_RE
+from permita38.core.repository.importer import (
+    NUMBERED,
+    RESTORE_FINDING_CODES,
+    RESTORE_SUSPENDED,
+    drop_empty_number,
+    duplicate_numbers,
+)
 from permita38.core.repository.schema import BOOL, FLOAT, ID, INT, JSON, TABLES
 from permita38.core.rights import ROLES
 from permita38.core.service.numbering import NumberingService
@@ -586,6 +593,21 @@ def validate(path: Path, store: Repository, *, allow_no_users: bool = False, tod
     return plan
 
 
+def _normalise_and_check_numbers(plan: Plan) -> None:
+    """Drop empty numbers, then refuse duplicates: the number guard is never suspended."""
+    for coll in NUMBERED:
+        recs = plan.records.get(coll, [])
+        for rec in recs:
+            drop_empty_number(rec)
+        dup = duplicate_numbers(r.get("number") for r in recs)
+        if dup:
+            plan.error(
+                "numbering.duplicate",
+                f"data/{coll}.json contains duplicate numbers: {', '.join(dup)}. Run `permita38 check-db` on the source to see the records.",
+                f"data/{coll}.json",
+            )
+
+
 def _validate(plan: Plan, reader: ArchiveReader, store: Repository, today: date) -> None:
     if "manifest.json" not in reader.entries:
         raise ArchiveError("manifest_missing", "The archive has no manifest.json.", "manifest.json")
@@ -677,6 +699,9 @@ def _validate(plan: Plan, reader: ArchiveReader, store: Repository, today: date)
     _check_semantics(plan)
     if plan.errors:
         return
+    _normalise_and_check_numbers(plan)
+    if plan.errors:
+        return
     _check_references(plan)
     _user_plan(plan, store.list("users"))
     _numbering(plan, today)
@@ -706,7 +731,7 @@ def apply(path: Path, store: Repository, plan: Plan) -> dict:
         with ArchiveReader(path) as reader:
             for name in sorted(plan.attachments):
                 _stage_one(reader, store, stage, name, plan)
-        with store.transaction():
+        with store.transaction(), store.guards_suspended(RESTORE_SUSPENDED):
             reason = instance_state(store, allow_no_users=plan.allow_no_users)  # re-checked: it may have changed
             if reason:
                 raise ServiceError(409, reason)
@@ -720,6 +745,10 @@ def apply(path: Path, store: Repository, plan: Plan) -> dict:
             relogin = _write_users(store, plan, local_user)
             keep = {k: v for k, v in store.settings().items() if manifest.is_secret_setting(k)}
             store.save_settings({**plan.settings, **keep})
+            from permita38.core.service.integrity import IntegrityService
+
+            for f in IntegrityService(store).run(only=RESTORE_FINDING_CODES):
+                plan.warn(f.code, f"{f.collection} {f.id}: {f.field}: {f.message}")
     except BaseException:
         store.discard_stage(stage)
         raise

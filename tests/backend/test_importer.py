@@ -129,3 +129,26 @@ def test_nonexistent_source_directory(tmp_path):
     with pytest.raises(FileNotFoundError):
         import_json(repo, tmp_path / "nope")
     repo.close()
+
+
+def test_cli_import_json_refuses_duplicate_numbers_without_traceback(tmp_path, capsys):
+    old = tmp_path / "old"
+    for rid in ("inv000001", "inv000002"):
+        write(old / "invoices" / f"{rid}.json", {"id": rid, "number": "RE-2026-0001"})
+    with pytest.raises(SystemExit) as exc:
+        main(["-c", str(tmp_path / "cfg.yaml"), "--data", str(tmp_path / "new"), "import-json", str(old)])
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert captured.err.startswith("numbering.duplicate") and "RE-2026-0001" in captured.err
+    assert "Traceback" not in captured.err and captured.out == ""
+
+
+def test_cli_import_json_prints_warnings_after_the_summary(tmp_path, capsys):
+    old = tmp_path / "old"
+    write(
+        old / "projects" / "proj00000001.json",
+        {"id": "proj00000001", "name": "P", "start": "2026-05-01", "end": "2026-04-01"},
+    )
+    main(["-c", str(tmp_path / "cfg.yaml"), "--data", str(tmp_path / "new"), "import-json", str(old)])
+    out = capsys.readouterr().out
+    assert out.index("settings imported") < out.index("  warning: state.period_reversed projects/proj00000001")

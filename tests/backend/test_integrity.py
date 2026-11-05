@@ -10,20 +10,16 @@ import pytest
 
 from permita38.cli.main import main
 from permita38.core.database import head_id
+from permita38.core.repository.schema import GUARDS
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service import integrity
-from permita38.core.service import receipts as receipts_mod
 from permita38.core.service.integrity import IntegrityService
 
 from .test_allocations_api import END as ALLOC_END
 from .test_allocations_api import START as ALLOC_START
 from .test_document_scans_service import INVOICE as SCAN_INVOICE
-from .test_document_scans_service import TODAY as SCAN_TODAY
-from .test_document_scans_service import Reader as DocReader
 from .test_migrations import legacy_db
 from .test_receipts_api import SINGLE
-from .test_receipts_api import TODAY as RECEIPT_TODAY
-from .test_receipts_api import Reader as ReceiptReader
 from .test_trips_api import trip_body
 
 
@@ -97,11 +93,12 @@ def test_model_invalid_reports_field_and_never_the_value(store):
     assert "bogus-state" not in rows[0].message
 
 
-def test_model_date_format_on_tables_without_crud_model(store):
+def test_model_date_format_on_tables_without_crud_model(store, unguarded):
+    # "2026-02-30" has the date shape, so no guard refuses it
     store.save("allocations", {"id": "alloc01", "user_id": "boss01", "start": "2026-02-30", "end": "2026-03-01"})
     store.save("trips", {"id": "trip01", "start": "2026-03-01", "end": "2026-03-02T10:00"})  # start lacks the time
     store.save("trips", {"id": "trip02", "start": "2026-03-01T08:00", "end": "2026-03-02T10:00"})
-    store.save("incoming_offers", {"id": "inoff01", "received_on": "yesterday"})
+    unguarded(store, "incoming_offers", {"id": "inoff01", "received_on": "yesterday"}, "format.date")
     store.save("users", {"id": "emp001", "username": "emp", "role": "employee", "tracking_start": "01.03.2026"})
     assert sorted(found(store, "model.")) == [
         ("model.date_format", "allocations", "alloc01", "start"),
@@ -117,6 +114,63 @@ def test_entry_clock_times_are_not_dates(store):
         {"id": "ent001", "user_id": "boss01", "date": "2026-03-01", "minutes": 480, "start": "22:00", "end": "06:00"},
     )
     assert found(store) == []
+
+
+# ------------------------------------------------------------------ database guards (format.date, range.negative)
+def test_format_date_reports_only_filled_non_iso_values(store, unguarded):
+    unguarded(
+        store,
+        "projects",
+        {"id": "proj01", "name": "P", "start": "2026-03-01", "end": "01.03.2026"},
+        ("format.date", "state.period_reversed"),
+    )
+    store.save("projects", {"id": "proj02", "name": "Q", "start": "", "end": None})
+    unguarded(store, "expenses", {"id": "exp001", "date": "2026-3-1", "paid_on": "2026-03-01"}, "format.date")
+    store.save("entries", {"id": "ent001", "user_id": "boss01", "date": "2026-03-01", "minutes": 5})
+    assert sorted(found(store, "format.date")) == [
+        ("format.date", "expenses", "exp001", "date"),
+        ("format.date", "projects", "proj01", "end"),
+    ]
+    assert {f.severity for f in IntegrityService(store).run(["format.date"])} == {"error"}
+
+
+def test_range_negative_reports_only_values_below_zero(store, unguarded):
+    unguarded(
+        store,
+        "entries",
+        {"id": "ent001", "user_id": "boss01", "date": "2026-03-01", "minutes": -1, "rate": 0},
+        "range.negative",
+    )
+    store.save("entries", {"id": "ent002", "user_id": "boss01", "date": "2026-03-01", "minutes": 0, "rate": 10.5})
+    unguarded(store, "customers", {"id": "cust01", "name": "Demo Client", "rate": -0.5}, "range.negative")
+    assert sorted(found(store, "range.negative")) == [
+        ("range.negative", "customers", "cust01", "rate"),
+        ("range.negative", "entries", "ent001", "minutes"),
+    ]
+    assert {f.severity for f in IntegrityService(store).run(["range.negative"])} == {"error"}
+
+
+def test_guard_rules_use_exactly_the_guard_columns():
+    for kind, derived in (
+        ("date", integrity.GUARD_DATE_COLUMNS),
+        ("non_negative", integrity.GUARD_NON_NEGATIVE_COLUMNS),
+    ):
+        expected = {(g.table, c) for g in GUARDS if g.kind == kind for c in g.columns}
+        assert {(t, c) for t, cols in derived.items() for c in cols} == expected
+        assert expected  # the guard list is not empty
+    pairs = {(g.table, g.columns) for g in GUARDS if g.kind == "order"}
+    assert {(t, cols) for t, cols, _ in integrity._PERIODS} == pairs
+
+
+def test_period_reversed_covers_the_offer_service_period(store, unguarded):
+    with_customer(store)
+    unguarded(
+        store,
+        "offers",
+        doc("offers", "off001", service_from="2026-02-10", service_to="2026-02-01"),
+        "state.period_reversed",
+    )
+    assert found(store, "state.period") == [("state.period_reversed", "offers", "off001", "service_to")]
 
 
 # ------------------------------------------------------------------ 3. references
@@ -183,10 +237,10 @@ def test_project_without_customer_is_never_a_mismatch(store):
 
 
 # ------------------------------------------------------------------ 4. numbering
-def test_duplicate_and_similar_numbers(store):
+def test_duplicate_and_similar_numbers(store, unguarded):
     with_customer(store)
     store.save("invoices", doc("invoices", "inv001", status="sent", number="RE-2026-0001"))
-    store.save("invoices", doc("invoices", "inv002", status="sent", number="RE-2026-0001"))
+    unguarded(store, "invoices", doc("invoices", "inv002", status="sent", number="RE-2026-0001"), "numbering.duplicate")
     store.save("invoices", doc("invoices", "inv003", status="sent", number="RE-2026-0002"))
     store.save("invoices", doc("invoices", "inv004", status="sent", number="RE-2026-0002 "))
     got = sorted(found(store, "numbering.duplicate"))
@@ -305,18 +359,40 @@ def test_money_not_finite_and_too_large(store):
 
 
 # ------------------------------------------------------------------ 6. logical state
-def test_period_reversed(store):
+def test_period_reversed(store, unguarded):
     with_customer(store)
-    store.save("projects", {"id": "proj01", "name": "P", "start": "2026-03-10", "end": "2026-03-01"})
+    unguarded(
+        store,
+        "projects",
+        {"id": "proj01", "name": "P", "start": "2026-03-10", "end": "2026-03-01"},
+        "state.period_reversed",
+    )
     store.save("projects", {"id": "proj02", "name": "Q", "start": "2026-03-01", "end": "2026-03-01"})
-    store.save(
+    unguarded(
+        store,
         "absences",
         {"id": "abs001", "user_id": "boss01", "kind": "vacation", "start": "2026-05-02", "end": "2026-05-01"},
+        "state.period_reversed",
     )
-    store.save("trips", {"id": "trip01", "start": "2026-03-02T08:00", "end": "2026-03-01T08:00"})
-    store.save("invoices", doc("invoices", "inv001", service_from="2026-02-10", service_to="2026-02-01"))
-    store.save("allocations", {"id": "alloc01", "user_id": "boss01", "start": "2026-04-02", "end": "2026-04-01"})
-    store.save("contracts", {"id": "con001", "start": "2026-04-02", "end": "2026-04-01"})
+    unguarded(
+        store,
+        "trips",
+        {"id": "trip01", "start": "2026-03-02T08:00", "end": "2026-03-01T08:00"},
+        "state.period_reversed",
+    )
+    unguarded(
+        store,
+        "invoices",
+        doc("invoices", "inv001", service_from="2026-02-10", service_to="2026-02-01"),
+        "state.period_reversed",
+    )
+    unguarded(
+        store,
+        "allocations",
+        {"id": "alloc01", "user_id": "boss01", "start": "2026-04-02", "end": "2026-04-01"},
+        "state.period_reversed",
+    )
+    unguarded(store, "contracts", {"id": "con001", "start": "2026-04-02", "end": "2026-04-01"}, "state.period_reversed")
     store.save(
         "entries",
         {"id": "ent001", "user_id": "boss01", "date": "2026-03-01", "minutes": 480, "start": "22:00", "end": "06:00"},
@@ -403,19 +479,10 @@ def test_findings_are_sorted_and_only_filters_by_prefix(store):
 
 
 # ------------------------------------------------------------------ false-positive guard
-def test_data_made_by_the_services_gives_no_errors_and_no_warnings(app, boss_client, monkeypatch):
+def test_data_made_by_the_services_gives_no_errors_and_no_warnings(app, boss_client, scan_stubs):
     c = boss_client
     services = app.state.services
-    receipt_reader, doc_reader = ReceiptReader(), DocReader()
-
-    def read_file(path, config):  # both services share one runner module: dispatch on the content
-        with open(path, "rb") as f:
-            data = f.read()
-        return (receipt_reader if data in receipt_reader.by_content else doc_reader)(path, config)
-
-    monkeypatch.setattr(receipts_mod.runner, "read_file", read_file)
-    services.receipts._today = lambda: RECEIPT_TODAY
-    services.document_scans._today = lambda: SCAN_TODAY
+    receipt_reader, doc_reader = scan_stubs
     me = c.get("/api/auth/me").json()
     cust = c.post("/api/customers", json={"name": "Demo Client", "rate": 100}).json()
     proj = c.post("/api/projects", json={"name": "Demo Project", "customer_id": cust["id"]}).json()
