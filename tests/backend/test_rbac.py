@@ -647,6 +647,14 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
         raw.execute('DROP TABLE "document_scans"')
     if "guards" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         raw.executescript('DROP INDEX "idx_invoices_number"; DROP INDEX "idx_offers_number";')
+    if "reference_guards" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        for (trigger,) in raw.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'guard%_ref_%'"
+        ).fetchall():
+            raw.execute(f'DROP TRIGGER "{trigger}"')
+        raw.executescript(
+            'DROP INDEX "idx_contracts_project"; DROP INDEX "idx_offers_project"; DROP INDEX "idx_invoices_project";'
+        )
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)

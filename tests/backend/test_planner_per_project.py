@@ -572,6 +572,7 @@ def test_allocations_on_different_days_of_a_week_do_not_warn(w):
 # ------------------------------------------------------------------------------- E5, internal-only variant
 def test_e5_internal_only_variant_and_a_supplier_row_does_not_leak(w):
     w.alloc(w.boss, w.p, 40)
+    w.repo.save("suppliers", {"id": "supp0001", "name": "Demo Supplier"})
     w.repo.save(
         "allocations",
         dict(
@@ -691,6 +692,8 @@ def test_bootstrap_warnings_are_bounded_to_ten_weeks(w):
 )
 def test_a_damaged_allocation_row_is_skipped_everywhere(w, row, code, unguarded):
     planted = {**row, "user_id": w.boss["id"]}
+    if "project_id" in row:
+        planted["project_id"] = w.p["id"]  # an existing project; only the damage in `row` is intended
     if code:
         unguarded(w.repo, "allocations", planted, code)
     else:

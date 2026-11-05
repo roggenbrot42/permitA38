@@ -177,10 +177,12 @@ def test_entry_without_project_still_allowed(boss_client):
     assert r.status_code == 200
 
 
-def test_unchanged_legacy_dangling_project_can_be_resaved(boss_client, app):
+def test_unchanged_legacy_dangling_project_can_be_resaved(boss_client, app, unguarded):
     c = boss_client
     store = app.state.services.store
-    legacy = store.save("entries", {"user_id": _uid(c), "date": TODAY, "minutes": 20, "project_id": GHOST})
+    legacy = unguarded(
+        store, "entries", {"user_id": _uid(c), "date": TODAY, "minutes": 20, "project_id": GHOST}, "ref.dangling"
+    )
     r = c.put(f"/api/entries/{legacy['id']}", json={**legacy, "minutes": 25})
     assert r.status_code == 200, r.text
     assert r.json()["minutes"] == 25 and r.json()["project_id"] == GHOST
@@ -216,11 +218,12 @@ def test_timer_on_existing_project_starts(boss_client):
 MSG = "The offer's project no longer exists; set another project on the offer first."
 
 
-def test_offer_to_invoice_with_vanished_project_refused(boss_client, app):
+def test_offer_to_invoice_with_vanished_project_refused(boss_client, app, unguarded):
     c = boss_client
     p = _project(c)
     o = _offer(c, p["id"])
-    app.state.services.store.delete("projects", p["id"])  # planted: the service itself refuses this delete
+    store = app.state.services.store
+    unguarded(store, "offers", {**store.get("offers", o["id"]), "project_id": GHOST}, "ref.dangling")  # legacy data
     r = c.post(f"/api/offers/{o['id']}/to-invoice")
     assert r.status_code == 422, r.text
     assert r.json()["detail"] == MSG
