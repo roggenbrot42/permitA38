@@ -538,10 +538,23 @@ def _holds(cond: Any, row: dict) -> bool:
     return cond.holds(row)
 
 
+def _as_stored(g: Any, row: dict) -> dict:
+    """The row as the guard's trigger sees it: a value that does not fit its column's logical type lives in `extra`
+    (the column holds NULL), so it counts as None."""
+    table = TABLES.get(g.table)
+    out = dict(row)
+    for name in g.read_columns:
+        col = table.column(name) if table is not None else None
+        if col is not None and name in out and not fits(col.type, out[name]):
+            out[name] = None
+    return out
+
+
 def guard_violated(g: Any, row: dict) -> bool:
     """Whether a stored row breaks a row-local guard: the Python twin of `Dialect.guard_bad_sql` (same NULL, '' and
     whitespace handling), built from the guard's own parameters and conditions."""
     cols = g.columns
+    row = _as_stored(g, row)
     if g.kind == "one_of":
         return _set(row.get(cols[0])) and row.get(cols[0]) not in g.values
     if g.kind == "exactly_one":

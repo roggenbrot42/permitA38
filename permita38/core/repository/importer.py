@@ -4,12 +4,13 @@ import json
 import logging
 import re
 import shutil
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from .base import ID_RE, Repository
+from . import schema as _schema
 from .schema import COLLECTIONS, INTERNAL_COLLECTIONS
 
 log = logging.getLogger("permita38.import")
@@ -26,7 +27,27 @@ RESTORE_SUSPENDED = {
     "range",
     "implies",
 }
-RESTORE_FINDING_CODES = ("format.date", "range.negative", "state.period_reversed")
+_BASE_FINDING_CODES = ("format.date", "range.negative", "state.period_reversed")
+
+
+class _RestoreFindingCodes(Sequence):
+    """The finding-code prefixes a restore reports: the three base codes plus the code (before any ':') of every
+    guard whose kind a restore suspends. Derived from ``schema.GUARDS`` each time it is read, so guards added later
+    (or patched in tests) are covered."""
+
+    @staticmethod
+    def _codes() -> tuple[str, ...]:
+        derived = (g.code.split(":", 1)[0] for g in _schema.GUARDS if g.kind in RESTORE_SUSPENDED)
+        return tuple(dict.fromkeys((*_BASE_FINDING_CODES, *derived)))
+
+    def __len__(self) -> int:
+        return len(self._codes())
+
+    def __getitem__(self, index):
+        return self._codes()[index]
+
+
+RESTORE_FINDING_CODES = _RestoreFindingCodes()
 NUMBERED = ("invoices", "offers")
 
 _FILE_RE = re.compile(r"^[0-9a-z]{6,32}\.json$")

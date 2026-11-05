@@ -21,6 +21,8 @@ from .test_allocations_api import START as ALLOC_START
 from .test_document_scans_service import INVOICE as SCAN_INVOICE
 from .test_guards_v2_kinds import CASES as V2_CASES
 from .test_guards_v2_kinds import COLS as V2_COLS
+from .test_guards_v2_kinds import G_ONE_OF, G_RANGE_EXCL, G_REQUIRED
+from .test_guards_v2_kinds import TABLE as V2_TABLE
 from .test_guards_v2_kinds import new_db as v2_new_db
 from .test_guards_v2_kinds import save as v2_save
 from .test_migrations import legacy_db
@@ -599,6 +601,43 @@ def test_check_db_rule_agrees_with_the_trigger_row_by_row(name, monkeypatch):
         refused_any |= refused_by_trigger
         reported_any |= bool(reported)
     assert refused_any and reported_any  # the sample set has violations and the comparison is not vacuous
+
+
+@pytest.mark.parametrize(
+    ("guard", "column", "wrong", "stored", "reported"),
+    [
+        (G_REQUIRED, "a", 5, None, True),  # a str column holding an int lives in extra: the column is NULL
+        (G_REQUIRED, "a", "x", "x", False),
+        (G_ONE_OF, "kind", 123, None, False),  # NULL is not checked by one_of
+        (G_ONE_OF, "kind", "bogus", "bogus", True),
+        (G_RANGE_EXCL, "n", float("inf"), None, False),
+        (G_RANGE_EXCL, "n", True, None, False),
+        (G_RANGE_EXCL, "n", "abc", None, False),
+        (G_RANGE_EXCL, "n", 81, 81, True),
+    ],
+)
+def test_value_that_does_not_fit_its_column_counts_as_null_like_the_trigger(
+    guard, column, wrong, stored, reported, monkeypatch
+):
+    monkeypatch.setitem(schema.TABLES, "t", V2_TABLE)
+    base = {"a": "p"} if guard is G_ONE_OF else {}
+    assert _sql_refuses(guard, {**base, column: stored}) is reported  # what the database column holds
+    expected = [(guard.code, "t", "r1", column)] if reported else []
+    assert _rule_reports(guard, {**base, column: wrong}, monkeypatch) == expected
+
+
+def test_grandfathered_row_is_saved_again_and_check_db_reports_exactly_it(store, monkeypatch):
+    from permita38.core.repository.dialect import DIALECTS
+
+    store.save("customers", {"id": "cust01", "name": ""})
+    guard = Guard("guard_customers_name_required", "customers", "required", ("name",), "state.required")
+    monkeypatch.setattr(schema, "GUARDS", (*schema.GUARDS, guard))
+    with store.lock:
+        for stmt in DIALECTS["sqlite"].guard_sql(guard):
+            store._conn.execute(stmt)
+    store.save("customers", {"id": "cust01", "name": "", "notes": "changed"})  # another field: grandfathered
+    assert store.get("customers", "cust01")["notes"] == "changed"
+    assert found(store, "state.required") == [("state.required", "customers", "cust01", "name")]
 
 
 # ------------------------------------------------------------------ false-positive guard
