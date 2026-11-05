@@ -196,18 +196,18 @@ def test_e4_over_capacity_message_and_numbers():
     cleo = person("cleo", "Cleo", hours=20.0)
     mon, fri = date(2026, 11, 9), date(2026, 11, 13)
     assigns = [
-        weekly("cleo", "Administration", mon, fri, 12.0, kind="internal"),
-        weekly("cleo", "Elm", mon, fri, 10.0),
+        weekly("cleo", "padmin", mon, fri, 12.0, kind="internal"),
+        weekly("cleo", "pelm", mon, fri, 10.0),
     ]
     today = date(2026, 11, 8)
     sup = supply.build([cleo], assigns, by_holiday, today, mon, fri)
-    assert sum(v[0] for v in sup.project["Elm"].values()) == approx(10.0)  # nothing scaled
+    assert sum(v[0] for v in sup.project["pelm"].values()) == approx(10.0)  # nothing scaled
     week = [sup.people["cleo"][d] for d in days(mon, fri)]
     assert sum(p.capacity for p in week) == approx(20.0)
     assert sum(p.assigned_internal for p in week) == approx(12.0)
     assert sum(p.assigned_customer for p in week) == approx(10.0)
     assert sum(sup.unassigned("cleo", d) for d in days(mon, fri)) == 0.0
-    ws = supply.warnings([cleo], assigns, by_holiday, today, mon, fri)
+    ws = supply.warnings([cleo], assigns, by_holiday, today, mon, fri, {"padmin": "Administration", "pelm": "Elm"})
     assert codes(ws) == ["assignment.over_capacity"]
     w = ws[0]
     assert w["severity"] == "warning"
@@ -225,7 +225,7 @@ def test_e4_over_capacity_message_and_numbers():
     )
     assert d["reason"] == "weekly_hours"
     assert d["reasons"] == ["weekly_hours"]
-    assert d["projects"] == [{"project_id": "Administration", "hours": 12.0}, {"project_id": "Elm", "hours": 10.0}]
+    assert d["projects"] == [{"project_id": "padmin", "hours": 12.0}, {"project_id": "pelm", "hours": 10.0}]
 
 
 # ---------------------------------------------------------------- E5 / E5c / E5d
@@ -263,23 +263,23 @@ def test_e5_variant_two_vacation_days_over_by_four_time_off():
 
 
 def test_e5c_week_partly_covered_and_week_with_holiday():
-    # the spec calls the week of 28.12.2026 holiday-free; 01.01.2027 is a BY holiday, so use a calendar without it
-    def cal(d: date) -> str | None:
-        return None if d == date(2027, 1, 1) else by_holiday(d)
-
-    end = date(2026, 12, 31)
     for kind in ("employee", "subcontractor"):
         o = person("eve", "Eve", kind=kind)
-        a = weekly("eve", "Ash", date(2026, 12, 1), end, 10.0)
-        s = spread(o, a, cal, None)
-        wk = sum(v for d, v in s.items() if date(2026, 12, 28) <= d <= date(2027, 1, 3))
+        # ends Thu 19.11.2026, no holiday in BY that week: 10 / 5 = 2 on the 4 days inside the period = 8
+        a = weekly("eve", "Ash", date(2026, 11, 2), date(2026, 11, 19), 10.0)
+        s = spread(o, a, by_holiday, None)
+        wk = sum(v for d, v in s.items() if date(2026, 11, 16) <= d <= date(2026, 11, 22))
         assert wk == approx(8.0)
-        assert all(v == approx(2.0) for d, v in s.items() if d >= date(2026, 12, 28))
+        assert all(v == approx(2.0) for d, v in s.items() if d >= date(2026, 11, 16))
+        # ends Thu 31.12.2026; 01.01.2027 is a holiday, so the week has 4 available days, all inside: 10
+        a = weekly("eve", "Ash", date(2026, 12, 1), date(2026, 12, 31), 10.0)
+        s = spread(o, a, by_holiday, None)
+        wk = sum(v for d, v in s.items() if date(2026, 12, 28) <= d <= date(2027, 1, 3))
+        assert wk == approx(10.0)
         # week of 21.12.2026 (25.12. holiday): 10 / 4 = 2.5 on 4 days = 10
         wk = sum(v for d, v in s.items() if date(2026, 12, 21) <= d <= date(2026, 12, 27))
         assert wk == approx(10.0)
         assert s[date(2026, 12, 21)] == approx(2.5)
-        # costs for the subcontractor: 10 h in that week
     sam = person("s", kind="subcontractor")
     one_week = weekly("s", "Ash", date(2026, 12, 21), date(2026, 12, 27), 10.0)
     assert planned_net(sam, one_week, by_holiday, Decimal("90.00")) == Decimal("900.00")

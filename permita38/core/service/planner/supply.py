@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
@@ -133,6 +133,7 @@ def _over_capacity(
     ds: list[date],
     mon: date,
     per_project: dict[str, float],
+    names: Mapping[str, str] | None = None,
 ) -> dict | None:
     assigned = sum(rows[d].assigned for d in ds)
     cap = sum(rows[d].capacity for d in ds)
@@ -147,7 +148,7 @@ def _over_capacity(
         reasons.append("time_off" if lost else "weekly_hours")
     if not reasons:
         return None
-    parts = ", ".join(f"{p} {_h(h)} h" for p, h in sorted(per_project.items()))
+    parts = ", ".join(f"{(names or {}).get(p, p)} {_h(h)} h" for p, h in sorted(per_project.items()))
     sentences = [
         f"{_h(rows[d].assigned)} h planned on {_ddmmyyyy(d)}; the law allows at most 10 h a day (§3 ArbZG)."
         for d in law_days
@@ -238,8 +239,15 @@ def _average_warning(o: Owner, assignments: Sequence[Assignment], holiday: Holid
 
 
 def warnings(
-    owners: Sequence[Owner], assignments: Sequence[Assignment], holiday: Holiday, today: date, lo: date, hi: date
+    owners: Sequence[Owner],
+    assignments: Sequence[Assignment],
+    holiday: Holiday,
+    today: date,
+    lo: date,
+    hi: date,
+    names: Mapping[str, str] | None = None,
 ) -> list[dict]:
+    """S4 and S6 warnings. ``names`` maps project ids to the names used in the messages (the id when missing)."""
     sup = build(owners, assignments, holiday, today, lo, hi)
     out: list[dict] = []
     for o in owners:
@@ -257,7 +265,7 @@ def warnings(
                     h = sum(v for d, v in spread(o, a, holiday, today).items() if d in rows and d in ds)
                     if h > 0:
                         per_project[a.project_id] = per_project.get(a.project_id, 0.0) + h
-            w = _over_capacity(o, rows, ds, mon, per_project)
+            w = _over_capacity(o, rows, ds, mon, per_project, names)
             if w:
                 out.append(w)
             if o.kind == "boss":
