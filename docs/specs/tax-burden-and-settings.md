@@ -769,19 +769,16 @@ of that code.
 
 ## Open questions for the maintainer / tax adviser
 
-1. **Rates TO VERIFY**: Sachsen employee care share 2.3 % (2026); half voluntary ALV contribution 51.42 vs 51.43;
-   rounding of the Gewerbesteuer-Messbetrag; truncation of church tax to cents; all 2025 values except tariff, Soli
-   and the §10 (3) cap.
-2. Is the staged per-child Günstigerprüfung (each child tested on the zvE left after the previous children) what the
-   Finanzamt does, and is counting half the Kindergeld for a non-jointly assessed parent right in all cases?
-3. Soli base: `Z` reduced by a §35 credit recomputed on `Z` – confirm (§3 (2) SolZG refers to the tax "festzusetzen
-   wäre"); church tax base without §35 per §51a (2) S. 3.
-4. Vorauszahlungen are not recorded, so "currently owed" and the reserve ignore them – record them later?
-5. **Catch-up in the current month** (2026-11-03 amendment, architect's choice): the current month's `tax_set_aside`
-   now carries `owed_now` on top of `monthly` (past year: December carries the owed amount). Without it the tax on
-   the profit already booked lands in no month, `take_home` would never subtract it, and before day 60 every month
-   would show a reserve of 0 after a large invoice. The `reserve` block itself is unchanged. Confirm or revert (then
-   `take_home` needs another per-month tax term).
-6. **GmbH take-home**: for `gmbh` the same formula subtracts the household tax (on the salary) and the corporate taxes
-   from the GmbH profit, so `take_home` is the company's cash after set-asides, not the owner's. Keep, or hide
-   `take_home` for `gmbh`?
+Moved to [`docs/tax-adviser-review.md`](../tax-adviser-review.md) (one standalone checklist with status and answer
+columns). Index:
+
+* TA-01 Sachsen employee care share 2.3 % (`pv_employer_share_sn`); TA-02 half voluntary ALV 51.42 vs 51.43;
+  TA-03 Gewerbesteuer-Messbetrag rounding; TA-04 church tax truncation to cents; TA-05 all 2025 values except tariff,
+  Soli Freigrenze and the §10 (3) cap.
+* TA-06 staged per-child Günstigerprüfung and half Kindergeld for a non-jointly assessed parent.
+* TA-07 Soli base with the §35 credit recomputed on `Z` (§3 (2) SolZG); church tax base without §35 (§51a (2) S. 3).
+* TA-08 to TA-10 §10 Vorsorge logic, §35 share rule, GmbH case; TA-11 to TA-14 non-modelled items to confirm
+  (Progressionsvorbehalt, church-tax Kappung, §10 (3) S. 3 cut, Vorauszahlungen); TA-15 to TA-23 figures checked
+  from memory only.
+* TA-24 catch-up of owed tax in the current month's `tax_set_aside` (2026-11-03 amendment, architect's choice);
+  TA-25 GmbH `take_home` meaning; TA-26 record Vorauszahlungen later (maintainer decisions).
