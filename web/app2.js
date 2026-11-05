@@ -194,7 +194,7 @@ A.billTime = el => {
   openForm({
     title: 'Create invoice from tracked time', saveLabel: 'Create draft',
     vals: { customer_id: el?.dataset?.cust || '' }, fields: [{ k: 'customer_id', l: 'Customer', t: 'select', o: [['', '— choose a customer —'], ...S.d.customers.map(c => [c.id, c.name])] }, { k: 'from', l: 'From', t: 'date', row: 1 }, { k: 'to', l: 'To', t: 'date', row: 1 }],
-    note: '<p class="muted small">All unbilled, billable time of this customer's projects is grouped by project, task and rate. An invoice goes to one customer only; personal projects are never billed.</p>',
+    note: '<p class="muted small">All unbilled, billable time of the chosen customer’s projects is grouped by project, task and rate. An invoice goes to one customer only; personal projects are never billed.</p>',
     save: async v => { if (!v.customer_id) throw new Error('Choose a customer'); const inv = await api('POST', 'invoices/from-time', { customer_id: v.customer_id || null, from: v.from || null, to: v.to || null }); location.hash = '#/doc/invoices/' + inv.id; }
   });
 };
