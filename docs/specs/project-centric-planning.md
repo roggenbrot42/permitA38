@@ -235,6 +235,22 @@ write path, including import, transfer and procurement accept, comes before the 
   audit. `weekly_hours` of users and suppliers keep `Hours`; allocations keep `AllocHours` (0.25..80, one person on one
   project).
 
+**Step-0 audit results and decisions (2026-11-05; the audit is in the WP1 notes):**
+* `ContractIn`: exactly one of `hours_per_week` (`ContractHours`) / `total_hours` (`PositiveTotalHours`), 422
+  otherwise; `project_id` required; `"unassigned"` is refused as a stored `project_id` everywhere a request carries one
+  (contracts, offers, invoices, tasks, entries, expenses, allocations).
+* `PlanIn` (offer plan) and `CommitmentChange` (planner draft): at most one hour field (422 for both); none is allowed
+  in an offer plan (a draft). Accepting an offer whose plan has no hours books the sum of its `h` lines as
+  `total_hours`; an offer without hours and without `h` lines cannot be accepted (422 "The offer has no hours to
+  plan"). A draft change that sets one hour field clears the other.
+* `ProjectIn.kind` is optional for old clients: missing means `customer` when `customer_id` is set, else `internal`.
+  `kind=customer` without a customer and `kind=internal` with a customer are 422; `personal` in a request is 422.
+  `budget_hours` is `PositiveTotalHours` (0 is refused; clear the field instead).
+* Accepting an offer creates its project with `kind=customer` and a stripped, non-blank name (fallback "Offer
+  <number>").
+* Procurement accept: `total_hours` = sum of the `h` lines, refused with 422 when it is 0 or above 100000, and when the
+  derived rate is above 10000.
+
 **Data transfer:** an `UPGRADES` hook in `transfer/upgrades.py` maps `personal` to `kind` for archives of older heads
 (same rule as the data fix) and applies the hour-field fix. Restores suspend the guard kinds that v2 allows (never the
 number guard); the importer reports a row it cannot fix instead of writing it.
