@@ -197,7 +197,7 @@ is merged first). Order inside the file:
 |---|---|
 | projects | `required: kind`, `one_of: kind` (customer, internal), `one_of: status` (from `ProjectIn` Literal), `required: name`, `implies: kind = internal ⇒ customer_id blank`, `range: budget_hours` (0, 100000, min exclusive) |
 | allocations | `required: project_id, start, end`, `one_of: status` (active, cancelled), `exactly_one: hours_per_week, total_hours`, `range: hours_per_week` (0, 80, min exclusive), `range: total_hours` (0, 100000, min exclusive), `max_days: start, end, 1830`, `range: rate` (0, 10000), `implies: status = cancelled ⇒ cancelled_from set`, `implies: status = active ⇒ cancelled_from blank`, `implies: supplier_id set ⇒ rate set`, `implies: user_id set ⇒ incoming_offer_id blank`. Owner exclusivity stays the existing table CHECK `allocations_one_owner` |
-| contracts | `required: title, start, end`, `one_of: status` (confirmed, done), `exactly_one: hours_per_week, total_hours`, `range: hours_per_week` (0, 168, min exclusive), `range: total_hours` (0, 100000, min exclusive), `range: rate` (0, 10000) |
+| contracts | `required: title, start, end`, `one_of: status` (confirmed, done), `exactly_one: hours_per_week, total_hours`, `range: hours_per_week` (0, 10000, min exclusive), `range: total_hours` (0, 100000, min exclusive), `range: rate` (0, 10000) |
 
 **The API is tightened in this PR first** (a guard is never stricter than every write path; a step-0 audit of every
 write path, including import, transfer and procurement accept, comes before the guard):
@@ -205,8 +205,13 @@ write path, including import, transfer and procurement accept, comes before the 
 * `total_hours` > 0 on contracts, plans and allocations (`TotalHours` allows 0 today; a new exclusive type
   `PositiveTotalHours`).
 * exactly one of `hours_per_week` / `total_hours` on `ContractIn` and `AllocationIn` (422 otherwise).
-* `contracts.hours_per_week` stays at most 168: a contract no longer belongs to one person, so 80 would be wrong for a
-  team contract. Allocations stay at most 80 (one person).
+* A new type `ContractHours` in `validation.py`: > 0, at most 10,000 h/week (a hard "impossible input" bound, about
+  250 full-time people, not a business rule; the maintainer may still change the number). A contract or offer belongs
+  to the team, so a team of 5 can easily contract 200 h/week; the old `Hours` (0..168) is a per-person bound. Used on
+  `ContractIn.hours_per_week`, `PlanIn.hours_per_week` (offer plans) and `CommitmentChange.hours_per_week` (planner
+  drafts), and wherever contract hours per week are written (accepting an offer copies the plan). Covered by the step-0
+  audit. `weekly_hours` of users and suppliers keep `Hours`; allocations keep `AllocHours` (0.25..80, one person on one
+  project).
 
 **Data transfer:** an `UPGRADES` hook in `transfer/upgrades.py` maps `personal` to `kind` for archives of older heads
 (same rule as the data fix) and applies the hour-field fix. Restores suspend the guard kinds that v2 allows (never the
