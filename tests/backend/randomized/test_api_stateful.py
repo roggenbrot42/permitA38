@@ -445,7 +445,7 @@ class ApiMachine(RuleBasedStateMachine):
             req = {"name": TEXT, "project_id": self.ref("projects", none=False)}
             opt = {"rate": maybe_none(RATE)}
         elif coll == "entries":
-            req = {"date": DATES, "minutes": st.integers(1, 600), "user_id": self.user_ref()}
+            req = {"date": DATES, "minutes": st.integers(1, 600), "user_id": maybe_none(self.user_ref())}
             opt = dict(note=maybe_none(TEXT), billable=st.sampled_from([True, True, True, False]),
                        rate=st.one_of(st.none(), st.none(), st.none(), RATE),
                        start=maybe_none(st.just("09:00")), end=maybe_none(st.just("10:00")))  # fmt: skip
@@ -511,6 +511,8 @@ class ApiMachine(RuleBasedStateMachine):
             exp["member_ids"] = list(body.get("member_ids") or [])
         if coll in ("entries", "absences") and actor_user["role"] != "boss":
             exp["user_id"] = actor_user["id"]
+        elif coll == "entries" and not exp.get("user_id"):  # an entry without a person belongs to its writer
+            exp["user_id"] = (old or {}).get("user_id") or actor_user["id"]
         if coll == "entries" and actor_user["role"] != "boss":
             # billing fields are boss/system-only: a member can neither set nor change them
             for k in ("rate", "invoice_id"):

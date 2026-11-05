@@ -430,7 +430,7 @@ A.timerAdd = timerOnce('add', async () => {
   if (s === null || e === null) throw new Error('Enter start and stop times');
   if (e <= s) throw new Error('Stop must be after start');
   // no guard() wrapper here: a failed save throws to the click handler, which toasts it, and the form keeps the typed values
-  await api.upsert('entries', { date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: true });
+  await api.upsert('entries', { user_id: S.me.id, date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: true });
   toast('Saved');
   await loadAll(['entries']);
   render();
