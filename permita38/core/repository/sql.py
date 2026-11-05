@@ -23,9 +23,19 @@ from typing import Any, Iterable, Iterator
 
 from permita38.core.database import LEGACY_IDS, Migration, list_migrations
 
-from .base import ID_RE, DatabaseRevisionError, Record, RecordList, Repository, StrList, check_collection, new_id
+from .base import (
+    ID_RE,
+    ConstraintViolation,
+    DatabaseRevisionError,
+    Record,
+    RecordList,
+    Repository,
+    StrList,
+    check_collection,
+    new_id,
+)
 from .dialect import Dialect
-from .schema import BOOL, FLOAT, INT, JSON, TABLES, Column, Table, fits
+from .schema import BOOL, FLOAT, GUARD_KINDS, GUARDS, INT, JSON, TABLES, Column, Table, fits
 
 MIGRATIONS_TABLE = "schema_migrations"
 ATTACHMENT_RE = re.compile(r"[0-9a-z]{6,32}\.[a-z0-9]{1,5}")
@@ -38,6 +48,9 @@ def _now() -> str:
 
 _INT_MIN, _INT_MAX = -(2**63), 2**63 - 1
 _CONFLICT_MARKERS = (".sync-conflict-", "conflicted copy")
+
+
+_GUARD_PREFIX = "permita38:"
 
 
 class SQLRepository(Repository):
@@ -252,6 +265,41 @@ class SQLRepository(Repository):
                 self._depth = 0
                 self._commit()
 
+    @contextmanager
+    def guards_suspended(self, kinds: set[str]) -> Iterator[None]:
+        kinds = set(kinds)
+        unknown = kinds - set(GUARD_KINDS)
+        if unknown or "unique" in kinds:
+            raise ValueError(f"guards of kind {sorted(unknown | (kinds & {'unique'}))} cannot be suspended")
+        with self.lock:
+            self._ensure()
+            if not self._depth:
+                raise RuntimeError("guards_suspended() is only allowed inside transaction()")
+            if self.dialect.name != "sqlite":
+                raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
+            existing = {r[0] for r in self._rows("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+            live: dict[str, set[str] | None] = {}
+            drops: list[str] = []
+            creates: list[str] = []
+            for g in GUARDS:
+                if g.kind not in kinds:
+                    continue
+                cols = live.setdefault(g.table, self._live_columns(g.table))
+                if cols is not None and not set(g.columns) <= cols:
+                    continue
+                for stmt in self.dialect.guard_sql(g):
+                    m = re.match(r'CREATE TRIGGER "([^"]+)"', stmt)
+                    if m and m.group(1) in existing:
+                        drops.append(f"DROP TRIGGER {self.dialect.quote(m.group(1))}")
+                        creates.append(stmt)
+            for stmt in drops:
+                self._exec(stmt)
+            try:
+                yield
+            finally:
+                for stmt in creates:
+                    self._exec(stmt)
+
     # ------------------------------------------------------------------ value coding
     def _coerce(self, col: Column, v: Any) -> tuple[bool, Any]:
         """(ok, database value). Values that do not fit the column type go to the `extra` JSON instead."""
@@ -392,6 +440,16 @@ class SQLRepository(Repository):
         if not isinstance(rid, str) or not ID_RE.match(rid):
             raise ValueError("bad id")
         now = int(time.time())
+        try:
+            return self._save(coll, obj, rid, now, touch)
+        except Exception as e:
+            # driver-neutral: sqlite3, psycopg and pymysql all name their class IntegrityError
+            msg = str(e)
+            if type(e).__name__ == "IntegrityError" and msg.startswith(_GUARD_PREFIX):
+                raise ConstraintViolation(msg[len(_GUARD_PREFIX) :].strip(), coll) from e
+            raise
+
+    def _save(self, coll: str, obj: Record, rid: str, now: int, touch: bool) -> Record:
         with self.transaction():
             table = self._table(coll)
             if not obj.get("created"):
