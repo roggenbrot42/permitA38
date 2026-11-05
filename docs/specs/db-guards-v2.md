@@ -35,7 +35,9 @@ Conditions are a tiny dialect-neutral AST in `schema.py`, evaluated in SQL by `d
 from the same objects, so the two can never disagree:
 
 ```python
-Eq(col, value) | In(col, values) | IsSet(col) | IsBlank(col)  # IsSet = not NULL and not ''; IsBlank = the opposite
+(
+    Eq(col, value) | In(col, values) | IsSet(col) | IsBlank(col)
+)  # IsSet = not NULL, not '' and not only SQL_BLANK whitespace; IsBlank = the opposite
 ```
 
 | Kind | Parameters | Refuses (new or changed values) | Code |
@@ -44,12 +46,26 @@ Eq(col, value) | In(col, values) | IsSet(col) | IsBlank(col)  # IsSet = not NULL
 | `exactly_one` | `a`, `b` | both set, or both blank | `state.exactly_one` |
 | `required` | `col` | `IsBlank(col)` (NULL, `''`, or only whitespace for text) | `state.required` |
 | `max_days` | `start`, `end`, `days` | both dates valid and `julianday(end) - julianday(start) > days` | `range.too_long` |
-| `range` | `col`, `min`, `max`, `min_exclusive` | value set and outside the bounds | `range.bounds` |
+| `range` | `col`, `lo`, `hi`, `lo_exclusive` | value set and outside the bounds | `range.bounds` |
 | `implies` | `if_`, `then` (conditions) | `if_` holds and `then` does not | `state.implies:<guard name>` |
 
 v1's `non_negative` (`range.negative`) stays as it is; `range` is for upper bounds and exclusive minimums.
 
 Notes:
+- `IsSet` is false for NULL, `''` and strings made only of the `SQL_BLANK` characters (space, tab, LF, VT, FF, CR); a
+  non-breaking space (NBSP) and other Unicode spaces count as **set**, in SQL and in Python alike.
+- `one_of` treats NULL, `''` and whitespace-only values as "not set" and accepts them: it checks set values only. This is
+  looser than the API's `Literal` on purpose.
+- `required`: a legacy NULL that is changed to `''` on a `required` column is a change and is refused.
+- The condition AST has no `and` / `or` / `not` (a limit); add a kind later if a rule needs it.
+- `Guard` rejects, when it is declared: parameters the kind does not use, identical columns for `exactly_one` /
+  `order` / `max_days`, `lo > hi` (or an empty exclusive range), an `implies` code other than `state.implies:<name>`,
+  and an `Eq` / `In` / `one_of` literal whose Python type does not fit the column's logical type (str for id/str/text,
+  int/float for numeric, bool for bool), so SQL affinity and Python comparison cannot differ.
+- PostgreSQL / MariaDB: a `range` on a numeric column emits only the NULL test (`'' ` would raise on PostgreSQL and
+  equals 0 on MariaDB); PostgreSQL's `max_days` only casts strings that match a real-calendar-date regex, so the CHECK
+  never raises; MariaDB compares strings with `BINARY` (its default collation is case-insensitive), escapes backslashes
+  and strips the same blank set as `SQL_BLANK`.
 - `one_of` values are **generated from the model `Literal`** (`typing.get_args`), not typed twice. A test fails when the
   `Literal` and the guard differ, so adding a status means adding a migration that drops and recreates that one
   trigger (no table rebuild). Use it only for **stable** vocabularies (see answers).

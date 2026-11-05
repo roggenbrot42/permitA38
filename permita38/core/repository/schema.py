@@ -443,6 +443,13 @@ _KIND_ARITY: dict[str, int | None] = {
 }
 
 
+def column_type(table: str, col: str) -> str | None:
+    """Logical type of ``table.col`` (None when the table or column is not in TABLES)."""
+    t = TABLES.get(table)
+    c = t.column(col) if t else None
+    return c.type if c else None
+
+
 @dataclass(frozen=True)
 class Guard:
     """A database-level guard checked for new or changed values only (see docs/specs/db-constraints.md).
@@ -479,11 +486,15 @@ class Guard:
             object.__setattr__(self, "columns", derived)
         elif len(self.columns) != _KIND_ARITY[self.kind]:
             raise ValueError(f"a {self.kind} guard needs {_KIND_ARITY[self.kind]} column(s), got {self.columns!r}")
+        self._check_parameters()
+        if self.kind in ("exactly_one", "order", "max_days") and self.columns[0] == self.columns[1]:
+            raise ValueError(f"a {self.kind} guard needs two different columns, got {self.columns!r}")
         if self.kind == "one_of":
             if not self.values:
                 raise ValueError("a one_of guard needs values")
             for v in self.values:
                 _check_scalar(v)
+            self._check_literals(self.columns[0], self.values)
         if self.kind == "max_days" and (not isinstance(self.days, int) or isinstance(self.days, bool) or self.days < 0):
             raise ValueError("a max_days guard needs days >= 0")
         if self.kind == "range":
@@ -496,6 +507,55 @@ class Guard:
                         raise ValueError("range bounds must be numbers")
             if self.lo_exclusive and self.lo is None:
                 raise ValueError("lo_exclusive needs lo")
+            if self.lo is not None and self.hi is not None:
+                if self.lo > self.hi or (self.lo == self.hi and self.lo_exclusive):
+                    raise ValueError(
+                        f"a range guard needs lo <= hi (and a non-empty range), got {self.lo!r}..{self.hi!r}"
+                    )
+        if self.kind == "implies":
+            if self.code != f"state.implies:{self.name}":
+                raise ValueError(f"an implies guard's code must be 'state.implies:{self.name}', got {self.code!r}")
+            for cond in (self.if_, self.then):
+                if isinstance(cond, Eq):
+                    self._check_literals(cond.col, (cond.value,))
+                elif isinstance(cond, In):
+                    self._check_literals(cond.col, cond.values)
+
+    def _check_parameters(self) -> None:
+        """Reject parameters that the kind does not use (they would be silently ignored)."""
+        used = {
+            "one_of": {"values"},
+            "range": {"lo", "hi", "lo_exclusive"},
+            "max_days": {"days"},
+            "implies": {"if_", "then"},
+        }
+        defaults = {
+            "values": (),
+            "lo": None,
+            "hi": None,
+            "lo_exclusive": False,
+            "days": None,
+            "if_": None,
+            "then": None,
+        }
+        for param, default in defaults.items():
+            if param not in used.get(self.kind, set()) and getattr(self, param) != default:
+                raise ValueError(f"a {self.kind} guard does not take {param}")
+
+    def _check_literals(self, col: str, values: tuple[Any, ...]) -> None:
+        """A literal compared with a known column must have the column's logical type (no affinity surprises)."""
+        ctype = column_type(self.table, col)
+        if ctype is None or ctype == JSON:
+            return
+        for v in values:
+            if ctype in (ID, STR, TEXT):
+                ok = isinstance(v, str)
+            elif ctype == BOOL:
+                ok = isinstance(v, bool)
+            else:
+                ok = isinstance(v, (int, float)) and not isinstance(v, bool)
+            if not ok:
+                raise ValueError(f"{self.table}.{col} is {ctype}: literal {v!r} has the wrong type")
 
     @property
     def read_columns(self) -> tuple[str, ...]:

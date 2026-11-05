@@ -8,6 +8,7 @@ from typing import Literal
 
 import pytest
 
+from permita38.core.repository import schema
 from permita38.core.repository.dialect import DIALECTS, SQLiteDialect
 from permita38.core.repository.importer import RESTORE_SUSPENDED
 from permita38.core.repository.schema import (
@@ -20,6 +21,7 @@ from permita38.core.repository.schema import (
     IsBlank,
     IsSet,
     Table,
+    fits,
     one_of_from_literal,
 )
 from permita38.core.repository.sqlite import SQLiteRepository
@@ -161,12 +163,13 @@ def test_update_of_a_stored_row_into_a_violation_is_refused(name):
     save(db, {**good_rows[0], "id": "r1"})
     for row in bad_rows:
         refused(db, guard.code, {**row, "id": "r1"})
-    # a plain UPDATE statement (not an upsert) is guarded as well
-    bad = {k: v for k, v in {**EMPTY, **bad_rows[0]}.items() if k != "id"}
-    sets = ", ".join(f'"{c}" = ?' for c in bad)
-    with pytest.raises(sqlite3.IntegrityError) as e:
-        db.execute(f"UPDATE t SET {sets} WHERE \"id\" = 'r1'", list(bad.values()))
-    assert str(e.value) == f"permita38:{guard.code}"
+    # a plain UPDATE statement (not an upsert) is guarded as well, for every bad row
+    for row in bad_rows:
+        bad = {k: v for k, v in {**EMPTY, **row}.items() if k != "id"}
+        sets = ", ".join(f'"{c}" = ?' for c in bad)
+        with pytest.raises(sqlite3.IntegrityError) as e:
+            db.execute(f"UPDATE t SET {sets} WHERE \"id\" = 'r1'", list(bad.values()))
+        assert str(e.value) == f"permita38:{guard.code}"
 
 
 @pytest.mark.parametrize("name", CASES)
@@ -331,23 +334,103 @@ def test_sql_blank_constant_equals_what_the_dialect_renders():
         dict(kind="implies", columns=(), if_=Eq("a", 1)),
         dict(kind="implies", columns=("a",), if_=Eq("a", 1), then=IsSet("b")),  # not the derived columns
         dict(kind="order", columns=("s",)),
+        # parameters the kind does not use
+        dict(kind="required", columns=("a",), values=("x",)),
+        dict(kind="required", columns=("a",), lo=1),
+        dict(kind="required", columns=("a",), days=3),
+        dict(kind="one_of", columns=("a",), values=("x",), hi=3),
+        dict(kind="one_of", columns=("a",), values=("x",), if_=IsSet("a")),
+        dict(kind="range", columns=("n",), lo=1, values=("x",)),
+        dict(kind="range", columns=("n",), lo=1, days=3),
+        dict(kind="max_days", columns=("s", "e"), days=3, lo=1),
+        dict(kind="exactly_one", columns=("a", "b"), lo_exclusive=True),
+        dict(kind="order", columns=("s", "e"), days=3),
+        dict(kind="implies", columns=(), code="state.implies:g", if_=Eq("a", "x"), then=IsSet("b"), values=("x",)),
+        # identical columns
+        dict(kind="exactly_one", columns=("a", "a")),
+        dict(kind="order", columns=("s", "s")),
+        dict(kind="max_days", columns=("s", "s"), days=3),
+        # lo > hi, empty range
+        dict(kind="range", columns=("n",), lo=5, hi=4),
+        dict(kind="range", columns=("n",), lo=5, hi=5, lo_exclusive=True),
+        # implies code must be state.implies:<name>
+        dict(kind="implies", columns=(), code="state.required", if_=Eq("a", "x"), then=IsSet("b")),
+        dict(kind="implies", columns=(), code="state.implies:other", if_=Eq("a", "x"), then=IsSet("b")),
     ],
 )
 def test_guard_validation_errors(kwargs):
     with pytest.raises(ValueError):
-        Guard("g", "t", code="c", **kwargs)
+        Guard("g", "t", **{"code": "c", **kwargs})
 
 
 def test_implies_derives_its_read_columns():
     g = Guard("g", "t", "implies", (), "state.implies:g", if_=Eq("kind", "done"), then=In("a", ("x",)))
     assert g.read_columns == g.columns == ("kind", "a")
-    assert Guard("g", "t", "implies", (), "c", if_=Eq("kind", "d"), then=IsSet("kind")).read_columns == ("kind",)
+    assert Guard("g", "t", "implies", (), "state.implies:g", if_=Eq("kind", "d"), then=IsSet("kind")).read_columns == (
+        "kind",
+    )
 
 
 def test_new_kinds_are_registered_and_v1_guards_are_unchanged():
     assert set(GUARD_KINDS) >= {"one_of", "exactly_one", "required", "max_days", "range", "implies"}
     g = Guard("g", "t", "order", ("s", "e"), "state.period_reversed")
     assert g.read_columns == ("s", "e") and g.values == () and g.days is None
+
+
+def test_a_range_of_lo_equal_hi_is_allowed():
+    Guard("g", "t", "range", ("n",), "range.bounds", lo=5, hi=5)
+
+
+@pytest.fixture
+def table_t(monkeypatch):
+    """Make the invented table known to schema.TABLES (literal type checks, PostgreSQL/MariaDB column types)."""
+    monkeypatch.setitem(schema.TABLES, "t", TABLE)
+
+
+TYPED_BAD = [
+    dict(kind="one_of", columns=("kind",), values=(1,)),  # str column, int literal
+    dict(kind="one_of", columns=("kind",), values=("a", 1)),
+    dict(kind="one_of", columns=("n",), values=("x",)),  # float column, str literal
+    dict(kind="one_of", columns=("n",), values=(True,)),  # float column, bool literal
+    dict(kind="implies", columns=(), if_=Eq("kind", 1), then=IsSet("a")),
+    dict(kind="implies", columns=(), if_=IsSet("a"), then=Eq("n", "5")),
+    dict(kind="implies", columns=(), if_=IsSet("a"), then=In("n", (1, "5"))),
+    dict(kind="implies", columns=(), if_=IsSet("a"), then=Eq("n", True)),
+    dict(kind="implies", columns=(), if_=IsSet("a"), then=In("kind", (1.5,))),
+]
+
+
+@pytest.mark.parametrize("kwargs", TYPED_BAD)
+def test_literal_type_must_match_the_column_type(table_t, kwargs):
+    with pytest.raises(ValueError, match="wrong type"):
+        Guard("g", "t", code="state.implies:g" if kwargs["kind"] == "implies" else "c", **kwargs)
+
+
+def test_literal_of_the_right_type_is_accepted_and_unknown_tables_are_not_checked(table_t):
+    Guard("g", "t", "one_of", ("kind",), "c", values=("a", "b"))
+    Guard("g", "t", "implies", (), "state.implies:g", if_=Eq("n", 1), then=In("n", (2, 3.5)))
+    Guard("g", "unknown_table", "one_of", ("kind",), "c", values=(1,))
+
+
+def test_literal_type_check_covers_bool_columns(monkeypatch):
+    monkeypatch.setitem(schema.TABLES, "t", Table("t", (Column("id", "id"), Column("flag", "bool"))))
+    Guard("g", "t", "implies", (), "state.implies:g", if_=Eq("flag", True), then=IsSet("id"))
+    with pytest.raises(ValueError, match="wrong type"):
+        Guard("g", "t", "implies", (), "state.implies:g", if_=Eq("flag", 1), then=IsSet("id"))
+
+
+def test_bool_versus_int_equality_on_the_sql_side():
+    # Python: True is not 1. SQL stores True as 1, so a raw True in a numeric column equals 1 there. The two can only
+    # differ for a value the repository never stores in a numeric column (schema.fits sends it to `extra`).
+    assert Eq("n", 1).holds({"n": True}) is False
+    assert fits("float", True) is False and fits("int", True) is False
+    g = Guard("g", "t", "implies", (), "state.implies:g", if_=IsSet("id"), then=Eq("n", 1))
+    db = new_db(g)
+    save(db, {"id": "r1", "n": 1})
+    save(db, {"id": "r2", "n": True})
+    assert db.execute("SELECT n FROM t WHERE id = 'r2'").fetchone() == (1,)
+    refused(db, "state.implies:g", {"id": "r3", "n": 2})
+    refused(db, "state.implies:g", {"id": "r4", "n": False})
 
 
 # ------------------------------------------------------------------ Literal -> one_of
@@ -382,39 +465,96 @@ def test_real_model_literals_work_with_one_of_from_literal():
 PG, MARIA = DIALECTS["postgresql"], DIALECTS["mariadb"]
 
 
-def one_check(dialect, guard) -> str:
-    stmts = dialect.guard_sql(guard)
-    assert len(stmts) == 1
+PG_DATE = (
+    r"^(?!0000)(?:[0-9]{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)"
+    r"|02-(?:0[1-9]|1[0-9]|2[0-8]))|(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])"
+    r"|(?:[02468][048]|[13579][26])00)-02-29)$"
+)
+PG_SET = r"""("{c}" IS NOT NULL AND btrim(CAST("{c}" AS TEXT), E' \t\n\r\f\v') <> '')"""
+MA_SET = r"""(`{c}` IS NOT NULL AND `{c}` NOT REGEXP '^[\\x20\\x09-\\x0d]*$')"""
+G_RANGE_HI = Guard("g_range_hi", "t", "range", ("n",), "range.bounds", hi=7.5)
+G_RANGE_TEXT = Guard("g_range_text", "t", "range", ("x",), "range.bounds", lo=5, hi=9)
+G_BACKSLASH = Guard("g_bs", "t", "one_of", ("x",), "vocab.unknown", values=("a\\b",))
+
+
+def wrap(dialect, name, cond, false) -> str:
     q = dialect.quote
-    prefix = f"ALTER TABLE {q('t')} ADD CONSTRAINT {q(guard.name)} CHECK (NOT COALESCE(("
-    assert stmts[0].startswith(prefix) and stmts[0].endswith("), %s));" % dialect._false())
-    return stmts[0][len(prefix) : -len("), %s));" % dialect._false())]
+    return f"ALTER TABLE {q('t')} ADD CONSTRAINT {q(name)} CHECK (NOT COALESCE(({cond}), {false}));"
 
 
-def test_postgres_checks():
-    assert one_check(PG, G_ONE_OF).endswith("\"kind\" NOT IN ('open', 'done', 'it''s')")
-    assert (
-        one_check(PG, G_REQUIRED) == "NOT (\"a\" IS NOT NULL AND btrim(CAST(\"a\" AS TEXT), E' \\t\\n\\r\\f\\v') <> '')"
+def test_postgres_checks(table_t):
+    def check(guard, cond):
+        assert PG.guard_sql(guard) == [wrap(PG, guard.name, cond, "FALSE")]
+
+    a, b, k = (PG_SET.format(c=c) for c in ("a", "b", "kind"))
+    check(G_ONE_OF, k + " AND \"kind\" NOT IN ('open', 'done', 'it''s')")
+    check(G_BACKSLASH, PG_SET.format(c="x") + " AND \"x\" NOT IN ('a\\b')")  # standard_conforming_strings: no escape
+    check(G_REQUIRED, f"NOT {a}")
+    check(G_EXACTLY, f"({a} AND {b}) OR (NOT {a} AND NOT {b})")
+    # numeric columns get the NULL test only ('' would raise "invalid input syntax" on PostgreSQL)
+    check(G_RANGE_EXCL, '"n" IS NOT NULL AND ("n" <= 0 OR "n" > 80)')
+    check(G_RANGE_LO, '"n" IS NOT NULL AND ("n" < 5)')
+    check(G_RANGE_HI, '"n" IS NOT NULL AND ("n" > 7.5)')
+    check(G_RANGE_TEXT, '"x" IS NOT NULL AND "x" <> \'\' AND ("x" < 5 OR "x" > 9)')
+    check(
+        G_DAYS,
+        f"""COALESCE((CASE WHEN "s" ~ '{PG_DATE}' AND "e" ~ '{PG_DATE}' THEN CAST("e" AS date) - CAST("s" AS date) END) > 10, FALSE)""",
     )
-    assert one_check(PG, G_RANGE_EXCL) == '"n" IS NOT NULL AND "n" <> \'\' AND ("n" <= 0 OR "n" > 80)'
-    assert one_check(PG, G_RANGE_LO) == '"n" IS NOT NULL AND "n" <> \'\' AND ("n" < 5)'
-    days = one_check(PG, G_DAYS)
-    assert days.startswith("COALESCE((CASE WHEN ") and days.endswith(
-        'CAST("e" AS date) - CAST("s" AS date) END) > 10, FALSE)'
+    check(G_IMPLIES, f"""COALESCE("kind" = 'done', FALSE) AND NOT COALESCE({a}, FALSE)""")
+
+
+def test_postgres_date_regex_admits_only_real_calendar_dates(table_t):
+    # the regex of the CHECK must never let CAST(... AS date) raise: compare with the calendar
+    import datetime
+
+    rx = re.compile(PG_DATE)
+    years = [*range(0, 2500), 2800, 3000, 9999]
+    for y in years:
+        for m in range(0, 14):
+            for d in range(0, 33):
+                try:
+                    datetime.date(y, m, d)
+                    real = y > 0
+                except ValueError:
+                    real = False
+                assert bool(rx.match(f"{y:04d}-{m:02d}-{d:02d}")) is real, (y, m, d)
+    for bad in ("2026-02-30", "2026-13-45", "2025-02-29", "1900-02-29", "0000-01-01", "2026-1-01", "2026-01-01 ", ""):
+        assert not rx.match(bad), bad
+    assert rx.match("2024-02-29") and rx.match("2000-02-29")
+    assert PG_DATE in PG.guard_sql(G_DAYS)[0]
+
+
+def test_mariadb_checks(table_t):
+    def check(guard, cond):
+        assert MARIA.guard_sql(guard) == [wrap(MARIA, guard.name, cond, "0")]
+
+    a, b, k = (MA_SET.format(c=c) for c in ("a", "b", "kind"))
+    # the default collation is case-insensitive: strings are compared as bytes (BINARY)
+    check(G_ONE_OF, k + " AND BINARY `kind` NOT IN ('open', 'done', 'it''s')")
+    check(G_BACKSLASH, MA_SET.format(c="x") + " AND BINARY `x` NOT IN ('a\\\\b')")  # backslash escaped
+    check(G_REQUIRED, f"NOT {a}")
+    check(G_EXACTLY, f"({a} AND {b}) OR (NOT {a} AND NOT {b})")
+    # `0 <> ''` is false in MariaDB: numeric columns get the NULL test only
+    check(G_RANGE_EXCL, "`n` IS NOT NULL AND (`n` <= 0 OR `n` > 80)")
+    check(G_RANGE_LO, "`n` IS NOT NULL AND (`n` < 5)")
+    check(G_RANGE_HI, "`n` IS NOT NULL AND (`n` > 7.5)")
+    check(G_RANGE_TEXT, "`x` IS NOT NULL AND `x` <> '' AND (`x` < 5 OR `x` > 9)")
+    date = "^[0-9]{4}-[01][0-9]-[0-3][0-9]$"
+    check(
+        G_DAYS,
+        f"COALESCE((CASE WHEN `s` REGEXP '{date}' AND `e` REGEXP '{date}' THEN DATEDIFF(`e`, `s`) END) > 10, 0)",
     )
-    ex = one_check(PG, G_EXACTLY)
-    assert " AND " in ex and "OR (NOT " in ex
-    imp = one_check(PG, G_IMPLIES)
-    assert imp.startswith("COALESCE(\"kind\" = 'done', FALSE) AND NOT COALESCE((") and imp.endswith(", FALSE)")
-    assert "NEW." not in imp
+    check(G_IMPLIES, f"COALESCE(BINARY `kind` = 'done', 0) AND NOT COALESCE({a}, 0)")
 
 
-def test_mariadb_checks():
-    assert one_check(MARIA, G_ONE_OF).endswith("`kind` NOT IN ('open', 'done', 'it''s')")
-    assert one_check(MARIA, G_REQUIRED) == "NOT (`a` IS NOT NULL AND TRIM(BOTH '\\t\\n\\r ' FROM `a`) <> '')"
-    assert one_check(MARIA, G_RANGE_EXCL) == "`n` IS NOT NULL AND `n` <> '' AND (`n` <= 0 OR `n` > 80)"
-    assert one_check(MARIA, G_DAYS).endswith("DATEDIFF(`e`, `s`) END) > 10, 0)")
-    assert one_check(MARIA, G_IMPLIES).startswith("COALESCE(`kind` = 'done', 0) AND NOT COALESCE((")
+def test_mariadb_blank_set_equals_sql_blank():
+    # the regex class \x20 \x09-\x0d is exactly SQL_BLANK
+    assert "".join(chr(c) for c in sorted([0x20, *range(0x09, 0x0E)])) == "".join(sorted(SQL_BLANK, key=ord))
+    assert MARIA._is_set("x") == "(x IS NOT NULL AND x NOT REGEXP '^[\\\\x20\\\\x09-\\\\x0d]*$')"
+
+
+def test_sqlite_range_keeps_the_blank_test_for_every_column():
+    assert DIALECT.guard_bad_sql(G_RANGE_EXCL) == '"n" IS NOT NULL AND "n" <> \'\' AND ("n" <= 0 OR "n" > 80)'
 
 
 # ------------------------------------------------------------------ restore

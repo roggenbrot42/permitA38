@@ -26,10 +26,19 @@ from .schema import (
     IsBlank,
     IsSet,
     Table,
+    column_type,
 )
 
 _DATE_GLOB = "[0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]"
 _DATE_REGEX = "^[0-9]{4}-[01][0-9]-[0-3][0-9]$"
+
+# Real calendar dates only (PostgreSQL's CAST(... AS date) raises on 2026-02-30 and on year 0000), so a CHECK never raises.
+_LEAP_YEAR = "(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)"
+_CALENDAR_DATE_REGEX = (
+    "^(?!0000)(?:[0-9]{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)"
+    "|02-(?:0[1-9]|1[0-9]|2[0-8]))"
+    f"|{_LEAP_YEAR}-02-29)$"
+)
 
 #: guard kinds added in guards v2 that are row-local (rendered by `Dialect.guard_bad_sql`)
 ROW_LOCAL_KINDS = frozenset({"one_of", "exactly_one", "required", "max_days", "range", "implies"})
@@ -116,12 +125,24 @@ class Dialect:
     def _false(self) -> str:
         return "0"
 
+    def _exact(self, ref: str, values: tuple[Any, ...]) -> str:
+        """Reference used in an exact equality / IN test (MariaDB overrides it for its case-insensitive collation)."""
+        return ref
+
+    def _in_list(self, ref: str, values: tuple[Any, ...], negate: bool = False) -> str:
+        lits = ", ".join(self._literal(v) for v in values)
+        return f"{self._exact(ref, values)} {'NOT IN' if negate else 'IN'} ({lits})"
+
+    def _range_blank_test(self, guard: Guard) -> bool:
+        """Does a range guard also exclude '' (text columns)? SQLite compares loosely, so it always does."""
+        return True
+
     def cond_sql(self, cond: Condition, prefix: str = "") -> str:
         ref = self._ref(cond.col, prefix)
         if isinstance(cond, Eq):
-            return f"{ref} = {self._literal(cond.value)}"
+            return f"{self._exact(ref, (cond.value,))} = {self._literal(cond.value)}"
         if isinstance(cond, In):
-            return f"{ref} IN ({', '.join(self._literal(v) for v in cond.values)})"
+            return self._in_list(ref, cond.values)
         if isinstance(cond, IsSet):
             return self._is_set(ref)
         if isinstance(cond, IsBlank):
@@ -134,7 +155,7 @@ class Dialect:
         cols = [self._ref(c, prefix) for c in guard.columns]
         x = cols[0]
         if guard.kind == "one_of":
-            return f"{self._is_set(x)} AND {x} NOT IN ({', '.join(lit(v) for v in guard.values)})"
+            return f"{self._is_set(x)} AND {self._in_list(x, guard.values, negate=True)}"
         if guard.kind == "exactly_one":
             a, b = self._is_set(cols[0]), self._is_set(cols[1])
             return f"({a} AND {b}) OR (NOT {a} AND NOT {b})"
@@ -148,7 +169,8 @@ class Dialect:
                 parts.append(f"{x} {'<=' if guard.lo_exclusive else '<'} {lit(guard.lo)}")
             if guard.hi is not None:
                 parts.append(f"{x} > {lit(guard.hi)}")
-            return f"{x} IS NOT NULL AND {x} <> '' AND ({' OR '.join(parts)})"
+            blank = f" AND {x} <> ''" if self._range_blank_test(guard) else ""
+            return f"{x} IS NOT NULL{blank} AND ({' OR '.join(parts)})"
         if guard.kind == "implies":
             assert guard.if_ is not None and guard.then is not None
             return (
@@ -293,8 +315,13 @@ class PostgresDialect(Dialect):
         return f"({ref} IS NOT NULL AND btrim(CAST({ref} AS TEXT), E' \\t\\n\\r\\f\\v') <> '')"
 
     def _days_between(self, start: str, end: str) -> str:
-        ok = " AND ".join(f"{x} ~ '{_DATE_REGEX}'" for x in (start, end))
+        # CAST(... AS date) raises on 2026-02-30, so the regex admits real calendar dates only (never raises)
+        ok = " AND ".join(f"{x} ~ '{_CALENDAR_DATE_REGEX}'" for x in (start, end))
         return f"(CASE WHEN {ok} THEN CAST({end} AS date) - CAST({start} AS date) END)"
+
+    def _range_blank_test(self, guard: Guard) -> bool:
+        # `numeric <> ''` raises "invalid input syntax" on PostgreSQL: only text columns get the blank test
+        return column_type(guard.table, guard.columns[0]) in (ID, STR, TEXT)
 
     def _false(self) -> str:
         return "FALSE"
@@ -345,8 +372,22 @@ class MariaDBDialect(Dialect):
         JSON: "LONGTEXT",
     }
 
+    def _literal(self, v: Any) -> str:
+        if isinstance(v, str):  # the default sql_mode treats the backslash as an escape character
+            return "'" + v.replace("\\", "\\\\").replace("'", "''") + "'"
+        return super()._literal(v)
+
+    def _exact(self, ref: str, values: tuple[Any, ...]) -> str:
+        # the default collation (utf8mb4_general_ci) is case-insensitive: compare strings as bytes
+        return f"BINARY {ref}" if any(isinstance(v, str) for v in values) else ref
+
+    def _range_blank_test(self, guard: Guard) -> bool:
+        # `0 <> ''` is false in MariaDB ('' coerces to 0): only text columns get the blank test
+        return column_type(guard.table, guard.columns[0]) in (ID, STR, TEXT)
+
     def _is_set(self, ref: str) -> str:
-        return f"({ref} IS NOT NULL AND TRIM(BOTH '\\t\\n\\r ' FROM {ref}) <> '')"
+        # the same set as schema.SQL_BLANK (space, \t \n \v \f \r); TRIM(BOTH ...) cannot strip \v and \f
+        return f"({ref} IS NOT NULL AND {ref} NOT REGEXP '^[\\\\x20\\\\x09-\\\\x0d]*$')"
 
     def _days_between(self, start: str, end: str) -> str:
         ok = " AND ".join(f"{x} REGEXP '{_DATE_REGEX}'" for x in (start, end))
