@@ -14,7 +14,19 @@ from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service import integrity
 from permita38.core.service.integrity import IntegrityService
 
+from permita38.core.service import document_scans as ds_mod
+from permita38.core.service import receipts as receipts_mod
+
+from .test_allocations_api import END as ALLOC_END
+from .test_allocations_api import START as ALLOC_START
+from .test_document_scans_service import INVOICE as SCAN_INVOICE
+from .test_document_scans_service import TODAY as SCAN_TODAY
+from .test_document_scans_service import Reader as DocReader
 from .test_migrations import legacy_db
+from .test_receipts_api import SINGLE
+from .test_receipts_api import Reader as ReceiptReader
+from .test_receipts_api import TODAY as RECEIPT_TODAY
+from .test_trips_api import trip_body
 
 
 @pytest.fixture
@@ -50,6 +62,16 @@ def test_empty_boss_list_is_an_error(tmp_path):
     repo.save("users", {"id": "emp001", "username": "e", "role": "employee"})
     repo.save("users", {"id": "boss02", "username": "b", "role": "boss", "active": False})
     assert found(repo) == [("state.no_active_boss", "users", None, "role")]
+    repo.close()
+
+
+def test_only_an_inactive_boss_is_reported_but_an_active_one_beside_it_is_not(tmp_path):
+    repo = SQLiteRepository(tmp_path / "d")
+    repo.startup()
+    repo.save("users", {"id": "boss02", "username": "b", "role": "boss", "active": False})
+    assert found(repo) == [("state.no_active_boss", "users", None, "role")]
+    repo.save("users", {"id": "boss03", "username": "c", "role": "boss"})
+    assert found(repo) == []
     repo.close()
 
 
@@ -153,6 +175,13 @@ def test_project_customer_mismatch(store):
     store.save("contracts", {"id": "con002", "start": "2026-01-01", "customer_id": "cust01", "project_id": "proj02"})
     store.save("contracts", {"id": "con003", "start": "2026-01-01", "customer_id": "cust02", "project_id": "proj01"})
     assert found(store, "ref.") == [("ref.self_project_customer", "contracts", "con001", "customer_id")]
+
+
+def test_project_without_customer_is_never_a_mismatch(store):
+    store.save("customers", {"id": "cust01", "name": "A"})
+    store.save("projects", {"id": "proj02", "name": "Q"})
+    store.save("contracts", {"id": "con002", "start": "2026-01-01", "customer_id": "cust01", "project_id": "proj02"})
+    assert found(store, "ref.") == []
 
 
 # ------------------------------------------------------------------ 4. numbering
@@ -264,6 +293,11 @@ def test_expense_itemised(store):
     ]
 
 
+def test_expense_with_a_non_dict_line_is_one_finding_and_does_not_crash(store):
+    store.save("expenses", {"id": "exp003", "date": "2026-03-01", "lines": ["oops", 5], "net": 1.0})
+    assert found(store, "money.") == [("money.expense_itemised", "expenses", "exp003", "lines")]
+
+
 def test_money_not_finite_and_too_large(store):
     store.save("expenses", {"id": "exp001", "date": "2026-03-01", "net": float("nan")})
     store.save("expenses", {"id": "exp002", "date": "2026-03-01", "vat": 2e9})
@@ -371,8 +405,19 @@ def test_findings_are_sorted_and_only_filters_by_prefix(store):
 
 
 # ------------------------------------------------------------------ false-positive guard
-def test_data_made_by_the_services_gives_no_errors_and_no_warnings(app, boss_client):
+def test_data_made_by_the_services_gives_no_errors_and_no_warnings(app, boss_client, monkeypatch):
     c = boss_client
+    services = app.state.services
+    receipt_reader, doc_reader = ReceiptReader(), DocReader()
+
+    def read_file(path, config):  # both services share one runner module: dispatch on the content
+        with open(path, "rb") as f:
+            data = f.read()
+        return (receipt_reader if data in receipt_reader.by_content else doc_reader)(path, config)
+
+    monkeypatch.setattr(receipts_mod.runner, "read_file", read_file)
+    services.receipts._today = lambda: RECEIPT_TODAY
+    services.document_scans._today = lambda: SCAN_TODAY
     me = c.get("/api/auth/me").json()
     cust = c.post("/api/customers", json={"name": "Demo Client", "rate": 100}).json()
     proj = c.post("/api/projects", json={"name": "Demo Project", "customer_id": cust["id"]}).json()
@@ -415,8 +460,37 @@ def test_data_made_by_the_services_gives_no_errors_and_no_warnings(app, boss_cli
     assert r.status_code == 200, r.text
     c.post("/api/expenses", json={"date": "2026-03-05", "net": 50, "vat": 9.5, "category": "Software"})
     c.post("/api/timer/start", json={})
-    store = app.state.services.store
-    assert [len(store.list(k)) for k in ("customers", "invoices", "offers", "expenses", "entries")] == [1, 2, 1, 2, 2]
+    st = services.store.settings()
+    company = {"company_name": "Max Muster IT-Beratung", "owner_name": "Max Muster", "vat_id": "DE123456789"}
+    services.store.save_settings({**st, **company, "payment_days": 30})
+    # a booked receipt scan, a booked old-document scan, a trip, an allocation
+    booked = c.post("/api/receipts", files={"file": ("bill.pdf", receipt_reader.add(SINGLE))})
+    assert booked.status_code == 201 and booked.json()["outcome"] == "booked", booked.text
+    scanned = c.post("/api/document-scans", files={"file": ("old.pdf", doc_reader.add(SCAN_INVOICE))})
+    assert scanned.status_code == 201 and scanned.json()["status"] == "added", scanned.text
+    assert c.post("/api/trips", json=trip_body()).status_code == 200
+    r = c.post(
+        "/api/allocations",
+        json={
+            "user_id": me["id"],
+            "project_id": proj["id"],
+            "start": ALLOC_START,
+            "end": ALLOC_END,
+            "hours_per_week": 20,
+        },
+    )
+    assert r.status_code == 201, r.text
+    # finalized documents with one shared number sequence
+    services.store.save_settings({**services.store.settings(), "numbering_shared": True})
+    for coll, extra in (("offers", {}), ("invoices", {}), ("offers", {})):
+        d = c.post(
+            f"/api/{coll}",
+            json={"customer_id": cust["id"], "lines": [{"description": "S", "qty": 1, "price": 5}], **extra},
+        )
+        assert d.status_code == 200, d.text
+        assert c.post(f"/api/{coll}/{d.json()['id']}/finalize").status_code == 200
+    store = services.store
+    assert [len(store.list(k)) for k in ("receipt_scans", "document_scans", "trips", "allocations")] == [1, 1, 1, 1]
     assert store.list("timers") and store.list("number_sequences")
     findings = IntegrityService(store).run()
     assert [f for f in findings if f.severity in ("error", "warning")] == []
