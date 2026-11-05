@@ -93,6 +93,7 @@ def _document_table(name: str) -> Table:
         (
             Index(f"idx_{name}_status", ("status",)),
             Index(f"idx_{name}_customer", ("customer_id",)),
+            Index(f"idx_{name}_number", ("number",)),
         ),
     )
 
@@ -324,6 +325,78 @@ TABLES: dict[str, Table] = {
             ),
         ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
+    )
+}
+
+
+@dataclass(frozen=True)
+class Guard:
+    """A database-level guard checked for new or changed values only (see docs/specs/db-constraints.md)."""
+
+    name: str  # trigger name stem, e.g. "guard_invoices_number_unique"
+    table: str
+    kind: str  # "unique" | "date" | "non_negative" | "order"
+    columns: tuple[str, ...]  # one column, or (start, end) for "order"
+    code: str  # the RAISE code, e.g. "numbering.duplicate"
+
+
+GUARD_KINDS = ("unique", "date", "non_negative", "order")
+
+_DATE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "entries": ("date",),
+    "invoices": ("date", "due_date", "valid_until", "paid_date", "service_from", "service_to"),
+    "offers": ("date", "due_date", "valid_until", "paid_date", "service_from", "service_to"),
+    "expenses": ("date", "paid_on"),
+    "absences": ("start", "end"),
+    "contracts": ("start", "end"),
+    "projects": ("start", "end"),
+    "allocations": ("start", "end", "cancelled_from"),
+    "incoming_offers": ("received_on", "valid_until"),
+}
+_NON_NEGATIVE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "entries": ("minutes", "rate"),
+    "customers": ("rate",),
+    "projects": ("rate", "budget_hours"),
+    "tasks": ("rate",),
+    "contracts": ("rate", "hours_per_week", "total_hours"),
+    "allocations": ("rate", "hours_per_week", "total_hours"),
+    "suppliers": ("rate",),
+    "expenses": ("net", "vat"),
+}
+_ORDER_TABLES = ("absences", "contracts", "projects", "allocations", "trips")
+
+
+def _build_guards() -> tuple[Guard, ...]:
+    out = [
+        Guard(f"guard_{t}_number_unique", t, "unique", ("number",), "numbering.duplicate")
+        for t in ("invoices", "offers")
+    ]
+    out += [
+        Guard(f"guard_{t}_{c}_date", t, "date", (c,), "format.date") for t, cols in _DATE_COLUMNS.items() for c in cols
+    ]
+    out += [
+        Guard(f"guard_{t}_{c}_nonneg", t, "non_negative", (c,), "range.negative")
+        for t, cols in _NON_NEGATIVE_COLUMNS.items()
+        for c in cols
+    ]
+    out += [
+        Guard(f"guard_{t}_period_order", t, "order", ("start", "end"), "state.period_reversed") for t in _ORDER_TABLES
+    ]
+    out += [
+        Guard(f"guard_{t}_service_order", t, "order", ("service_from", "service_to"), "state.period_reversed")
+        for t in ("invoices", "offers")
+    ]
+    return tuple(out)
+
+
+# trips.start / trips.end are local datetimes ("YYYY-MM-DDTHH:MM"): only the order guard, no date format guard
+GUARDS: tuple[Guard, ...] = _build_guards()
+
+#: table CHECK constraints declared for the drift test; the SQL stays in the migration that created them
+CHECKS = {
+    "allocations": (
+        "allocations_one_owner",
+        '("user_id" IS NOT NULL AND "supplier_id" IS NULL) OR ("user_id" IS NULL AND "supplier_id" IS NOT NULL)',
     )
 }
 
