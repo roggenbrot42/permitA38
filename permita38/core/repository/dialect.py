@@ -187,6 +187,12 @@ class Dialect:
         """DDL statements (each ending with ';') that create the guard."""
         raise NotImplementedError
 
+    def _reference_bad(self, guard: Guard, new: str) -> str:
+        """SQL boolean: the (new) value is set and no target row has that id."""
+        assert guard.target is not None
+        q, c = self.quote, self.quote(guard.columns[0])
+        return f"{self._is_set(new + c)} AND NOT EXISTS (SELECT 1 FROM {q(guard.target)} WHERE {q('id')} = {new}{c})"
+
     def ddl(self, tables: dict[str, Table]) -> str:
         out = []
         for t in tables.values():
@@ -281,17 +287,29 @@ class SQLiteDialect(Dialect):
             bad = (
                 f"NEW.{c} IS NOT NULL AND NEW.{c} <> '' AND NEW.{e} IS NOT NULL AND NEW.{e} <> '' AND NEW.{e} < NEW.{c}"
             )
+        elif guard.kind == "reference":
+            assert guard.target is not None
+            bad = f'{self._is_set("NEW." + c)} AND NOT EXISTS (SELECT 1 FROM {q(guard.target)} WHERE "id" = NEW.{c})'
         else:
             raise ValueError(f"unknown guard kind {guard.kind!r}")
         same = " AND ".join(f"{x} IS NEW.{x}" for x in cols)
         unchanged = f'EXISTS (SELECT 1 FROM {t} WHERE "id" = NEW."id" AND {same})'
         changed = " OR ".join(f"NEW.{x} IS NOT OLD.{x}" for x in cols)
         raise_ = f"BEGIN SELECT RAISE(ABORT, 'permita38:{guard.code}'); END;"
-        return [
+        out = [
             f"CREATE TRIGGER {q(guard.name + '_ins')} BEFORE INSERT ON {t}\nWHEN {bad}\n AND NOT {unchanged}\n{raise_}",
             f"CREATE TRIGGER {q(guard.name + '_upd')} BEFORE UPDATE OF {', '.join(cols)} ON {t}\n"
             f"WHEN {bad}\n AND ({changed})\n{raise_}",
         ]
+        if (
+            guard.kind == "reference" and guard.target
+        ):  # deleting a target that is still referenced (never grandfathered)
+            out.append(
+                f"CREATE TRIGGER {q(guard.name + '_del')} BEFORE DELETE ON {q(guard.target)}\n"
+                f'WHEN EXISTS (SELECT 1 FROM {t} WHERE {c} = OLD."id")\n'
+                f"BEGIN SELECT RAISE(ABORT, 'permita38:ref.in_use'); END;"
+            )
+        return out
 
 
 class PostgresDialect(Dialect):
@@ -337,6 +355,8 @@ class PostgresDialect(Dialect):
         c = cols[0]
         if guard.kind in ROW_LOCAL_KINDS:
             return self._check_guard_sql(guard)
+        if guard.kind == "reference":
+            return self._reference_triggers(guard)
         if guard.kind == "unique":
             return [f"CREATE UNIQUE INDEX {q(guard.name)} ON {t} ({c}) WHERE {c} IS NOT NULL AND {c} <> '';"]
         if guard.kind == "date":
@@ -349,6 +369,27 @@ class PostgresDialect(Dialect):
         else:
             raise ValueError(f"unknown guard kind {guard.kind!r}")
         return [f"ALTER TABLE {t} ADD CONSTRAINT {q(guard.name)} CHECK ({cond});"]
+
+    def _reference_triggers(self, guard: Guard) -> list[str]:
+        """Trigger functions and triggers of a reference guard (insert / update side and delete side)."""
+        assert guard.target is not None
+        q, t, c = self.quote, self.quote(guard.table), self.quote(guard.columns[0])
+        n = guard.name
+        bad = self._reference_bad(guard, "NEW.")
+        unchanged = f"EXISTS (SELECT 1 FROM {t} WHERE {q('id')} = NEW.{q('id')} AND {c} IS NOT DISTINCT FROM NEW.{c})"
+        chk, use = q(n + "_chk"), q(n + "_use")
+        return [
+            f"CREATE FUNCTION {chk}() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n"
+            f"  IF {bad} AND NOT {unchanged} THEN\n"
+            f"    RAISE EXCEPTION 'permita38:{guard.code}' USING ERRCODE = '23503';\n  END IF;\n  RETURN NEW;\nEND;\n$$;",
+            f"CREATE TRIGGER {q(n + '_ins')} BEFORE INSERT ON {t} FOR EACH ROW EXECUTE FUNCTION {chk}();",
+            f"CREATE TRIGGER {q(n + '_upd')} BEFORE UPDATE OF {c} ON {t} FOR EACH ROW\n"
+            f"WHEN (OLD.{c} IS DISTINCT FROM NEW.{c}) EXECUTE FUNCTION {chk}();",
+            f"CREATE FUNCTION {use}() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n"
+            f"  IF EXISTS (SELECT 1 FROM {t} WHERE {c} = OLD.{q('id')}) THEN\n"
+            f"    RAISE EXCEPTION 'permita38:ref.in_use' USING ERRCODE = '23503';\n  END IF;\n  RETURN OLD;\nEND;\n$$;",
+            f"CREATE TRIGGER {q(n + '_del')} BEFORE DELETE ON {q(guard.target)} FOR EACH ROW EXECUTE FUNCTION {use}();",
+        ]
 
     def encode_bool(self, value: bool) -> Any:
         return bool(value)
@@ -409,6 +450,8 @@ class MariaDBDialect(Dialect):
         c = cols[0]
         if guard.kind in ROW_LOCAL_KINDS:
             return self._check_guard_sql(guard)
+        if guard.kind == "reference":
+            return self._reference_triggers(guard)
         if guard.kind == "unique":
             key = q(guard.columns[0] + "_key")
             return [
@@ -425,6 +468,26 @@ class MariaDBDialect(Dialect):
         else:
             raise ValueError(f"unknown guard kind {guard.kind!r}")
         return [f"ALTER TABLE {t} ADD CONSTRAINT {q(guard.name)} CHECK ({cond});"]
+
+    def _reference_triggers(self, guard: Guard) -> list[str]:
+        """BEFORE INSERT / UPDATE / DELETE triggers of a reference guard (SIGNAL carries the code)."""
+        assert guard.target is not None
+        q, t, c = self.quote, self.quote(guard.table), self.quote(guard.columns[0])
+        n = guard.name
+        bad = self._reference_bad(guard, "NEW.")
+        unchanged = f"EXISTS (SELECT 1 FROM {t} WHERE {q('id')} = NEW.{q('id')} AND {c} <=> NEW.{c})"
+
+        def signal(code: str) -> str:
+            return f"SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:{code}'"
+
+        return [
+            f"CREATE TRIGGER {q(n + '_ins')} BEFORE INSERT ON {t} FOR EACH ROW\nBEGIN\n"
+            f"  IF {bad} AND NOT {unchanged} THEN {signal(guard.code)}; END IF;\nEND;",
+            f"CREATE TRIGGER {q(n + '_upd')} BEFORE UPDATE ON {t} FOR EACH ROW\nBEGIN\n"
+            f"  IF NOT (OLD.{c} <=> NEW.{c}) AND {bad} THEN {signal(guard.code)}; END IF;\nEND;",
+            f"CREATE TRIGGER {q(n + '_del')} BEFORE DELETE ON {q(guard.target)} FOR EACH ROW\nBEGIN\n"
+            f"  IF EXISTS (SELECT 1 FROM {t} WHERE {c} = OLD.{q('id')}) THEN {signal('ref.in_use')}; END IF;\nEND;",
+        ]
 
     def create_table(self, table: Table) -> str:
         return super().create_table(table).rstrip(";") + " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"
