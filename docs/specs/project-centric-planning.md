@@ -87,10 +87,13 @@ S5. Internal projects: their assignments **are** the plan. They consume capacity
     exceed it.
 
 S6. **Working-time law (ArbZG) for employees, a friendly info for the boss.** The law applies to users whose role is
-    not `boss`. The boss is not an employee: they get the same three overwork checks below as **info** only (severity
-    `info`, no paragraph, wording like "You have 62 h planned in the week of 09.11.2026; that is a lot."), never as a
-    warning. Subcontractors are external freelancers and are never checked. Breaks are **never deducted
-    automatically**, for anyone.
+    not `boss`. The boss is not an employee and has own limits, without law wording: a planned day of more than 10 h
+    is an **info** (`assignment.long_day`), more than **12 h a warning** (`assignment.very_long_day`), more than
+    **16 h** is the absolute maximum: a warning that the plan is impossible (`assignment.impossible_day`; plans never
+    block saving, booked time above 16 h is refused, see the roadmap item). Long weeks (more than 60 h) and a high
+    24-week average (more than 48 h/week) are infos. Subcontractors are external freelancers and are never checked.
+    Breaks are deducted automatically for **employees** when they book time (roadmap item), never for the boss; the
+    planner needs no break rule because `weekly_hours` is net working time.
     Planned hours are the person's assigned hours per day after S1, summed over all projects (customer and internal):
     * a day with more than 10 planned hours, or a week with more than 60 (§3: 6 working days × 10 h): the
       `assignment.over_capacity` warning (S4) gets the reason `working_time_law`, with the limit and the paragraph in
@@ -332,6 +335,8 @@ suggestions (C6) replace it.
 | `assignment.working_time` | warning | S6: planned 24-week average above 48 h/week (employees only) |
 | `user.weekly_hours_above_law` | warning | S6: an employee's `weekly_hours` above 48 |
 | `assignment.long_day`, `assignment.long_week`, `assignment.high_average` | info | S6 for the boss: more than 10 h on a day, 60 h in a week, 48 h/week on the 24-week average (no law wording) |
+| `assignment.very_long_day` | warning | S6 for the boss: more than 12 h planned on a day |
+| `assignment.impossible_day` | warning | S6 for the boss: more than 16 h planned on a day (the absolute maximum) |
 | `contract.no_project` | info | C5 items |
 
 Removed: `capacity.gap`, `capacity.over`, `capacity.offer_over`, `offer.project_gap`,
@@ -378,7 +383,7 @@ Calendar: state BY. Between 09.11.2026 and 18.12.2026 there is no public holiday
 | E3 | Today Sun 08.11.2026. Ben 40 h, assigned to Pine 10 h/week 09.11.–04.12. (2/day). Contracts T1 total 25 h 09.11.–27.11., T2 total 20 h 09.11.–04.12. | Earliest end first: T1 window has 15 days × 2 = 30 h, takes 25. Leftover 5 h until 27.11., plus 10 h in the week of 30.11. T2 takes 15 | T1 shortfall 0; T2 covered 15, shortfall 5. Check: 45 − 40 = 5 |
 | E4 | Week of 09.11.2026. Cleo 20 h (4/day). Assignments: Administration 12 h/week, customer project Elm 10 h/week. Contract on Elm 10 h/week | Per day 2.4 + 2.0 = 4.4 > 4: 0.4 over on each of 5 days = 2 h. Nothing is scaled | `assignment.over_capacity`: "Week of 09.11.2026: Cleo is assigned 22 h (Administration 12 h, Elm 10 h) but has 20 h of capacity: over by 2 h. The projects still count the full hours." Elm supply 10, contract weekly shortfall 0. Week row: capacity 20, internal 12, customer 10, unassigned 0, over-assigned 2 |
 | E5 | Week of 21.12.2026. Dan 40 h, vacation Wed 23.12. Assigned to Ash 20 h/week. Contract on Ash 20 h/week | Available days Mon 21., Tue 22., Thu 24. (25.12. holiday): 20 / 3 = 6.67/day ≤ 8, no scaling, supply 20 | Ash weekly shortfall 0. Week row: capacity 24, holiday 8, vacation 8, customer 20, unassigned 4. **Variant** with vacation also on Tue 22.12.: 2 days, 10/day > 8, over by 2 on each day = 4 h, `assignment.over_capacity` with reason `time_off`; supply stays 20, weekly shortfall 0 |
-| E5d | Week of 21.12.2026. Fay (employee, 40 h, Mon–Fri) assigned 40 h/week to Ash; vacation Tue 22. and Wed 23.12. Same assignment for the boss and for subcontractor Sam (Sam unavailable 22.–23.12.) | Fay: available Mon, Thu (25.12. holiday): 40 / 2 = 20 h per day, more than 8 (capacity) and more than 10 (§3) | Fay: `assignment.over_capacity` reason `working_time_law` ("20 h planned on 21.12.2026; the law allows at most 10 h a day (§3 ArbZG)"). Boss: `assignment.over_capacity` reason `time_off`, plus the info `assignment.long_day` ("20 h planned on 21.12.2026; that is a long day."). Sam: no warning (D13) |
+| E5d | Week of 21.12.2026. Fay (employee, 40 h, Mon–Fri) assigned 40 h/week to Ash; vacation Tue 22. and Wed 23.12. Same assignment for the boss and for subcontractor Sam (Sam unavailable 22.–23.12.) | Fay: available Mon, Thu (25.12. holiday): 40 / 2 = 20 h per day, more than 8 (capacity) and more than 10 (§3) | Fay: `assignment.over_capacity` reason `working_time_law` ("20 h planned on 21.12.2026; the law allows at most 10 h a day (§3 ArbZG)"). Boss: `assignment.over_capacity` reason `time_off`, plus the warning `assignment.impossible_day` ("20 h planned on 21.12.2026; more than 16 h a day is impossible."). Variant with 24 h/week on those 2 days: 12 h/day, info `assignment.long_day` only (12 is not more than 12). Sam: no warning (D13) |
 | E5b | Contract 10 h/week starting Wed 11.11.2026 | D2: 3 weekdays of 5 in the period | demand 6 h in the week of 09.11.2026 |
 | E5c | Eve 40 h, assigned to Ash 10 h/week until Thu 31.12.2026. Week of 28.12.2026 (no holiday in that week) | 10 / 5 available days of the week = 2/day, on the 4 days inside the period | supply 8 h in that week. Same for a subcontractor with 10 h/week: 8 h. **Week of 21.12.2026** (25.12. holiday): 10 / 4 = 2.5/day on 4 days = 10 h (today's subcontractor rule gives 2/day on 4 days = 8 h; at 90.00 that is 900.00 instead of 720.00 planned cost, see D14) |
 | E6 | Incoming offer from Sam: one line 24 h × 90.00 = 2,160.00 net; plan 09.11.–04.12. with `hours_per_week` 6 | Accept: total assignment 24 h, rate 90.00, `hours_per_week` ignored | Assignment total 24, planned net 2,160.00, no warning. Edit to 30 h: planned net 2,700.00, info `assignment.differs_from_offer`: "Planned 30 h / 2,700.00 € differ from the offer's 24 h / 2,160.00 € (6 h / 540.00 € more)." |
