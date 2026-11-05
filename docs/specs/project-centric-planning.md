@@ -349,8 +349,10 @@ Removed: `capacity.gap`, `capacity.over`, `capacity.offer_over`, `offer.project_
 
 ## Callers that change (complete list, checked on `origin/main` c63d776)
 
-* `core/service/planning.py` (engine) and `plan_service.py`: rewritten as a package `core/service/planning/` with
-  `spread.py` (S1), `supply.py`, `demand.py` (D1–D6), `cover.py` (C1–C6), `views.py` (the JSON of the API).
+* `core/service/planning.py` (engine) and `plan_service.py`: replaced by the new package `core/service/planner/`
+  (the name `planning` is taken by the old module until WP4 deletes it) with `model.py`, `spread.py` (S1),
+  `supply.py` (S2–S6), `cover.py` (D1–D6, C1–C6, M1) and, in WP4, `views.py` (the JSON of the API). WP2 and WP3 are
+  pure functions without storage; WP4 loads the data, switches the callers below and deletes the old modules.
 * `core/service/external_capacity.py`: its spreading goes into `spread.py`; `figures()` uses it.
 * `core/service/allocations.py`: `_planned_hours` uses `spread.py`; bootstrap removed; external rows editable.
 * `core/service/planning_warnings.py`: `week_over_allocation`, `over_allocation_on_save` use the supply of S1/S3.
@@ -393,14 +395,151 @@ Calendar: state BY. Between 09.11.2026 and 18.12.2026 there is no public holiday
 | E7 | E1 plus offer O1 on Orchard, total 10 h 16.11.–04.12., win probability 50 % | Contracts first: K2 already took every leftover hour until 04.12. O1 covered 0 | O1 shortfall 10, `offer.shortfall`; Orchard shortfall_contracts 26, shortfall_worst_case 36, shortfall_expected 26 + 5 = 31, status `short` |
 | E8 | Migration: projects (a) `personal` 1, no customer; (b) `personal` 0, no customer, no documents; (c) `personal` 1 with customer; (d) `personal` 0, no customer, one contract; (e) status NULL. Contracts (f) both hour fields; (g) `total_hours` 0 (grandfathered). Allocation (h) employee with `incoming_offer_id` (grandfathered) | Data fixes and guards per the section above | (a) internal, (b) internal, (c) customer, (d) customer, (e) `active`; (f) `total_hours` NULL; (g) kept, re-saving it unchanged succeeds, changing its title succeeds, `check-db` reports `range.bounds`; (h) kept and reported by `check-db` (`state.implies:<guard>`). A new contract with `total_hours` 0 is refused by the API (422) and by the guard. `internaladmin` exists once after two runs; the `personal` column is gone |
 
+## Module interfaces of WP2 and WP3 (binding)
+
+Pure Python, no `Repository`, no `calc`, no SQL. Hours are `float`; money uses `core/money.py` (`dec`, `q2`). Weeks
+are ISO weeks (Monday to Sunday). Warnings are built with `planning_warnings.warning(...)`; hours in messages are
+formatted with `planning_warnings._fmt`, dates as `DD.MM.YYYY`.
+
+```python
+# planner/model.py
+OwnerKind = Literal["employee", "boss", "subcontractor"]
+DayOff = Literal["holiday", "vacation", "sick", "other", "unavailable"]
+Holiday = Callable[[date], str | None]        # the public holiday's name or None (core/holidays.py for the state)
+
+@dataclass(frozen=True)
+class WorkLimits:                             # S6, the boss's "My settings"; defaults as in S6
+    info_day: float = 10.0; warn_day: float = 12.0; max_day: float = 16.0
+    info_week: float = 60.0; info_average: float = 48.0
+
+@dataclass(frozen=True)
+class Owner:
+    id: str
+    name: str
+    kind: OwnerKind
+    weekly_hours: float                       # 0 for a subcontractor (not team capacity)
+    workdays: tuple[int, ...]                 # 0 = Monday
+    days_off: Mapping[date, DayOff] = field(default_factory=dict)   # absences or unavailable windows, expanded
+    busy: Mapping[date, float] = field(default_factory=dict)        # out-of-office / all-day block hours (D10)
+    limits: WorkLimits | None = None          # only for kind "boss"
+
+@dataclass(frozen=True)
+class Assignment:
+    id: str
+    owner_id: str
+    project_id: str
+    project_kind: Literal["customer", "internal"]
+    start: date
+    end: date
+    hours_per_week: float | None              # exactly one of the two is set
+    total_hours: float | None
+    booked: float = 0.0                       # total assignments: hours the owner booked on the project in the period
+
+@dataclass(frozen=True)
+class Item:                                   # a contract (must) or an open offer (could)
+    kind: Literal["contract", "offer"]
+    id: str
+    title: str
+    project_id: str | None                    # None = the scope "unassigned" (C5)
+    start: date
+    end: date
+    hours_per_week: float | None
+    total_hours: float | None
+    rate: Decimal
+    win: float = 1.0                          # offers: 0..1; contracts always 1.0
+
+@dataclass(frozen=True)
+class Booking:                                # time entries summed per project and day (all people)
+    project_id: str
+    day: date
+    hours: float
+```
+
+```python
+# planner/spread.py (S1, S2)
+def is_available(owner: Owner, day: date, holiday: Holiday) -> bool
+def capacity(owner: Owner, day: date, holiday: Holiday) -> float
+    # employee/boss: weekly_hours / len(workdays) on an available day, minus busy, never below 0; subcontractor: 0
+def spread(owner: Owner, a: Assignment, holiday: Holiday, today: date | None) -> dict[date, float]
+    # today=None: the whole period (planned hours and cost, M1); otherwise only days after today (S2)
+    # hours_per_week: hours_per_week / available days of the WHOLE ISO week, on the available days inside the period
+    # total_hours with today: max(0, total_hours - booked) / available days in (today, end]; today=None: total / all
+    #   available days of the period. No available day: {}
+def planned_hours(owner, a, holiday) -> float     # round(sum(spread(..., today=None)), 2)
+def planned_net(owner, a, holiday, rate: Decimal) -> Decimal
+    # total assignment: q2(total_hours x rate); weekly: q2(dec(round(planned_hours_exact, 6)) x rate)
+```
+
+```python
+# planner/supply.py (S2-S6)
+@dataclass
+class PersonDay:
+    capacity: float; assigned: float; assigned_customer: float; assigned_internal: float
+    holiday: float; vacation: float; absence: float; busy: float   # hours lost (weekly_hours / workdays per lost workday)
+
+@dataclass
+class Supply:
+    lo: date; hi: date; today: date
+    people: dict[str, dict[date, PersonDay]]                    # employees and boss only
+    project: dict[str, dict[date, tuple[float, float]]]         # project id -> day -> (employees, subcontractors)
+    def unassigned(self, owner_id: str, day: date) -> float     # max(0, capacity - assigned)
+
+def build(owners: Sequence[Owner], assignments: Sequence[Assignment], holiday: Holiday,
+          today: date, lo: date, hi: date) -> Supply                # days after today only, inside lo..hi
+def warnings(owners, assignments, holiday, today: date, lo: date, hi: date) -> list[dict]
+    # S4 assignment.over_capacity per employee/boss and week with over_assigned > 0 or (employees) a working-time-law
+    #   hit; details {user_id, week, assigned, capacity, over_by, reason, reasons, projects: [{project_id, hours}]};
+    #   reasons subset of ["working_time_law", "time_off", "weekly_hours"] in this order, reason = reasons[0];
+    #   working_time_law: a day above 10 h or the week above 60 h (employees only)
+    # S6 employees: assignment.working_time once per person: the first week w whose 24 weeks w-23..w average more
+    #   than 48 h of planned hours (spread with today=None), details {user_id, week, average}
+    # S6 boss: per day the highest of long_day / very_long_day / impossible_day by limits; long_week per week above
+    #   info_week; high_average once like the employees' rule with info_average. Subcontractors: nothing.
+    # Planned hours of a day = sum of all assignments of the person on that day (customer and internal).
+```
+
+```python
+# planner/cover.py (D1-D6, C1-C6, M1 value)
+@dataclass
+class WeekShortfall: week: date; demand: float; supply: float; shortfall: float
+
+@dataclass
+class ItemVerdict:
+    kind: str; id: str; title: str; type: Literal["weekly", "total"]; start: date; end: date
+    promised: float; booked: float; remaining: float; covered: float; shortfall: float
+    weekly_shortfalls: list[WeekShortfall]; rate: Decimal; value: Decimal; win_probability: float | None
+    explanation: str; suggestions: list[dict]        # [{user_id, name, hours, from, to}], C6
+
+@dataclass
+class ProjectVerdict:
+    project_id: str | None; supply_employees: float; supply_subcontractors: float
+    remaining_contracts: float; shortfall_contracts: float; remaining_offers: float
+    shortfall_worst_case: float; shortfall_expected: float
+    status: Literal["ok", "at_risk", "short"]; items: list[ItemVerdict]; booked_unattributed: float
+
+def cover(items: Sequence[Item], bookings: Sequence[Booking], supply: Supply, owners: Sequence[Owner],
+          today: date, names: Mapping[str, str]) -> list[ProjectVerdict]
+    # one entry per customer project with an item, plus project_id None when an item has no project (C5, supply =
+    # the team's unassigned hours of each day). Internal projects never appear here.
+```
+
+Explanation texts (literal templates; `{h}` via `_fmt`, dates `DD.MM.YYYY`):
+* total: `"{promised} h promised − {booked} h booked = {remaining} h remaining. Until {end} {project} has {left} h of
+  assigned time left after its weekly contracts. Short {shortfall} h."` where `left` is the leftover available to
+  the item before it takes any; the last sentence is `"Covered."` without a shortfall. Offers say "offered" instead of
+  "promised" and "after its contracts" instead of "after its weekly contracts". The project name of the scope
+  without a project is `"the team's unassigned time"`.
+* weekly: `"{hours_per_week} h per week from {start} to {end}: short {shortfall} h in {n} week(s) ({weeks})."` with
+  the Mondays as `DD.MM.`, or `"{hours_per_week} h per week from {start} to {end}: covered every week."`.
+
 ## Work packages (fresh Sonnet agents, one each; backend and web UI in parallel against the contract)
 
 | WP | Content | Depends on |
 |---|---|---|
 | WP0 | Not part of this work: guard kinds (db-guards-v2 part A) and reference guards (part B) land first in their own PRs | – |
 | WP1 | Step-0 write-path audit, API tightening, migration `NNNN-project-planning` (3 dialects), `kind`, data fixes, guard instances in `schema.GUARDS`, "Administration", models (`ProjectIn.kind`, `ContractIn`, `AllocationIn`, `IncomingPlanIn`), `transfer/upgrades.py`, importer; E8 | WP0 |
-| WP2 | `planning/spread.py` and supply (S1–S5) with E4, E5, E5b; switch `allocations`, `procurement`, `planning_warnings`, `external_capacity` to it | – |
-| WP3 | Demand, attribution, covering, verdicts (D1–D6, C1–C6, M1–M2) as pure functions; E1–E3, E7 | WP2 |
+| WP2 | `planner/model.py`, `planner/spread.py`, `planner/supply.py` (S1–S6) as pure functions with E4, E5 (and variant), E5c, E5d and the supply figures of E1/E2; the callers are switched in WP4 | – |
+| WP3 | `planner/cover.py`: demand, attribution, covering, verdicts (D1–D6, C1–C6, M1 value) as pure functions; E1–E3, E5b, E7 | WP2 |
 | WP4 | Service and API: `GET /api/plan`, simulate, apply, suggestions, warnings on save, allocations API, incoming accept (E6), team timeline, removals; `api/openapi.json`; randomized model updated | WP1, WP3 |
 | WP5 | Web UI against the contract with E1/E7 fixtures: planner overview (week rows, project and item verdicts with explanation and "Assign"), assignment dialog for people and subcontractors, project form `kind`, offer plan without assignee | contract only; integration after WP4 |
 | WP6 | `docs/planning.md` rewritten with E1 as the walkthrough; superseded headers | WP4 |
