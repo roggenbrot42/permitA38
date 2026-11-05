@@ -7,6 +7,11 @@ on:
 permissions:
   contents: read
 
+# a new push to a pull request cancels its older, now pointless run (runners are shared); main keeps every run
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     runs-on: ubuntu-latest

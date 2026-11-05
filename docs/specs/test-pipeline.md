@@ -37,6 +37,7 @@ Review tier: **Light** (CI/tooling and tests only, no product code).
 5. `AGENTS.md` ("Running tests economically"): CI line says Linux Python 3.12-3.14 + Windows 3.13 on PRs, full Windows
    matrix on `main`; the boss monkey runs only in the nightly and `make test-web`; a red nightly opens/updates the issue.
 6. `tests/web/e2e_random/README.md`: same facts for the monkey row / seeds section.
+7. `ci.yaml`: `concurrency` group per pull request with `cancel-in-progress` on pull requests only, so superseded pushes free the shared runners (observed: 4 queued CI runs for one branch).
 
 ## WP2 - fuzz sanitizer (implementer-small)
 
