@@ -50,8 +50,10 @@ def test_timer_start_accepts_the_bodies_the_web_ui_sends(boss_client):
     c = boss_client
     assert c.post("/api/timer/start", json={"project_id": None, "task_id": None, "note": ""}).status_code == 200
     assert c.post("/api/timer/start", json={"project_id": "", "task_id": "", "note": ""}).status_code == 200
+    proj = c.post("/api/projects", json={"name": "Demo Project"}).json()
+    task = c.post("/api/tasks", json={"project_id": proj["id"], "name": "Task"}).json()
     assert (
-        c.post("/api/timer/start", json={"project_id": "abc123", "task_id": "def456", "note": "Ü ok"}).status_code
+        c.post("/api/timer/start", json={"project_id": proj["id"], "task_id": task["id"], "note": "Ü ok"}).status_code
         == 200
     )
     assert c.post("/api/timer/start", json={"note": "x" * 5000}).status_code == 200  # the limit itself
