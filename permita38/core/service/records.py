@@ -131,6 +131,10 @@ class RecordService:
                     data.pop(k, None)
                     if old and k in old:
                         data[k] = old[k]
+        elif coll == "entries" and not data.get("user_id"):
+            # time always belongs to a person: without one it would count for the project and as unbilled work but
+            # appear in nobody's timesheet, Today list or weekly hours (an update without user_id keeps the owner)
+            data["user_id"] = (old or {}).get("user_id") or me["id"]
         if coll in PROJECT_CUSTOMER_COLLECTIONS:
             check_project_customer(self.store, data, old)
         if coll in ("offers", "invoices"):

@@ -76,6 +76,10 @@ def test_manual_add_computes_duration_and_saves_entry(pg, srv):
     assert saved[0]["minutes"] == 90
     assert saved[0]["start"] == "09:00" and saved[0]["end"] == "10:30"
     assert saved[0]["project_id"] is not None
+    assert saved[0]["user_id"] == api(srv, "GET", "auth/me")["id"]  # an entry without a person shows in no timesheet
+    pg.wait_for_selector("tr[data-a=editEntry]:has-text('Beispiel Kick-off')")  # Today lists it
+    pg.goto(srv.base + "/#/time")
+    pg.wait_for_selector("tr[data-a=editEntry]:has-text('Beispiel Kick-off')")  # and so does the timesheet
 
 
 def test_tracker_mode_starts_and_stops_a_timer_on_the_project(pg, srv):
