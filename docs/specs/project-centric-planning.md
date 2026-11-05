@@ -206,7 +206,7 @@ write path, including import, transfer and procurement accept, comes before the 
   `PositiveTotalHours`).
 * exactly one of `hours_per_week` / `total_hours` on `ContractIn` and `AllocationIn` (422 otherwise).
 * A new type `ContractHours` in `validation.py`: > 0, at most 10,000 h/week (a hard "impossible input" bound, about
-  250 full-time people, not a business rule; the maintainer may still change the number). A contract or offer belongs
+  250 full-time people, not a business rule; confirmed by the maintainer 2026-11-05). A contract or offer belongs
   to the team, so a team of 5 can easily contract 200 h/week; the old `Hours` (0..168) is a per-person bound. Used on
   `ContractIn.hours_per_week`, `PlanIn.hours_per_week` (offer plans) and `CommitmentChange.hours_per_week` (planner
   drafts), and wherever contract hours per week are written (accepting an offer copies the plan). Covered by the step-0
