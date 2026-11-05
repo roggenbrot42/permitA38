@@ -505,14 +505,7 @@ def rule_range_negative(ctx: Ctx) -> Iterable[Finding]:
 
 
 # ---- the row-local guard kinds (docs/specs/db-guards-v2.md): one generic rule over schema.GUARDS, read at run time
-_SQL_WHITESPACE = " \t\n\v\f\r"  # what the SQL `trim(x, ...)` of the dialect strips
-
-
-def _set(value: Any) -> bool:
-    """Not NULL, not '' and (for text) not only SQL whitespace: the dialect's `_is_set`."""
-    if value is None:
-        return False
-    return not (isinstance(value, str) and value.strip(_SQL_WHITESPACE) == "")
+_set = _schema._is_set  # the one Python evaluator of IsSet (schema.SQL_BLANK whitespace, like the dialect's trim)
 
 
 def _julian_day(value: Any) -> int | None:
@@ -542,11 +535,6 @@ def _outside_range(g: Any, value: Any) -> bool:
 
 
 def _holds(cond: Any, row: dict) -> bool:
-    # IsSet / IsBlank use the SQL whitespace set (schema's `holds` strips every Unicode space, e.g. NBSP, unlike trim())
-    if isinstance(cond, _schema.IsSet):
-        return _set(row.get(cond.col))
-    if isinstance(cond, _schema.IsBlank):
-        return not _set(row.get(cond.col))
     return cond.holds(row)
 
 

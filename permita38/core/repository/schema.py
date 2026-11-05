@@ -337,11 +337,14 @@ def _check_scalar(v: object) -> None:
         raise ValueError(f"unsupported condition value {v!r} (only str, int, finite float, bool)")
 
 
+SQL_BLANK = " \t\n\v\f\r"  # the whitespace set the dialects' `trim(x, ...)` strips (not NBSP or other Unicode spaces)
+
+
 def _is_set(v: object) -> bool:
-    """IsSet semantics in Python: not None, not '', and for text not only whitespace."""
+    """IsSet semantics in Python: not None, not '', and for text not only SQL_BLANK characters."""
     if v is None:
         return False
-    return not (isinstance(v, str) and v.strip() == "")
+    return not (isinstance(v, str) and v.strip(SQL_BLANK) == "")
 
 
 @dataclass(frozen=True)

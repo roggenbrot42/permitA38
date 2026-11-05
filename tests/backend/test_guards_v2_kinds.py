@@ -2,6 +2,7 @@
 (docs/specs/db-guards-v2.md, section 1). A small invented table is written through the SQLite upsert, exactly as the
 repository writes. All data is invented."""
 
+import re
 import sqlite3
 from typing import Literal
 
@@ -11,6 +12,7 @@ from permita38.core.repository.dialect import DIALECTS, SQLiteDialect
 from permita38.core.repository.importer import RESTORE_SUSPENDED
 from permita38.core.repository.schema import (
     GUARD_KINDS,
+    SQL_BLANK,
     Column,
     Eq,
     Guard,
@@ -279,6 +281,10 @@ def test_implies_with_in_isblank_and_isset_conditions():
         (IsSet("a"), {"a": " \t\n"}, False),
         (IsSet("a"), {"a": None}, False),
         (IsSet("a"), {}, False),
+        (IsSet("a"), {"a": "\u00a0"}, True),  # NBSP is not trimmed by SQL trim(): set in both
+        (IsSet("a"), {"a": "   "}, False),
+        (IsBlank("a"), {"a": "\u00a0"}, False),
+        (IsBlank("a"), {"a": "   "}, True),
         (IsBlank("a"), {"a": "  "}, True),
         (IsBlank("a"), {"a": "p"}, False),
     ],
@@ -294,6 +300,13 @@ def test_conditions_evaluate_in_python_like_in_sql(cond, row, expected):
         save(db, full)
     else:
         refused(db, "state.implies:g", full)
+
+
+def test_sql_blank_constant_equals_what_the_dialect_renders():
+    sql = SQLiteDialect()._is_set("x")
+    codes = [int(c) for c in re.search(r"char\(([\d, ]+)\)", sql).group(1).split(",")]
+    assert "' '" in sql
+    assert " " + "".join(chr(c) for c in codes) == SQL_BLANK
 
 
 # ------------------------------------------------------------------ validation
