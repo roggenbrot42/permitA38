@@ -49,7 +49,7 @@ from the same objects, so the two can never disagree:
 | `range` | `col`, `lo`, `hi`, `lo_exclusive` | value set and outside the bounds | `range.bounds` |
 | `implies` | `if_`, `then` (conditions) | `if_` holds and `then` does not | `state.implies:<guard name>` |
 
-v1's `non_negative` (`range.negative`) stays as it is; `range` is for upper bounds and exclusive minimums.
+v1's `non_negative` (`range.negative`) stays as it is; `range` is for upper bounds and exclusive minimums. `range` is only for numeric (int/float) columns; `Guard` refuses it on any other known column type.
 
 Notes:
 - `IsSet` is false for NULL, `''` and strings made only of the `SQL_BLANK` characters (space, tab, LF, VT, FF, CR); a

@@ -525,7 +525,7 @@ def _julian_day(value: Any) -> int | None:
 def _outside_range(g: Any, value: Any) -> bool:
     if value is None or value == "":
         return False
-    if isinstance(value, str):  # SQLite orders text after every number
+    if isinstance(value, str):  # only a column unknown to TABLES: SQLite orders text after every number
         return g.hi is not None
     if not isinstance(value, (int, float)):
         return False

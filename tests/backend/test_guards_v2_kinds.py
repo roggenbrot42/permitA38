@@ -412,6 +412,13 @@ def test_literal_of_the_right_type_is_accepted_and_unknown_tables_are_not_checke
     Guard("g", "unknown_table", "one_of", ("kind",), "c", values=(1,))
 
 
+def test_range_on_a_text_column_is_refused(table_t):
+    with pytest.raises(ValueError, match="numeric column"):
+        Guard("g_range_text", "t", "range", ("x",), "range.bounds", lo=5, hi=9)
+    Guard("g_range_num", "t", "range", ("n",), "range.bounds", lo=5, hi=9)
+    Guard("g_range_unknown", "unknown_table", "range", ("x",), "range.bounds", lo=5, hi=9)
+
+
 def test_literal_type_check_covers_bool_columns(monkeypatch):
     monkeypatch.setitem(schema.TABLES, "t", Table("t", (Column("id", "id"), Column("flag", "bool"))))
     Guard("g", "t", "implies", (), "state.implies:g", if_=Eq("flag", True), then=IsSet("id"))
@@ -473,7 +480,6 @@ PG_DATE = (
 PG_SET = r"""("{c}" IS NOT NULL AND btrim(CAST("{c}" AS TEXT), E' \t\n\r\f\v') <> '')"""
 MA_SET = r"""(`{c}` IS NOT NULL AND `{c}` NOT REGEXP '^[\\x20\\x09-\\x0d]*$')"""
 G_RANGE_HI = Guard("g_range_hi", "t", "range", ("n",), "range.bounds", hi=7.5)
-G_RANGE_TEXT = Guard("g_range_text", "t", "range", ("x",), "range.bounds", lo=5, hi=9)
 G_BACKSLASH = Guard("g_bs", "t", "one_of", ("x",), "vocab.unknown", values=("a\\b",))
 
 
@@ -495,7 +501,6 @@ def test_postgres_checks(table_t):
     check(G_RANGE_EXCL, '"n" IS NOT NULL AND ("n" <= 0 OR "n" > 80)')
     check(G_RANGE_LO, '"n" IS NOT NULL AND ("n" < 5)')
     check(G_RANGE_HI, '"n" IS NOT NULL AND ("n" > 7.5)')
-    check(G_RANGE_TEXT, '"x" IS NOT NULL AND "x" <> \'\' AND ("x" < 5 OR "x" > 9)')
     check(
         G_DAYS,
         f"""COALESCE((CASE WHEN "s" ~ '{PG_DATE}' AND "e" ~ '{PG_DATE}' THEN CAST("e" AS date) - CAST("s" AS date) END) > 10, FALSE)""",
@@ -538,7 +543,6 @@ def test_mariadb_checks(table_t):
     check(G_RANGE_EXCL, "`n` IS NOT NULL AND (`n` <= 0 OR `n` > 80)")
     check(G_RANGE_LO, "`n` IS NOT NULL AND (`n` < 5)")
     check(G_RANGE_HI, "`n` IS NOT NULL AND (`n` > 7.5)")
-    check(G_RANGE_TEXT, "`x` IS NOT NULL AND `x` <> '' AND (`x` < 5 OR `x` > 9)")
     date = "^[0-9]{4}-[01][0-9]-[0-3][0-9]$"
     check(
         G_DAYS,

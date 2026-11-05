@@ -26,7 +26,6 @@ from .schema import (
     IsBlank,
     IsSet,
     Table,
-    column_type,
 )
 
 _DATE_GLOB = "[0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]"
@@ -320,8 +319,9 @@ class PostgresDialect(Dialect):
         return f"(CASE WHEN {ok} THEN CAST({end} AS date) - CAST({start} AS date) END)"
 
     def _range_blank_test(self, guard: Guard) -> bool:
-        # `numeric <> ''` raises "invalid input syntax" on PostgreSQL: only text columns get the blank test
-        return column_type(guard.table, guard.columns[0]) in (ID, STR, TEXT)
+        # `numeric <> ''` raises "invalid input syntax" on PostgreSQL. A range guard on a known column is numeric
+        # (Guard refuses text columns), and a column unknown to TABLES is treated alike: never the blank test.
+        return False
 
     def _false(self) -> str:
         return "FALSE"
@@ -382,8 +382,9 @@ class MariaDBDialect(Dialect):
         return f"BINARY {ref}" if any(isinstance(v, str) for v in values) else ref
 
     def _range_blank_test(self, guard: Guard) -> bool:
-        # `0 <> ''` is false in MariaDB ('' coerces to 0): only text columns get the blank test
-        return column_type(guard.table, guard.columns[0]) in (ID, STR, TEXT)
+        # `0 <> ''` is false in MariaDB ('' coerces to 0). A range guard on a known column is numeric (Guard refuses
+        # text columns), and a column unknown to TABLES is treated alike: never the blank test.
+        return False
 
     def _is_set(self, ref: str) -> str:
         # the same set as schema.SQL_BLANK (space, \t \n \v \f \r); TRIM(BOTH ...) cannot strip \v and \f

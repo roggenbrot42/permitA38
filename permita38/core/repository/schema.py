@@ -507,6 +507,9 @@ class Guard:
                         raise ValueError("range bounds must be numbers")
             if self.lo_exclusive and self.lo is None:
                 raise ValueError("lo_exclusive needs lo")
+            ctype = column_type(self.table, self.columns[0])
+            if ctype is not None and ctype not in (INT, FLOAT):
+                raise ValueError(f"a range guard needs a numeric column, {self.table}.{self.columns[0]} is {ctype}")
             if self.lo is not None and self.hi is not None:
                 if self.lo > self.hi or (self.lo == self.hi and self.lo_exclusive):
                     raise ValueError(
