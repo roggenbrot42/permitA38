@@ -567,6 +567,12 @@ Architect decisions after the code and test review (2026-11-05):
 * S4 reason `time_off` only when a holiday or day off falls on a workday of the week **and** the week is over
   capacity on another day because of it (the hours moved there); an overload on a week without lost days, or caused
   by busy time, is `weekly_hours`. Project lists in messages are sorted by the displayed name.
+* Logic review: booked hours dated outside **every** item period of the project are history and are ignored (not
+  `booked_unattributed`); total items take booked hours contracts first, then earliest end (D1 "must before could").
+  The 24-week average (S6) is reported only for windows that end in a week inside `lo..hi`.
+* `cover()` raises `ValueError("supply ends before item <id>")` when an item ends after `supply.hi`; the caller must
+  build the supply far enough (see above). A contract value is `q2(dec(round(promised, 6)) x rate)` (no float noise at
+  half-cent boundaries).
 * The law checks (10 h day, 60 h week) and the boss limits judge **all** planned days of the week, also those on or
   before today (spread with `today=None`), so a week that today cuts in half is not under-counted.
 
