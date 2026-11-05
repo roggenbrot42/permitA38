@@ -135,6 +135,8 @@ class RecordService:
             # time always belongs to a person: without one it would count for the project and as unbilled work but
             # appear in nobody's timesheet, Today list or weekly hours (an update without user_id keeps the owner)
             data["user_id"] = (old or {}).get("user_id") or me["id"]
+        if coll in _PROJECT_REF_COLLECTIONS:
+            self._check_project_exists(data, old)
         if coll in PROJECT_CUSTOMER_COLLECTIONS:
             check_project_customer(self.store, data, old)
         if coll in ("offers", "invoices"):
@@ -270,6 +272,36 @@ class RecordService:
         calc.doc_totals(doc, st)  # fills line amounts
         return {k: v for k, v in doc.items() if v is not None}
 
+    def _check_project_exists(self, data: dict, old: dict | None) -> None:
+        """A new or changed project reference must point to an existing project; an unchanged (legacy) one is left."""
+        if "project_id" not in data:
+            return
+        pid = data["project_id"]
+        if not pid or (old is not None and old.get("project_id") == pid):
+            return
+        if not _valid_id(pid) or not self.store.get("projects", pid):
+            raise ServiceError(422, "Unknown project")
+
+    def _project_usage(self, rid: str) -> list[tuple[int, str, str]]:
+        """What still uses a project: (count, singular, plural) in the order of the refusal message."""
+        timer = [t for t in self.store.list("timers") if t.get("running") and t.get("project_id") == rid]
+        found = [
+            (sum(1 for a in self.store.list("allocations") if a.get("project_id") == rid), "allocation", "allocations"),
+            (sum(1 for e in self.store.list("entries") if e.get("project_id") == rid), "time entry", "time entries"),
+            (sum(1 for c in self.store.list("contracts") if c.get("project_id") == rid), "contract", "contracts"),
+            (sum(1 for o in self.store.list("offers") if o.get("project_id") == rid), "offer", "offers"),
+            (sum(1 for i in self.store.list("invoices") if i.get("project_id") == rid), "invoice", "invoices"),
+            (len(timer), "running timer", "running timers"),
+        ]
+        return [f for f in found if f[0]]
+
+    def _refuse_used_project(self, rid: str) -> None:
+        used = self._project_usage(rid)
+        if used:
+            parts = [f"{n} {one if n == 1 else many}" for n, one, many in used]
+            names = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+            raise ServiceError(409, f"This project is still used by {names}; archive it instead.")
+
     def delete(self, me: dict, coll: str, rid: str):
         self._check(coll)
         old = self.store.get(coll, rid) if _valid_id(rid) else None
@@ -279,8 +311,6 @@ class RecordService:
             raise ServiceError(
                 409, "A numbered invoice cannot be deleted; cancel it instead (keeps the numbers gapless)"
             )
-        if coll == "projects" and any(a.get("project_id") == rid for a in self.store.list("allocations")):
-            raise ServiceError(409, "This project has allocations; remove them first")
         sc = _scope(me, coll, "write")
         if sc != Scope.ALL:
             own = (
@@ -292,6 +322,8 @@ class RecordService:
             if not own:
                 raise ServiceError(403, "Forbidden")
         with self.store.transaction():
+            if coll == "projects":
+                self._refuse_used_project(rid)
             if coll == "invoices":  # release billed time entries
                 for e in self.store.list("entries"):
                     if e.get("invoice_id") == rid:
@@ -308,6 +340,7 @@ class RecordService:
         return [{"id": u["id"], "name": u.get("name"), "role": rights.normalize_role(u.get("role"))} for u in users]
 
 
+_PROJECT_REF_COLLECTIONS = frozenset({"entries", "contracts", "offers", "invoices"})
 _ENTRY_BILLING_FIELDS = ("rate", "invoice_id")
 _MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
 

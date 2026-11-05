@@ -18,6 +18,8 @@ class TimeService:
         return self.store.get("timers", me["id"]) or {"running": False}
 
     def start_timer(self, me: dict, project_id: str | None, task_id: str | None, note: str = "") -> dict:
+        if project_id and not self.store.get("projects", project_id):
+            raise ServiceError(422, "Unknown project")
         if self.get_timer(me).get("running"):
             self.stop_timer(me, None)
         t = dict(
