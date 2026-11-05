@@ -126,7 +126,12 @@ def unguarded():
     from permita38.core.repository.dialect import DIALECTS
 
     dialect = DIALECTS["sqlite"]
-    kinds = {"format.date": "date", "range.negative": "non_negative", "state.period_reversed": "order"}
+    kinds = {
+        "format.date": "date",
+        "range.negative": "non_negative",
+        "state.period_reversed": "order",
+        "ref.dangling": "reference",
+    }
 
     def guard_names(store):
         with store.lock:

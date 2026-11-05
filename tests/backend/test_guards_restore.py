@@ -248,3 +248,77 @@ def test_restore_warns_about_a_violated_required_guard_and_the_trigger_is_back(s
     assert len(warns) == 1
     assert f"customers {rec['id']}: name:" in warns[0]["message"]
     assert triggers(dst) == before
+
+
+# ------------------------------------------------------------------ reference guards (ref.dangling / ref.in_use)
+def edit_allocations(client, tmp_path, edit):
+    files = zip_files(export_archive(client))
+    body = json.loads(files["data/allocations.json"])
+    edit(_records(body))
+    body["count"] = len(body["records"])
+    files["data/allocations.json"] = json.dumps(body).encode()
+    return build_zip(files, tmp_path / "alloc.zip")
+
+
+def test_transfer_with_dangling_allocation_references_imports_with_a_warning(source, target, tmp_path):
+    _, src_client, ids = source
+    _, dst_client, dst = target
+    before = triggers(dst)
+    assert "guard_allocations_project_id_ref_del" in before
+
+    def edit(recs):
+        recs[0]["project_id"] = "prj00000404"
+        recs[0]["user_id"] = "usr00000404"
+
+    r = post_run(dst_client, edit_allocations(src_client, tmp_path, edit))
+    assert r.status_code == 200, r.text
+    alloc = dst.list("allocations")[0]
+    assert (alloc["project_id"], alloc["user_id"]) == ("prj00000404", "usr00000404")
+    assert [w["code"] for w in r.json()["warnings"]].count("ref.dangling") >= 2
+    assert triggers(dst) == before
+    assert {"guard_allocations_project_id_ref_del", "guard_allocations_user_id_ref_del"} <= triggers(dst)
+
+
+def test_users_are_written_before_the_allocations(source, target, tmp_path):
+    _, src_client, ids = source
+    _, dst_client, dst = target
+    path = tmp_path / "ok.zip"
+    path.write_bytes(export_archive(src_client))
+    r = post_run(dst_client, path)
+    assert r.status_code == 200, r.text
+    assert "ref.dangling" not in [w["code"] for w in r.json()["warnings"]]
+    assert len(dst.list("allocations")) == 1
+
+
+def test_import_json_with_a_dangling_reference_imports_with_a_warning(tmp_path):
+    old = tmp_path / "old"
+    write(old / "projects" / "prj000001.json", {"id": "prj000001", "name": "Demo"})
+    write(
+        old / "entries" / "ent000001.json",
+        {"id": "ent000001", "project_id": "prj000404", "date": "2026-03-02", "minutes": 30},
+    )
+    repo = SQLiteRepository(tmp_path / "new")
+    repo.startup()
+    before = triggers(repo)
+    report = import_json(repo, old)
+    assert repo.get("entries", "ent000001")["project_id"] == "prj000404"
+    assert [(w["code"], w["collection"], w["id"]) for w in report.warnings if w["code"] == "ref.dangling"] == [
+        ("ref.dangling", "entries", "ent000001")
+    ]
+    assert triggers(repo) == before
+
+
+def test_repository_delete_of_a_used_target_raises_constraint_violation(tmp_path):
+    from permita38.core.repository.base import ConstraintViolation
+
+    repo = SQLiteRepository(tmp_path / "new")
+    repo.startup()
+    proj = repo.save("projects", {"name": "Demo"})
+    repo.save("entries", {"project_id": proj["id"], "date": "2026-03-02", "minutes": 30})
+    with pytest.raises(ConstraintViolation) as e:
+        repo.delete("projects", proj["id"])
+    assert e.value.code == "ref.in_use" and e.value.collection == "projects"
+    with pytest.raises(ConstraintViolation) as e2:
+        repo.delete_where("projects", id=proj["id"])
+    assert e2.value.code == "ref.in_use"
+    assert repo.get("projects", proj["id"]) is not None

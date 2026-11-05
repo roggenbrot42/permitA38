@@ -737,12 +737,12 @@ def apply(path: Path, store: Repository, plan: Plan) -> dict:
                 raise ServiceError(409, reason)
             local = store.list("users")
             local_user = local[0] if local else None
+            relogin = _write_users(store, plan, local_user)  # first: allocations etc. reference the users
             for coll in manifest.exported_collections():
                 if coll == "users":
                     continue
                 for rec in plan.records.get(coll, []):
                     store.save(coll, rec, touch=False)
-            relogin = _write_users(store, plan, local_user)
             keep = {k: v for k, v in store.settings().items() if manifest.is_secret_setting(k)}
             store.save_settings({**plan.settings, **keep})
             from permita38.core.service.integrity import IntegrityService

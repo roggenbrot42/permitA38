@@ -26,6 +26,7 @@ RESTORE_SUSPENDED = {
     "max_days",
     "range",
     "implies",
+    "reference",
 }
 _BASE_FINDING_CODES = ("format.date", "range.negative", "state.period_reversed")
 
