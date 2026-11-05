@@ -10,7 +10,9 @@ Unknown fields of a record are kept in the JSON column ``extra`` (forward compat
 versions and other devices).
 """
 
+import math
 from dataclasses import dataclass, field
+from typing import Any
 
 ID, STR, TEXT, INT, FLOAT, BOOL, JSON = "id", "str", "text", "int", "float", "bool", "json"
 LOGICAL_TYPES = (ID, STR, TEXT, INT, FLOAT, BOOL, JSON)
@@ -47,6 +49,24 @@ class Table:
     @property
     def column_names(self) -> list[str]:
         return [c.name for c in self.columns]
+
+
+_INT_MIN, _INT_MAX = -(2**63), 2**63 - 1
+
+
+def fits(column_type: str, value: Any) -> bool:
+    """Does ``value`` fit a column of the logical type ``column_type``? (Values that do not go to the `extra` JSON.)"""
+    if column_type in (ID, STR, TEXT):
+        return isinstance(value, str)
+    if column_type == INT:
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        return isinstance(value, int) and not isinstance(value, bool) and _INT_MIN <= value <= _INT_MAX
+    if column_type == FLOAT:
+        return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if column_type == BOOL:
+        return isinstance(value, bool)
+    return column_type == JSON
 
 
 def _cols(spec: str) -> tuple[Column, ...]:

@@ -69,18 +69,4 @@ def crud_router(coll: str, model: type[models.Record], in_model: type[BaseModel]
     return router
 
 
-# collection -> (response model: lenient, request model: strict)
-COLLECTIONS: dict[str, tuple[type[models.Record], type[BaseModel]]] = {
-    "customers": (models.Customer, models.CustomerIn),
-    "projects": (models.Project, models.ProjectIn),
-    "tasks": (models.Task, models.TaskIn),
-    "entries": (models.Entry, models.EntryIn),
-    "contracts": (models.Contract, models.ContractIn),
-    "absences": (models.Absence, models.AbsenceIn),
-    "offers": (models.Document, models.DocumentIn),
-    "invoices": (models.Document, models.DocumentIn),
-    "expenses": (models.Expense, models.ExpenseIn),
-    "templates": (models.Template, models.TemplateIn),
-}
-
-routers = [crud_router(c, out, inp) for c, (out, inp) in COLLECTIONS.items()]
+routers = [crud_router(c, out, inp) for c, (out, inp) in models.RECORD_MODELS.items()]

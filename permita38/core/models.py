@@ -1676,3 +1676,18 @@ class AdoptVendorsIn(v.CheckedBody):
     model_config = ConfigDict(extra="forbid")
     dry_run: bool = True
     items: Annotated[list[AdoptVendorItemIn], Field(min_length=1, max_length=200)]
+
+
+# collection -> (response model: lenient, request model: strict) of the typed CRUD collections
+RECORD_MODELS: dict[str, tuple[type[Record], type[BaseModel]]] = {
+    "customers": (Customer, CustomerIn),
+    "projects": (Project, ProjectIn),
+    "tasks": (Task, TaskIn),
+    "entries": (Entry, EntryIn),
+    "contracts": (Contract, ContractIn),
+    "absences": (Absence, AbsenceIn),
+    "offers": (Document, DocumentIn),
+    "invoices": (Document, DocumentIn),
+    "expenses": (Expense, ExpenseIn),
+    "templates": (Template, TemplateIn),
+}
