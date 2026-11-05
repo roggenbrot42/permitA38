@@ -15,7 +15,17 @@ from .schema import COLLECTIONS, INTERNAL_COLLECTIONS
 log = logging.getLogger("permita38.import")
 
 #: guard kinds a verbatim restore may suspend; the number guard (``unique``) never is
-RESTORE_SUSPENDED = {"date", "non_negative", "order"}
+RESTORE_SUSPENDED = {
+    "date",
+    "non_negative",
+    "order",
+    "one_of",
+    "exactly_one",
+    "required",
+    "max_days",
+    "range",
+    "implies",
+}
 RESTORE_FINDING_CODES = ("format.date", "range.negative", "state.period_reversed")
 NUMBERED = ("invoices", "offers")
 
