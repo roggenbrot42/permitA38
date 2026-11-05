@@ -4,16 +4,19 @@ timesheet, Today list or weekly hours (Today page, manual mode)."""
 
 from datetime import date
 
+import pytest
+
 
 def _project(c):
     cust = c.post("/api/customers", json={"name": "Demo Customer"}).json()
     return c.post("/api/projects", json={"name": "Demo Project", "customer_id": cust["id"], "rate": 100}).json()
 
 
-def test_boss_entry_without_user_gets_the_boss(boss_client):
+@pytest.mark.parametrize("owner", [{}, {"user_id": None}])
+def test_boss_entry_without_user_gets_the_boss(boss_client, owner):
     me = boss_client.get("/api/auth/me").json()
     proj = _project(boss_client)
-    r = boss_client.post("/api/entries", json={"date": "2026-03-02", "minutes": 90, "project_id": proj["id"]})
+    r = boss_client.post("/api/entries", json={"date": "2026-03-02", "minutes": 90, "project_id": proj["id"]} | owner)
     assert r.status_code == 200, r.text
     assert r.json()["user_id"] == me["id"]
     stored = [e for e in boss_client.get("/api/entries").json() if e["id"] == r.json()["id"]]
