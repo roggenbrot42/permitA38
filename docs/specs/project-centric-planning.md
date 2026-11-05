@@ -42,7 +42,7 @@ allocations (D4). In real use nobody could explain its numbers:
 | Term | Meaning |
 |---|---|
 | **assignment** | hours of one person or subcontractor given to one project for a period: `hours_per_week` **or** `total_hours`. Stored in `allocations` (table and API path keep their names; the UI says "assignment") |
-| **capacity** | a person's real hours on a day: `weekly_hours / workdays` on a workday that is not a public holiday, not an absence day, minus calendar busy time; never below 0 |
+| **capacity** | a person's real hours on a day: `weekly_hours / workdays` on a workday that is not a public holiday, not an absence day, minus calendar out-of-office and all-day blocks (D10; ordinary busy events do not count); never below 0 |
 | **supply** of a project | the hours its assignments give it (rule S1; never scaled, see S3) |
 | **demand** | what contracts (must) and offers (could) of a project still need |
 | **remaining** | promised − booked, never below 0 |
@@ -393,19 +393,19 @@ the merge (records, data model and import are touched).
 |---|---|---|
 | D1 | Revenue: no weekly and no "assumed" revenue; per contract value, invoiced, open; per offer net and expected net | **decided: yes** |
 | D2 | Items without a project use the team's unassigned hours; new contracts need a project | **decided: yes** |
-| D3 | How a weekly contract counts a partial week (start or end mid-week) | **open**, see below |
+| D3 | How a weekly contract counts a partial week (start or end mid-week) | **decided: pro rata over Mon–Fri** (D2 rule) |
 | D4 | Over-assignment | **decided: warn only, never scale** (S3) |
 | D5 | Booked attribution: the week's weekly items first, then total items earliest end first | **decided: yes** |
 | D6 | Rows that violate a new rule at migration time | **open again**: conflicts with the guards decision of PR #91, see below |
 | D7 | Foreign keys | **open**, options below |
 | D8 | Remove "Allocate my capacity" | **decided: yes** |
 | D9 | `personal` | **decided: removed altogether** |
-| D10 | Calendar busy time and capacity | **open**, see below |
+| D10 | Calendar busy time and capacity | **decided: only out-of-office and all-day blocks reduce capacity**; ordinary busy events do not |
 | D11 | Booked up to and including today, supply from tomorrow | **decided: yes** |
 | D12 | Total assignments: open hours carry over from week to week and expire at the assignment's end | **decided** |
 | D13 | Subcontractors are never scaled or checked for over-assignment | **decided: yes** |
 | D14 | Subcontractors: holidays and their own unavailable windows (vacation mid-project) are days off; weekly hours move to the other days of the week like an employee's | **decided** (changes the planned cost of existing subcontractor assignments with a holiday in their period, E5c; the release notes name it) |
 
-Still open, with the architect's recommendation, in the conversation of 2026-11-05: D3 (Mon–Fri pro rata), D6/D7
-(build on the trigger guards of PR #91 instead of table CHECKs and a rejects table; references guarded by triggers
-for new and changed values), D10 (only out-of-office and all-day blocks reduce capacity, ordinary meetings do not).
+Still open: D6/D7 wait for PR #91 (database guards). Recommendation: build on its trigger guards instead of table
+CHECKs and a rejects table (the "Strict schema" section is rewritten then), and guard references with triggers for
+new and changed values. The migration of this work becomes `0017` with `requires` = the guards migration.
