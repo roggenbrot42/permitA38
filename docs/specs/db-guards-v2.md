@@ -123,6 +123,25 @@ Notes:
 - `"unassigned"` (planner scope) is never stored in `allocations.project_id`; if it can be, the guard excludes it
   explicitly and the step-0 list says where.
 
+
+### Every link to a project (maintainer decision 2026-11-06)
+
+"No inconsistent projects, rather archive if deleting with dangling references isn't possible." So **no cascades**:
+a project can be deleted only when nothing points at it; otherwise the delete is refused and the user archives it.
+
+- Reference guards (same migration 0017, still unreleased) also on `tasks.project_id`, `expenses.project_id`,
+  `incoming_offers.project_id`, `trips.project_id`, `timers.project_id`; lookup indexes
+  `idx_incoming_offers_project`, `idx_trips_project`, `idx_timers_project` (tasks and expenses are indexed already).
+- `records._write`: "Unknown project" 422 also for tasks and expenses (new or changed value only). Trips and incoming
+  offers keep their existing check on every write (stricter; a legacy dangling trip must get a valid project first).
+- Project delete counts, in this order: allocations, tasks, time entries, contracts, offers, invoices, expenses,
+  incoming offers, trips, saved planning scenarios, running timer. Planning scenarios store project ids in the JSON
+  `plan_scenarios.changes` (no trigger can see them): the service counts them, and `check-db` reports a scenario whose
+  project is gone (`ref.dangling`, warning).
+- Stopped timers normally carry no project (stop rewrites the row). A legacy stopped timer that still has one does not
+  block the delete: the delete clears that timer's `project_id`/`task_id` in the same transaction (the row has no
+  meaning; this is not a cascade of data).
+
 ## 4. Notes for the planner's migration (part C)
 
 - **Dropping `projects.personal`:** use `ALTER TABLE ... DROP COLUMN` (SQLite >= 3.35; CI and local have 3.51), not a
