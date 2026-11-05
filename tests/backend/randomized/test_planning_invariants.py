@@ -85,12 +85,12 @@ def build(repo, world):
                 user_ids=[ids[c["user"]]],
             ),
         )
-    for o in offers:
+    for i, o in enumerate(offers):
         end = (date.fromisoformat(o["start"]) + timedelta(days=o["days"])).isoformat()
         repo.save(
             "offers",
             dict(
-                number="AN-1",
+                number=f"AN-{i + 1}",
                 status="sent",
                 lines=[],
                 valid_until=o["valid"],
@@ -244,7 +244,7 @@ def build_fenced(repo, world, skip_contracts_of=None, extra_q_person=False, with
         if c["project"]:
             rec["project_id"] = proj[c["project"]]
         repo.save("contracts", rec)
-    for o in offers:
+    for i, o in enumerate(offers):
         if skip_contracts_of and o["project"] == skip_contracts_of:
             continue
         plan = dict(
@@ -254,7 +254,7 @@ def build_fenced(repo, world, skip_contracts_of=None, extra_q_person=False, with
             user_ids=[ids[o["user"]]],
             win_probability=o["win"],
         )
-        rec = dict(number="AN-1", status="sent", lines=[], valid_until="2099-12-31", plan=plan)
+        rec = dict(number=f"AN-{i + 1}", status="sent", lines=[], valid_until="2099-12-31", plan=plan)
         if o["project"]:
             rec["project_id"] = proj[o["project"]]
         repo.save("offers", rec)

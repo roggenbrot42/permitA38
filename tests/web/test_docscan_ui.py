@@ -21,6 +21,8 @@ import pytest
 
 pytest.importorskip("playwright.sync_api")
 
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError  # noqa: E402
+
 from tests.web.test_expense_lines_ui import PDF, make_png  # noqa: E402
 from tests.web.test_impressum_prefill import Server  # noqa: E402,F401  (shared harness)
 
@@ -35,7 +37,12 @@ def scan(sid="d1", filename="old.pdf", flags=None, draft=None, doc=None):
 
 def added(number="RE-2024-001", year=2024, rid="inv1"):
     full = scan(sid="x", flags=[], draft={"number": number})
-    full.update(status="added", record_coll="invoices", record_id=rid, notes=[{"code": "added_open", "message": "Added as open."}])
+    full.update(
+        status="added",
+        record_coll="invoices",
+        record_id=rid,
+        notes=[{"code": "added_open", "message": "Added as open."}],
+    )
     return {"status": "added", "scan": full, "record": {"collection": "invoices", "id": rid, "number": number, "year": year}}  # fmt: skip
 
 
@@ -138,8 +145,16 @@ def open_check(pg, sid="d1"):
     pg.wait_for_selector(row)
     # a running batch re-renders the page when it settles: wait until no file is scanning, then click once
     pg.wait_for_function("() => !document.querySelector('#ds_panel .rcpt-row[data-state=scanning]')")
-    pg.click(row)
-    pg.wait_for_selector("#ds_add")
+    # the settle re-render (render() in docscan.js run()) can replace the row between mousedown and mouseup, so no
+    # click event fires: retry the click, only while the dialog is absent (the modal root survives re-renders)
+    for attempt in range(3):
+        pg.click(row)
+        try:
+            pg.wait_for_selector("#ds_add", timeout=2000)
+            return
+        except PlaywrightTimeoutError:
+            if attempt == 2:
+                raise
 
 
 def test_clean_upload_is_added_with_year_and_link(make_ui):
@@ -314,7 +329,7 @@ def test_unflagged_409_has_no_check_link_and_unit_is_limited(make_ui):
     pg.wait_for_selector('#ds_panel .rcpt-row[data-state="duplicate"]')
     assert pg.locator("#ds_panel .rcpt-row a").count() == 0
     open_check(pg)
-    assert pg.get_attribute('#ds_lines [data-f=unit]', "maxlength") == "30"
+    assert pg.get_attribute("#ds_lines [data-f=unit]", "maxlength") == "30"
     assert pg.get_attribute("#ds_c_zip", "maxlength") == "20"
     assert pg.get_attribute("#ds_c_country", "maxlength") == "100"
     assert pg.get_attribute("#ds_c_vat", "maxlength") == "30"

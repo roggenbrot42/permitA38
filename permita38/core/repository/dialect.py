@@ -9,7 +9,10 @@ is wired to a real driver today (see `sqlite.py`); the PostgreSQL and MariaDB cl
 import json
 from typing import Any
 
-from .schema import BOOL, FLOAT, ID, INT, JSON, STR, TEXT, Column, Index, Table
+from .schema import BOOL, FLOAT, ID, INT, JSON, STR, TEXT, Column, Guard, Index, Table
+
+_DATE_GLOB = "[0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]"
+_DATE_REGEX = "^[0-9]{4}-[01][0-9]-[0-3][0-9]$"
 
 
 class Dialect:
@@ -67,6 +70,10 @@ class Dialect:
         unique = "UNIQUE " if index.unique else ""
         cols = ", ".join(self.quote(c) for c in index.columns)
         return f"CREATE {unique}INDEX {self.quote(index.name)} ON {self.quote(table.name)} ({cols});"
+
+    def guard_sql(self, guard: Guard) -> list[str]:
+        """DDL statements (each ending with ';') that create the guard."""
+        raise NotImplementedError
 
     def ddl(self, tables: dict[str, Table]) -> str:
         out = []
@@ -130,6 +137,41 @@ class SQLiteDialect(Dialect):
         updates = ", ".join(f"{self.quote(c)} = excluded.{self.quote(c)}" for c in columns if c != table.pk)
         return self._insert_head(table, columns) + f" ON CONFLICT ({self.quote(table.pk)}) DO UPDATE SET {updates}"
 
+    def guard_sql(self, guard: Guard) -> list[str]:
+        """The BEFORE INSERT and BEFORE UPDATE OF triggers of a guard (named `<guard.name>_ins` / `_upd`).
+
+        They fire only for new or changed values, so rows that already violate the rule stay writable (grandfathered).
+        The repository writes with an upsert, so the INSERT trigger fires on every re-save: it skips a row whose
+        guarded values equal the stored ones."""
+        q, t = self.quote, self.quote(guard.table)
+        cols = [q(c) for c in guard.columns]
+        c = cols[0]
+        if guard.kind == "unique":
+            bad = (
+                f"NEW.{c} IS NOT NULL AND NEW.{c} <> '' "
+                f'AND EXISTS (SELECT 1 FROM {t} WHERE {c} = NEW.{c} AND "id" <> NEW."id")'
+            )
+        elif guard.kind == "date":
+            bad = f"NEW.{c} IS NOT NULL AND NEW.{c} <> '' AND NOT (NEW.{c} GLOB '{_DATE_GLOB}')"
+        elif guard.kind == "non_negative":
+            bad = f"NEW.{c} IS NOT NULL AND NEW.{c} < 0"
+        elif guard.kind == "order":
+            e = cols[1]
+            bad = (
+                f"NEW.{c} IS NOT NULL AND NEW.{c} <> '' AND NEW.{e} IS NOT NULL AND NEW.{e} <> '' AND NEW.{e} < NEW.{c}"
+            )
+        else:
+            raise ValueError(f"unknown guard kind {guard.kind!r}")
+        same = " AND ".join(f"{x} IS NEW.{x}" for x in cols)
+        unchanged = f'EXISTS (SELECT 1 FROM {t} WHERE "id" = NEW."id" AND {same})'
+        changed = " OR ".join(f"NEW.{x} IS NOT OLD.{x}" for x in cols)
+        raise_ = f"BEGIN SELECT RAISE(ABORT, 'permita38:{guard.code}'); END;"
+        return [
+            f"CREATE TRIGGER {q(guard.name + '_ins')} BEFORE INSERT ON {t}\nWHEN {bad}\n AND NOT {unchanged}\n{raise_}",
+            f"CREATE TRIGGER {q(guard.name + '_upd')} BEFORE UPDATE OF {', '.join(cols)} ON {t}\n"
+            f"WHEN {bad}\n AND ({changed})\n{raise_}",
+        ]
+
 
 class PostgresDialect(Dialect):
     """PostgreSQL (psycopg-style `%s` placeholders). Prepared, not wired to a driver yet."""
@@ -150,6 +192,24 @@ class PostgresDialect(Dialect):
     def upsert(self, table: Table, columns: list[str]) -> str:
         updates = ", ".join(f"{self.quote(c)} = EXCLUDED.{self.quote(c)}" for c in columns if c != table.pk)
         return self._insert_head(table, columns) + f" ON CONFLICT ({self.quote(table.pk)}) DO UPDATE SET {updates}"
+
+    def guard_sql(self, guard: Guard) -> list[str]:
+        """Native constraints. Unlike the SQLite triggers they validate existing rows (docs/porting-to-postgres.md)."""
+        q, t = self.quote, self.quote(guard.table)
+        cols = [q(c) for c in guard.columns]
+        c = cols[0]
+        if guard.kind == "unique":
+            return [f"CREATE UNIQUE INDEX {q(guard.name)} ON {t} ({c}) WHERE {c} IS NOT NULL AND {c} <> '';"]
+        if guard.kind == "date":
+            cond = f"{c} IS NULL OR {c} = '' OR {c} ~ '{_DATE_REGEX}'"
+        elif guard.kind == "non_negative":
+            cond = f"{c} IS NULL OR {c} >= 0"
+        elif guard.kind == "order":
+            e = cols[1]
+            cond = f"{c} IS NULL OR {c} = '' OR {e} IS NULL OR {e} = '' OR {e} >= {c}"
+        else:
+            raise ValueError(f"unknown guard kind {guard.kind!r}")
+        return [f"ALTER TABLE {t} ADD CONSTRAINT {q(guard.name)} CHECK ({cond});"]
 
     def encode_bool(self, value: bool) -> Any:
         return bool(value)
@@ -180,6 +240,28 @@ class MariaDBDialect(Dialect):
     def upsert(self, table: Table, columns: list[str]) -> str:
         updates = ", ".join(f"{self.quote(c)} = VALUES({self.quote(c)})" for c in columns if c != table.pk)
         return self._insert_head(table, columns) + f" ON DUPLICATE KEY UPDATE {updates}"
+
+    def guard_sql(self, guard: Guard) -> list[str]:
+        """Native constraints (a generated column carries the unique key). Unlike the SQLite triggers they validate existing rows (docs/porting-to-postgres.md)."""
+        q, t = self.quote, self.quote(guard.table)
+        cols = [q(c) for c in guard.columns]
+        c = cols[0]
+        if guard.kind == "unique":
+            key = q(guard.columns[0] + "_key")
+            return [
+                f"ALTER TABLE {t} ADD COLUMN {key} VARCHAR(255) AS (NULLIF({c}, '')) VIRTUAL;",
+                f"CREATE UNIQUE INDEX {q(guard.name)} ON {t} ({key});",
+            ]
+        if guard.kind == "date":
+            cond = f"{c} IS NULL OR {c} = '' OR {c} REGEXP '{_DATE_REGEX}'"
+        elif guard.kind == "non_negative":
+            cond = f"{c} IS NULL OR {c} >= 0"
+        elif guard.kind == "order":
+            e = cols[1]
+            cond = f"{c} IS NULL OR {c} = '' OR {e} IS NULL OR {e} = '' OR {e} >= {c}"
+        else:
+            raise ValueError(f"unknown guard kind {guard.kind!r}")
+        return [f"ALTER TABLE {t} ADD CONSTRAINT {q(guard.name)} CHECK ({cond});"]
 
     def create_table(self, table: Table) -> str:
         return super().create_table(table).rstrip(";") + " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;"

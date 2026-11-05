@@ -68,6 +68,23 @@ inline; every other attachment is served as a download (`application/octet-strea
 Only *hard* limits live here – values that can never be right. "Suspicious but possible" input (an amount 100× your
 usual one, a date far in the future) is for the advisory warnings of [`sanity-checks.md`](sanity-checks.md), which never block saving.
 
+## Database guards
+
+Below the hard limits and the sanity checks sits a third layer: the database itself refuses a few values that can
+never be right, even when a write path forgot to check them. Each refusal has a code:
+
+| Code | Rule |
+|---|---|
+| `numbering.duplicate` | an invoice or offer number is already used in the same table |
+| `format.date` | a date column is not written `YYYY-MM-DD` |
+| `range.negative` | a minutes, rate, hours or amount column is below 0 |
+| `state.period_reversed` | the end of a period is before its start |
+
+The guards check **new or changed values only**, so records stored before they existed can still be read and saved
+unchanged. A refusal is answered with **HTTP 409** and `{"detail": "The database refused the change (<code>).",
+"code": "<code>"}`. The request models stay stricter than the guards, so in normal use the API answers 422 first.
+`permita38 check-db` reports the same four codes for stored data.
+
 ## Stored data that is already damaged
 
 Records can arrive from an older version or from another device through file sync. `permita38/core/calc.py` therefore

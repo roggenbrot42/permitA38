@@ -1,4 +1,5 @@
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -88,3 +89,85 @@ def member_client(app, boss_client):
     c.user_id = r.json()["id"]  # type: ignore[attr-defined]
     yield c
     c.close()
+
+
+@pytest.fixture
+def scan_stubs(app, monkeypatch):
+    """Receipt and document scans without an OCR / PDF engine: returns (receipt_reader, doc_reader); `reader.add(...)`
+    yields the file content that the stub 'reads'. Both services share one runner module, so dispatch on the content."""
+    from permita38.core.service import receipts as receipts_mod
+
+    from .test_document_scans_service import TODAY as SCAN_TODAY
+    from .test_document_scans_service import Reader as DocReader
+    from .test_receipts_api import TODAY as RECEIPT_TODAY
+    from .test_receipts_api import Reader as ReceiptReader
+
+    receipt_reader, doc_reader = ReceiptReader(), DocReader()
+
+    def read_file(path, config):
+        with open(path, "rb") as f:
+            data = f.read()
+        return (receipt_reader if data in receipt_reader.by_content else doc_reader)(path, config)
+
+    monkeypatch.setattr(receipts_mod.runner, "read_file", read_file)
+    app.state.services.receipts._today = lambda: RECEIPT_TODAY
+    app.state.services.document_scans._today = lambda: SCAN_TODAY
+    return receipt_reader, doc_reader
+
+
+@pytest.fixture
+def unguarded():
+    """plant(store, coll, rec, code): store a record as a database written before the guards could hold it.
+
+    `code` is the guard code the row breaks. A normal save must first be refused with exactly that code (the guard
+    is live and the bypass is needed) and store nothing; only then is the row saved with just that guard kind off."""
+    from permita38.core.repository import schema
+    from permita38.core.repository.base import ConstraintViolation
+    from permita38.core.repository.dialect import DIALECTS
+
+    dialect = DIALECTS["sqlite"]
+    kinds = {"format.date": "date", "range.negative": "non_negative", "state.period_reversed": "order"}
+
+    def guard_names(store):
+        with store.lock:
+            return {n for (n,) in store._conn.execute("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+
+    def expected_names():
+        return {
+            m.group(1)
+            for g in schema.GUARDS
+            for s in dialect.guard_sql(g)
+            if (m := re.match(r'CREATE TRIGGER "([^"]+)"', s))
+        }
+
+    def plant(store, coll, rec, code):
+        # a row that breaks several guard kinds at once names all their codes (a tuple); the refusal is the first one
+        codes = (code,) if isinstance(code, str) else tuple(code)
+        before = len(store.list(coll))
+        with pytest.raises(ConstraintViolation) as refused:
+            store.save(coll, rec)
+        assert refused.value.code in codes, "the row must break the guard it is planted for"
+        assert len(store.list(coll)) == before, "a refused save stores nothing"
+        if all(c in kinds for c in codes):
+            with store.transaction(), store.guards_suspended({kinds[c] for c in codes}):
+                saved = store.save(coll, rec)
+        elif codes == ("numbering.duplicate",):
+            # guards_suspended() refuses the unique guard on purpose; this models a database written before the guards
+            with store.transaction():
+                conn = store._conn
+                unique = [g for g in schema.GUARDS if g.kind == "unique"]
+                for g in unique:
+                    for suffix in ("_ins", "_upd"):
+                        conn.execute(f'DROP TRIGGER "{g.name}{suffix}"')
+                try:
+                    saved = store.save(coll, rec)
+                finally:
+                    for g in unique:
+                        for stmt in dialect.guard_sql(g):
+                            conn.execute(stmt)
+        else:
+            raise AssertionError(f"no bypass for guard codes {codes!r}")
+        assert expected_names() <= guard_names(store), "all guard triggers are back"
+        return saved
+
+    return plant

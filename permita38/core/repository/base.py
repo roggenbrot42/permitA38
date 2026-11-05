@@ -27,6 +27,7 @@ from .schema import COLLECTIONS, INTERNAL_COLLECTIONS
 __all__ = [
     "COLLECTIONS",
     "ID_RE",
+    "ConstraintViolation",
     "DatabaseRevisionError",
     "Record",
     "RecordList",
@@ -43,6 +44,16 @@ ID_RE = re.compile(r"^[0-9a-z]{6,32}$")
 
 class DatabaseRevisionError(RuntimeError):
     """The database schema revision does not match what this version of the app expects."""
+
+
+class ConstraintViolation(Exception):
+    """A database guard refused a write (see docs/specs/db-constraints.md). ``code`` is a check-db code such as
+    ``numbering.duplicate``; ``collection`` is the collection that was being saved."""
+
+    def __init__(self, code: str, collection: str):
+        super().__init__(f"{collection}: {code}")
+        self.code = code
+        self.collection = collection
 
 
 def new_id() -> str:
@@ -113,6 +124,12 @@ class Repository(ABC):
 
     @abstractmethod
     def transaction(self) -> AbstractContextManager[None]: ...
+
+    @abstractmethod
+    def guards_suspended(self, kinds: set[str]) -> AbstractContextManager[None]:
+        """Switch the database guards of the given kinds (``date``, ``non_negative``, ``order``) off inside the block.
+        Only allowed inside ``transaction()`` (RuntimeError otherwise); ``unique`` is never allowed (ValueError).
+        The guards are back before the block is left, and a rollback restores them too."""
 
     # ---- settings (one key/value document per installation) ----
     @abstractmethod

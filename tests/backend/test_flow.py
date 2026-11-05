@@ -77,9 +77,9 @@ def test_deleting_invoice_releases_time(boss_client):
         "/api/entries",
         json={"user_id": me["id"], "date": date.today().isoformat(), "minutes": 60, "project_id": proj["id"]},
     )
-    inv = c.post("/api/invoices/from-time", json={}).json()
+    inv = c.post("/api/invoices/from-time", json={"customer_id": cust["id"]}).json()
     assert c.delete(f"/api/invoices/{inv['id']}").status_code == 204
-    assert c.post("/api/invoices/from-time", json={}).status_code == 200
+    assert c.post("/api/invoices/from-time", json={"customer_id": cust["id"]}).status_code == 200
 
 
 def test_timer_start_stop(boss_client):

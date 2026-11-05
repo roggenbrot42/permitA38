@@ -43,6 +43,15 @@ class SQLiteRepository(SQLRepository):
         rows = self._rows(f"PRAGMA table_info({self.dialect.quote(table)})")
         return {r[1] for r in rows} or None
 
+    def _guard_triggers(self) -> set[str]:
+        return {r[0] for r in self._rows("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+
+    def _drop_guard(self, name: str) -> None:
+        self._exec(f"DROP TRIGGER {self.dialect.quote(name)}")
+
+    def _create_guard(self, statement: str) -> None:
+        self._exec(statement)
+
     def _open(self) -> None:
         if self._conn is not None:
             return

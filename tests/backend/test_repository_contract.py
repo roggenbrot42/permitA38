@@ -5,8 +5,15 @@ import time
 
 import pytest
 
-from permita38.core.repository import COLLECTIONS, INTERNAL_COLLECTIONS, TABLES, DatabaseRevisionError, Repository
-from permita38.core.repository.schema import Table
+from permita38.core.repository import (
+    COLLECTIONS,
+    INTERNAL_COLLECTIONS,
+    TABLES,
+    ConstraintViolation,
+    DatabaseRevisionError,
+    Repository,
+)
+from permita38.core.repository.schema import GUARDS, Table
 
 from .repository_registry import REGISTRY, integrity_error, registry_params
 
@@ -33,6 +40,9 @@ def sample(table: Table, i: int = 0) -> dict:
         "json": [1, "two", {"k": [True, None, 2.5]}],
     }
     rec = {c.name: values[c.type] for c in table.columns if c.name not in ("id", "created", "updated")}
+    for g in GUARDS:  # the database refuses dates in another format
+        if g.table == table.name and g.kind == "date":
+            rec[g.columns[0]] = "2026-01-05"
     if table.name == "allocations":
         rec.pop("supplier_id")  # a row has exactly one owner (the allocations_one_owner check)
     return rec
@@ -437,3 +447,88 @@ def test_document_scans_json_columns_and_unknown_fields_round_trip(repo):
     got = repo.get("document_scans", row["id"])
     assert got["draft"] == draft and got["doc"] == doc and got["flags"] == ["no_total"]
     assert got["future"] == {"k": [1]}
+
+
+# ------------------------------------------------------------------ database guards
+def _trigger_names(repo) -> set[str]:
+    """Names of the guard triggers (SQLite only; other backends use native constraints)."""
+    return {r[0] for r in repo._rows("SELECT name FROM sqlite_master WHERE type = 'trigger'")}
+
+
+def test_constraint_violation_has_code_and_collection_and_rolls_back(repo):
+    keep = repo.save("invoices", {"number": "RE-2026-0001", "title": "kept"})
+    with pytest.raises(ConstraintViolation) as e:
+        with repo.transaction():
+            repo.save("customers", {"name": "rolled back"})
+            repo.save("invoices", {"number": "RE-2026-0001"})
+    assert e.value.code == "numbering.duplicate" and e.value.collection == "invoices"
+    assert isinstance(e.value.__cause__, integrity_error(repo))
+    assert repo.list("customers") == []  # the whole transaction was rolled back
+    assert repo.list("invoices") == [keep]
+    with pytest.raises(ConstraintViolation) as e2:  # a standalone save as well
+        repo.save("entries", {"date": "2026-01-01", "minutes": -1})
+    assert (e2.value.code, e2.value.collection) == ("range.negative", "entries")
+    assert repo.list("entries") == []
+
+
+def test_other_integrity_errors_are_not_translated(repo):
+    repo.save("users", {"username": "inv001", "name": "A"})
+    with pytest.raises(integrity_error(repo)) as e:
+        repo.save("users", {"username": "inv001", "name": "B"})
+    assert not isinstance(e.value, ConstraintViolation)
+
+
+def test_guards_suspended_rejects_unique_unknown_and_outside_transaction(repo):
+    with repo.transaction():
+        for kinds in ({"unique"}, {"date", "unique"}, {"nonsense"}):
+            with pytest.raises(ValueError):
+                with repo.guards_suspended(kinds):
+                    pass
+    with pytest.raises(RuntimeError):
+        with repo.guards_suspended({"date"}):
+            pass
+
+
+def test_guards_suspended_allows_the_write_and_restores_the_guards(repo):
+    before = _trigger_names(repo)
+    assert before
+    with repo.transaction():
+        with repo.guards_suspended({"date", "non_negative", "order"}):
+            repo.save("entries", {"date": "5.3.2026", "minutes": -5})
+            repo.save("absences", {"user_id": "inv001", "start": "2026-03-10", "end": "2026-03-01"})
+            repo.save("invoices", {"number": "RE-2026-0001"})
+            with pytest.raises(ConstraintViolation) as e:  # the number guard is never off
+                repo.save("invoices", {"number": "RE-2026-0001"})
+            assert e.value.code == "numbering.duplicate"
+    assert _trigger_names(repo) == before
+    assert len(repo.list("entries")) == 1 and len(repo.list("absences")) == 1
+    with pytest.raises(ConstraintViolation):
+        repo.save("entries", {"date": "5.3.2026"})
+
+
+def test_guards_suspended_only_lifts_the_given_kinds(repo):
+    with repo.transaction():
+        with repo.guards_suspended({"date"}):
+            repo.save("entries", {"date": "5.3.2026"})
+            with pytest.raises(ConstraintViolation) as e:
+                repo.save("entries", {"date": "2026-03-05", "minutes": -1})
+            assert e.value.code == "range.negative"
+
+
+def test_guards_are_back_after_an_exception_and_a_rollback(repo):
+    before = _trigger_names(repo)
+    with pytest.raises(RuntimeError):
+        with repo.transaction():
+            with repo.guards_suspended({"date", "non_negative", "order"}):
+                repo.save("entries", {"date": "5.3.2026"})
+                raise RuntimeError("restore failed")
+    assert _trigger_names(repo) == before
+    assert repo.list("entries") == []
+    # an exception caught inside the same transaction: the guards are back before the block is left
+    with repo.transaction():
+        with pytest.raises(RuntimeError):
+            with repo.guards_suspended({"date"}):
+                raise RuntimeError("boom")
+        with pytest.raises(ConstraintViolation):
+            repo.save("entries", {"date": "5.3.2026"})
+    assert _trigger_names(repo) == before

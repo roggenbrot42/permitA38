@@ -1,5 +1,6 @@
 """Dependency injection: services container and authentication."""
 
+import logging
 from dataclasses import dataclass
 from typing import Annotated, Any
 
@@ -20,6 +21,7 @@ from permita38.core.service.calendar.service import CalendarService, ResourceFet
 from permita38.core.service.document_scans import DocumentScanService
 from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
+from permita38.core.service.integrity import Ctx, rule_numbering_duplicates
 from permita38.core.service.personal_tax import PersonalTaxService
 from permita38.core.service.plan_service import PlanningService
 from permita38.core.service.procurement import ProcurementService
@@ -36,6 +38,7 @@ from permita38.core.service.tokens import TokenService
 from permita38.core.service.totp import TotpService
 from permita38.core.service.transfer.service import TransferService, clean_stale_tmp
 from permita38.core.service.trips import TripService
+from permita38.core.settings import effective_settings
 
 COOKIE_NAME = "authorization"
 
@@ -110,9 +113,31 @@ class Services:
         )
 
 
+log = logging.getLogger(__name__)
+
+
+def log_duplicate_numbers(store: Repository) -> None:
+    """One ERROR line naming duplicate invoice/offer numbers (only possible in data written before the database
+    guards). Numbers only; never fails the startup."""
+    try:
+        ctx = Ctx(store, effective_settings(store.settings()), {c: store.list(c) for c in ("invoices", "offers")})
+        numbers: set[str] = set()
+        for f in rule_numbering_duplicates(ctx):
+            if f.code != "numbering.duplicate":
+                continue
+            rec = next((r for r in ctx.rows(f.collection or "") if r.get("id") == f.id), None)
+            if rec and isinstance(rec.get("number"), str):
+                numbers.add(rec["number"])
+        if numbers:
+            log.error("Duplicate invoice/offer numbers in the database: %s", ", ".join(sorted(numbers)))
+    except Exception as e:  # a failing check must never stop the server
+        log.warning("Could not check for duplicate document numbers: %s", e)
+
+
 def startup_services(services: Services) -> None:
     """Open the database (migrating if needed; refuses a newer one) and take the daily backup."""
     services.store.startup()
+    log_duplicate_numbers(services.store)
     clean_stale_tmp(services.config.data_dir / "tmp", store=services.store)
     db = services.config.database
     if db.auto_backup:

@@ -1,6 +1,6 @@
 """Browser test: the project picker next to a customer lists only that customer's projects (and general projects
 without a customer) in the document editor and the trip dialog; changing the customer clears a project that no longer
-fits. A legacy project of another customer stays visible, marked, when an existing record is opened. Demo data only."""
+fits. Personal projects are never offered on a document. A legacy project of another customer stays visible, marked, when an existing record is opened. Demo data only."""
 
 import httpx
 import pytest
@@ -51,6 +51,7 @@ def _options(pg, sel):
 
 
 def test_document_editor_lists_only_the_chosen_customers_projects(browser, srv, world):
+    world["post"]("projects", {"name": "Own Learning", "personal": True})  # never offered on an offer or invoice
     ctx = _ctx(browser, srv)
     pg = ctx.new_page()
     pg.goto(srv.base + "/#/doc/offers/new")
@@ -102,4 +103,18 @@ def test_trip_dialog_lists_only_the_chosen_customers_projects(browser, srv, worl
     pg.select_option("#f_customer_id", world["other"])
     assert set(_options(pg, "#f_project_id")) == {"", world["p_other"], world["p_general"]}
     assert pg.input_value("#f_project_id") == ""
+    ctx.close()
+
+
+def test_time_billing_dialog_has_no_all_customers_choice(browser, srv, world):
+    ctx = _ctx(browser, srv)
+    pg = ctx.new_page()
+    pg.goto(srv.base + "/#/sales")
+    pg.click("[data-a=billTime]")
+    pg.wait_for_selector("#f_customer_id")
+    assert set(_options(pg, "#f_customer_id")) == {"", world["acme"], world["other"]}
+    pg.click("#m-save")  # no customer chosen: refused in the dialog, no invoice is created
+    pg.wait_for_timeout(300)
+    assert "#/doc/invoices/" not in pg.url
+    assert httpx.get(srv.base + "/api/invoices", headers=world["h"]).json() == []
     ctx.close()
