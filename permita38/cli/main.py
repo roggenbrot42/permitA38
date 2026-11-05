@@ -166,6 +166,40 @@ def _import_archive(services, args) -> None:
         )
 
 
+def _check_db(services, args) -> int:
+    """Exit code: 0 no errors, 1 at least one error, 2 the check could not run. Never writes or migrates."""
+    from permita38.core.repository import DatabaseRevisionError
+    from permita38.core.service.integrity import IntegrityService, summary
+
+    store = services.store
+    store.auto_migrate = False  # type: ignore[attr-defined]  # a pre-flight check must not touch the schema
+    try:
+        health = store.health()
+        if health["revision"] != health["current_revision"]:
+            print(
+                f"The database is at revision {health['revision']}, expected {health['current_revision']}. "
+                "Run `permita38 migrate` first.",
+                file=sys.stderr,
+            )
+            return 2
+        findings = IntegrityService(store).run(args.only)
+    except DatabaseRevisionError as e:
+        print(f"The database cannot be checked: {e}", file=sys.stderr)
+        return 2
+    except OSError as e:
+        print(f"The data folder cannot be read: {type(e).__name__}", file=sys.stderr)
+        return 2
+    counts = summary(findings)
+    if args.json:
+        print(json.dumps({"findings": [f.as_dict() for f in findings], "summary": counts}, indent=2))
+    else:
+        for f in findings:
+            where = f"{f.collection or '-'}/{f.id or '-'}"
+            print(f"{f.severity.upper():<8}{f.code}  {where}  {f.field or '-'}  {f.message}")
+        print(f"{counts['errors']} errors, {counts['warnings']} warnings, {counts['info']} info")
+    return 1 if counts["errors"] else 0
+
+
 def main(argv: list[str] | None = None):
     ap = argparse.ArgumentParser(
         prog="permita38",
@@ -185,6 +219,9 @@ def main(argv: list[str] | None = None):
     rp.add_argument("username")
     mp = sub.add_parser("migrate", help="apply pending database migrations (a backup is taken first)")
     mp.add_argument("--status", action="store_true", help="list the migration chain with an applied marker and exit")
+    cd = sub.add_parser("check-db", help="report stored data that breaks the rules (read-only, never migrates)")
+    cd.add_argument("--json", action="store_true", help="print the findings as JSON")
+    cd.add_argument("--only", nargs="+", default=[], metavar="CODE_PREFIX", help="only findings whose code starts so")
     bp = sub.add_parser("backup", help="write a consistent copy of the database")
     bp.add_argument("--dest", type=Path, help="target file (default: <data>/backups/permita38-<timestamp>.sqlite3)")
     ip = sub.add_parser("import-json", help="import data from the old JSON-file layout")
@@ -286,6 +323,8 @@ def main(argv: list[str] | None = None):
                 else f"Migrated {old or 'none'} -> {new} ({n} migrations applied)."
             )
             return
+        if command == "check-db":
+            sys.exit(_check_db(services, args))
         if command == "backup":
             services.store.startup()
             print("Backup written to", services.store.backup(args.dest))

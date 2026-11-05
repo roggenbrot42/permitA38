@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import builtins
 import contextlib
-import math
 import os
 import re
 import secrets
@@ -26,7 +25,7 @@ from permita38.core.database import LEGACY_IDS, Migration, list_migrations
 
 from .base import ID_RE, DatabaseRevisionError, Record, RecordList, Repository, StrList, check_collection, new_id
 from .dialect import Dialect
-from .schema import BOOL, FLOAT, ID, INT, JSON, STR, TABLES, TEXT, Column, Table
+from .schema import BOOL, FLOAT, INT, JSON, TABLES, Column, Table, fits
 
 MIGRATIONS_TABLE = "schema_migrations"
 ATTACHMENT_RE = re.compile(r"[0-9a-z]{6,32}\.[a-z0-9]{1,5}")
@@ -257,20 +256,17 @@ class SQLRepository(Repository):
     def _coerce(self, col: Column, v: Any) -> tuple[bool, Any]:
         """(ok, database value). Values that do not fit the column type go to the `extra` JSON instead."""
         t, d = col.type, self.dialect
-        if t in (ID, STR, TEXT):
-            return isinstance(v, str), v
-        if t == INT:
-            if isinstance(v, float) and v.is_integer():
-                v = int(v)
-            return (isinstance(v, int) and not isinstance(v, bool) and _INT_MIN <= v <= _INT_MAX), v
-        if t == FLOAT:
-            ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
-            return ok, (float(v) if ok else v)
-        if t == BOOL:
-            return isinstance(v, bool), (d.encode_bool(v) if isinstance(v, bool) else v)
-        if t == JSON:
-            return True, d.encode_json(v)
-        return False, v
+        if not fits(t, v):
+            return False, v
+        if t == INT and isinstance(v, float):
+            v = int(v)
+        elif t == FLOAT:
+            v = float(v)
+        elif t == BOOL:
+            v = d.encode_bool(v)
+        elif t == JSON:
+            v = d.encode_json(v)
+        return True, v
 
     def _encode(self, table: Table, obj: Record) -> dict[str, Any]:
         values: dict[str, Any] = {}

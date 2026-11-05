@@ -52,6 +52,9 @@ def _iso_date(value: str) -> str:
     return value
 
 
+iso_date = _iso_date  # public name for read-only checks (stored data check)
+
+
 def _local_datetime(value: str) -> str:
     """``YYYY-MM-DDTHH:MM`` in local time (business trips); a real calendar date and time of day."""
     if not _LOCAL_DT_RE.match(value):
@@ -61,6 +64,9 @@ def _local_datetime(value: str) -> str:
     except ValueError:
         raise ValueError("is not a real date and time") from None
     return value
+
+
+local_datetime = _local_datetime
 
 
 def _clock_time(value: str) -> str:

@@ -247,7 +247,7 @@ The database is a normal SQLite file – open it with any SQLite tool (`sqlite3 
 
 **Coming from the earlier JSON-file version?** Import it once: `permita38 import-json <old data folder>` (idempotent; keeps ids and timestamps; old users get a derived username and need `permita38 set-password <username>`).
 
-**Command line:** `permita38 migrate` · `permita38 backup [--dest FILE]` · `permita38 import-json DIR` · `permita38 create-migration NAME` · `permita38 dump-ddl --dialect postgresql` · `permita38 set-password USER` · `permita38 reset-totp USER`.
+**Command line:** `permita38 migrate` · `permita38 backup [--dest FILE]` · `permita38 check-db [--json]` (read-only report on stored data) · `permita38 import-json DIR` · `permita38 create-migration NAME` · `permita38 dump-ddl --dialect postgresql` · `permita38 set-password USER` · `permita38 reset-totp USER`.
 
 ---
 
