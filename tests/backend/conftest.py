@@ -88,3 +88,27 @@ def member_client(app, boss_client):
     c.user_id = r.json()["id"]  # type: ignore[attr-defined]
     yield c
     c.close()
+
+
+@pytest.fixture
+def scan_stubs(app, monkeypatch):
+    """Receipt and document scans without an OCR / PDF engine: returns (receipt_reader, doc_reader); `reader.add(...)`
+    yields the file content that the stub 'reads'. Both services share one runner module, so dispatch on the content."""
+    from permita38.core.service import receipts as receipts_mod
+
+    from .test_document_scans_service import TODAY as SCAN_TODAY
+    from .test_document_scans_service import Reader as DocReader
+    from .test_receipts_api import TODAY as RECEIPT_TODAY
+    from .test_receipts_api import Reader as ReceiptReader
+
+    receipt_reader, doc_reader = ReceiptReader(), DocReader()
+
+    def read_file(path, config):
+        with open(path, "rb") as f:
+            data = f.read()
+        return (receipt_reader if data in receipt_reader.by_content else doc_reader)(path, config)
+
+    monkeypatch.setattr(receipts_mod.runner, "read_file", read_file)
+    app.state.services.receipts._today = lambda: RECEIPT_TODAY
+    app.state.services.document_scans._today = lambda: SCAN_TODAY
+    return receipt_reader, doc_reader

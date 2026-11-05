@@ -1,9 +1,9 @@
 """Step 0 of docs/specs/db-constraints.md as a test: every write path stores the valid edge values of the guarded
-columns (minutes 1, rate 0, start == end, net 0) without a refusal by the database guards. Plus one negative control
-per guard kind through the storage layer, which bypasses the request validation. All data is invented.
-
-Skipped on purpose: receipt and document scans (need an OCR / PDF engine; their expense save is the plain expense
-route covered here)."""
+columns (minutes 1, rate 0, start == end, net 0) without a refusal by the database guards: entries, timer, invoices,
+offers, projects, contracts, absences, allocations, trips (shortest period), expenses, scans of receipts and old
+documents, incoming offers and the CSV import. Plus one negative control per guard kind through the storage layer,
+which bypasses the request validation. All data is invented.
+"""
 
 import pytest
 
@@ -154,6 +154,31 @@ def test_incoming_offer_with_dates(boss_client):
         "lines": [{"description": "Print", "quantity": 1, "unit": "h", "unit_price": 10.0}],
     }
     ok(boss_client.post("/api/incoming-offers", json=body), 201)
+
+
+# ------------------------------------------------------------------ trips and scans
+def test_trip_with_the_shortest_period_and_equal_ends(boss_client, store):
+    from .test_trips_api import trip_body
+
+    ok(boss_client.post("/api/trips", json=trip_body(start="2026-03-10T08:00", end="2026-03-10T08:01")))
+    n = len(store.list("trips"))
+    r = boss_client.post("/api/trips", json=trip_body(start="2026-03-10T08:00", end="2026-03-10T08:00"))
+    assert r.status_code == 422, r.text
+    assert len(store.list("trips")) == n == 1
+
+
+def test_receipt_scan_and_document_scan_are_booked_and_added(boss_client, store, scan_stubs):
+    from .test_document_scans_service import INVOICE as SCAN_INVOICE
+    from .test_receipts_api import SINGLE
+
+    receipt_reader, doc_reader = scan_stubs
+    st = store.settings()
+    company = {"company_name": "Max Muster IT-Beratung", "owner_name": "Max Muster", "vat_id": "DE123456789"}
+    store.save_settings({**st, **company, "payment_days": 30})
+    booked = boss_client.post("/api/receipts", files={"file": ("bill.pdf", receipt_reader.add(SINGLE))})
+    assert booked.status_code == 201 and booked.json()["outcome"] == "booked", booked.text
+    scanned = boss_client.post("/api/document-scans", files={"file": ("old.pdf", doc_reader.add(SCAN_INVOICE))})
+    assert scanned.status_code == 201 and scanned.json()["status"] == "added", scanned.text
 
 
 # ------------------------------------------------------------------ document importer

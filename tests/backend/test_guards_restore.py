@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from permita38.core.repository.importer import drop_empty_number, import_json
+from permita38.core.repository.importer import ImportRefused, drop_empty_number, import_json
 from permita38.core.repository.sqlite import SQLiteRepository
 
 from .transfer_helpers import build_zip, export_archive, make_instance, seed, zip_files
@@ -76,7 +76,25 @@ def test_duplicate_invoice_number_is_refused_and_nothing_is_written(source, targ
     errs = r.json()["errors"]
     assert [e["code"] for e in errs] == ["numbering.duplicate"]
     assert "RE-2026-0007" in errs[0]["message"]
+    assert "permita38 check-db" in errs[0]["message"]
     assert dst.list("invoices") == [] and dst.list("customers") == []
+
+
+def test_duplicate_offer_number_is_refused_and_nothing_is_written(source, target, tmp_path):
+    _, src_client, _ = source
+    _, dst_client, dst = target
+
+    def edit(name, recs):
+        if name == "data/offers.json":
+            recs.append({"id": "off00000001", "number": "AN-2026-0001"})
+            recs.append({"id": "off00000002", "number": "AN-2026-0001"})
+
+    r = post_run(dst_client, edited_archive(src_client, tmp_path, edit))
+    assert r.status_code == 422, r.text
+    errs = r.json()["errors"]
+    assert [e["code"] for e in errs] == ["numbering.duplicate"]
+    assert "AN-2026-0001" in errs[0]["message"]
+    assert dst.list("offers") == [] and dst.list("customers") == []
 
 
 def test_same_number_in_an_invoice_and_an_offer_is_fine(source, target, tmp_path):
@@ -144,9 +162,34 @@ def test_import_json_refuses_a_duplicate_inside_the_folder(tmp_path):
     inv(old, "inv000001", "RE-2026-0001")
     inv(old, "inv000002", "RE-2026-0001")
     repo = SQLiteRepository(tmp_path / "new")
-    with pytest.raises(ValueError, match="RE-2026-0001"):
+    with pytest.raises(ValueError, match="RE-2026-0001") as e:
         import_json(repo, old)
+    assert isinstance(e.value, ImportRefused) and e.value.code == "numbering.duplicate"
+    assert "permita38 check-db" in str(e.value)
     assert repo.list("invoices") == [] and repo.list("customers") == []
+
+
+def test_import_json_refuses_a_duplicate_offer_number(tmp_path):
+    old = tmp_path / "old"
+    write(old / "customers" / "cust00000001.json", {"id": "cust00000001", "name": "ACME"})
+    for rid in ("offr000001", "offr000002"):
+        write(old / "offers" / f"{rid}.json", {"id": rid, "number": "AN-2026-0001"})
+    repo = SQLiteRepository(tmp_path / "new")
+    with pytest.raises(ImportRefused, match="AN-2026-0001") as e:
+        import_json(repo, old)
+    assert e.value.code == "numbering.duplicate"
+    assert "permita38 check-db" in str(e.value)
+    assert repo.list("offers") == [] and repo.list("customers") == []
+
+
+def test_import_json_same_id_and_number_twice_is_not_a_duplicate(tmp_path):
+    old = tmp_path / "old"
+    write(old / "invoices" / "inv000001.json", {"id": "inv000001", "number": "RE-2026-0001"})
+    write(old / "invoices" / "inv000001b.json", {"id": "inv000001", "number": "RE-2026-0001"})
+    repo = SQLiteRepository(tmp_path / "new")
+    repo.startup()
+    import_json(repo, old)
+    assert [r["id"] for r in repo.list("invoices")] == ["inv000001"]
 
 
 def test_import_json_refuses_a_duplicate_against_a_stored_invoice(tmp_path):

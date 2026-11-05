@@ -162,6 +162,12 @@ def test_date_guard_refuses_a_bad_format_and_accepts_iso(repo, table, col):
     repo.save(table, {**_owner(table)})
 
 
+@pytest.mark.parametrize(("table", "col"), DATE_CASES)
+def test_date_and_order_guards_accept_empty_string_date(repo, table, col):
+    ok = repo.save(table, {**_owner(table), col: ""})
+    assert ok[col] == ""
+
+
 def test_date_guard_covers_every_declared_column():
     guarded = {(g.table, g.columns[0]) for g in GUARDS if g.kind == "date"}
     assert set(DATE_CASES) <= guarded
@@ -225,6 +231,18 @@ def test_period_guard_refuses_a_reversed_period_and_accepts_equal_ends(repo, tab
     refused("state.period_reversed", repo.save, table, {**ok, a: "9999-01-01"[: len(early)]})
     repo.save(table, {**o, a: late})  # an open end
     repo.save(table, {**o, b: early})  # an open start
+
+
+@pytest.mark.parametrize(("table", "a", "b", "late", "early"), ORDER_CASES)
+def test_date_and_order_guards_accept_empty_string(repo, table, a, b, late, early):
+    o = _owner(table)
+    for first, second in (("", late), (late, ""), ("", early)):
+        ok = repo.save(table, {**o, a: first, b: second})
+        assert (ok[a], ok[b]) == (first, second)
+
+
+def test_negative_fraction_is_refused(repo):
+    refused("range.negative", repo.save, "customers", {"rate": -0.5})
 
 
 def test_entries_clock_times_may_run_over_midnight(repo):
@@ -310,3 +328,28 @@ def test_migration_does_not_change_old_rows(old_db):
     repo.close()
     assert after == before
     assert sum(len(v) for v in before.values()) == 4
+
+
+def test_checkdb_reports_grandfathered_rows_after_migration(old_db):
+    from permita38.core.service.integrity import IntegrityService
+
+    data, planted = old_db
+    repo = SQLiteRepository(data)
+    repo.startup()
+    try:
+        findings = IntegrityService(repo).run(
+            only=("numbering.duplicate", "state.period_reversed", "format.date", "range.negative")
+        )
+        got = sorted((f.code, f.collection, f.id, f.field) for f in findings)
+    finally:
+        repo.close()
+    a, b, ab, e = (planted[k]["id"] for k in ("inv_a", "inv_b", "absence", "bad_date"))
+    assert got == sorted(
+        [
+            ("numbering.duplicate", "invoices", a, "number"),
+            ("numbering.duplicate", "invoices", b, "number"),
+            ("state.period_reversed", "absences", ab, "end"),
+            ("format.date", "entries", e, "date"),
+            ("range.negative", "entries", e, "minutes"),
+        ]
+    )

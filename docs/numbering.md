@@ -87,6 +87,12 @@ The counter of a period is created on first use. If none exists, it is seeded fr
 highest number that the current pattern produces for a document of that period (numbers of other formats, or with a
 year/month that differs from the document date, are ignored; there is no count fallback). Numbers in use are always skipped, so a finalize can never produce a duplicate.
 
+## Known limitation
+
+A database that already holds duplicate numbers from before this version keeps them: an issued number cannot be
+changed. `permita38 check-db` lists them. Such a database cannot be restored from an export or via import-json until the
+duplicates are resolved; talk to your tax adviser about correcting the affected invoices.
+
 ## Concurrency
 
 Allocation runs inside the finalize transaction. The SQLite backend serialises transactions, so two parallel

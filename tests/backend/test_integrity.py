@@ -13,18 +13,13 @@ from permita38.core.database import head_id
 from permita38.core.repository.schema import GUARDS
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service import integrity
-from permita38.core.service import receipts as receipts_mod
 from permita38.core.service.integrity import IntegrityService
 
 from .test_allocations_api import END as ALLOC_END
 from .test_allocations_api import START as ALLOC_START
 from .test_document_scans_service import INVOICE as SCAN_INVOICE
-from .test_document_scans_service import TODAY as SCAN_TODAY
-from .test_document_scans_service import Reader as DocReader
 from .test_migrations import legacy_db
 from .test_receipts_api import SINGLE
-from .test_receipts_api import TODAY as RECEIPT_TODAY
-from .test_receipts_api import Reader as ReceiptReader
 from .test_trips_api import trip_body
 
 
@@ -463,19 +458,10 @@ def test_findings_are_sorted_and_only_filters_by_prefix(store):
 
 
 # ------------------------------------------------------------------ false-positive guard
-def test_data_made_by_the_services_gives_no_errors_and_no_warnings(app, boss_client, monkeypatch):
+def test_data_made_by_the_services_gives_no_errors_and_no_warnings(app, boss_client, scan_stubs):
     c = boss_client
     services = app.state.services
-    receipt_reader, doc_reader = ReceiptReader(), DocReader()
-
-    def read_file(path, config):  # both services share one runner module: dispatch on the content
-        with open(path, "rb") as f:
-            data = f.read()
-        return (receipt_reader if data in receipt_reader.by_content else doc_reader)(path, config)
-
-    monkeypatch.setattr(receipts_mod.runner, "read_file", read_file)
-    services.receipts._today = lambda: RECEIPT_TODAY
-    services.document_scans._today = lambda: SCAN_TODAY
+    receipt_reader, doc_reader = scan_stubs
     me = c.get("/api/auth/me").json()
     cust = c.post("/api/customers", json={"name": "Demo Client", "rate": 100}).json()
     proj = c.post("/api/projects", json={"name": "Demo Project", "customer_id": cust["id"]}).json()
