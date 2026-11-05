@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from permita38.core import database
-from permita38.core.repository import TABLES
+from permita38.core.repository import TABLES, ConstraintViolation
 from permita38.core.repository.dialect import DIALECTS, SQLiteDialect
 from permita38.core.repository.schema import CHECKS, GUARD_KINDS, GUARDS
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
@@ -28,9 +28,11 @@ def repo(tmp_path):
 
 
 def refused(code, fn, *args):
-    with pytest.raises(sqlite3.IntegrityError) as e:
+    with pytest.raises(ConstraintViolation) as e:
         fn(*args)
-    assert str(e.value).startswith(f"permita38:{code}"), str(e.value)
+    assert e.value.code == code
+    assert isinstance(e.value.__cause__, sqlite3.IntegrityError)
+    assert str(e.value.__cause__) == f"permita38:{code}"
 
 
 # ------------------------------------------------------------------ (a) schema description
