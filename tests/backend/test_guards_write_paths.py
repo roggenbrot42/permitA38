@@ -104,7 +104,12 @@ def test_offer_accept_with_a_one_day_plan_and_to_invoice(boss_client):
 
 # ------------------------------------------------------------------ periods and rates
 def test_project_contract_absence_with_start_equal_end(boss_client, me):
-    p = ok(boss_client.post("/api/projects", json={"name": "P", "start": DAY, "end": DAY, "rate": 0}))
+    cust = _customer(boss_client)
+    p = ok(
+        boss_client.post(
+            "/api/projects", json={"name": "P", "start": DAY, "end": DAY, "rate": 0, "customer_id": cust["id"]}
+        )
+    )
     assert p["start"] == p["end"] == DAY
     # zero hours and "both hour fields" are refused by the API before the database guards
     assert boss_client.post("/api/projects", json={"name": "P0", "budget_hours": 0}).status_code == 422

@@ -51,24 +51,24 @@ def _options(pg, sel):
 
 
 def test_document_editor_lists_only_the_chosen_customers_projects(browser, srv, world):
-    world["post"]("projects", {"name": "Own Learning", "personal": True})  # never offered on an offer or invoice
+    world["post"]("projects", {"name": "Own Learning", "kind": "internal"})  # never offered on an offer or invoice
     ctx = _ctx(browser, srv)
     pg = ctx.new_page()
     pg.goto(srv.base + "/#/doc/offers/new")
     pg.wait_for_selector("#d_totals")
-    # no customer chosen: only the general project (no customer) is offered
-    assert set(_options(pg, "#d_proj")) == {"", world["p_general"]}
+    # no customer chosen: no project is offered (internal projects are never offered on a document)
+    assert set(_options(pg, "#d_proj")) == {""}
     pg.select_option("#d_cust", world["acme"])
-    assert set(_options(pg, "#d_proj")) == {"", world["p_acme"], world["p_general"]}
+    assert set(_options(pg, "#d_proj")) == {"", world["p_acme"]}
     pg.select_option("#d_proj", world["p_acme"])
     # the customer changes: the project of the other customer is not offered, and the chosen one is cleared
     pg.select_option("#d_cust", world["other"])
-    assert set(_options(pg, "#d_proj")) == {"", world["p_other"], world["p_general"]}
+    assert set(_options(pg, "#d_proj")) == {"", world["p_other"]}
     assert pg.input_value("#d_proj") == ""
-    # a project that still fits is kept when the customer changes
-    pg.select_option("#d_proj", world["p_general"])
-    pg.select_option("#d_cust", world["acme"])
-    assert pg.input_value("#d_proj") == world["p_general"]
+    # a project that still fits is kept when the customer is chosen again
+    pg.select_option("#d_proj", world["p_other"])
+    pg.select_option("#d_cust", world["other"])
+    assert pg.input_value("#d_proj") == world["p_other"]
     ctx.close()
 
 
@@ -86,7 +86,7 @@ def test_legacy_project_of_another_customer_is_shown_marked(browser, srv, world)
     assert pg.input_value("#d_proj") == world["p_acme"]
     assert "(other customer)" in pg.inner_text("#d_proj option:checked")
     # the other mismatching projects are not offered for this customer
-    assert set(_options(pg, "#d_proj")) == {"", world["p_acme"], world["p_general"]}
+    assert set(_options(pg, "#d_proj")) == {"", world["p_acme"]}
     ctx.close()
 
 

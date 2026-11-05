@@ -30,7 +30,9 @@ def boss_id(app):
 
 
 def new_project(c, name):
-    r = c.post("/api/projects", json={"name": name})
+    cu = c.post("/api/customers", json={"name": f"{name} Client (Demo)"})
+    assert cu.status_code == 200, cu.text
+    r = c.post("/api/projects", json={"name": name, "customer_id": cu.json()["id"]})
     assert r.status_code == 200, r.text
     return r.json()
 

@@ -13,6 +13,7 @@ from .test_trips_api import make_trip, trip_body
 
 LINES = [{"description": "Dev", "qty": 2, "unit": "h", "price": 90}]
 MISMATCH = "Project belongs to another customer"
+INTERNAL = "Internal projects cannot have offers, contracts or invoices"
 
 
 def _customer(c, name):
@@ -74,10 +75,11 @@ def test_offer_with_project_of_another_customer_is_refused(world):
     assert c.get("/api/offers").json() == []
 
 
-def test_offer_with_general_project_is_saved(world):
+def test_offer_with_internal_project_is_refused(world):
     c = world["c"]
     r = _offer(c, customer_id=world["acme"], project_id=world["p_general"])
-    assert r.status_code == 200, r.text
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == INTERNAL
 
 
 def test_offer_without_customer_is_not_checked(world):
@@ -142,7 +144,7 @@ def test_invoice_legacy_mismatch_unrelated_edit_allowed(world):
 # -- contracts -----------------------------------------------------------------------------------------------------
 def test_contract_with_other_customer_project_is_refused(world):
     c = world["c"]
-    body = {"title": "Retainer", "start": "2026-02-01", "end": "2026-06-30"}
+    body = {"title": "Retainer", "start": "2026-02-01", "end": "2026-06-30", "hours_per_week": 10}
     ok = c.post("/api/contracts", json={**body, "customer_id": world["acme"], "project_id": world["p_acme"]})
     assert ok.status_code == 200, ok.text
     bad = c.post("/api/contracts", json={**body, "customer_id": world["acme"], "project_id": world["p_other"]})
@@ -184,7 +186,7 @@ def test_trip_update_to_other_customer_project_refused_and_legacy_edit_allowed(w
 
 
 # -- accept, conversions and PUT without a field --------------------------------------------------------------------
-PLAN = {"start": "2026-03-02", "end": "2026-03-31", "hours_per_week": 10, "total_hours": 40, "rate": 90}
+PLAN = {"start": "2026-03-02", "end": "2026-03-31", "hours_per_week": 10, "rate": 90}
 
 
 def test_accept_offer_with_other_customer_project_is_refused(world):
@@ -211,7 +213,7 @@ def test_offer_to_invoice_with_other_customer_project_is_refused(world):
 
 def test_legacy_contract_mismatch_edit_of_other_field_allowed_project_change_refused(world):
     c = world["c"]
-    body = {"title": "Retainer", "start": "2026-02-01", "end": "2026-06-30"}
+    body = {"title": "Retainer", "start": "2026-02-01", "end": "2026-06-30", "hours_per_week": 10}
     ct = c.post("/api/contracts", json={**body, "customer_id": world["acme"], "project_id": world["p_acme"]}).json()
     _move_project(c, world["p_acme"], world["other"])  # legacy: the contract now mismatches its project
     r = c.put(f"/api/contracts/{ct['id']}", json={**ct, "title": "Corrected"})
@@ -225,14 +227,16 @@ def test_legacy_contract_mismatch_edit_of_other_field_allowed_project_change_ref
 def test_put_without_customer_is_checked_against_the_stored_customer(world):
     """A PUT replaces the record, but an omitted customer_id is checked against the stored one (acme here)."""
     c = world["c"]
-    body = {"title": "Retainer", "start": "2026-02-01", "end": "2026-06-30"}
+    body = {"title": "Retainer", "start": "2026-02-01", "end": "2026-06-30", "hours_per_week": 10}
     ct = c.post("/api/contracts", json={**body, "customer_id": world["acme"], "project_id": world["p_acme"]}).json()
     r = c.put(f"/api/contracts/{ct['id']}", json={**body, "project_id": world["p_other"]})
     assert r.status_code == 422
     assert r.json()["detail"] == MISMATCH
     assert c.get(f"/api/contracts/{ct['id']}").json()["project_id"] == world["p_acme"]  # nothing was saved
     r = c.put(f"/api/contracts/{ct['id']}", json={**body, "project_id": world["p_general"]})
-    assert r.status_code == 200, r.text  # a general project has no customer to check
+    assert r.status_code == 409 and r.json()["detail"] == INTERNAL  # an internal project takes no contracts
+    r = c.put(f"/api/contracts/{ct['id']}", json={**body, "project_id": world["p_acme"]})
+    assert r.status_code == 200, r.text  # the unchanged project is not checked again
     assert r.json().get("customer_id") is None  # the PUT replaced the record: the omitted customer is gone
 
 
