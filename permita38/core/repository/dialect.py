@@ -9,10 +9,38 @@ is wired to a real driver today (see `sqlite.py`); the PostgreSQL and MariaDB cl
 import json
 from typing import Any
 
-from .schema import BOOL, FLOAT, ID, INT, JSON, STR, TEXT, Column, Guard, Index, Table
+from .schema import (
+    BOOL,
+    FLOAT,
+    ID,
+    INT,
+    JSON,
+    STR,
+    TEXT,
+    Column,
+    Condition,
+    Eq,
+    Guard,
+    In,
+    Index,
+    IsBlank,
+    IsSet,
+    Table,
+)
 
 _DATE_GLOB = "[0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]"
 _DATE_REGEX = "^[0-9]{4}-[01][0-9]-[0-3][0-9]$"
+
+# Real calendar dates only (PostgreSQL's CAST(... AS date) raises on 2026-02-30 and on year 0000), so a CHECK never raises.
+_LEAP_YEAR = "(?:[0-9]{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)"
+_CALENDAR_DATE_REGEX = (
+    "^(?!0000)(?:[0-9]{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12][0-9]|3[01])|(?:0[469]|11)-(?:0[1-9]|[12][0-9]|30)"
+    "|02-(?:0[1-9]|1[0-9]|2[0-8]))"
+    f"|{_LEAP_YEAR}-02-29)$"
+)
+
+#: guard kinds added in guards v2 that are row-local (rendered by `Dialect.guard_bad_sql`)
+ROW_LOCAL_KINDS = frozenset({"one_of", "exactly_one", "required", "max_days", "range", "implies"})
 
 
 class Dialect:
@@ -70,6 +98,90 @@ class Dialect:
         unique = "UNIQUE " if index.unique else ""
         cols = ", ".join(self.quote(c) for c in index.columns)
         return f"CREATE {unique}INDEX {self.quote(index.name)} ON {self.quote(table.name)} ({cols});"
+
+    # ---- row-local guard conditions (guards v2), rendered from the AST in schema.py
+    def _ref(self, col: str, prefix: str) -> str:
+        """Column reference; the prefix is "NEW." in a SQLite trigger and empty in a CHECK constraint."""
+        return prefix + self.quote(col)
+
+    def _literal(self, v: Any) -> str:
+        if isinstance(v, bool):
+            return str(int(v))
+        if isinstance(v, (int, float)):
+            return repr(v)
+        if isinstance(v, str):
+            return "'" + v.replace("'", "''") + "'"
+        raise ValueError(f"unsupported condition value {v!r}")
+
+    def _is_set(self, ref: str) -> str:
+        """SQL boolean: not NULL, not '' and not only whitespace."""
+        raise NotImplementedError
+
+    def _days_between(self, start: str, end: str) -> str:
+        """SQL number: end - start in days (NULL when either is not a valid date)."""
+        raise NotImplementedError
+
+    def _false(self) -> str:
+        return "0"
+
+    def _exact(self, ref: str, values: tuple[Any, ...]) -> str:
+        """Reference used in an exact equality / IN test (MariaDB overrides it for its case-insensitive collation)."""
+        return ref
+
+    def _in_list(self, ref: str, values: tuple[Any, ...], negate: bool = False) -> str:
+        lits = ", ".join(self._literal(v) for v in values)
+        return f"{self._exact(ref, values)} {'NOT IN' if negate else 'IN'} ({lits})"
+
+    def _range_blank_test(self, guard: Guard) -> bool:
+        """Does a range guard also exclude '' (text columns)? SQLite compares loosely, so it always does."""
+        return True
+
+    def cond_sql(self, cond: Condition, prefix: str = "") -> str:
+        ref = self._ref(cond.col, prefix)
+        if isinstance(cond, Eq):
+            return f"{self._exact(ref, (cond.value,))} = {self._literal(cond.value)}"
+        if isinstance(cond, In):
+            return self._in_list(ref, cond.values)
+        if isinstance(cond, IsSet):
+            return self._is_set(ref)
+        if isinstance(cond, IsBlank):
+            return f"NOT {self._is_set(ref)}"
+        raise ValueError(f"unknown condition {cond!r}")
+
+    def guard_bad_sql(self, guard: Guard, prefix: str = "") -> str:
+        """SQL boolean that is true when a row violates a guard of one of the new row-local kinds."""
+        lit, false = self._literal, self._false()
+        cols = [self._ref(c, prefix) for c in guard.columns]
+        x = cols[0]
+        if guard.kind == "one_of":
+            return f"{self._is_set(x)} AND {self._in_list(x, guard.values, negate=True)}"
+        if guard.kind == "exactly_one":
+            a, b = self._is_set(cols[0]), self._is_set(cols[1])
+            return f"({a} AND {b}) OR (NOT {a} AND NOT {b})"
+        if guard.kind == "required":
+            return f"NOT {self._is_set(x)}"
+        if guard.kind == "max_days":
+            return f"COALESCE({self._days_between(cols[0], cols[1])} > {guard.days}, {false})"
+        if guard.kind == "range":
+            parts = []
+            if guard.lo is not None:
+                parts.append(f"{x} {'<=' if guard.lo_exclusive else '<'} {lit(guard.lo)}")
+            if guard.hi is not None:
+                parts.append(f"{x} > {lit(guard.hi)}")
+            blank = f" AND {x} <> ''" if self._range_blank_test(guard) else ""
+            return f"{x} IS NOT NULL{blank} AND ({' OR '.join(parts)})"
+        if guard.kind == "implies":
+            assert guard.if_ is not None and guard.then is not None
+            return (
+                f"COALESCE({self.cond_sql(guard.if_, prefix)}, {false}) "
+                f"AND NOT COALESCE({self.cond_sql(guard.then, prefix)}, {false})"
+            )
+        raise ValueError(f"unknown guard kind {guard.kind!r}")
+
+    def _check_guard_sql(self, guard: Guard) -> list[str]:
+        """Native CHECK constraint for the row-local new kinds (PostgreSQL, MariaDB)."""
+        cond = f"NOT COALESCE(({self.guard_bad_sql(guard)}), {self._false()})"
+        return [f"ALTER TABLE {self.quote(guard.table)} ADD CONSTRAINT {self.quote(guard.name)} CHECK ({cond});"]
 
     def guard_sql(self, guard: Guard) -> list[str]:
         """DDL statements (each ending with ';') that create the guard."""
@@ -130,6 +242,13 @@ class SQLiteDialect(Dialect):
     name = "sqlite"
     types = {ID: "TEXT", STR: "TEXT", TEXT: "TEXT", INT: "INTEGER", FLOAT: "REAL", BOOL: "INTEGER", JSON: "TEXT"}
 
+    def _is_set(self, ref: str) -> str:
+        return f"({ref} IS NOT NULL AND trim({ref}, ' ' || char(9, 10, 11, 12, 13)) <> '')"
+
+    def _days_between(self, start: str, end: str) -> str:
+        ok = " AND ".join(f"{x} GLOB '{_DATE_GLOB}' AND julianday({x}) IS NOT NULL" for x in (start, end))
+        return f"(CASE WHEN {ok} THEN julianday({end}) - julianday({start}) END)"
+
     def table_exists_sql(self) -> str:
         return "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?"
 
@@ -144,9 +263,11 @@ class SQLiteDialect(Dialect):
         The repository writes with an upsert, so the INSERT trigger fires on every re-save: it skips a row whose
         guarded values equal the stored ones."""
         q, t = self.quote, self.quote(guard.table)
-        cols = [q(c) for c in guard.columns]
+        cols = [q(c) for c in guard.read_columns]
         c = cols[0]
-        if guard.kind == "unique":
+        if guard.kind in ROW_LOCAL_KINDS:
+            bad = f"({self.guard_bad_sql(guard, 'NEW.')})"  # parenthesised: it may contain a top-level OR
+        elif guard.kind == "unique":
             bad = (
                 f"NEW.{c} IS NOT NULL AND NEW.{c} <> '' "
                 f'AND EXISTS (SELECT 1 FROM {t} WHERE {c} = NEW.{c} AND "id" <> NEW."id")'
@@ -189,6 +310,22 @@ class PostgresDialect(Dialect):
         JSON: "JSONB",
     }
 
+    def _is_set(self, ref: str) -> str:
+        return f"({ref} IS NOT NULL AND btrim(CAST({ref} AS TEXT), E' \\t\\n\\r\\f\\v') <> '')"
+
+    def _days_between(self, start: str, end: str) -> str:
+        # CAST(... AS date) raises on 2026-02-30, so the regex admits real calendar dates only (never raises)
+        ok = " AND ".join(f"{x} ~ '{_CALENDAR_DATE_REGEX}'" for x in (start, end))
+        return f"(CASE WHEN {ok} THEN CAST({end} AS date) - CAST({start} AS date) END)"
+
+    def _range_blank_test(self, guard: Guard) -> bool:
+        # `numeric <> ''` raises "invalid input syntax" on PostgreSQL. A range guard on a known column is numeric
+        # (Guard refuses text columns), and a column unknown to TABLES is treated alike: never the blank test.
+        return False
+
+    def _false(self) -> str:
+        return "FALSE"
+
     def upsert(self, table: Table, columns: list[str]) -> str:
         updates = ", ".join(f"{self.quote(c)} = EXCLUDED.{self.quote(c)}" for c in columns if c != table.pk)
         return self._insert_head(table, columns) + f" ON CONFLICT ({self.quote(table.pk)}) DO UPDATE SET {updates}"
@@ -198,6 +335,8 @@ class PostgresDialect(Dialect):
         q, t = self.quote, self.quote(guard.table)
         cols = [q(c) for c in guard.columns]
         c = cols[0]
+        if guard.kind in ROW_LOCAL_KINDS:
+            return self._check_guard_sql(guard)
         if guard.kind == "unique":
             return [f"CREATE UNIQUE INDEX {q(guard.name)} ON {t} ({c}) WHERE {c} IS NOT NULL AND {c} <> '';"]
         if guard.kind == "date":
@@ -233,6 +372,28 @@ class MariaDBDialect(Dialect):
         JSON: "LONGTEXT",
     }
 
+    def _literal(self, v: Any) -> str:
+        if isinstance(v, str):  # the default sql_mode treats the backslash as an escape character
+            return "'" + v.replace("\\", "\\\\").replace("'", "''") + "'"
+        return super()._literal(v)
+
+    def _exact(self, ref: str, values: tuple[Any, ...]) -> str:
+        # the default collation (utf8mb4_general_ci) is case-insensitive: compare strings as bytes
+        return f"BINARY {ref}" if any(isinstance(v, str) for v in values) else ref
+
+    def _range_blank_test(self, guard: Guard) -> bool:
+        # `0 <> ''` is false in MariaDB ('' coerces to 0). A range guard on a known column is numeric (Guard refuses
+        # text columns), and a column unknown to TABLES is treated alike: never the blank test.
+        return False
+
+    def _is_set(self, ref: str) -> str:
+        # the same set as schema.SQL_BLANK (space, \t \n \v \f \r); TRIM(BOTH ...) cannot strip \v and \f
+        return f"({ref} IS NOT NULL AND {ref} NOT REGEXP '^[\\\\x20\\\\x09-\\\\x0d]*$')"
+
+    def _days_between(self, start: str, end: str) -> str:
+        ok = " AND ".join(f"{x} REGEXP '{_DATE_REGEX}'" for x in (start, end))
+        return f"(CASE WHEN {ok} THEN DATEDIFF({end}, {start}) END)"
+
     def sql_type(self, column: Column) -> str:
         # primary keys / index keys must be bounded strings in MariaDB
         return self.types[column.type]
@@ -246,6 +407,8 @@ class MariaDBDialect(Dialect):
         q, t = self.quote, self.quote(guard.table)
         cols = [q(c) for c in guard.columns]
         c = cols[0]
+        if guard.kind in ROW_LOCAL_KINDS:
+            return self._check_guard_sql(guard)
         if guard.kind == "unique":
             key = q(guard.columns[0] + "_key")
             return [

@@ -10,7 +10,8 @@ import pytest
 
 from permita38.cli.main import main
 from permita38.core.database import head_id
-from permita38.core.repository.schema import GUARDS
+from permita38.core.repository import schema
+from permita38.core.repository.schema import GUARDS, Eq, Guard, IsSet
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service import integrity
 from permita38.core.service.integrity import IntegrityService
@@ -18,6 +19,12 @@ from permita38.core.service.integrity import IntegrityService
 from .test_allocations_api import END as ALLOC_END
 from .test_allocations_api import START as ALLOC_START
 from .test_document_scans_service import INVOICE as SCAN_INVOICE
+from .test_guards_v2_kinds import CASES as V2_CASES
+from .test_guards_v2_kinds import COLS as V2_COLS
+from .test_guards_v2_kinds import G_ONE_OF, G_RANGE_EXCL, G_REQUIRED
+from .test_guards_v2_kinds import TABLE as V2_TABLE
+from .test_guards_v2_kinds import new_db as v2_new_db
+from .test_guards_v2_kinds import save as v2_save
 from .test_migrations import legacy_db
 from .test_receipts_api import SINGLE
 from .test_trips_api import trip_body
@@ -476,6 +483,161 @@ def test_findings_are_sorted_and_only_filters_by_prefix(store):
         "numbering.final_without_number",
         "state.timer_running_without_start",
     ]
+
+
+# ------------------------------------------------------------------ row-local guard kinds (guards v2)
+V2_GUARDS = (
+    Guard("g_absence_kind", "absences", "one_of", ("kind",), "vocab.unknown", values=("vacation", "sick")),
+    Guard("g_expense_owner", "expenses", "exactly_one", ("project_id", "trip_id"), "state.exactly_one"),
+    Guard("g_customer_name", "customers", "required", ("name",), "state.required"),
+    Guard("g_absence_days", "absences", "max_days", ("start", "end"), "range.too_long", days=14),
+    Guard("g_customer_rate", "customers", "range", ("rate",), "range.bounds", lo=0, hi=500, lo_exclusive=True),
+    Guard(
+        "g_project_done",
+        "projects",
+        "implies",
+        (),
+        "state.implies:g_project_done",
+        if_=Eq("status", "done"),
+        then=IsSet("end"),
+    ),
+)
+
+
+def test_row_local_guard_kinds_are_reported_with_code_collection_id_and_field(store, monkeypatch):
+    monkeypatch.setattr(schema, "GUARDS", V2_GUARDS)  # no trigger exists for these, so the bad rows can be planted
+    save = store.save
+    save(
+        "absences", {"id": "abs001", "user_id": "boss01", "kind": "holiday", "start": "2026-01-01", "end": "2026-01-02"}
+    )
+    save("absences", {"id": "abs002", "user_id": "boss01", "kind": "sick", "start": "2026-01-01", "end": "2026-01-02"})
+    save("absences", {"id": "abs003", "user_id": "boss01", "kind": "sick", "start": "2026-01-01", "end": "2026-01-16"})
+    save("absences", {"id": "abs004", "user_id": "boss01", "kind": "sick", "start": "2026-01-01", "end": "2026-01-15"})
+    save("expenses", {"id": "exp001", "project_id": "p1", "trip_id": "t1"})
+    save("expenses", {"id": "exp002", "project_id": "p1", "trip_id": ""})
+    save("expenses", {"id": "exp003"})
+    save("customers", {"id": "cus001", "name": "  ", "rate": 0})
+    save("customers", {"id": "cus002", "name": "Demo Client", "rate": 0.01})
+    save("customers", {"id": "cus003", "name": "Demo Client", "rate": 500.5})
+    save("customers", {"id": "cus004", "name": "Demo Client", "rate": 500})
+    save("projects", {"id": "prj001", "name": "A", "status": "done", "end": ""})
+    save("projects", {"id": "prj002", "name": "B", "status": "done", "end": "2026-02-01"})
+    save("projects", {"id": "prj003", "name": "C", "status": "open"})
+    findings = IntegrityService(store).run(("vocab.", "state.exactly_one", "state.required", "range.", "state.implies"))
+    assert [(f.code, f.collection, f.id, f.field, f.severity) for f in findings] == [
+        ("range.bounds", "customers", "cus001", "rate", "error"),
+        ("range.bounds", "customers", "cus003", "rate", "error"),
+        ("range.too_long", "absences", "abs003", "start,end", "error"),
+        ("state.exactly_one", "expenses", "exp001", "project_id,trip_id", "error"),
+        ("state.exactly_one", "expenses", "exp003", "project_id,trip_id", "error"),
+        ("state.implies:g_project_done", "projects", "prj001", "status,end", "error"),
+        ("state.required", "customers", "cus001", "name", "error"),
+        ("vocab.unknown", "absences", "abs001", "kind", "error"),
+    ]
+
+
+def test_row_local_guard_rule_reads_the_guards_at_run_time(store, monkeypatch):
+    store.save("customers", {"id": "cus001", "name": ""})
+    assert found(store, "state.required") == []
+    monkeypatch.setattr(schema, "GUARDS", (V2_GUARDS[2],))
+    assert found(store, "state.required") == [("state.required", "customers", "cus001", "name")]
+
+
+EXTRA_ROWS = [  # edge values for every column of the scratch table, on top of the rows of test_guards_v2_kinds
+    {"kind": "open\u00a0"},
+    {"kind": "\u00a0"},
+    {"kind": "\x0b\x0c"},
+    {"a": "\u00a0", "b": "q"},
+    {"a": "\u00a0", "b": "\u00a0"},
+    {"a": "p", "b": "\r"},
+    {"s": "2026-02-30", "e": "2026-03-13"},
+    {"s": "2026-02-28", "e": "2026-03-13"},
+    {"s": "2026-02-28", "e": "2026-03-14"},
+    {"s": "0000-01-01", "e": "0000-01-12"},
+    {"s": "2025-12-31", "e": "2026-01-10"},
+    {"s": "2025-12-31", "e": "2026-01-11"},
+    {"s": "2026-01-01 ", "e": "2026-02-01"},
+    {"s": "2026-01-01", "e": "2026-02-00"},
+    {"n": "abc"},
+    {"n": True},
+    {"n": 80.000001},
+    {"n": 1e308},
+    {"n": -0.0},
+    {"n": 5},
+    {"n": 4.999999},
+    {"kind": "done", "a": "\u00a0"},
+    {"kind": "done", "a": "\t"},
+    {"kind": "Done", "a": None},
+]
+
+
+def _sql_refuses(guard, row):
+    db = v2_new_db(guard)
+    try:
+        v2_save(db, {"id": "r1", **row})
+    except sqlite3.IntegrityError as e:
+        assert str(e) == f"permita38:{guard.code}"
+        return True
+    return False
+
+
+def _rule_reports(guard, row, monkeypatch):
+    monkeypatch.setattr(schema, "GUARDS", (guard,))
+    rec = {c: None for c in V2_COLS} | {"id": "r1"} | row
+    ctx = integrity.Ctx(None, {}, {"t": [rec]})
+    return [(f.code, f.collection, f.id, f.field) for f in integrity.rule_guard_row_local(ctx)]
+
+
+@pytest.mark.parametrize("name", V2_CASES)
+def test_check_db_rule_agrees_with_the_trigger_row_by_row(name, monkeypatch):
+    guard, base, bad_rows, good_rows, legacy, change = V2_CASES[name]
+    rows = [{**base, **r} for r in [*bad_rows, *good_rows, legacy, change, *EXTRA_ROWS]]
+    field_name = ",".join(guard.read_columns)
+    refused_any = reported_any = False
+    for row in rows:
+        refused_by_trigger = _sql_refuses(guard, row)
+        reported = _rule_reports(guard, row, monkeypatch)
+        assert reported == ([(guard.code, "t", "r1", field_name)] if refused_by_trigger else []), (name, row)
+        refused_any |= refused_by_trigger
+        reported_any |= bool(reported)
+    assert refused_any and reported_any  # the sample set has violations and the comparison is not vacuous
+
+
+@pytest.mark.parametrize(
+    ("guard", "column", "wrong", "stored", "reported"),
+    [
+        (G_REQUIRED, "a", 5, None, True),  # a str column holding an int lives in extra: the column is NULL
+        (G_REQUIRED, "a", "x", "x", False),
+        (G_ONE_OF, "kind", 123, None, False),  # NULL is not checked by one_of
+        (G_ONE_OF, "kind", "bogus", "bogus", True),
+        (G_RANGE_EXCL, "n", float("inf"), None, False),
+        (G_RANGE_EXCL, "n", True, None, False),
+        (G_RANGE_EXCL, "n", "abc", None, False),
+        (G_RANGE_EXCL, "n", 81, 81, True),
+    ],
+)
+def test_value_that_does_not_fit_its_column_counts_as_null_like_the_trigger(
+    guard, column, wrong, stored, reported, monkeypatch
+):
+    monkeypatch.setitem(schema.TABLES, "t", V2_TABLE)
+    base = {"a": "p"} if guard is G_ONE_OF else {}
+    assert _sql_refuses(guard, {**base, column: stored}) is reported  # what the database column holds
+    expected = [(guard.code, "t", "r1", column)] if reported else []
+    assert _rule_reports(guard, {**base, column: wrong}, monkeypatch) == expected
+
+
+def test_grandfathered_row_is_saved_again_and_check_db_reports_exactly_it(store, monkeypatch):
+    from permita38.core.repository.dialect import DIALECTS
+
+    store.save("customers", {"id": "cust01", "name": ""})
+    guard = Guard("guard_customers_name_required", "customers", "required", ("name",), "state.required")
+    monkeypatch.setattr(schema, "GUARDS", (*schema.GUARDS, guard))
+    with store.lock:
+        for stmt in DIALECTS["sqlite"].guard_sql(guard):
+            store._conn.execute(stmt)
+    store.save("customers", {"id": "cust01", "name": "", "notes": "changed"})  # another field: grandfathered
+    assert store.get("customers", "cust01")["notes"] == "changed"
+    assert found(store, "state.required") == [("state.required", "customers", "cust01", "name")]
 
 
 # ------------------------------------------------------------------ false-positive guard

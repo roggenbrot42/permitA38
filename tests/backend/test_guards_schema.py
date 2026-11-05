@@ -8,10 +8,12 @@ import pytest
 
 from permita38.core import database
 from permita38.core.repository import TABLES, ConstraintViolation
-from permita38.core.repository.dialect import DIALECTS, SQLiteDialect
+from permita38.core.repository.dialect import DIALECTS, ROW_LOCAL_KINDS, SQLiteDialect
 from permita38.core.repository.schema import CHECKS, GUARD_KINDS, GUARDS
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
+from permita38.core.service import integrity
 
+from .test_guards_v2_kinds import CASES as V2_CASES
 from .test_migrations import CHAIN, DIALECT_NAMES, HEAD, real_chain_copy, use_chain
 
 
@@ -37,7 +39,15 @@ def refused(code, fn, *args):
 
 # ------------------------------------------------------------------ (a) schema description
 def test_guard_declarations_are_well_formed():
-    assert {g.kind for g in GUARDS} == set(GUARD_KINDS)
+    assert set(ROW_LOCAL_KINDS) <= set(GUARD_KINDS)
+    used = {g.kind for g in GUARDS}
+    assert used <= set(GUARD_KINDS)  # no unknown kind
+    # no dead kind: used by a real guard, or a row-local kind (exercised by test_guards_v2_kinds.py)
+    assert set(GUARD_KINDS) <= used | ROW_LOCAL_KINDS
+    # every row-local kind is covered by the check-db rule (it raises for a kind it does not know)
+    samples = {case[0].kind: case[0] for case in V2_CASES.values()}
+    for kind in ROW_LOCAL_KINDS:
+        assert integrity.guard_violated(samples[kind], {}) in (True, False), kind
     assert len({g.name for g in GUARDS}) == len(GUARDS)
     for g in GUARDS:
         assert g.table in TABLES

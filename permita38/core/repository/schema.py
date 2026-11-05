@@ -12,7 +12,7 @@ versions and other devices).
 
 import math
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, get_args, get_origin
 
 ID, STR, TEXT, INT, FLOAT, BOOL, JSON = "id", "str", "text", "int", "float", "bool", "json"
 LOGICAL_TYPES = (ID, STR, TEXT, INT, FLOAT, BOOL, JSON)
@@ -329,18 +329,249 @@ TABLES: dict[str, Table] = {
 }
 
 
+_SCALARS = (str, int, float, bool)
+
+
+def _check_scalar(v: object) -> None:
+    if not isinstance(v, _SCALARS) or (isinstance(v, float) and not math.isfinite(v)):
+        raise ValueError(f"unsupported condition value {v!r} (only str, int, finite float, bool)")
+
+
+SQL_BLANK = " \t\n\v\f\r"  # the whitespace set the dialects' `trim(x, ...)` strips (not NBSP or other Unicode spaces)
+
+
+def _is_set(v: object) -> bool:
+    """IsSet semantics in Python: not None, not '', and for text not only SQL_BLANK characters."""
+    if v is None:
+        return False
+    return not (isinstance(v, str) and v.strip(SQL_BLANK) == "")
+
+
+@dataclass(frozen=True)
+class Eq:
+    """`col = value` (false when the column is NULL)."""
+
+    col: str
+    value: Any
+
+    def __post_init__(self) -> None:
+        _check_scalar(self.value)
+
+    def columns(self) -> tuple[str, ...]:
+        return (self.col,)
+
+    def holds(self, row: dict[str, Any]) -> bool:
+        v = row.get(self.col)
+        return v is not None and v == self.value and isinstance(v, bool) == isinstance(self.value, bool)
+
+
+@dataclass(frozen=True)
+class In:
+    """`col IN values` (false when the column is NULL)."""
+
+    col: str
+    values: tuple[Any, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", tuple(self.values))
+        if not self.values:
+            raise ValueError("In() needs at least one value")
+        for v in self.values:
+            _check_scalar(v)
+
+    def columns(self) -> tuple[str, ...]:
+        return (self.col,)
+
+    def holds(self, row: dict[str, Any]) -> bool:
+        v = row.get(self.col)
+        return v is not None and v in self.values
+
+
+@dataclass(frozen=True)
+class IsSet:
+    """Not NULL, not '' and (for text) not only whitespace."""
+
+    col: str
+
+    def columns(self) -> tuple[str, ...]:
+        return (self.col,)
+
+    def holds(self, row: dict[str, Any]) -> bool:
+        return _is_set(row.get(self.col))
+
+
+@dataclass(frozen=True)
+class IsBlank:
+    """The opposite of `IsSet`."""
+
+    col: str
+
+    def columns(self) -> tuple[str, ...]:
+        return (self.col,)
+
+    def holds(self, row: dict[str, Any]) -> bool:
+        return not _is_set(row.get(self.col))
+
+
+Condition = Eq | In | IsSet | IsBlank
+
+GUARD_KINDS = (
+    "unique",
+    "date",
+    "non_negative",
+    "order",
+    "one_of",
+    "exactly_one",
+    "required",
+    "max_days",
+    "range",
+    "implies",
+)
+
+# number of columns a guard of this kind names in `columns` (None = derived from its conditions)
+_KIND_ARITY: dict[str, int | None] = {
+    "unique": 1,
+    "date": 1,
+    "non_negative": 1,
+    "order": 2,
+    "one_of": 1,
+    "exactly_one": 2,
+    "required": 1,
+    "max_days": 2,
+    "range": 1,
+    "implies": None,
+}
+
+
+def column_type(table: str, col: str) -> str | None:
+    """Logical type of ``table.col`` (None when the table or column is not in TABLES)."""
+    t = TABLES.get(table)
+    c = t.column(col) if t else None
+    return c.type if c else None
+
+
 @dataclass(frozen=True)
 class Guard:
-    """A database-level guard checked for new or changed values only (see docs/specs/db-constraints.md)."""
+    """A database-level guard checked for new or changed values only (see docs/specs/db-constraints.md).
+
+    `columns` is one column, or two for "order" / "exactly_one" (a, b) / "max_days" (start, end); for "implies" it is
+    derived from the conditions (pass `()`). The optional parameters belong to the new kinds (docs/specs/db-guards-v2.md):
+    `values` (one_of), `lo` / `hi` / `lo_exclusive` (range, at least one bound), `days` (max_days),
+    `if_` / `then` (implies; for implies the code should be `state.implies:<name>`)."""
 
     name: str  # trigger name stem, e.g. "guard_invoices_number_unique"
     table: str
-    kind: str  # "unique" | "date" | "non_negative" | "order"
-    columns: tuple[str, ...]  # one column, or (start, end) for "order"
+    kind: str  # one of GUARD_KINDS
+    columns: tuple[str, ...]
     code: str  # the RAISE code, e.g. "numbering.duplicate"
+    values: tuple[Any, ...] = ()
+    lo: int | float | None = None
+    hi: int | float | None = None
+    lo_exclusive: bool = False
+    days: int | None = None
+    if_: Condition | None = None
+    then: Condition | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in GUARD_KINDS:
+            raise ValueError(f"unknown guard kind {self.kind!r}")
+        object.__setattr__(self, "columns", tuple(self.columns))
+        object.__setattr__(self, "values", tuple(self.values))
+        if self.kind == "implies":
+            if self.if_ is None or self.then is None:
+                raise ValueError("an implies guard needs if_ and then")
+            derived = tuple(dict.fromkeys(self.if_.columns() + self.then.columns()))
+            if self.columns not in ((), derived):
+                raise ValueError("an implies guard derives its columns from if_ / then")
+            object.__setattr__(self, "columns", derived)
+        elif len(self.columns) != _KIND_ARITY[self.kind]:
+            raise ValueError(f"a {self.kind} guard needs {_KIND_ARITY[self.kind]} column(s), got {self.columns!r}")
+        self._check_parameters()
+        if self.kind in ("exactly_one", "order", "max_days") and self.columns[0] == self.columns[1]:
+            raise ValueError(f"a {self.kind} guard needs two different columns, got {self.columns!r}")
+        if self.kind == "one_of":
+            if not self.values:
+                raise ValueError("a one_of guard needs values")
+            for v in self.values:
+                _check_scalar(v)
+            self._check_literals(self.columns[0], self.values)
+        if self.kind == "max_days" and (not isinstance(self.days, int) or isinstance(self.days, bool) or self.days < 0):
+            raise ValueError("a max_days guard needs days >= 0")
+        if self.kind == "range":
+            if self.lo is None and self.hi is None:
+                raise ValueError("a range guard needs lo or hi")
+            for b in (self.lo, self.hi):
+                if b is not None:
+                    _check_scalar(b)
+                    if isinstance(b, (str, bool)):
+                        raise ValueError("range bounds must be numbers")
+            if self.lo_exclusive and self.lo is None:
+                raise ValueError("lo_exclusive needs lo")
+            ctype = column_type(self.table, self.columns[0])
+            if ctype is not None and ctype not in (INT, FLOAT):
+                raise ValueError(f"a range guard needs a numeric column, {self.table}.{self.columns[0]} is {ctype}")
+            if self.lo is not None and self.hi is not None:
+                if self.lo > self.hi or (self.lo == self.hi and self.lo_exclusive):
+                    raise ValueError(
+                        f"a range guard needs lo <= hi (and a non-empty range), got {self.lo!r}..{self.hi!r}"
+                    )
+        if self.kind == "implies":
+            if self.code != f"state.implies:{self.name}":
+                raise ValueError(f"an implies guard's code must be 'state.implies:{self.name}', got {self.code!r}")
+            for cond in (self.if_, self.then):
+                if isinstance(cond, Eq):
+                    self._check_literals(cond.col, (cond.value,))
+                elif isinstance(cond, In):
+                    self._check_literals(cond.col, cond.values)
+
+    def _check_parameters(self) -> None:
+        """Reject parameters that the kind does not use (they would be silently ignored)."""
+        used = {
+            "one_of": {"values"},
+            "range": {"lo", "hi", "lo_exclusive"},
+            "max_days": {"days"},
+            "implies": {"if_", "then"},
+        }
+        defaults = {
+            "values": (),
+            "lo": None,
+            "hi": None,
+            "lo_exclusive": False,
+            "days": None,
+            "if_": None,
+            "then": None,
+        }
+        for param, default in defaults.items():
+            if param not in used.get(self.kind, set()) and getattr(self, param) != default:
+                raise ValueError(f"a {self.kind} guard does not take {param}")
+
+    def _check_literals(self, col: str, values: tuple[Any, ...]) -> None:
+        """A literal compared with a known column must have the column's logical type (no affinity surprises)."""
+        ctype = column_type(self.table, col)
+        if ctype is None or ctype == JSON:
+            return
+        for v in values:
+            if ctype in (ID, STR, TEXT):
+                ok = isinstance(v, str)
+            elif ctype == BOOL:
+                ok = isinstance(v, bool)
+            else:
+                ok = isinstance(v, (int, float)) and not isinstance(v, bool)
+            if not ok:
+                raise ValueError(f"{self.table}.{col} is {ctype}: literal {v!r} has the wrong type")
+
+    @property
+    def read_columns(self) -> tuple[str, ...]:
+        """All columns the guard reads (grandfathering clause and UPDATE OF list)."""
+        return self.columns
 
 
-GUARD_KINDS = ("unique", "date", "non_negative", "order")
+def one_of_from_literal(name: str, table: str, col: str, literal_type: Any, code: str = "vocab.unknown") -> Guard:
+    """A `one_of` guard whose values are the members of a `typing.Literal` (never typed twice)."""
+    if get_origin(literal_type) is not Literal:
+        raise ValueError(f"{literal_type!r} is not a Literal type")
+    return Guard(name, table, "one_of", (col,), code, values=get_args(literal_type))
+
 
 _DATE_COLUMNS: dict[str, tuple[str, ...]] = {
     "entries": ("date",),
