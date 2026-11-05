@@ -21,6 +21,9 @@ Review tier: **Light** (CI/tooling and tests only, no product code).
 2. `tests/web/e2e_random/test_monkey.py`: mark **only** `test_monkey_as_boss` with `@pytest.mark.monkey_walk`.
    `test_monkey_as_member` (role leak check) stays in PR CI. Replace the hard `assert watch.writes >= 3` with
    `warnings.warn(...)` (same message plus the seed) when `writes < 3`; the run continues to the backend checks.
+   Amendment: when env `PERMITA38_E2E_STRICT=1` the boss run additionally asserts `watch.writes >= 1` (message: "the
+   monkey never managed to save anything - the test is not exercising the UI"); `writes < 3` still warns in all cases.
+   `nightly-random.yaml` sets `PERMITA38_E2E_STRICT: "1"` in the env of the web-random-seeds pytest step.
 3. `.github/workflows/ci.yaml`:
    - web job: add `-m "not monkey_walk"` to the pytest call.
    - test matrix: on `pull_request` exclude `windows-latest` with Python 3.12 and 3.14 (keep 3.13, it runs the OCR

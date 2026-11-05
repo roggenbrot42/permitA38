@@ -8,6 +8,7 @@ asserts that no boss-only data is ever shown.
 Replay: PERMITA38_E2E_SEED=<seed> pytest tests/web/e2e_random/test_monkey.py
 """
 
+import os
 import random
 import re
 import warnings
@@ -571,6 +572,10 @@ def _run_monkey(seed, make_page, live_server, api, steps, member=False):
             f"{len(watch.http_4xx)} 4xx answers (validation/auth)"
         )
         if not member:
+            if os.environ.get("PERMITA38_E2E_STRICT") == "1":
+                assert watch.writes >= 1, (
+                    f"the monkey never managed to save anything - the test is not exercising the UI (seed {seed})"
+                )
             if watch.writes < 3:
                 warnings.warn(
                     f"the monkey never managed to save anything - the test is not exercising the UI (seed {seed})",

@@ -25,6 +25,8 @@ pytest tests/web/e2e_random/test_api_random.py -q          # no browser needed, 
   saves a screenshot to `/tmp/e2e_*.png`. Replay: `PERMITA38_E2E_SEED=1337 pytest tests/web/e2e_random/test_user_journeys_random.py -x -s`.
 * Length: `PERMITA38_E2E_ACTIONS` (journey, default 20), `PERMITA38_E2E_MONKEY_STEPS` (default 110),
   `PERMITA38_E2E_API_STEPS` (default 80). Run `PERMITA38_E2E_SEED=$RANDOM` in a loop to explore.
+  `PERMITA38_E2E_STRICT=1` (set in the nightly) makes the boss monkey fail when it saved nothing at all (`writes < 1`);
+  without it, fewer than 3 saves only emits a warning.
 
 ## Browser
 

@@ -49,6 +49,7 @@ jobs:
       - name: Fresh seeds for journeys, monkey and API sessions
         env:
           PERMITA38_E2E_SEED: ${{ github.event.inputs.seeds }}
+          PERMITA38_E2E_STRICT: "1"
         run: |
           if [ -z "$PERMITA38_E2E_SEED" ]; then
             PERMITA38_E2E_SEED="$(python -c 'import random; print(*[random.randrange(1, 10**6) for _ in range(6)])')"
