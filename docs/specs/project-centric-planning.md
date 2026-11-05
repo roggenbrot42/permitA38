@@ -523,6 +523,11 @@ def cover(items: Sequence[Item], bookings: Sequence[Booking], supply: Supply, ow
     # the team's unassigned hours of each day). Internal projects never appear here.
 ```
 
+Confirmed implementation details (WP3 review, 2026-11-05): `WeekShortfall.supply` is the item's covered share of that
+week (demand − shortfall); a shortfall or a weekly shortfall counts only when it rounds above 0 at 2 decimals; a total
+item whose window has no day after today (it ended undelivered) keeps its whole remaining as shortfall; suggestions
+show the item's whole window as `from`/`to` but sum only the days inside the supply range.
+
 Explanation texts (literal templates; `{h}` via `_fmt`, dates `DD.MM.YYYY`):
 * total: `"{promised} h promised − {booked} h booked = {remaining} h remaining. Until {end} {project} has {left} h of
   assigned time left after its weekly contracts. Short {shortfall} h."` where `left` is the leftover available to
