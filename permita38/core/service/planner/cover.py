@@ -216,7 +216,7 @@ def _explain(s: _State, project_name: str) -> str:
         if not s.short_weeks:
             return f"{head} covered every week."
         weeks = ", ".join(w.strftime("%d.%m.") for w in sorted(s.short_weeks))
-        return f"{head} short {_h(s.shortfall)} h in {len(s.short_weeks)} week(s) ({weeks})."
+        return f"{head} short {_h(s.shortfall)} h in {len(s.short_weeks)} {'week' if len(s.short_weeks) == 1 else 'weeks'} ({weeks})."
     promised, after = ("promised", "its weekly contracts") if it.kind == "contract" else ("offered", "its contracts")
     tail = f"Short {_h(s.shortfall)} h." if _pos(s.shortfall) else "Covered."
     return (

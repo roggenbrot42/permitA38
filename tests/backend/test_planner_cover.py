@@ -145,7 +145,7 @@ def test_weekly_shortfall_text_and_list():
         (D(2026, 11, 9), 5, 3, 2),
         (D(2026, 11, 16), 5, 3, 2),
     ]
-    assert w.explanation == "5 h per week from 09.11.2026 to 20.11.2026: short 4 h in 2 week(s) (09.11., 16.11.)."
+    assert w.explanation == "5 h per week from 09.11.2026 to 20.11.2026: short 4 h in 2 weeks (09.11., 16.11.)."
     assert v.status == "short"
 
 

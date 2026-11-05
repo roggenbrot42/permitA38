@@ -529,7 +529,7 @@ Explanation texts (literal templates; `{h}` via `_fmt`, dates `DD.MM.YYYY`):
   the item before it takes any; the last sentence is `"Covered."` without a shortfall. Offers say "offered" instead of
   "promised" and "after its contracts" instead of "after its weekly contracts". The project name of the scope
   without a project is `"the team's unassigned time"`.
-* weekly: `"{hours_per_week} h per week from {start} to {end}: short {shortfall} h in {n} week(s) ({weeks})."` with
+* weekly: `"{hours_per_week} h per week from {start} to {end}: short {shortfall} h in {n} week|weeks ({weeks})."` (singular for one week) with
   the Mondays as `DD.MM.`, or `"{hours_per_week} h per week from {start} to {end}: covered every week."`.
 
 ## Work packages (fresh Sonnet agents, one each; backend and web UI in parallel against the contract)
