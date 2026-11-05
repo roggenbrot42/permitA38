@@ -9,8 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .base import ID_RE, Repository
 from . import schema as _schema
+from .base import ID_RE, Repository
 from .schema import COLLECTIONS, INTERNAL_COLLECTIONS
 
 log = logging.getLogger("permita38.import")
