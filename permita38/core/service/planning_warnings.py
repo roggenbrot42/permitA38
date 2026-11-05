@@ -166,7 +166,7 @@ def project_warnings(project: dict, entries: list[dict], plans: list[dict], cust
     out: list[dict] = []
     s, e = calc.d(project.get("start")), calc.d(project.get("end"))
     if not s or not e:
-        if customer_linked and not project.get("personal"):
+        if customer_linked and project.get("kind", "customer") != "internal":
             out.append(
                 warning(
                     "project.no_dates",

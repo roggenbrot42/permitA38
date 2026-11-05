@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 from permita38.core import calc, documents
 from permita38.core.errors import ServiceError
-from permita38.core.money import hours_from_minutes, to_float
+from permita38.core.money import ZERO, dec, hours_from_minutes, to_float
 from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
@@ -71,16 +71,29 @@ class SalesService:
         o = self._get("offers", rid)
         o["status"] = "accepted"
         o = self.store.save("offers", o)
-        cust = self.store.get("customers", o["customer_id"]) if o.get("customer_id") else None
         plan = o.get("plan") or {}
         existing = self.store.get("projects", o["project_id"]) if o.get("project_id") else None
+        title = (o.get("title") or "").strip()
+        hours: dict = {}
+        if plan and plan.get("start") and plan.get("end"):
+            if plan.get("hours_per_week") is not None:
+                hours["hours_per_week"] = plan["hours_per_week"]
+            elif plan.get("total_hours") is not None:
+                hours["total_hours"] = plan["total_hours"]
+            else:
+                h_lines = [ln for ln in o.get("lines") or [] if ln.get("unit") == "h"]
+                total = sum((dec(ln.get("qty")) for ln in h_lines), ZERO)
+                if total <= 0:
+                    raise ServiceError(422, "The offer has no hours to plan")
+                hours["total_hours"] = to_float(total)
         if existing:  # the offer belongs to a project: widen its period to cover the plan (recorded)
             proj = self.store.save("projects", PlanningService.cover_plan(existing, plan, rid))
         else:
             proj = self.store.save(
                 "projects",
                 dict(
-                    name=o.get("title") or "Project for " + (cust or {}).get("name", ""),
+                    name=title or "Offer " + (o.get("number") or ""),
+                    kind="customer",
                     customer_id=o.get("customer_id"),
                     status="active",
                     color="#2563eb",
@@ -92,16 +105,16 @@ class SalesService:
         out = {"offer": o, "project": proj, "contract": None}
         if plan and plan.get("start") and plan.get("end"):
             c = dict(
-                title=o.get("title") or "Contract " + (o.get("number") or ""),
+                title=title or "Contract " + (o.get("number") or ""),
                 customer_id=o.get("customer_id"),
                 project_id=proj["id"],
                 start=plan["start"],
                 end=plan["end"],
                 offer_id=rid,
                 status="confirmed",
-                user_ids=plan.get("user_ids") or [],
+                **hours,
             )
-            for k in ("hours_per_week", "total_hours", "rate"):
+            for k in ("rate",):
                 if plan.get(k) is not None:
                     c[k] = plan[k]
             check_project_customer(self.store, c, None)
@@ -126,8 +139,8 @@ class SalesService:
         proj = ctx["projects"].get(project_id) if project_id else None
         if project_id and not proj:
             raise ServiceError(404, "Project not found")
-        if proj and proj.get("personal"):
-            raise ServiceError(422, "Personal projects cannot be billed")
+        if proj and proj.get("kind") == "internal":
+            raise ServiceError(422, "Internal projects cannot be billed")
         customer_id = customer_id or (proj or {}).get("customer_id")
         if not customer_id:
             raise ServiceError(422, "Choose a customer: an invoice goes to one customer only")
@@ -139,7 +152,7 @@ class SalesService:
             if e.get("invoice_id") or not e.get("billable", True) or not (d0 <= e["date"] <= d1):
                 continue
             p = ctx["projects"].get(e.get("project_id"))
-            if not p or p.get("personal"):
+            if not p or p.get("kind") == "internal":
                 continue
             if project_id and p["id"] != project_id:
                 continue
