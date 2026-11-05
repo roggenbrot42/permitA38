@@ -42,7 +42,11 @@ def _pdf(services, coll: str, rid: str) -> Response:
 
 @router.post("/invoices/from-time", response_model=DocumentResult, response_model_exclude_none=True)
 def invoice_from_time(body: FromTime, _: Annotated[dict, Needs("invoices", "write")], services: ServicesDep):
-    """Group unbilled, billable time by project/task/rate into a draft invoice."""
+    """Group unbilled, billable time of one customer by project/task/rate into a draft invoice.
+
+    The customer is ``customer_id`` or, when only ``project_id`` is given, that project's customer; one of them is
+    required. Personal projects are never billed.
+    """
     inv = services.sales.invoice_from_time(body.customer_id, body.project_id, body.date_from, body.date_to)
     return _doc(services, "invoices", inv)
 
