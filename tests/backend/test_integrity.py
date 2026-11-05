@@ -12,10 +12,8 @@ from permita38.cli.main import main
 from permita38.core.database import head_id
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service import integrity
-from permita38.core.service.integrity import IntegrityService
-
-from permita38.core.service import document_scans as ds_mod
 from permita38.core.service import receipts as receipts_mod
+from permita38.core.service.integrity import IntegrityService
 
 from .test_allocations_api import END as ALLOC_END
 from .test_allocations_api import START as ALLOC_START
@@ -24,8 +22,8 @@ from .test_document_scans_service import TODAY as SCAN_TODAY
 from .test_document_scans_service import Reader as DocReader
 from .test_migrations import legacy_db
 from .test_receipts_api import SINGLE
-from .test_receipts_api import Reader as ReceiptReader
 from .test_receipts_api import TODAY as RECEIPT_TODAY
+from .test_receipts_api import Reader as ReceiptReader
 from .test_trips_api import trip_body
 
 
