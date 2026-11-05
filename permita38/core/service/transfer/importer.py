@@ -22,6 +22,7 @@ from permita38.core.repository.importer import (
     RESTORE_SUSPENDED,
     drop_empty_number,
     duplicate_numbers,
+    restore_findings,
 )
 from permita38.core.repository.schema import BOOL, FLOAT, ID, INT, JSON, TABLES
 from permita38.core.rights import ROLES
@@ -747,7 +748,7 @@ def apply(path: Path, store: Repository, plan: Plan) -> dict:
             store.save_settings({**plan.settings, **keep})
             from permita38.core.service.integrity import IntegrityService
 
-            for f in IntegrityService(store).run(only=RESTORE_FINDING_CODES):
+            for f in restore_findings(IntegrityService(store).run(only=RESTORE_FINDING_CODES)):
                 plan.warn(f.code, f"{f.collection} {f.id}: {f.field}: {f.message}")
     except BaseException:
         store.discard_stage(stage)

@@ -1,10 +1,13 @@
 """Timer, dashboard and capacity planning."""
 
+import logging
 import time as _time
 
 from permita38.core import calc, rights
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
+
+log = logging.getLogger("permita38.time")
 
 
 class TimeService:
@@ -40,13 +43,25 @@ class TimeService:
         now = int(_time.time())
         minutes = max(1, round((now - cur["started"]) / 60))
         start = _time.localtime(cur["started"])
+        project_id, task_id = cur.get("project_id"), cur.get("task_id")
+        if project_id and not self.store.get("projects", project_id):
+            # a timer from before the reference guards may point at a project deleted back then: keep the time
+            task = self.store.get("tasks", task_id) if task_id else None
+            if task is None or task.get("project_id") == project_id:
+                task_id = None
+            log.info(
+                "stop_timer: project %s of the running timer of user %s is gone; booking without it",
+                project_id,
+                me["id"],
+            )
+            project_id = None
         entry = self.store.save(
             "entries",
             dict(
                 user_id=me["id"],
                 date=_time.strftime("%Y-%m-%d", start),
-                project_id=cur.get("project_id"),
-                task_id=cur.get("task_id"),
+                project_id=project_id,
+                task_id=task_id,
                 note=note if note is not None else cur.get("note", ""),
                 minutes=minutes,
                 start=_time.strftime("%H:%M", start),

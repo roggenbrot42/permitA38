@@ -464,6 +464,9 @@ class SQLRepository(Repository):
         try:
             return self._save(coll, obj, rid, now, touch)
         except Exception as e:
+            # NOTE: only sqlite3 is mapped. PostgreSQL (psycopg ForeignKeyViolation / RaiseException, SQLSTATE 23503 /
+            # P0001) and MariaDB (pymysql OperationalError 1644 for SIGNAL SQLSTATE '45000') report the guard message
+            # differently from sqlite3's IntegrityError and need their own mapping when those drivers are wired.
             # driver-neutral: sqlite3, psycopg and pymysql all name their class IntegrityError
             msg = str(e)
             if type(e).__name__ == "IntegrityError" and msg.startswith(_GUARD_PREFIX):
