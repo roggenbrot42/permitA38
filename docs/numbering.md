@@ -12,6 +12,12 @@ Invoice numbers must be unique and sequential (§ 14 UStG in Germany). Gaps have
 skips numbers on its own and does not let you delete a numbered invoice (cancel it instead; it keeps its number).
 Before you change a number mid-year, talk to your tax advisor.
 
+The database itself refuses a second invoice with the same number, and a second offer with the same number (the check
+is per table). The refusal is answered with HTTP 409 and the code `numbering.duplicate`. A restore from a data export
+or an `import-json` whose data holds a duplicate number is refused as a whole; nothing is written and the message lists
+the numbers. Numbers stored by an earlier version are kept as they are: `permita38 check-db` reports a duplicate as an
+error and the server logs it once at startup (numbers only). Finalizing further invoices is not blocked.
+
 ## Pattern
 
 A pattern is literal text plus tokens:

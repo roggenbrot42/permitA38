@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- **Database guards**: the database refuses duplicate invoice and offer numbers, malformed dates, negative amounts and
+  reversed periods (HTTP 409 with a code); old data is kept and reported by `permita38 check-db`.
 - **Stored data check**: `permita38 check-db` reports stored records that break the rules (types, references,
   numbering, money, state, files); read-only, see `docs/sanity-checks.md`.
 - **Receipt scan**: *Upload receipts* (or drag files onto Expenses) reads PDFs, photos and e-invoices (XRechnung, ZUGFeRD)
