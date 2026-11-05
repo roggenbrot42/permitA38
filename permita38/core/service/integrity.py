@@ -21,6 +21,8 @@ from permita38.core import validation as v
 from permita38.core.models import RECORD_MODELS
 from permita38.core.numbering import Pattern, PatternError, normalize_text, parse_pattern, period_key
 from permita38.core.repository import Repository
+from permita38.core.repository import schema as _schema
+from permita38.core.repository.dialect import ROW_LOCAL_KINDS
 from permita38.core.repository.schema import GUARDS, TABLES, fits
 from permita38.core.settings import effective_settings
 
@@ -502,6 +504,82 @@ def rule_range_negative(ctx: Ctx) -> Iterable[Finding]:
                     yield Finding("range.negative", ERROR, coll, rec.get("id"), col, "must not be negative")
 
 
+# ---- the row-local guard kinds (docs/specs/db-guards-v2.md): one generic rule over schema.GUARDS, read at run time
+_SQL_WHITESPACE = " \t\n\v\f\r"  # what the SQL `trim(x, ...)` of the dialect strips
+
+
+def _set(value: Any) -> bool:
+    """Not NULL, not '' and (for text) not only SQL whitespace: the dialect's `_is_set`."""
+    if value is None:
+        return False
+    return not (isinstance(value, str) and value.strip(_SQL_WHITESPACE) == "")
+
+
+def _julian_day(value: Any) -> int | None:
+    """Day number of a `YYYY-MM-DD` text as SQLite's `julianday` computes it (day 1-31 is normalised, so 2026-02-30 is
+    valid); None when the value is not such a text."""
+    if not isinstance(value, str) or not _GUARD_DATE.fullmatch(value):
+        return None
+    y, m, d = int(value[:4]), int(value[5:7]), int(value[8:])
+    if not (1 <= m <= 12 and 1 <= d <= 31):
+        return None
+    y -= m <= 2  # days from civil (proleptic Gregorian, any year)
+    era, yoe = divmod(y, 400)
+    doy = (153 * (m + (-3 if m > 2 else 9)) + 2) // 5 + d - 1
+    return era * 146097 + yoe * 365 + yoe // 4 - yoe // 100 + doy
+
+
+def _outside_range(g: Any, value: Any) -> bool:
+    if value is None or value == "":
+        return False
+    if isinstance(value, str):  # SQLite orders text after every number
+        return g.hi is not None
+    if not isinstance(value, (int, float)):
+        return False
+    return (g.lo is not None and (value <= g.lo if g.lo_exclusive else value < g.lo)) or (
+        g.hi is not None and value > g.hi
+    )
+
+
+def _holds(cond: Any, row: dict) -> bool:
+    # IsSet / IsBlank use the SQL whitespace set (schema's `holds` strips every Unicode space, e.g. NBSP, unlike trim())
+    if isinstance(cond, _schema.IsSet):
+        return _set(row.get(cond.col))
+    if isinstance(cond, _schema.IsBlank):
+        return not _set(row.get(cond.col))
+    return cond.holds(row)
+
+
+def guard_violated(g: Any, row: dict) -> bool:
+    """Whether a stored row breaks a row-local guard: the Python twin of `Dialect.guard_bad_sql` (same NULL, '' and
+    whitespace handling), built from the guard's own parameters and conditions."""
+    cols = g.columns
+    if g.kind == "one_of":
+        return _set(row.get(cols[0])) and row.get(cols[0]) not in g.values
+    if g.kind == "exactly_one":
+        return _set(row.get(cols[0])) == _set(row.get(cols[1]))
+    if g.kind == "required":
+        return not _set(row.get(cols[0]))
+    if g.kind == "max_days":
+        start, end = _julian_day(row.get(cols[0])), _julian_day(row.get(cols[1]))
+        return start is not None and end is not None and end - start > g.days
+    if g.kind == "range":
+        return _outside_range(g, row.get(cols[0]))
+    if g.kind == "implies":
+        return _holds(g.if_, row) and not _holds(g.then, row)
+    raise ValueError(f"unknown guard kind {g.kind!r}")
+
+
+def rule_guard_row_local(ctx: Ctx) -> Iterable[Finding]:
+    for g in _schema.GUARDS:  # read at run time: guards added later (or patched in tests) are covered
+        if g.kind not in ROW_LOCAL_KINDS:
+            continue
+        field_name = ",".join(g.read_columns)
+        for rec in ctx.rows(g.table):
+            if guard_violated(g, rec):
+                yield Finding(g.code, ERROR, g.table, rec.get("id"), field_name, f"violates the {g.kind} rule")
+
+
 def rule_state_no_active_boss(ctx: Ctx) -> Iterable[Finding]:
     if not any(u.get("role") == "boss" and u.get("active") is not False for u in ctx.rows("users")):
         yield Finding("state.no_active_boss", ERROR, "users", None, "role", "no active user with the role boss")
@@ -596,6 +674,7 @@ RULES: list[Callable[[Ctx], Iterable[Finding]]] = [
     rule_state_period_reversed,
     rule_format_date,
     rule_range_negative,
+    rule_guard_row_local,
     rule_state_no_active_boss,
     rule_state_receipt_booked,
     rule_state_document_scan,
