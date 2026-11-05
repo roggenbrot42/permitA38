@@ -3,7 +3,7 @@ other devices survive a round-trip through this version."""
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AfterValidator,
@@ -51,7 +51,7 @@ class Customer(Record):
 class Project(Record):
     name: str
     customer_id: str | None = None
-    personal: bool = False
+    kind: str = "customer"
     rate: float | None = None
     budget_hours: float | None = None
     status: str = "active"
@@ -388,9 +388,9 @@ class CustomerIn(v.StrictRecord):
 class ProjectIn(v.StrictRecord):
     name: v.Name
     customer_id: v.OptId = None
-    personal: bool = False
+    kind: Literal["customer", "internal"] | None = None
     rate: v.Rate | None = None
-    budget_hours: v.TotalHours | None = None
+    budget_hours: v.PositiveTotalHours | None = None
     status: Literal["active", "paused", "done", "archived"] = "active"
     color: v.OptColor = None
     notes: v.Note | None = None
@@ -399,14 +399,27 @@ class ProjectIn(v.StrictRecord):
     start: v.OptDate = None
     end: v.OptDate = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _no_personal(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "personal" in data:
+            raise ValueError("personal was removed; use kind (customer or internal)")
+        return data
+
     @model_validator(mode="after")
     def _period(self):
         v.check_period(self.start, self.end, "project end")
+        if self.kind is None:
+            self.kind = "customer" if self.customer_id else "internal"
+        elif self.kind == "customer" and not self.customer_id:
+            raise ValueError("a customer project needs a customer_id")
+        elif self.kind == "internal" and self.customer_id:
+            raise ValueError("an internal project cannot have a customer_id")
         return self
 
 
 class TaskIn(v.StrictRecord):
-    project_id: v.Id
+    project_id: v.ProjectId
     name: v.Name
     rate: v.Rate | None = None
 
@@ -415,7 +428,7 @@ class EntryIn(v.StrictRecord):
     user_id: v.OptId = None
     date: v.ISODate
     minutes: v.Minutes
-    project_id: v.OptId = None
+    project_id: v.OptProjectId = None
     task_id: v.OptId = None
     note: v.Note | None = None
     start: v.OptTime = None
@@ -428,11 +441,11 @@ class EntryIn(v.StrictRecord):
 class ContractIn(v.StrictRecord):
     title: v.Name
     customer_id: v.OptId = None
-    project_id: v.OptId = None
+    project_id: v.ProjectId
     start: v.ISODate
     end: v.ISODate
-    hours_per_week: v.Hours | None = None
-    total_hours: v.TotalHours | None = None
+    hours_per_week: v.ContractHours | None = None
+    total_hours: v.PositiveTotalHours | None = None
     rate: v.Rate | None = None
     status: Literal["confirmed", "done"] = "confirmed"
     user_ids: v.IdList = []
@@ -441,6 +454,8 @@ class ContractIn(v.StrictRecord):
     @model_validator(mode="after")
     def _period(self):
         v.check_period(self.start, self.end)
+        if (self.hours_per_week is None) == (self.total_hours is None):
+            raise ValueError("give exactly one of hours_per_week and total_hours")
         return self
 
 
@@ -484,7 +499,7 @@ class ExpenseIn(v.StrictRecord):
     vendor: v.Short | None = None
     description: v.Desc | None = None
     category: v.Short | None = None
-    project_id: v.OptId = None
+    project_id: v.OptProjectId = None
     deductible: v.Percent = 100
     vat_deductible: v.Percent | None = None
     attachment: v.OptAttachment = None
@@ -606,8 +621,8 @@ class PlanIn(v.CheckedBody):
     model_config = ConfigDict(extra="allow")
     start: v.OptDate = None
     end: v.OptDate = None
-    hours_per_week: v.Hours | None = None
-    total_hours: v.TotalHours | None = None
+    hours_per_week: v.ContractHours | None = None
+    total_hours: v.PositiveTotalHours | None = None
     user_ids: v.IdList = []
     rate: v.Rate | None = None
     win_probability: v.Percent | None = None
@@ -615,6 +630,8 @@ class PlanIn(v.CheckedBody):
     @model_validator(mode="after")
     def _period(self):
         v.check_period(self.start, self.end)
+        if self.hours_per_week is not None and self.total_hours is not None:
+            raise ValueError("give at most one of hours_per_week and total_hours")
         return self
 
 
@@ -623,7 +640,7 @@ class DocumentIn(v.StrictRecord):
 
     number: Annotated[str, StringConstraints(max_length=50)] | None = None
     customer_id: v.OptId = None
-    project_id: v.OptId = None
+    project_id: v.OptProjectId = None
     status: DOC_STATUS = "draft"
     date: v.OptDate = None
     due_date: v.OptDate = None
@@ -947,12 +964,14 @@ class CommitmentChange(v.CheckedBody):
     id: v.Id
     start: v.OptDate = None
     end: v.OptDate = None
-    hours_per_week: v.Hours | None = None
-    total_hours: v.TotalHours | None = None
+    hours_per_week: v.ContractHours | None = None
+    total_hours: v.PositiveTotalHours | None = None
 
     @model_validator(mode="after")
     def _period(self):
         v.check_period(self.start, self.end)
+        if self.hours_per_week is not None and self.total_hours is not None:
+            raise ValueError("give at most one of hours_per_week and total_hours")
         return self
 
 
@@ -1067,7 +1086,7 @@ class Allocation(BaseModel):
 class TimerStartIn(v.CheckedBody):
     """Start the running timer of the current user (replaces a running one)."""
 
-    project_id: v.OptId = None
+    project_id: v.OptProjectId = None
     task_id: v.OptId = None
     note: v.Note = ""
 
@@ -1312,7 +1331,7 @@ class TripIn(v.StrictRecord):
     title: v.Short | None = None
     purpose: v.Name
     customer_id: v.OptId = None
-    project_id: v.OptId = None
+    project_id: v.OptProjectId = None
     origin: v.Short | None = None  # start place of the trip (docs/specs/business-trips-wizard.md, section 2)
     destination: v.Short | None = None
     destination_country: Annotated[str, StringConstraints(pattern=r"^[A-Z]{2}$")] | None = None
@@ -1570,13 +1589,11 @@ class IncomingPlanIn(v.CheckedBody):
     start: v.ISODate
     end: v.ISODate
     hours_per_week: v.AllocHours | None = None
-    total_hours: Annotated[float, Field(gt=0, le=100_000, allow_inf_nan=False)] | None = None
+    total_hours: v.PositiveTotalHours | None = None
 
     @model_validator(mode="after")
     def _rules(self):
         _check_alloc_period(self.start, self.end)
-        if (self.hours_per_week is None) == (self.total_hours is None):
-            raise ValueError("give exactly one of hours_per_week and total_hours")
         return self
 
 
@@ -1590,7 +1607,7 @@ class IncomingOfferIn(v.StrictRecord):
     vat_rate: Literal[0, 5, 7, 16, 19] | None = None
     vat_mode: VatMode | None = None
     plan: IncomingPlanIn | None = None
-    project_id: v.OptId = None
+    project_id: v.OptProjectId = None
     contract_id: v.OptId = None
     attachment: v.OptAttachment = None
     decision_note: v.Note | None = None
@@ -1641,7 +1658,7 @@ class AcceptIn(v.CheckedBody):
     model_config = ConfigDict(extra="forbid")
     confirm_expired: bool = False
     confirm_warnings: Annotated[list[Annotated[str, StringConstraints(max_length=80)]], Field(max_length=20)] = []
-    project_id: v.OptId = None
+    project_id: v.OptProjectId = None
     contract_id: v.OptId = None
     decision_note: v.Note | None = None
 

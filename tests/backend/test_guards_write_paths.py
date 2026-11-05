@@ -104,12 +104,15 @@ def test_offer_accept_with_a_one_day_plan_and_to_invoice(boss_client):
 
 # ------------------------------------------------------------------ periods and rates
 def test_project_contract_absence_with_start_equal_end(boss_client, me):
-    p = ok(
-        boss_client.post("/api/projects", json={"name": "P", "start": DAY, "end": DAY, "rate": 0, "budget_hours": 0})
-    )
+    p = ok(boss_client.post("/api/projects", json={"name": "P", "start": DAY, "end": DAY, "rate": 0}))
     assert p["start"] == p["end"] == DAY
-    body = {"title": "C", "start": DAY, "end": DAY, "hours_per_week": 0, "total_hours": 0, "rate": 0}
-    k = ok(boss_client.post("/api/contracts", json=body))
+    # zero hours and "both hour fields" are refused by the API before the database guards
+    assert boss_client.post("/api/projects", json={"name": "P0", "budget_hours": 0}).status_code == 422
+    body = {"title": "C", "project_id": p["id"], "start": DAY, "end": DAY, "rate": 0}
+    assert boss_client.post("/api/contracts", json={**body, "hours_per_week": 0}).status_code == 422
+    assert boss_client.post("/api/contracts", json={**body, "total_hours": 0}).status_code == 422
+    assert boss_client.post("/api/contracts", json={**body, "hours_per_week": 1, "total_hours": 1}).status_code == 422
+    k = ok(boss_client.post("/api/contracts", json={**body, "total_hours": 0.0001}))
     assert k["start"] == k["end"] == DAY
     a = ok(boss_client.post("/api/absences", json={"user_id": me["id"], "start": DAY, "end": DAY}))
     assert a["start"] == a["end"] == DAY

@@ -11283,8 +11283,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 168.0,
-                "minimum": 0.0
+                "maximum": 10000.0,
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -11297,7 +11297,7 @@
               {
                 "type": "number",
                 "maximum": 100000.0,
-                "minimum": 0.0
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -11750,15 +11750,8 @@
             "title": "Customer Id"
           },
           "project_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^[0-9a-z]{6,32}$"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "pattern": "^[0-9a-z]{6,32}$",
             "title": "Project Id"
           },
           "start": {
@@ -11773,8 +11766,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 168.0,
-                "minimum": 0.0
+                "maximum": 10000.0,
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -11787,7 +11780,7 @@
               {
                 "type": "number",
                 "maximum": 100000.0,
-                "minimum": 0.0
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -11844,6 +11837,7 @@
         "type": "object",
         "required": [
           "title",
+          "project_id",
           "start",
           "end"
         ],
@@ -16105,8 +16099,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 168.0,
-                "minimum": 0.0
+                "maximum": 10000.0,
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -16119,7 +16113,7 @@
               {
                 "type": "number",
                 "maximum": 100000.0,
-                "minimum": 0.0
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -16218,10 +16212,10 @@
             ],
             "title": "Customer Id"
           },
-          "personal": {
-            "type": "boolean",
-            "title": "Personal",
-            "default": false
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "customer"
           },
           "rate": {
             "anyOf": [
@@ -16356,10 +16350,20 @@
             ],
             "title": "Customer Id"
           },
-          "personal": {
-            "type": "boolean",
-            "title": "Personal",
-            "default": false
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "customer",
+                  "internal"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
           },
           "rate": {
             "anyOf": [
@@ -16379,7 +16383,7 @@
               {
                 "type": "number",
                 "maximum": 100000.0,
-                "minimum": 0.0
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -21951,10 +21955,10 @@
             ],
             "title": "Customer Id"
           },
-          "personal": {
-            "type": "boolean",
-            "title": "Personal",
-            "default": false
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "customer"
           },
           "rate": {
             "anyOf": [

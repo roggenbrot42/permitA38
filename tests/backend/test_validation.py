@@ -85,7 +85,7 @@ def test_entry_minutes(boss_client, minutes):
         ("projects", {"name": "x", "status": "weird"}),
         ("projects", {"name": "x", "color": "red"}),
         ("projects", {"name": "x", "budget_hours": -1}),
-        ("contracts", {"title": "x", "start": "2026-01-01", "end": "2026-02-01", "hours_per_week": 169}),
+        ("contracts", {"title": "x", "start": "2026-01-01", "end": "2026-02-01", "hours_per_week": 10000.01}),
         ("absences", {"start": "2026-01-01", "kind": "nap"}),
         ("invoices", {"status": "teapot"}),
         ("invoices", {"lines": [{"qty": 1e9, "price": 1}]}),
@@ -346,3 +346,124 @@ def test_damaged_stored_records_do_not_break_the_odd_users_dashboard(app, boss_c
     _damage(app, unguarded)
     odd = next(u for u in boss_client.get("/api/users").json() if u["username"] == "odd")
     assert boss_client.get("/api/dashboard", params={"user_id": odd["id"]}).status_code == 200
+
+
+# ------------------------------------------------------------------ project-centric planning: hours, kind, unassigned
+_CONTRACT = {"title": "x", "start": "2026-01-01", "end": "2026-02-01"}
+
+
+def _contract_body(c, **extra):
+    return {**_CONTRACT, "project_id": _ids(c)[1], **extra}
+
+
+@pytest.mark.parametrize(
+    "field,value", [("hours_per_week", 0), ("hours_per_week", 10000.01), ("total_hours", 0), ("total_hours", 100000.01)]
+)
+def test_contract_hour_bounds_refused(boss_client, field, value):
+    _422(boss_client.post("/api/contracts", json=_contract_body(boss_client, **{field: value})))
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [("hours_per_week", 0.0001), ("hours_per_week", 10000), ("total_hours", 0.0001), ("total_hours", 100000)],
+)
+def test_contract_hour_bounds_accepted(boss_client, field, value):
+    r = boss_client.post("/api/contracts", json=_contract_body(boss_client, **{field: value}))
+    assert r.status_code == 200, r.text
+
+
+def test_contract_needs_exactly_one_hour_field_and_a_project(boss_client):
+    _422(boss_client.post("/api/contracts", json=_contract_body(boss_client, hours_per_week=5, total_hours=50)))
+    _422(boss_client.post("/api/contracts", json=_contract_body(boss_client)))
+    pid = _ids(boss_client)[1]
+    _422(boss_client.post("/api/contracts", json={**_CONTRACT, "hours_per_week": 5}))
+    _422(boss_client.post("/api/contracts", json={**_CONTRACT, "project_id": "", "hours_per_week": 5}))
+    _422(boss_client.post("/api/contracts", json={**_CONTRACT, "project_id": "unassigned", "hours_per_week": 5}))
+    assert (
+        boss_client.post(
+            "/api/contracts", json={**_CONTRACT, "project_id": pid, "hours_per_week": 5, "user_ids": []}
+        ).status_code
+        == 200
+    )
+
+
+@pytest.mark.parametrize(
+    "plan,code",
+    [
+        ({"hours_per_week": 0}, 422),
+        ({"hours_per_week": 10000.01}, 422),
+        ({"total_hours": 0}, 422),
+        ({"total_hours": 100000.01}, 422),
+        ({"hours_per_week": 5, "total_hours": 50}, 422),
+        ({"hours_per_week": 10000}, 200),
+        ({"total_hours": 100000}, 200),
+        ({"total_hours": 0.0001}, 200),
+        ({}, 200),
+    ],
+)
+def test_offer_plan_hours(boss_client, plan, code):
+    r = boss_client.post("/api/offers", json={"plan": {"start": "2026-01-01", "end": "2026-02-01", **plan}})
+    assert r.status_code == code, r.text
+
+
+def test_commitment_change_hours():
+    from pydantic import ValidationError
+
+    from permita38.core.models import CommitmentChange
+
+    base = {"kind": "contract", "id": "abcdef123456"}
+    for bad in (
+        {"hours_per_week": 0},
+        {"total_hours": 0},
+        {"hours_per_week": 10000.01},
+        {"total_hours": 100000.01},
+        {"hours_per_week": 1, "total_hours": 1},
+    ):
+        with pytest.raises(ValidationError):
+            CommitmentChange(**base, **bad)
+    for good in ({}, {"hours_per_week": 10000}, {"total_hours": 100000}, {"total_hours": 0.0001}):
+        CommitmentChange(**base, **good)
+
+
+@pytest.mark.parametrize("hours,code", [(0, 422), (0.0001, 200), (100000, 200), (100000.01, 422)])
+def test_project_budget_hours(boss_client, hours, code):
+    assert boss_client.post("/api/projects", json={"name": "P", "budget_hours": hours}).status_code == code
+
+
+@pytest.mark.parametrize("flag", [True, False])
+def test_project_personal_is_refused(boss_client, flag):
+    _422(boss_client.post("/api/projects", json={"name": "P", "personal": flag}))
+
+
+def test_project_kind_rules(boss_client):
+    cid = boss_client.post("/api/customers", json={"name": "ACME GmbH"}).json()["id"]
+    post = lambda **b: boss_client.post("/api/projects", json={"name": "P", **b})  # noqa: E731
+    assert post().json()["kind"] == "internal"
+    assert post(customer_id=cid).json()["kind"] == "customer"
+    assert post(kind="customer", customer_id=cid).status_code == 200
+    assert post(kind="internal").status_code == 200
+    _422(post(kind="customer"))
+    _422(post(kind="internal", customer_id=cid))
+    _422(post(kind="weird"))
+
+
+def test_incoming_plan_hours_are_optional(boss_client):
+    from permita38.core.models import IncomingPlanIn
+
+    IncomingPlanIn(start="2026-01-01", end="2026-02-01")
+    IncomingPlanIn(start="2026-01-01", end="2026-02-01", hours_per_week=5, total_hours=50)
+
+
+def test_unassigned_project_id_is_refused_everywhere(boss_client):
+    c = boss_client
+    u = "unassigned"
+    day = {"date": "2026-01-05"}
+    for path, body in (
+        ("contracts", {**_CONTRACT, "project_id": u, "hours_per_week": 5}),
+        ("offers", {"project_id": u}),
+        ("invoices", {"project_id": u}),
+        ("tasks", {"project_id": u, "name": "t"}),
+        ("entries", {**day, "minutes": 60, "project_id": u}),
+        ("expenses", {**day, "net": 1, "project_id": u}),
+    ):
+        _422(c.post(f"/api/{path}", json=body))
