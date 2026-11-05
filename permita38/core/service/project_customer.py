@@ -28,8 +28,16 @@ def check_project_customer(store, data: dict, old: dict | None) -> None:
         raise ServiceError(422, "Project belongs to another customer")
 
 
+def project_kind(project: dict) -> str:
+    """``customer`` or ``internal``. Rows stored before ``kind`` existed: customer when they have a customer_id."""
+    kind = project.get("kind")
+    if kind in ("customer", "internal"):
+        return kind
+    return "customer" if project.get("customer_id") else "internal"
+
+
 def check_billable_project(store, data: dict, old: dict | None) -> None:
-    """Refuse a personal project on an offer or invoice: personal projects are never billed.
+    """Refuse an internal project on an offer or invoice: internal projects are never billed.
 
     Same convention as :func:`check_project_customer`: a field left out of the write keeps its stored value, and an
     unchanged project (legacy data) is not checked again, so such a document can still be edited.
@@ -38,5 +46,5 @@ def check_billable_project(store, data: dict, old: dict | None) -> None:
     if not pid or (old is not None and old.get("project_id") == pid):
         return
     project = store.get("projects", pid)
-    if project and project.get("personal"):
-        raise ServiceError(422, "Personal projects cannot be billed")
+    if project and project_kind(project) == "internal":
+        raise ServiceError(422, "Internal projects cannot be billed")

@@ -11,7 +11,12 @@ from permita38.core.settings import effective_settings
 from permita38.core.validation import ALLOWED_VAT_RATES, MAX_MONEY
 
 from .auth import public_user
-from .project_customer import PROJECT_CUSTOMER_COLLECTIONS, check_billable_project, check_project_customer
+from .project_customer import (
+    PROJECT_CUSTOMER_COLLECTIONS,
+    check_billable_project,
+    check_project_customer,
+    project_kind,
+)
 
 # collections where a LIMITED scope means "own records only" (write) / "own records or assigned projects" (read)
 OWN_COLLECTIONS = {"entries", "absences"}
@@ -136,6 +141,7 @@ class RecordService:
             # appear in nobody's timesheet, Today list or weekly hours (an update without user_id keeps the owner)
             data["user_id"] = (old or {}).get("user_id") or me["id"]
         if coll in PROJECT_CUSTOMER_COLLECTIONS:
+            self._check_not_internal(data, old)
             check_project_customer(self.store, data, old)
         if coll in ("offers", "invoices"):
             check_billable_project(self.store, data, old)
@@ -172,8 +178,10 @@ class RecordService:
                 data.pop("lines", None)
                 self._check_vat_rates(data.get("vat_rate"))
         elif coll == "contracts":
-            self._check_contract_users(data)
-        elif coll == "projects":  # the extension history is server-managed: never taken from the request
+            data.pop("user_ids", None)  # contracts are not assigned to people; the project carries the team
+        elif coll == "projects":
+            data.pop("personal", None)  # replaced by ``kind``
+            # the extension history is server-managed: never taken from the request
             data.pop("extensions", None)
             if old and old.get("extensions") is not None:
                 data["extensions"] = old["extensions"]
@@ -190,15 +198,14 @@ class RecordService:
         saved = self.store.save(coll, data)
         return _expense_view(saved) if coll == "expenses" else saved
 
-    def _check_contract_users(self, data: dict) -> None:
-        """``user_ids`` of a contract: people, or active subcontractors (person-capacity). An id of another supplier
-        kind, or of an inactive one, is refused; any other unknown id keeps today's behaviour (the planner ignores it)."""
-        for uid in data.get("user_ids") or []:
-            supplier = self.store.get("suppliers", uid) if isinstance(uid, str) else None
-            if supplier is None:
-                continue
-            if supplier.get("kind") != "person-capacity" or not supplier.get("active", True):
-                raise ServiceError(422, "A contract can only list people or active subcontractors")
+    def _check_not_internal(self, data: dict, old: dict | None) -> None:
+        """Offers, contracts and invoices never sit on an internal project (an unchanged legacy link stays editable)."""
+        pid = data["project_id"] if "project_id" in data else (old or {}).get("project_id")
+        if not pid or (old is not None and old.get("project_id") == pid):
+            return
+        project = self.store.get("projects", pid)
+        if project and project_kind(project) == "internal":
+            raise ServiceError(409, "Internal projects cannot have offers, contracts or invoices")
 
     def _link_supplier(self, data: dict, keep_vendor: bool = False) -> None:
         """Expense links (docs/contracts/subcontractors.md): the supplier must exist and gives ``vendor`` (a snapshot
@@ -279,6 +286,8 @@ class RecordService:
             raise ServiceError(
                 409, "A numbered invoice cannot be deleted; cancel it instead (keeps the numbers gapless)"
             )
+        if coll == "projects" and rid == "internaladmin":
+            raise ServiceError(409, "The Administration project cannot be deleted; archive it instead")
         if coll == "projects" and any(a.get("project_id") == rid for a in self.store.list("allocations")):
             raise ServiceError(409, "This project has allocations; remove them first")
         sc = _scope(me, coll, "write")
@@ -309,7 +318,7 @@ class RecordService:
 
 
 _ENTRY_BILLING_FIELDS = ("rate", "invoice_id")
-_MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
+_MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "kind", "member_ids")
 
 
 def _scope(me: dict, coll: str, op: rights.Op) -> Scope:
