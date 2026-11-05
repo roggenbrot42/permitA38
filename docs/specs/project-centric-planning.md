@@ -66,6 +66,9 @@ S1. **One spreading function** `spread(owner, assignment, calendar) -> {date: ho
     public holidays minus its unavailable windows.
     * `hours_per_week`: per available day of an ISO week `hours_per_week / available days of that week`. A holiday or
       a day off moves the hours to the other days of that week; a week with no available day gives 0 (warning S4).
+      The divisor is the available days of the **whole** ISO week; only days inside the assignment period get hours.
+      So a week the assignment only partly covers gets its share (E5c), and a holiday still moves hours inside the
+      week. This also applies to subcontractors (Open decision D14).
     * `total_hours`: the hours **still open** (`total_hours − hours the owner booked on the project inside the period`,
       at least 0; subcontractors normally book nothing) spread evenly over the owner's available days from the day
       after `today` to the end. A total assignment is a budget that does not expire because a week passed.
@@ -131,6 +134,9 @@ M2. **Revenue** (recommended, Open decision D1): no weekly revenue and no "assum
 * The column `personal` is **removed** (recommended, Open decision D9). The response keeps `personal` (=
   `kind == "internal"`) for one release, marked deprecated in the OpenAPI description; `ProjectIn` accepts
   `personal` for one release and maps `true` → `internal`; giving both with a contradiction is a 422.
+* A customer project needs a `customer_id` when it is created or changed (`ProjectIn`, 422). The database does not
+  require it: legacy customer projects without a customer but with documents stay `customer` (migration rule), and
+  deleting a customer does not touch `projects.customer_id` today (dangling ids are the subject of D7).
 * A default internal project **"Administration"** with the fixed id `internal-administration` is inserted by the
   migration when no row with that id exists (`INSERT ... WHERE NOT EXISTS`, idempotent). It can be renamed and
   archived, not deleted (409).
@@ -189,10 +195,10 @@ PostgreSQL/MariaDB: the same rejects and repairs, then `ALTER TABLE ... ADD CONS
 
 | Table | Constraint | Existing rows that violate it |
 |---|---|---|
-| projects | `kind` NOT NULL, `one_of(kind, customer, internal)` | repaired: `customer` when `customer_id` is set, else `internal` (a `personal` project with a customer becomes `customer`) |
+| projects | `kind` NOT NULL, `one_of(kind, customer, internal)` | repaired: `customer` when `customer_id` is set **or** an offer, contract or invoice references the project; else `internal` (a `personal` project with a customer becomes `customer`) |
 | projects | `non_blank(name)` | repaired to `(unnamed project)` |
 | projects | `status` NOT NULL, `one_of(status, active, paused, done, archived)` | NULL → `active`; any other value → rejects |
-| projects | `implies(kind = internal, customer_id IS NULL)`, `implies(kind = customer, customer_id IS NOT NULL)` | follows from the kind repair |
+| projects | `implies(kind = internal, customer_id IS NULL)` | follows from the kind repair |
 | projects | `iso_date(start)`, `iso_date(end)`, `not_before(end, start)` | rejects |
 | projects | `range(budget_hours, 0, 100000, lo_open)`, `range(rate, 0, <v.Rate max>)` | rejects |
 | allocations | `exactly_one(user_id, supplier_id)` (exists), `project_id` NOT NULL | rejects |
@@ -219,7 +225,8 @@ the shape `{code, severity, field, message, details, confirmable}` and **every m
 ### `GET /api/plan` (replaces `GET /api/forecast` and `GET /api/plan/day-table`)
 
 Query: `weeks` (1–52, default 12), `project_id` (a project id or `unassigned`; filters `projects`), `user_id`
-(filters `weeks` and `people`). Area `planning`, read.
+(filters `weeks` and `people`). Area `planning`, read. `people` and `projects[].supply` cover the same range as
+`weeks` (from the Monday of the current week to the last Sunday). The example is E1 with `weeks=6`.
 
 ```json
 {
@@ -326,6 +333,8 @@ Removed: `capacity.gap`, `capacity.over`, `capacity.offer_over`, `offer.project_
 * `core/service/team_timeline.py`: shows a person's **assignments** instead of contracts by `user_ids`.
 * `core/service/transfer/importer.py` (`contracts.user_ids` mapping stays for old files) and `transfer/upgrades.py`.
 * `core/calc.py`: `forecast()` delegates to the new view; `Capacity` stays the holiday/absence source.
+* Rights: `core/rights.py` (subcontractor allocation PUT/DELETE under `procurement` write, employee rows under
+  `planning` write), the `EXPECTED` table of `tests/backend/test_rbac.py`, and the generated `docs/roles.md`.
 * `api/routers/planning.py` (`SuggestStartIn` without `user_ids`, new `/plan`), `api/routers/allocations.py`.
 * `web/planner.js`, `web/allocations.js`, `web/procurement.js`, `web/timeline.js`, `web/app.js` (project form `kind`,
   forecast tab), `web/app2.js` (offer plan).
@@ -348,9 +357,10 @@ Calendar: state BY. Between 09.11.2026 and 18.12.2026 there is no public holiday
 | E1 | Today Sun 08.11.2026. Ada 40 h. Internal "Administration": Ada 30 h/week 09.11.–18.12. Customer project Orchard: Ada 4 h/week 09.11.–18.12.; subcontractor Sam total 24 h 09.11.–04.12., rate 90.00. Contracts on Orchard: K1 4 h/week 09.11.–18.12., rate 120.00; K2 total 50 h 09.11.–04.12., rate 120.00. Nothing booked | Supply Orchard: Ada 0.8/day; Sam 24 h / 20 days = 1.2/day until 04.12. Weeks 09.11.–04.12.: supply 4 + 6 = 10 per week, K1 takes 4, leftover 6 per week, 24 in total. Weeks 07.12. and 14.12.: supply 4 = K1 4, leftover 0. K2 takes 24 of 50 | K1 shortfall 0. K2 remaining 50, covered 24, shortfall 26, `contract.shortfall`. Orchard supply employees 24, subcontractors 24, total 48; remaining_contracts 74; shortfall_contracts 26; status `short`. Ada unassigned 6 h/week, suggestion for K2: Ada 24 h 09.11.–04.12. Week of 09.11.: capacity 40, customer 4, internal 30, unassigned 6, billable share 10.0, subcontractors 6. Planned subcontractor cost 2,160.00; contract value 24 × 120 + 50 × 120 = 8,880.00; margin 6,720.00 |
 | E2 | E1, but today Sun 15.11.2026, and Ada booked 10 h on Orchard between 09.11. and 13.11. | Attribution week 09.11.: K1 takes 4, K2 gets 6, so K2 remaining 44. Sam's 24 h are still open (he booked nothing): 24 / 15 days (16.11.–04.12.) = 1.6/day. Weeks 16.11., 23.11., 30.11.: supply 4 + 8 = 12, K1 4, leftover 8, 24 in total | K2 remaining 44, covered 24, shortfall 20. Check: remaining demand K1 5 × 4 = 20 plus K2 44 = 64; supply Ada 20 + Sam 24 = 44; 64 − 44 = 20 |
 | E3 | Today Sun 08.11.2026. Ben 40 h, assigned to Pine 10 h/week 09.11.–04.12. (2/day). Contracts T1 total 25 h 09.11.–27.11., T2 total 20 h 09.11.–04.12. | Earliest end first: T1 window has 15 days × 2 = 30 h, takes 25. Leftover 5 h until 27.11., plus 10 h in the week of 30.11. T2 takes 15 | T1 shortfall 0; T2 covered 15, shortfall 5. Check: 45 − 40 = 5 |
-| E4 | Week of 09.11.2026. Cleo 20 h (4/day). Assignments: Administration 12 h/week, customer project Elm 10 h/week. Contract on Elm 10 h/week | Per day 2.4 + 2.0 = 4.4 > 4, scale 4 / 4.4 = 10/11: Administration 2.1818/day = 10.91 h, Elm 1.8182/day = 9.09 h | `assignment.over_capacity`: "Week of 09.11.2026: Cleo is assigned 22 h but has 20 h of capacity; her assignments of that week are scaled to 90.9 % (Administration 10.91 h, Elm 9.09 h)." Elm contract weekly shortfall 0.91 (10 − 9.09). Week row: capacity 20, internal 10.91, customer 9.09, unassigned 0, over-assigned 2 |
+| E4 | Week of 09.11.2026. Cleo 20 h (4/day). Assignments: Administration 12 h/week, customer project Elm 10 h/week. Contract on Elm 10 h/week | Per day 2.4 + 2.0 = 4.4 > 4, scale 4 / 4.4 = 10/11: Administration 2.1818/day = 10.91 h, Elm 1.8182/day = 9.09 h | `assignment.over_capacity`: "Week of 09.11.2026: Cleo is assigned 22 h but has 20 h of capacity; the assignments of that week are scaled to 90.9 % (Administration 10.91 h, Elm 9.09 h)." Elm contract weekly shortfall 0.91 (10 − 9.09). Week row: capacity 20, internal 10.91, customer 9.09, unassigned 0, over-assigned 2 |
 | E5 | Week of 21.12.2026. Dan 40 h, vacation Wed 23.12. Assigned to Ash 20 h/week. Contract on Ash 20 h/week | Available days Mon 21., Tue 22., Thu 24. (25.12. holiday): 20 / 3 = 6.67/day ≤ 8, no scaling, supply 20 | Ash weekly shortfall 0. Week row: capacity 24, holiday 8, vacation 8, customer 20, unassigned 4. **Variant** with vacation also on Tue 22.12.: 2 days, 10/day > 8, scaled to 8/day, supply 16, `assignment.over_capacity` with reason `time_off`, weekly shortfall 4 |
 | E5b | Contract 10 h/week starting Wed 11.11.2026 | D2: 3 weekdays of 5 in the period | demand 6 h in the week of 09.11.2026 |
+| E5c | Eve 40 h, assigned to Ash 10 h/week until Thu 31.12.2026. Week of 28.12.2026 (no holiday in that week) | 10 / 5 available days of the week = 2/day, on the 4 days inside the period | supply 8 h in that week. Same for a subcontractor with 10 h/week: 8 h. **Week of 21.12.2026** (25.12. holiday): 10 / 4 = 2.5/day on 4 days = 10 h (today's subcontractor rule gives 2/day on 4 days = 8 h; at 90.00 that is 900.00 instead of 720.00 planned cost, see D14) |
 | E6 | Incoming offer from Sam: one line 24 h × 90.00 = 2,160.00 net; plan 09.11.–04.12. with `hours_per_week` 6 | Accept: total assignment 24 h, rate 90.00, `hours_per_week` ignored | Assignment total 24, planned net 2,160.00, no warning. Edit to 30 h: planned net 2,700.00, info `assignment.differs_from_offer`: "Planned 30 h / 2,700.00 € differ from the offer's 24 h / 2,160.00 € (6 h / 540.00 € more)." |
 | E7 | E1 plus offer O1 on Orchard, total 10 h 16.11.–04.12., win probability 50 % | Contracts first: K2 already took every leftover hour until 04.12. O1 covered 0 | O1 shortfall 10, `offer.shortfall`; Orchard shortfall_contracts 26, shortfall_worst_case 36, shortfall_expected 26 + 5 = 31, status `short` |
 | E8 | Migration: projects (a) `personal` 1, no customer; (b) `personal` 0, no customer; (c) `personal` 1 with customer; (d) status NULL; (e) end before start. Contracts (f) both hour fields; (g) none. Allocation (h) employee with `incoming_offer_id` | Repairs and rejects per the table | (a) internal, (b) internal, (c) customer, (d) `active`, (e) in `migration_rejects` and not in `projects`; (f) `total_hours` NULL, (g) rejected; (h) rejected. `migrate --status` reports 3 rejects. `internal-administration` exists once after two runs |
@@ -387,3 +397,7 @@ the merge (records, data model and import are touched).
 | D8 | Remove "Allocate my capacity" (bootstrap); the per-item suggestions replace it | yes |
 | D9 | Remove the `personal` column; keep `personal` in responses and requests for one release | yes |
 | D10 | Busy time from connected calendars keeps reducing capacity | yes |
+| D11 | Booked hours count up to and including today; supply counts from tomorrow | yes |
+| D12 | A total assignment's supply is its hours still open (total − hours its owner booked on the project), spread again from tomorrow: bought hours do not expire because a week passed | yes |
+| D13 | Subcontractor assignments are never scaled down by S3 (their other customers are unknown) | yes |
+| D14 | Subcontractor `hours_per_week` follow S1 like employees: a holiday moves the hours to the other days of the week instead of losing them. This **changes the planned cost** of existing subcontractor assignments with holidays in their period, without anybody editing them (E5c) | yes, and the release notes name it |
