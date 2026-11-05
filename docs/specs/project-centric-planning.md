@@ -43,7 +43,7 @@ allocations (D4). In real use nobody could explain its numbers:
 |---|---|
 | **assignment** | hours of one person or subcontractor given to one project for a period: `hours_per_week` **or** `total_hours`. Stored in `allocations` (table and API path keep their names; the UI says "assignment") |
 | **capacity** | a person's real hours on a day: `weekly_hours / workdays` on a workday that is not a public holiday, not an absence day, minus calendar busy time; never below 0 |
-| **supply** of a project | the hours its assignments give it (after scaling, see rule S3) |
+| **supply** of a project | the hours its assignments give it (rule S1; never scaled, see S3) |
 | **demand** | what contracts (must) and offers (could) of a project still need |
 | **remaining** | promised − booked, never below 0 |
 | **covered** | the part of the remaining hours that the supply can deliver by the rules below |
@@ -68,16 +68,20 @@ S1. **One spreading function** `spread(owner, assignment, calendar) -> {date: ho
       a day off moves the hours to the other days of that week; a week with no available day gives 0 (warning S4).
       The divisor is the available days of the **whole** ISO week; only days inside the assignment period get hours.
       So a week the assignment only partly covers gets its share (E5c), and a holiday still moves hours inside the
-      week. This also applies to subcontractors (Open decision D14).
+      week. This also applies to subcontractors (decided, D14).
     * `total_hours`: the hours **still open** (`total_hours − hours the owner booked on the project inside the period`,
       at least 0; subcontractors normally book nothing) spread evenly over the owner's available days from the day
-      after `today` to the end. A total assignment is a budget that does not expire because a week passed.
+      after `today` to the assignment's end. A total assignment is a budget that does not expire because a week
+      passed; whatever is still open at the **end of the assignment** (the end of the agreement) expires (decided, D12).
+    * Subcontractors: public holidays and their own unavailable windows (vacation mid-project, the supplier form's
+      "Not available" rows) are their days off, exactly like an employee's holidays and absences (decided, D14).
 S2. Past days give no supply. Days before the assignment start or after its end give none.
-S3. **Over-assignment** (recommended, Open decision D4): when a person's assignments of one day add up to more than
-    that day's capacity, every assignment of that day is scaled by `capacity / sum`. Subcontractors are not scaled (we
-    do not know their other customers).
-S4. Warning `assignment.over_capacity` per person and week in which S3 scaled something away, with the arithmetic
-    (example E4). Reason `time_off` when the week has holidays or absences that cause it, else `weekly_hours`.
+S3. **Over-assignment is only warned, never scaled** (decided, D4). When a person's assignments of one day add up to
+    more than that day's capacity, every project still counts its full assigned hours; the person's week row shows the
+    excess as `over_assigned` (sum over the days of `max(0, assigned − capacity)`).
+S4. Warning `assignment.over_capacity` per person and week with `over_assigned > 0`, with the arithmetic and the
+    projects involved (example E4). Reason `time_off` when the week has holidays or absences on the days that are
+    over, else `weekly_hours`. Subcontractors are never checked (their other customers are unknown, decided D13).
 S5. Internal projects: their assignments **are** the plan. They consume capacity and never have demand, shortfall or
     "no demand" warnings. Optional `budget_hours`: warning `internal.over_budget` when booked + assigned future hours
     exceed it.
@@ -90,7 +94,7 @@ D1. **Contracts** of a project with status `confirmed`; **offers** with status `
 D2. A weekly item (`hours_per_week`) demands, per ISO week, `hours_per_week × weekdays (Mon–Fri) of the week inside
     its period / 5`. Holidays and vacation do **not** reduce the promise (they reduce the supply).
 D3. A total item demands `total_hours` over its period.
-D4. **Booked attribution** (recommended, Open decision D5). Time entries (billable or not) on the project, dated
+D4. **Booked attribution** (decided, D5). Time entries (billable or not) on the project, dated
     inside an item's period and up to `today`, are attributed week by week: first to that week's weekly items (up to
     their weekly demand, contracts before offers), the rest to total items whose period contains the entry date,
     earliest end first, up to their `total_hours`. Hours left over are reported as `booked_unattributed` (info).
@@ -109,7 +113,7 @@ C2. Total contracts then take leftover hours **earliest end first** (ties: earli
 C3. Offers repeat C1 and C2 on what is left after all contracts (worst case: every offer is won).
 C4. Expected view: an offer's remaining and shortfall multiplied by its win probability (default setting
     `planning_default_win_probability`, as today). Contracts are not weighted.
-C5. Contracts and offers **without a project** (recommended, Open decision D2) are covered by the team's
+C5. Contracts and offers **without a project** (decided, D2) are covered by the team's
     **unassigned** hours with the same rules (a virtual scope "Unassigned").
 C6. **Remedy, never automatic:** for every item with a shortfall the answer lists the people with unassigned hours
     inside the item's window (`suggestions: [{user_id, name, hours, from, to}]`); the UI offers "Assign" which opens
@@ -119,7 +123,7 @@ C6. **Remedy, never automatic:** for every item with a shortfall the answer list
 
 M1. Planned cost of a subcontractor assignment = its hours (S1, over the whole period, booked or not) × `rate`, with
     `core/money.py` (exact decimals, half-up cents). A total assignment's planned net is `q2(total_hours × rate)`.
-M2. **Revenue** (recommended, Open decision D1): no weekly revenue and no "assumed" revenue from capacity. Each
+M2. **Revenue** (decided, D1): no weekly revenue and no "assumed" revenue from capacity. Each
     contract shows `value = promised hours × rate`, `invoiced` (net of its project's invoices in its period, as the
     project report computes) and `open = value − invoiced`; each offer shows its net and the expected net (× win
     probability). Margin per project = contract value − planned subcontractor cost.
@@ -131,9 +135,9 @@ M2. **Revenue** (recommended, Open decision D1): no weekly revenue and no "assum
 * New column `kind` (`customer` | `internal`), NOT NULL. `customer`: needs a `customer_id`; may have offers,
   contracts, invoices. `internal`: no customer, no offers, contracts or invoices (the services refuse with 409:
   "Internal projects cannot have offers, contracts or invoices"); dates optional.
-* The column `personal` is **removed** (recommended, Open decision D9). The response keeps `personal` (=
-  `kind == "internal"`) for one release, marked deprecated in the OpenAPI description; `ProjectIn` accepts
-  `personal` for one release and maps `true` → `internal`; giving both with a contradiction is a 422.
+* The column `personal` is **removed altogether** (decided, D9): not in the table, not in responses, not in requests
+  (`ProjectIn` refuses it with 422). Old exports and imports are mapped by `transfer/upgrades.py` and the importer
+  (`personal: true` → `kind: internal`, unless a customer is set).
 * A customer project needs a `customer_id` when it is created or changed (`ProjectIn`, 422). The database does not
   require it: legacy customer projects without a customer but with documents stay `customer` (migration rule), and
   deleting a customer does not touch `projects.customer_id` today (dangling ids are the subject of D7).
@@ -156,7 +160,7 @@ M2. **Revenue** (recommended, Open decision D1): no weekly revenue and no "assum
   longer written by the web UI or by accepting an offer, and is **ignored** by every planner function. `ContractIn`
   and `PlanIn` still accept it (old clients) and drop it.
 * Exactly one of `hours_per_week` / `total_hours` on a contract (today both are accepted and `hours_per_week` wins).
-* New contracts need a project (recommended, Open decision D2): `ContractIn.project_id` required, 422 otherwise.
+* New contracts need a project (decided, D2): `ContractIn.project_id` required, 422 otherwise.
   Existing rows without a project stay valid (C5).
 
 ### Incoming offers
@@ -255,8 +259,8 @@ Query: `weeks` (1–52, default 12), `project_id` (a project id or `unassigned`;
 
 * Week row fields (labels in the UI, with the derivation as tooltip):
   `capacity` "Capacity" = workday hours − holidays − time off − busy; `assigned_customer` "Customer projects";
-  `assigned_internal` "Internal"; `unassigned` "Unassigned" = capacity − both (≥ 0); `over_assigned` "Over-assigned" =
-  hours scaled away by S3; `billable_share` "Billable share" = customer / capacity in percent (null when capacity is
+  `assigned_internal` "Internal"; `unassigned` "Unassigned" = per day `max(0, capacity − assigned)`, summed;
+  `over_assigned` "Over-assigned" = per day `max(0, assigned − capacity)`, summed (S3); `billable_share` "Billable share" = customer / capacity in percent (null when capacity is
   0); `subcontractor_hours` "Subcontractors" (not part of capacity).
 * `status` of a project: `ok` (no shortfall), `at_risk` (only the worst case is short), `short` (a contract is
   short). Internal projects: `ok` or `over_budget`; their entry carries `assigned`, `booked`, `budget_hours`.
@@ -288,7 +292,7 @@ Unchanged paths. `apply` writes absences, commitment moves and assignments (conf
 `suggest-vacation` ranks windows by the increase of the total contract shortfall, then by bridge days.
 `suggest-start` takes `{hours, deadline, earliest, project_id}` (no `user_ids`) and returns the first start from
 which an offer of `hours` total over `start..deadline` has no shortfall. `what-must-move` keeps its meaning (only
-offers move) on the new verdicts. `POST /api/allocations/bootstrap` is **removed** (Open decision D8), the
+offers move) on the new verdicts. `POST /api/allocations/bootstrap` is **removed** (decided, D8), the
 suggestions (C6) replace it.
 
 ### `/api/allocations`
@@ -357,8 +361,8 @@ Calendar: state BY. Between 09.11.2026 and 18.12.2026 there is no public holiday
 | E1 | Today Sun 08.11.2026. Ada 40 h. Internal "Administration": Ada 30 h/week 09.11.–18.12. Customer project Orchard: Ada 4 h/week 09.11.–18.12.; subcontractor Sam total 24 h 09.11.–04.12., rate 90.00. Contracts on Orchard: K1 4 h/week 09.11.–18.12., rate 120.00; K2 total 50 h 09.11.–04.12., rate 120.00. Nothing booked | Supply Orchard: Ada 0.8/day; Sam 24 h / 20 days = 1.2/day until 04.12. Weeks 09.11.–04.12.: supply 4 + 6 = 10 per week, K1 takes 4, leftover 6 per week, 24 in total. Weeks 07.12. and 14.12.: supply 4 = K1 4, leftover 0. K2 takes 24 of 50 | K1 shortfall 0. K2 remaining 50, covered 24, shortfall 26, `contract.shortfall`. Orchard supply employees 24, subcontractors 24, total 48; remaining_contracts 74; shortfall_contracts 26; status `short`. Ada unassigned 6 h/week, suggestion for K2: Ada 24 h 09.11.–04.12. Week of 09.11.: capacity 40, customer 4, internal 30, unassigned 6, billable share 10.0, subcontractors 6. Planned subcontractor cost 2,160.00; contract value 24 × 120 + 50 × 120 = 8,880.00; margin 6,720.00 |
 | E2 | E1, but today Sun 15.11.2026, and Ada booked 10 h on Orchard between 09.11. and 13.11. | Attribution week 09.11.: K1 takes 4, K2 gets 6, so K2 remaining 44. Sam's 24 h are still open (he booked nothing): 24 / 15 days (16.11.–04.12.) = 1.6/day. Weeks 16.11., 23.11., 30.11.: supply 4 + 8 = 12, K1 4, leftover 8, 24 in total | K2 remaining 44, covered 24, shortfall 20. Check: remaining demand K1 5 × 4 = 20 plus K2 44 = 64; supply Ada 20 + Sam 24 = 44; 64 − 44 = 20 |
 | E3 | Today Sun 08.11.2026. Ben 40 h, assigned to Pine 10 h/week 09.11.–04.12. (2/day). Contracts T1 total 25 h 09.11.–27.11., T2 total 20 h 09.11.–04.12. | Earliest end first: T1 window has 15 days × 2 = 30 h, takes 25. Leftover 5 h until 27.11., plus 10 h in the week of 30.11. T2 takes 15 | T1 shortfall 0; T2 covered 15, shortfall 5. Check: 45 − 40 = 5 |
-| E4 | Week of 09.11.2026. Cleo 20 h (4/day). Assignments: Administration 12 h/week, customer project Elm 10 h/week. Contract on Elm 10 h/week | Per day 2.4 + 2.0 = 4.4 > 4, scale 4 / 4.4 = 10/11: Administration 2.1818/day = 10.91 h, Elm 1.8182/day = 9.09 h | `assignment.over_capacity`: "Week of 09.11.2026: Cleo is assigned 22 h but has 20 h of capacity; the assignments of that week are scaled to 90.9 % (Administration 10.91 h, Elm 9.09 h)." Elm contract weekly shortfall 0.91 (10 − 9.09). Week row: capacity 20, internal 10.91, customer 9.09, unassigned 0, over-assigned 2 |
-| E5 | Week of 21.12.2026. Dan 40 h, vacation Wed 23.12. Assigned to Ash 20 h/week. Contract on Ash 20 h/week | Available days Mon 21., Tue 22., Thu 24. (25.12. holiday): 20 / 3 = 6.67/day ≤ 8, no scaling, supply 20 | Ash weekly shortfall 0. Week row: capacity 24, holiday 8, vacation 8, customer 20, unassigned 4. **Variant** with vacation also on Tue 22.12.: 2 days, 10/day > 8, scaled to 8/day, supply 16, `assignment.over_capacity` with reason `time_off`, weekly shortfall 4 |
+| E4 | Week of 09.11.2026. Cleo 20 h (4/day). Assignments: Administration 12 h/week, customer project Elm 10 h/week. Contract on Elm 10 h/week | Per day 2.4 + 2.0 = 4.4 > 4: 0.4 over on each of 5 days = 2 h. Nothing is scaled | `assignment.over_capacity`: "Week of 09.11.2026: Cleo is assigned 22 h (Administration 12 h, Elm 10 h) but has 20 h of capacity: over by 2 h. The projects still count the full hours." Elm supply 10, contract weekly shortfall 0. Week row: capacity 20, internal 12, customer 10, unassigned 0, over-assigned 2 |
+| E5 | Week of 21.12.2026. Dan 40 h, vacation Wed 23.12. Assigned to Ash 20 h/week. Contract on Ash 20 h/week | Available days Mon 21., Tue 22., Thu 24. (25.12. holiday): 20 / 3 = 6.67/day ≤ 8, no scaling, supply 20 | Ash weekly shortfall 0. Week row: capacity 24, holiday 8, vacation 8, customer 20, unassigned 4. **Variant** with vacation also on Tue 22.12.: 2 days, 10/day > 8, over by 2 on each day = 4 h, `assignment.over_capacity` with reason `time_off`; supply stays 20, weekly shortfall 0 |
 | E5b | Contract 10 h/week starting Wed 11.11.2026 | D2: 3 weekdays of 5 in the period | demand 6 h in the week of 09.11.2026 |
 | E5c | Eve 40 h, assigned to Ash 10 h/week until Thu 31.12.2026. Week of 28.12.2026 (no holiday in that week) | 10 / 5 available days of the week = 2/day, on the 4 days inside the period | supply 8 h in that week. Same for a subcontractor with 10 h/week: 8 h. **Week of 21.12.2026** (25.12. holiday): 10 / 4 = 2.5/day on 4 days = 10 h (today's subcontractor rule gives 2/day on 4 days = 8 h; at 90.00 that is 900.00 instead of 720.00 planned cost, see D14) |
 | E6 | Incoming offer from Sam: one line 24 h × 90.00 = 2,160.00 net; plan 09.11.–04.12. with `hours_per_week` 6 | Accept: total assignment 24 h, rate 90.00, `hours_per_week` ignored | Assignment total 24, planned net 2,160.00, no warning. Edit to 30 h: planned net 2,700.00, info `assignment.differs_from_offer`: "Planned 30 h / 2,700.00 € differ from the offer's 24 h / 2,160.00 € (6 h / 540.00 € more)." |
@@ -383,21 +387,25 @@ Calendar: state BY. Between 09.11.2026 and 18.12.2026 there is no public holiday
 code review, test review, and a logic review that recomputes E1–E8 by hand. The randomized suites run once before
 the merge (records, data model and import are touched).
 
-## Open decisions for the product owner (recommendation first)
+## Decisions (product owner, 2026-11-05) and what is still open
 
-| # | Question | Recommendation |
+| # | Question | Status |
 |---|---|---|
-| D1 | Revenue: drop the weekly revenue and the "assumed" revenue (capacity × default rate); show per contract value, invoiced, open; per offer net and expected net | yes |
-| D2 | Contracts and offers without a project: covered by the team's unassigned hours (C5); new contracts must have a project | yes |
-| D3 | Partial weeks of weekly items pro-rated by Mon–Fri (company calendar), not by each person's workdays | yes |
-| D4 | Over-assignment: scale a person's assignments pro rata on that day (today's rule) and warn | yes |
-| D5 | Booked attribution (D4 rule): weekly items of the week first, then total items earliest end first | yes |
-| D6 | Rows that violate a new constraint go to `migration_rejects` (kept, visible, restorable) instead of stopping the upgrade | yes |
-| D7 | Foreign keys: a separate later work item. Cost: `PRAGMA foreign_keys=ON` on every SQLite connection (cannot be switched inside the migration transaction), dangling references already exist (the planner shows "(deleted project)"), every delete path must then refuse or cascade explicitly | later, own spec |
-| D8 | Remove "Allocate my capacity" (bootstrap); the per-item suggestions replace it | yes |
-| D9 | Remove the `personal` column; keep `personal` in responses and requests for one release | yes |
-| D10 | Busy time from connected calendars keeps reducing capacity | yes |
-| D11 | Booked hours count up to and including today; supply counts from tomorrow | yes |
-| D12 | A total assignment's supply is its hours still open (total − hours its owner booked on the project), spread again from tomorrow: bought hours do not expire because a week passed | yes |
-| D13 | Subcontractor assignments are never scaled down by S3 (their other customers are unknown) | yes |
-| D14 | Subcontractor `hours_per_week` follow S1 like employees: a holiday moves the hours to the other days of the week instead of losing them. This **changes the planned cost** of existing subcontractor assignments with holidays in their period, without anybody editing them (E5c) | yes, and the release notes name it |
+| D1 | Revenue: no weekly and no "assumed" revenue; per contract value, invoiced, open; per offer net and expected net | **decided: yes** |
+| D2 | Items without a project use the team's unassigned hours; new contracts need a project | **decided: yes** |
+| D3 | How a weekly contract counts a partial week (start or end mid-week) | **open**, see below |
+| D4 | Over-assignment | **decided: warn only, never scale** (S3) |
+| D5 | Booked attribution: the week's weekly items first, then total items earliest end first | **decided: yes** |
+| D6 | Rows that violate a new rule at migration time | **open again**: conflicts with the guards decision of PR #91, see below |
+| D7 | Foreign keys | **open**, options below |
+| D8 | Remove "Allocate my capacity" | **decided: yes** |
+| D9 | `personal` | **decided: removed altogether** |
+| D10 | Calendar busy time and capacity | **open**, see below |
+| D11 | Booked up to and including today, supply from tomorrow | **decided: yes** |
+| D12 | Total assignments: open hours carry over from week to week and expire at the assignment's end | **decided** |
+| D13 | Subcontractors are never scaled or checked for over-assignment | **decided: yes** |
+| D14 | Subcontractors: holidays and their own unavailable windows (vacation mid-project) are days off; weekly hours move to the other days of the week like an employee's | **decided** (changes the planned cost of existing subcontractor assignments with a holiday in their period, E5c; the release notes name it) |
+
+Still open, with the architect's recommendation, in the conversation of 2026-11-05: D3 (Mon–Fri pro rata), D6/D7
+(build on the trigger guards of PR #91 instead of table CHECKs and a rejects table; references guarded by triggers
+for new and changed values), D10 (only out-of-office and all-day blocks reduce capacity, ordinary meetings do not).
