@@ -35,7 +35,7 @@ Conditions are a tiny dialect-neutral AST in `schema.py`, evaluated in SQL by `d
 from the same objects, so the two can never disagree:
 
 ```python
-Eq(col, value) | In(col, values) | IsSet(col) | IsBlank(col)   # IsSet = not NULL and not ''; IsBlank = the opposite
+Eq(col, value) | In(col, values) | IsSet(col) | IsBlank(col)  # IsSet = not NULL and not ''; IsBlank = the opposite
 ```
 
 | Kind | Parameters | Refuses (new or changed values) | Code |
