@@ -65,6 +65,7 @@ def _scene(
         {"orchard": Decimal("2160.00")},
         {},
         warnings,
+        holiday=_no_holiday,
         user_id=user_id,
         project_id=project_id,
     )
@@ -202,7 +203,7 @@ def test_invoiced_only_for_contracts():
     owners = [Owner("ada", "Ada", "employee", 40.0, WEEK)]
     supply = build(owners, [], _no_holiday, TODAY, LO, HI)
     verdicts = cover([_item("contract", "K1", "orchard", START, END, hpw=4.0)], [], supply, owners, TODAY, NAMES)
-    out = plan_json(supply, owners, [], verdicts, [], NAMES, {}, {"K1": Decimal("1000.50")}, [])
+    out = plan_json(supply, owners, [], verdicts, [], NAMES, {}, {"K1": Decimal("1000.50")}, [], holiday=_no_holiday)
     item = out["projects"][0]["items"][0]
     assert item["invoiced"] == 1000.5 and item["open"] == 2880.0 - 1000.5
     assert body  # the shared scene still builds
@@ -234,7 +235,7 @@ def test_project_filter():
     loose = _item("contract", "L1", None, START, SAM_END, total=10.0)
     body, _, _ = _scene(extra_items=[loose], project_id="unassigned")
     (p,) = body["projects"]
-    assert p["project_id"] == "unassigned" and p["name"] == "Unassigned"
+    assert p["project_id"] == "unassigned" and p["name"] == "Unassigned" and p["kind"] == "unassigned"
     assert p["planned_subcontractor_cost"] == 0.0
     assert p["items"][0]["id"] == "L1"
     # people and weeks are not filtered by project

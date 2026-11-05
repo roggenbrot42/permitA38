@@ -137,7 +137,7 @@ def _project_json(
     return {
         "project_id": pid if pid is not None else UNASSIGNED,
         "name": names.get(pid, pid) if pid is not None else _UNASSIGNED_NAME,
-        "kind": "customer",
+        "kind": "customer" if pid is not None else UNASSIGNED,
         "supply": {
             "employees": _r(v.supply_employees),
             "subcontractors": _r(v.supply_subcontractors),
@@ -228,23 +228,13 @@ def plan_json(
     subcontractor_cost: Mapping[str, Decimal],
     invoiced: Mapping[str, Decimal],
     warnings: Sequence[dict],
+    *,
+    holiday: Holiday,
     user_id: str | None = None,
     project_id: str | None = None,
-    holiday: Holiday | None = None,
 ) -> dict:
-    """The body of ``GET /api/plan``.
-
-    ``holiday`` is an optional addition to the interface: without it the public holidays are read off the supply
-    rows (a day on which some person has holiday hours), which is exact for every day inside the supply range.
-    """
-    if holiday is None:
-        holiday_days = {d for rows in supply.people.values() for d, pd in rows.items() if pd.holiday > 0}
-
-        def _derived(d: date) -> str | None:
-            return "holiday" if d in holiday_days else None
-
-        holiday = _derived
-
+    """The body of ``GET /api/plan``. ``holiday`` is the same calendar the supply was built with (required: the
+    per-assignment hours of ``people`` are spread again)."""
     people_owners = [o for o in owners if o.kind != "subcontractor" and (user_id is None or o.id == user_id)]
     weeks = _week_rows(supply, [o.id for o in people_owners], user_id is None)
 
