@@ -112,3 +112,30 @@ def scan_stubs(app, monkeypatch):
     app.state.services.receipts._today = lambda: RECEIPT_TODAY
     app.state.services.document_scans._today = lambda: SCAN_TODAY
     return receipt_reader, doc_reader
+
+
+@pytest.fixture
+def unguarded():
+    """plant(store, coll, rec): save a record as a database written before the guards would hold it."""
+    from permita38.core.repository import schema
+    from permita38.core.repository.dialect import DIALECTS
+
+    def plant(store, coll, rec):
+        with store.transaction():
+            conn = store._conn
+            names = [
+                n
+                for (n,) in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'guard_%'"
+                )
+            ]
+            for n in names:
+                conn.execute(f'DROP TRIGGER "{n}"')
+            try:
+                return store.save(coll, rec)
+            finally:
+                for g in schema.GUARDS:
+                    for stmt in DIALECTS["sqlite"].guard_sql(g):
+                        conn.execute(stmt)
+
+    return plant

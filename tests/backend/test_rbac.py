@@ -607,6 +607,11 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
     roles_mig = next(m for m in chain if m.name == "roles")
     # as if this database had not applied the roles migration yet (and nothing after it)
     later = [m.id for m in chain[chain.index(roles_mig) :]]
+    # an old database had no guard triggers (and they would block DROP COLUMN)
+    for (name,) in raw.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'guard_%'"
+    ).fetchall():
+        raw.execute(f'DROP TRIGGER "{name}"')
     raw.executemany("DELETE FROM schema_migrations WHERE id = ?", [(i,) for i in later])
     raw.execute(f"PRAGMA user_version = {len(chain) - len(later)}")
     # undo the schema of the later migrations too, so that the runner can apply them again
@@ -640,6 +645,8 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
         )
     if "document_scans" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         raw.execute('DROP TABLE "document_scans"')
+    if "guards" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.executescript('DROP INDEX "idx_invoices_number"; DROP INDEX "idx_offers_number";')
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)

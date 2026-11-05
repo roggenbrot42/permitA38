@@ -615,9 +615,9 @@ def test_put_changes_person_and_project_and_keeps_unknown_fields(boss_client, bo
         {"project_id": "{p}", "start": 5, "end": [1]},
     ],
 )
-def test_damaged_allocation_rows_do_not_break_the_views(boss_client, boss_id, project, store, row):
+def test_damaged_allocation_rows_do_not_break_the_views(boss_client, boss_id, project, store, row, unguarded):
     row = {k: (project["id"] if v == "{p}" else v) for k, v in row.items()}
-    store.save("allocations", {"user_id": boss_id, "status": "active", **row})
+    unguarded(store, "allocations", {"user_id": boss_id, "status": "active", **row})
     add_contract(store, boss_id, project, 10)
     assert boss_client.get("/api/allocations").status_code == 200
     assert boss_client.get("/api/forecast", params={"weeks": 4}).status_code == 200

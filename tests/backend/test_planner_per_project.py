@@ -683,8 +683,8 @@ def test_bootstrap_warnings_are_bounded_to_ten_weeks(w):
         dict(user_id="u1", project_id="p1", start=5, end=6, status="active"),
     ],
 )
-def test_a_damaged_allocation_row_is_skipped_everywhere(w, row):
-    w.repo.save("allocations", {**row, "user_id": w.boss["id"]})
+def test_a_damaged_allocation_row_is_skipped_everywhere(w, row, unguarded):
+    unguarded(w.repo, "allocations", {**row, "user_id": w.boss["id"]})
     w.contract(w.boss, w.p, hpw=10)
     out = w.forecast()
     assert out["weeks"][0]["capacity"] == 40.0 and w.entry(out, 0, None)["capacity"] == 40.0

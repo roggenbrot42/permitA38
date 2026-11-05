@@ -206,8 +206,12 @@ def test_paid_on_in_the_same_year_moves_only_the_cost_month(boss_client):
     assert (mar["expenses"], mar["vat_in"], apr["expenses"], apr["vat_in"]) == (0, 19.0, 100.0, 0)
 
 
-def test_a_damaged_paid_date_falls_back_to_the_bill_date(app, boss_client):
-    app.state.services.store.save("expenses", {"date": "2026-12-28", "net": 100.0, "vat": 19.0, "paid_on": "garbage"})
+def test_a_damaged_paid_date_falls_back_to_the_bill_date(app, boss_client, unguarded):
+    unguarded(
+        app.state.services.store,
+        "expenses",
+        {"date": "2026-12-28", "net": 100.0, "vat": 19.0, "paid_on": "garbage"},
+    )
     dec = month(boss_client, 2026, 12)
     assert (dec["expenses"], dec["vat_in"]) == (100.0, 19.0)
 
