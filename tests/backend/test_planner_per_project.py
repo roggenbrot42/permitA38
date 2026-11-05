@@ -674,17 +674,27 @@ def test_bootstrap_warnings_are_bounded_to_ten_weeks(w):
 
 # ------------------------------------------------------------------------------- damaged rows never break a view
 @pytest.mark.parametrize(
-    "row",
+    "row, code",
     [
-        dict(user_id="u1", project_id="p1", status="active"),  # no period
-        dict(user_id="u1", project_id="p1", start="garbage", end="2026-03-27", status="active"),
-        dict(user_id="u1", start="2026-03-02", end="2026-03-27", status="active"),  # no project
-        dict(user_id="u1", project_id="p1", start="2026-03-27", end="2026-03-02", status="active"),
-        dict(user_id="u1", project_id="p1", start=5, end=6, status="active"),
+        (dict(user_id="u1", project_id="p1", status="active"), None),  # no period
+        (
+            dict(user_id="u1", project_id="p1", start="garbage", end="2026-03-27", status="active"),
+            ("format.date", "state.period_reversed"),  # "garbage" sorts after the end date
+        ),
+        (dict(user_id="u1", start="2026-03-02", end="2026-03-27", status="active"), None),  # no project
+        (
+            dict(user_id="u1", project_id="p1", start="2026-03-27", end="2026-03-02", status="active"),
+            "state.period_reversed",
+        ),
+        (dict(user_id="u1", project_id="p1", start=5, end=6, status="active"), None),  # numbers: kept in extra
     ],
 )
-def test_a_damaged_allocation_row_is_skipped_everywhere(w, row, unguarded):
-    unguarded(w.repo, "allocations", {**row, "user_id": w.boss["id"]})
+def test_a_damaged_allocation_row_is_skipped_everywhere(w, row, code, unguarded):
+    planted = {**row, "user_id": w.boss["id"]}
+    if code:
+        unguarded(w.repo, "allocations", planted, code)
+    else:
+        w.repo.save("allocations", planted)  # damaged, but no guard refuses it
     w.contract(w.boss, w.p, hpw=10)
     out = w.forecast()
     assert out["weeks"][0]["capacity"] == 40.0 and w.entry(out, 0, None)["capacity"] == 40.0

@@ -269,17 +269,21 @@ def _damage(app, plant):
     store = app.state.services.store
     uid = store.list("users")[0]["id"]
 
-    def save(coll, rec):
-        return plant(store, coll, rec)
-
     cust = store.save("customers", {"name": "C", "rate": "abc"})
     proj = store.save("projects", {"name": "P", "customer_id": cust["id"], "rate": float("nan") if False else "x"})
-    save("absences", {"start": "garbage", "user_id": uid})
-    save("absences", {"start": "2026-10-19", "end": "2026-10-22"})  # no owner
-    save("absences", {"start": "2026-10-22", "end": "2026-10-19", "user_id": uid})  # reversed
-    save("contracts", {"title": "bad", "start": "nope", "end": "2026-12-31", "hours_per_week": 5})
-    save("contracts", {"title": "text", "start": "2026-01-01", "end": "2026-12-31", "hours_per_week": "lots"})
-    save(
+    plant(store, "absences", {"start": "garbage", "user_id": uid}, "format.date")
+    store.save("absences", {"start": "2026-10-19", "end": "2026-10-22"})  # no owner
+    plant(
+        store, "absences", {"start": "2026-10-22", "end": "2026-10-19", "user_id": uid}, "state.period_reversed"
+    )  # reversed
+    plant(
+        store,
+        "contracts",
+        {"title": "bad", "start": "nope", "end": "2026-12-31", "hours_per_week": 5},
+        ("format.date", "state.period_reversed"),
+    )
+    store.save("contracts", {"title": "text", "start": "2026-01-01", "end": "2026-12-31", "hours_per_week": "lots"})
+    store.save(
         "contracts",
         {
             "title": "ok",
@@ -289,12 +293,13 @@ def _damage(app, plant):
             "user_ids": [uid],
         },
     )
-    save("expenses", {"date": "2026-13-45", "net": 1})
-    save("expenses", {"date": TODAY.isoformat(), "net": "many", "vat": "x", "deductible": "y"})
-    save("entries", {"user_id": uid, "date": "not-a-date", "minutes": 60})
-    save("entries", {"user_id": uid, "date": TODAY.isoformat(), "minutes": "sixty", "project_id": proj["id"]})
-    save("entries", {"user_id": uid, "date": TODAY.isoformat(), "minutes": 90, "project_id": proj["id"]})
-    save(
+    plant(store, "expenses", {"date": "2026-13-45", "net": 1}, "format.date")
+    store.save("expenses", {"date": TODAY.isoformat(), "net": "many", "vat": "x", "deductible": "y"})
+    plant(store, "entries", {"user_id": uid, "date": "not-a-date", "minutes": 60}, "format.date")
+    store.save("entries", {"user_id": uid, "date": TODAY.isoformat(), "minutes": "sixty", "project_id": proj["id"]})
+    store.save("entries", {"user_id": uid, "date": TODAY.isoformat(), "minutes": 90, "project_id": proj["id"]})
+    plant(
+        store,
         "invoices",
         {
             "status": "paid",
@@ -302,10 +307,11 @@ def _damage(app, plant):
             "date": "x",
             "lines": [{"qty": "a", "price": None}, "junk", {"qty": 2, "price": 10}],
         },
+        "format.date",
     )
-    save("invoices", {"status": "sent", "date": TODAY.isoformat(), "lines": "not-a-list"})
-    save("offers", {"status": "sent", "plan": {"start": "bad", "end": "worse"}})
-    save(
+    store.save("invoices", {"status": "sent", "date": TODAY.isoformat(), "lines": "not-a-list"})
+    store.save("offers", {"status": "sent", "plan": {"start": "bad", "end": "worse"}})
+    store.save(
         "users",
         {
             "username": "odd",

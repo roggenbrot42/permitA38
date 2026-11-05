@@ -607,17 +607,24 @@ def test_put_changes_person_and_project_and_keeps_unknown_fields(boss_client, bo
 
 # ------------------------------------------------------------------ damaged rows never give a 500
 @pytest.mark.parametrize(
-    "row",
+    "row, code",
     [
-        {"project_id": "{p}"},
-        {"project_id": "{p}", "start": "garbage", "end": "2026-03-01"},
-        {"start": "2026-03-01", "end": "2026-03-05"},
-        {"project_id": "{p}", "start": 5, "end": [1]},
+        ({"project_id": "{p}"}, None),
+        (
+            {"project_id": "{p}", "start": "garbage", "end": "2026-03-01"},
+            ("format.date", "state.period_reversed"),  # "garbage" sorts after the end date
+        ),
+        ({"start": "2026-03-01", "end": "2026-03-05"}, None),
+        ({"project_id": "{p}", "start": 5, "end": [1]}, None),  # not date strings: kept in extra
     ],
 )
-def test_damaged_allocation_rows_do_not_break_the_views(boss_client, boss_id, project, store, row, unguarded):
+def test_damaged_allocation_rows_do_not_break_the_views(boss_client, boss_id, project, store, row, code, unguarded):
     row = {k: (project["id"] if v == "{p}" else v) for k, v in row.items()}
-    unguarded(store, "allocations", {"user_id": boss_id, "status": "active", **row})
+    planted = {"user_id": boss_id, "status": "active", **row}
+    if code:
+        unguarded(store, "allocations", planted, code)
+    else:
+        store.save("allocations", planted)  # damaged, but no guard refuses it
     add_contract(store, boss_id, project, 10)
     assert boss_client.get("/api/allocations").status_code == 200
     assert boss_client.get("/api/forecast", params={"weeks": 4}).status_code == 200
