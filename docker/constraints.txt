@@ -18,7 +18,7 @@ pydantic==2.14.1
     # via
     #   permita38 (pyproject.toml)
     #   fastapi
-pydantic-core==2.50.1
+pydantic-core==2.50.2
     # via pydantic
 pypdfium2==5.14.0
 zxing-cpp==3.1.1
