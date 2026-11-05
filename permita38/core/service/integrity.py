@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
@@ -20,7 +21,7 @@ from permita38.core import validation as v
 from permita38.core.models import RECORD_MODELS
 from permita38.core.numbering import Pattern, PatternError, normalize_text, parse_pattern, period_key
 from permita38.core.repository import Repository
-from permita38.core.repository.schema import TABLES, fits
+from permita38.core.repository.schema import GUARDS, TABLES, fits
 from permita38.core.settings import effective_settings
 
 ERROR, WARNING, INFO = "error", "warning", "info"
@@ -442,14 +443,12 @@ def rule_money_not_finite(ctx: Ctx) -> Iterable[Finding]:
 
 
 # ---------------------------------------------------------------------------------------------- 6. logical state
-_PERIODS: dict[str, tuple[tuple[str, str], str]] = {
-    "projects": (("start", "end"), "date"),
-    "contracts": (("start", "end"), "date"),
-    "absences": (("start", "end"), "date"),
-    "allocations": (("start", "end"), "date"),
-    "trips": (("start", "end"), "datetime"),
-    "invoices": (("service_from", "service_to"), "date"),
-}
+# derived from the "order" guards, so the check and the database guard cannot drift; trips carry local datetimes
+_PERIODS: tuple[tuple[str, tuple[str, str], str], ...] = tuple(
+    (g.table, (g.columns[0], g.columns[1]), "datetime" if g.table == "trips" else "date")
+    for g in GUARDS
+    if g.kind == "order"
+)
 
 
 def _valid(check: Callable[[str], str], value: Any) -> bool:
@@ -463,11 +462,44 @@ def _valid(check: Callable[[str], str], value: Any) -> bool:
 
 
 def rule_state_period_reversed(ctx: Ctx) -> Iterable[Finding]:
-    for coll, ((a, b), kind) in _PERIODS.items():
+    for coll, (a, b), kind in _PERIODS:
         check = v.iso_date if kind == "date" else v.local_datetime
         for rec in ctx.rows(coll):
             if _valid(check, rec.get(a)) and _valid(check, rec.get(b)) and rec[b] < rec[a]:
                 yield Finding("state.period_reversed", WARNING, coll, rec.get("id"), b, f"{b} is before {a}")
+
+
+# ---------------------------------------------------------------------------------------------- 7. database guards
+# The tables and columns come from schema.GUARDS (the triggers), so check and guard cannot drift.
+def _guard_columns(kind: str) -> dict[str, tuple[str, ...]]:
+    out: dict[str, list[str]] = {}
+    for g in GUARDS:
+        if g.kind == kind:
+            out.setdefault(g.table, []).extend(g.columns)
+    return {t: tuple(c) for t, c in out.items()}
+
+
+GUARD_DATE_COLUMNS = _guard_columns("date")
+GUARD_NON_NEGATIVE_COLUMNS = _guard_columns("non_negative")
+_GUARD_DATE = re.compile(r"[0-9]{4}-[01][0-9]-[0-3][0-9]")
+
+
+def rule_format_date(ctx: Ctx) -> Iterable[Finding]:
+    for coll, columns in GUARD_DATE_COLUMNS.items():
+        for rec in ctx.rows(coll):
+            for col in columns:
+                value = rec.get(col)
+                if _filled(value) and not (isinstance(value, str) and _GUARD_DATE.fullmatch(value)):
+                    yield Finding("format.date", ERROR, coll, rec.get("id"), col, "not an ISO date (YYYY-MM-DD)")
+
+
+def rule_range_negative(ctx: Ctx) -> Iterable[Finding]:
+    for coll, columns in GUARD_NON_NEGATIVE_COLUMNS.items():
+        for rec in ctx.rows(coll):
+            for col in columns:
+                value = rec.get(col)
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and value < 0:
+                    yield Finding("range.negative", ERROR, coll, rec.get("id"), col, "must not be negative")
 
 
 def rule_state_no_active_boss(ctx: Ctx) -> Iterable[Finding]:
@@ -562,6 +594,8 @@ RULES: list[Callable[[Ctx], Iterable[Finding]]] = [
     rule_money_expense_itemised,
     rule_money_not_finite,
     rule_state_period_reversed,
+    rule_format_date,
+    rule_range_negative,
     rule_state_no_active_boss,
     rule_state_receipt_booked,
     rule_state_document_scan,

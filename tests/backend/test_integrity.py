@@ -10,6 +10,7 @@ import pytest
 
 from permita38.cli.main import main
 from permita38.core.database import head_id
+from permita38.core.repository.schema import GUARDS
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service import integrity
 from permita38.core.service import receipts as receipts_mod
@@ -43,6 +44,17 @@ def found(store, *prefixes):
 
 def doc(coll, rid, **kw):
     return {"id": rid, "customer_id": "cust01", "status": "draft", "date": "2026-03-01", "lines": [], **kw}
+
+
+def drop_guards(store):
+    """Remove the database guards, to store the broken rows that check-db must report (grandfathered data)."""
+    raw = sqlite3.connect(store.data_dir / DB_FILENAME)
+    try:
+        for (name,) in raw.execute("SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'guard_%'"):
+            raw.execute(f'DROP TRIGGER "{name}"')
+        raw.commit()
+    finally:
+        raw.close()
 
 
 def with_customer(store):
@@ -98,6 +110,7 @@ def test_model_invalid_reports_field_and_never_the_value(store):
 
 
 def test_model_date_format_on_tables_without_crud_model(store):
+    drop_guards(store)
     store.save("allocations", {"id": "alloc01", "user_id": "boss01", "start": "2026-02-30", "end": "2026-03-01"})
     store.save("trips", {"id": "trip01", "start": "2026-03-01", "end": "2026-03-02T10:00"})  # start lacks the time
     store.save("trips", {"id": "trip02", "start": "2026-03-01T08:00", "end": "2026-03-02T10:00"})
@@ -117,6 +130,51 @@ def test_entry_clock_times_are_not_dates(store):
         {"id": "ent001", "user_id": "boss01", "date": "2026-03-01", "minutes": 480, "start": "22:00", "end": "06:00"},
     )
     assert found(store) == []
+
+
+# ------------------------------------------------------------------ database guards (format.date, range.negative)
+def test_format_date_reports_only_filled_non_iso_values(store):
+    drop_guards(store)
+    store.save("projects", {"id": "proj01", "name": "P", "start": "2026-03-01", "end": "01.03.2026"})
+    store.save("projects", {"id": "proj02", "name": "Q", "start": "", "end": None})
+    store.save("expenses", {"id": "exp001", "date": "2026-3-1", "paid_on": "2026-03-01"})
+    store.save("entries", {"id": "ent001", "user_id": "boss01", "date": "2026-03-01", "minutes": 5})
+    assert sorted(found(store, "format.date")) == [
+        ("format.date", "expenses", "exp001", "date"),
+        ("format.date", "projects", "proj01", "end"),
+    ]
+    assert {f.severity for f in IntegrityService(store).run(["format.date"])} == {"error"}
+
+
+def test_range_negative_reports_only_values_below_zero(store):
+    drop_guards(store)
+    store.save("entries", {"id": "ent001", "user_id": "boss01", "date": "2026-03-01", "minutes": -1, "rate": 0})
+    store.save("entries", {"id": "ent002", "user_id": "boss01", "date": "2026-03-01", "minutes": 0, "rate": 10.5})
+    store.save("customers", {"id": "cust01", "name": "Demo Client", "rate": -0.5})
+    assert sorted(found(store, "range.negative")) == [
+        ("range.negative", "customers", "cust01", "rate"),
+        ("range.negative", "entries", "ent001", "minutes"),
+    ]
+    assert {f.severity for f in IntegrityService(store).run(["range.negative"])} == {"error"}
+
+
+def test_guard_rules_use_exactly_the_guard_columns():
+    for kind, derived in (
+        ("date", integrity.GUARD_DATE_COLUMNS),
+        ("non_negative", integrity.GUARD_NON_NEGATIVE_COLUMNS),
+    ):
+        expected = {(g.table, c) for g in GUARDS if g.kind == kind for c in g.columns}
+        assert {(t, c) for t, cols in derived.items() for c in cols} == expected
+        assert expected  # the guard list is not empty
+    pairs = {(g.table, g.columns) for g in GUARDS if g.kind == "order"}
+    assert {(t, cols) for t, cols, _ in integrity._PERIODS} == pairs
+
+
+def test_period_reversed_covers_the_offer_service_period(store):
+    drop_guards(store)
+    with_customer(store)
+    store.save("offers", doc("offers", "off001", service_from="2026-02-10", service_to="2026-02-01"))
+    assert found(store, "state.period") == [("state.period_reversed", "offers", "off001", "service_to")]
 
 
 # ------------------------------------------------------------------ 3. references
@@ -184,6 +242,7 @@ def test_project_without_customer_is_never_a_mismatch(store):
 
 # ------------------------------------------------------------------ 4. numbering
 def test_duplicate_and_similar_numbers(store):
+    drop_guards(store)
     with_customer(store)
     store.save("invoices", doc("invoices", "inv001", status="sent", number="RE-2026-0001"))
     store.save("invoices", doc("invoices", "inv002", status="sent", number="RE-2026-0001"))
@@ -306,6 +365,7 @@ def test_money_not_finite_and_too_large(store):
 
 # ------------------------------------------------------------------ 6. logical state
 def test_period_reversed(store):
+    drop_guards(store)
     with_customer(store)
     store.save("projects", {"id": "proj01", "name": "P", "start": "2026-03-10", "end": "2026-03-01"})
     store.save("projects", {"id": "proj02", "name": "Q", "start": "2026-03-01", "end": "2026-03-01"})
