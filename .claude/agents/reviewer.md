@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Read-only review pass over a branch or pull request (code, tests or domain logic). Reports findings ranked by severity; never edits, commits or pushes. Use for the Standard and Full review tiers in AGENTS.md.
+description: Read-only review pass over a branch or pull request (code, tests or domain logic). Reports findings ranked by severity; never edits, commits or pushes. Use for every review tier in AGENTS.md (Light, Standard, Full); always on Sonnet, never Haiku.
 model: sonnet
 ---
 

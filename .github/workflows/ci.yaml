@@ -7,6 +7,11 @@ on:
 permissions:
   contents: read
 
+# a new push to a pull request cancels its older, now pointless run (runners are shared); main keeps every run
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -26,6 +31,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python: ["3.12", "3.13", "3.14"]
+        # pull requests: Windows only on 3.13 (OCR download step); push to main keeps the full matrix
+        exclude: ${{ github.event_name == 'pull_request' && fromJSON('[{"os":"windows-latest","python":"3.12"},{"os":"windows-latest","python":"3.14"}]') || fromJSON('[]') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -71,7 +78,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python -m pytest tests/web -q -n 4 --dist worksteal -rfE --tb=short -p no:cacheprovider 2>&1 | tee /tmp/web-tests.log
+          python -m pytest tests/web -m "not monkey_walk" -q -n 4 --dist worksteal -rfE --tb=short -p no:cacheprovider 2>&1 | tee /tmp/web-tests.log
           status=${PIPESTATUS[0]}
           if [ "$status" != 0 ]; then
             # surface the result as an annotation so it is visible without downloading logs

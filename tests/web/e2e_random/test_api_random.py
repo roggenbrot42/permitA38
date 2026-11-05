@@ -574,9 +574,15 @@ class ApiSim:
                     v = rec.get(k)
                     if isinstance(v, (int, float)) and abs(v) > 1e7:
                         bad = True
-                for ln in rec.get("lines") or []:
-                    if abs(ln.get("qty", 0)) > 1e7 or abs(ln.get("price", 0)) > 1e7:
-                        bad = True
+                lines = rec.get("lines")
+                if isinstance(lines, list):  # extra="allow": a fuzzed record may carry any shape here
+                    for ln in lines:
+                        if not isinstance(ln, dict):
+                            continue
+                        for k in ("qty", "price"):
+                            v = ln.get(k)
+                            if isinstance(v, (int, float)) and abs(v) > 1e7:
+                                bad = True
                 if bad:
                     self.boss.http.delete(f"/{coll}/{rec['id']}")
                     removed += 1
