@@ -401,6 +401,9 @@ def rule_money_expense_itemised(ctx: Ctx) -> Iterable[Finding]:
         if not lines or not isinstance(lines, list):
             continue
         rid = rec.get("id")
+        if not all(isinstance(x, dict) for x in lines):
+            yield Finding("money.expense_itemised", ERROR, "expenses", rid, "lines", "lines cannot be recomputed")
+            continue
         try:
             want = calc.itemise_expense(copy.deepcopy(rec))
         except (AttributeError, TypeError, ValueError):
