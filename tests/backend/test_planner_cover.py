@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from permita38.core.service.planner.cover import cover
 from permita38.core.service.planner.model import Assignment, Booking, Item, Owner
 from permita38.core.service.planner.supply import build
@@ -171,7 +173,7 @@ def test_booked_hours_exceeding_contracts_are_unattributed():
     today = D(2026, 11, 15)
     supply = build(owners, [], _no_holiday, today, today, D(2026, 12, 31))
     it = _item("contract", "W", "orchard", START, D(2026, 11, 13), hpw=4.0)
-    bookings = [Booking("orchard", D(2026, 11, 10), 10.0), Booking("orchard", D(2026, 11, 1), 3.0)]
+    bookings = [Booking("orchard", D(2026, 11, 10), 10.0), Booking("orchard", D(2026, 11, 11), 3.0)]
     (v,) = cover([it], bookings, supply, owners, today, NAMES)
     assert v.items[0].booked == 4 and v.items[0].remaining == 0
     assert v.booked_unattributed == 9
@@ -194,3 +196,89 @@ def test_internal_only_project_does_not_appear_and_projects_sorted_by_name():
     verdicts = cover(items, [], supply, owners, today, NAMES)
     assert [v.project_id for v in verdicts] == ["orchard", "pine", None]
     assert all(v.status == "ok" for v in verdicts)
+
+
+# ---------------------------------------------------------------- architect decisions after the review (2026-11-05)
+
+WK = (D(2026, 11, 9), D(2026, 11, 13))
+
+
+def _one(owner_hpw, items, bookings, today, hi=D(2026, 12, 31), project="orchard"):
+    owners = [_ada()]
+    asg = [_asg("a", "ada", project, "customer", START, D(2026, 11, 20), hpw=owner_hpw)]
+    supply = build(owners, asg, _no_holiday, today, today, hi)
+    (v,) = cover(items, bookings, supply, owners, today, NAMES)
+    return v, _by_id(v)
+
+
+def test_mid_week_today_remaining_covered_shortfall():
+    today = D(2026, 11, 11)
+    it = _item("contract", "W", "orchard", *WK, hpw=20.0)
+    bookings = [Booking("orchard", D(2026, 11, d), 2.0) for d in (9, 10, 11)]
+    _, items = _one(20.0, [it], bookings, today)
+    w = items["W"]
+    assert (w.remaining, w.covered, w.shortfall) == (14, 8, 6)
+
+
+def test_weekly_value_has_no_float_noise():
+    it = _item("contract", "W", "orchard", D(2026, 11, 9), D(2026, 11, 29), hpw=4.3, rate="7.05")
+    _, items = _one(10.0, [it], [], D(2026, 11, 8))
+    assert items["W"].value == Decimal("90.95")
+
+
+def test_booking_outside_every_item_period_is_ignored():
+    it = _item("contract", "C", "orchard", D(2026, 11, 16), D(2026, 11, 20), total=5.0)
+    v, items = _one(5.0, [it], [Booking("orchard", D(2026, 11, 2), 5.0)], D(2026, 11, 15))
+    assert v.booked_unattributed == 0 and items["C"].booked == 0
+
+
+def test_total_items_take_bookings_contracts_first_then_earliest_end():
+    offer = _item("offer", "O", "orchard", D(2026, 11, 9), D(2026, 11, 11), total=5.0)
+    contract = _item("contract", "C", "orchard", D(2026, 11, 9), D(2026, 11, 20), total=5.0)
+    later = _item("contract", "L", "orchard", D(2026, 11, 9), D(2026, 11, 27), total=5.0)
+    _, items = _one(10.0, [offer, later, contract], [Booking("orchard", D(2026, 11, 10), 7.0)], D(2026, 11, 11))
+    assert (items["C"].booked, items["L"].booked, items["O"].booked) == (5, 2, 0)
+
+
+def test_ended_total_item_explanation():
+    it = _item("contract", "T", "orchard", *WK, total=10.0)
+    _, items = _one(0.0, [it], [Booking("orchard", D(2026, 11, 10), 4.0)], D(2026, 11, 15))
+    t = items["T"]
+    assert (t.remaining, t.shortfall) == (6, 6)
+    assert t.explanation == "10 h promised − 4 h booked = 6 h remaining. Ended on 13.11.2026 with 6 h not delivered."
+
+
+def test_supply_ending_before_item_raises():
+    it = _item("contract", "T", "orchard", START, D(2026, 12, 18), total=10.0)
+    owners = [_ada()]
+    supply = build(owners, [], _no_holiday, D(2026, 11, 8), D(2026, 11, 8), D(2026, 12, 4))
+    with pytest.raises(ValueError, match="supply ends before item T"):
+        cover([it], [], supply, owners, D(2026, 11, 8), NAMES)
+
+
+def test_c1_weekly_takes_proportionally_before_total():
+    weekly_c = _item("contract", "W", "orchard", *WK, hpw=5.0)
+    total_c = _item("contract", "T", "orchard", D(2026, 11, 11), D(2026, 11, 13), total=4.0)
+    _, items = _one(10.0, [weekly_c, total_c], [], D(2026, 11, 8))
+    assert (items["T"].covered, items["T"].shortfall) == (3, 1)
+
+
+def test_two_weekly_contracts_share_shortfall_pro_rata():
+    a = _item("contract", "A", "orchard", *WK, hpw=6.0)
+    b = _item("contract", "B", "orchard", *WK, hpw=4.0)
+    _, items = _one(5.0, [a, b], [], D(2026, 11, 8))
+    assert (items["A"].shortfall, items["B"].shortfall) == (3, 2)
+
+
+def test_weekly_offer_comes_after_contracts():
+    c = _item("contract", "C", "orchard", *WK, hpw=6.0)
+    o = _item("offer", "O", "orchard", *WK, hpw=6.0)
+    _, items = _one(10.0, [c, o], [], D(2026, 11, 8))
+    assert (items["C"].shortfall, items["O"].shortfall) == (0, 2)
+
+
+def test_total_items_earliest_end_not_earliest_start():
+    t1 = _item("contract", "T1", "orchard", D(2026, 11, 9), D(2026, 11, 20), total=10.0)
+    t2 = _item("contract", "T2", "orchard", D(2026, 11, 12), D(2026, 11, 13), total=4.0)
+    _, items = _one(10.0, [t1, t2], [], D(2026, 11, 8))
+    assert (items["T1"].shortfall, items["T2"].shortfall) == (0, 0)

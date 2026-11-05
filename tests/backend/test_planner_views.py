@@ -270,11 +270,11 @@ def test_no_supply_warning():
 
 
 def test_booked_unattributed():
-    booking = Booking("orchard", D(2026, 11, 2), 3.0)
+    booking = Booking("orchard", D(2026, 11, 2), 7.0)
     owners = [Owner("ada", "Ada", "employee", 40.0, WEEK)]
     asg = [_asg("a2", "ada", "orchard", "customer", D(2026, 11, 2), END, hpw=4.0)]
     supply = build(owners, asg, _no_holiday, TODAY, LO, HI)
-    item = _item("contract", "K9", "orchard", D(2026, 11, 9), END, hpw=4.0)
+    item = _item("contract", "K9", "orchard", D(2026, 11, 2), END, hpw=4.0)
     verdicts = cover([item], [booking], supply, owners, TODAY, NAMES)
     assert verdicts[0].booked_unattributed == 3.0
     (w,) = [w for w in verdict_warnings(verdicts, NAMES) if w["code"] == "booked.unattributed"]

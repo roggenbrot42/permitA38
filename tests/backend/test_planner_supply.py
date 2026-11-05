@@ -371,7 +371,7 @@ def _weeks_assignment(hpw: float, oid="emp") -> Assignment:
 def test_employee_24_week_average_over_48_warns():
     emp = person("emp", "Eli", hours=60.0)
     today = date(2027, 1, 1)
-    ws = supply.warnings([emp], [_weeks_assignment(50.0)], by_holiday, today, date(2027, 1, 11), date(2027, 1, 17))
+    ws = supply.warnings([emp], [_weeks_assignment(50.0)], by_holiday, today, date(2027, 1, 11), date(2027, 6, 27))
     avg = [w for w in ws if w["code"] == "assignment.working_time"]
     assert len(avg) == 1
     assert avg[0]["details"]["average"] == 50.0
@@ -382,7 +382,7 @@ def test_employee_24_week_average_over_48_warns():
 def test_employee_24_week_average_of_exactly_48_does_not_warn():
     emp = person("emp", "Eli", hours=60.0)
     ws = supply.warnings(
-        [emp], [_weeks_assignment(48.0)], by_holiday, date(2027, 1, 1), date(2027, 1, 11), date(2027, 1, 17)
+        [emp], [_weeks_assignment(48.0)], by_holiday, date(2027, 1, 1), date(2027, 1, 11), date(2027, 6, 27)
     )
     assert "assignment.working_time" not in codes(ws)
 
@@ -390,8 +390,103 @@ def test_employee_24_week_average_of_exactly_48_does_not_warn():
 def test_boss_high_average_is_info():
     boss = person("emp", "Bea", kind="boss", hours=60.0)
     ws = supply.warnings(
-        [boss], [_weeks_assignment(50.0)], by_holiday, date(2027, 1, 1), date(2027, 1, 11), date(2027, 1, 17)
+        [boss], [_weeks_assignment(50.0)], by_holiday, date(2027, 1, 1), date(2027, 1, 11), date(2027, 6, 27)
     )
     avg = [w for w in ws if w["code"] == "assignment.high_average"]
     assert len(avg) == 1 and avg[0]["severity"] == "info"
     assert "assignment.working_time" not in codes(ws)
+
+
+# ---------------------------------------------------------------- architect decisions after the review (2026-11-05)
+
+MON, FRI = date(2026, 11, 9), date(2026, 11, 13)
+
+
+def _over(ws: list[dict]) -> dict:
+    (w,) = [w for w in ws if w["code"] == "assignment.over_capacity"]
+    return w
+
+
+def test_mid_week_today_leaves_thursday_and_friday():
+    pat = person("p")
+    a = weekly("p", "x", MON, FRI, 20.0)
+    sup = supply.build([pat], [a], no_holiday, date(2026, 11, 11), date(2026, 11, 9), date(2026, 11, 20))
+    assert sum(pd.assigned for pd in sup.people["p"].values()) == 8
+    assert sup.project["x"] == {date(2026, 11, 12): (4.0, 0.0), date(2026, 11, 13): (4.0, 0.0)}
+
+
+def test_subcontractor_unavailable_window_moves_hours():
+    sub = person("s", kind="subcontractor", off={date(2026, 11, 10): "unavailable", date(2026, 11, 11): "unavailable"})
+    a = weekly("s", "x", MON, FRI, 10.0)
+    got = spread(sub, a, no_holiday, None)
+    assert sorted(got) == [date(2026, 11, 9), date(2026, 11, 12), date(2026, 11, 13)]
+    assert all(v == pytest.approx(10 / 3) for v in got.values())
+    assert planned_hours(sub, a, no_holiday) == 10.0
+    assert planned_net(sub, a, no_holiday, Decimal("90.00")) == Decimal("900.00")
+    t = total("s", "x", MON, FRI, 9.0)
+    assert all(v == pytest.approx(3.0) for v in spread(sub, t, no_holiday, None).values())
+    assert len(spread(sub, t, no_holiday, None)) == 3
+
+
+def _six_day(hours: float) -> Owner:
+    return Owner("e", "Eve", "employee", hours, (0, 1, 2, 3, 4, 5))
+
+
+def test_sixty_hour_week_exactly_does_not_warn_but_61_does():
+    sat = date(2026, 11, 14)
+    today = date(2026, 11, 8)
+    ws = supply.warnings([_six_day(60.0)], [weekly("e", "x", MON, sat, 60.0)], no_holiday, today, MON, FRI)
+    assert ws == []
+    ws = supply.warnings([_six_day(60.0)], [weekly("e", "x", MON, sat, 61.0)], no_holiday, today, MON, FRI)
+    assert _over(ws)["details"]["reasons"] == ["working_time_law", "weekly_hours"]
+
+
+def test_time_off_only_with_lost_day_and_overload():
+    today = date(2026, 11, 8)
+    emp = person("p", off={MON: "vacation"})
+    ws = supply.warnings([emp], [weekly("p", "x", MON, FRI, 40.0)], no_holiday, today, MON, FRI)
+    assert _over(ws)["details"]["reasons"] == ["time_off"]
+    # a day off in a week that is not over capacity gives no warning
+    ws = supply.warnings([emp], [weekly("p", "x", MON, FRI, 20.0)], no_holiday, today, MON, FRI)
+    assert ws == []
+    # overload caused by busy time only
+    busy = person("p", busy={date(2026, 11, 10): 4.0})
+    ws = supply.warnings([busy], [weekly("p", "x", MON, FRI, 40.0)], no_holiday, today, MON, FRI)
+    w = _over(ws)
+    assert w["details"]["reason"] == "weekly_hours" and w["details"]["over_by"] == 4.0
+
+
+def test_project_lists_sorted_by_displayed_name():
+    emp = person("p")
+    asg = [weekly("p", "z", MON, FRI, 25.0), weekly("p", "a", MON, FRI, 25.0)]
+    ws = supply.warnings([emp], asg, no_holiday, date(2026, 11, 8), MON, FRI, {"z": "Alpha", "a": "Zed"})
+    w = _over(ws)
+    assert "(Alpha 25 h, Zed 25 h)" in w["message"]
+    assert [p["project_id"] for p in w["details"]["projects"]] == ["z", "a"]
+
+
+def test_law_checks_count_days_on_or_before_today():
+    emp = person("p", hours=60.0)
+    wed = date(2026, 11, 11)
+    ws = supply.warnings([emp], [weekly("p", "x", MON, FRI, 55.0)], no_holiday, wed, MON, FRI)
+    w = _over(ws)
+    assert w["details"]["reasons"] == ["working_time_law"]
+    assert w["message"].count("at most 10 h a day") == 5
+    boss = person("b", kind="boss", hours=80.0)
+    ws = supply.warnings([boss], [weekly("b", "x", MON, FRI, 65.0)], no_holiday, wed, MON, FRI)
+    assert codes(ws).count("assignment.very_long_day") == 5
+    assert "assignment.long_week" in codes(ws)
+
+
+def test_average_only_for_windows_ending_inside_range():
+    emp = person("emp", "Eli", hours=60.0)
+    today = date(2027, 1, 1)
+    ws = supply.warnings([emp], [_weeks_assignment(50.0)], by_holiday, today, date(2027, 1, 11), date(2027, 1, 17))
+    assert "assignment.working_time" not in codes(ws)
+
+
+def test_day_off_holiday_counts_as_holiday():
+    emp = person("p", off={MON: "holiday"})
+    sup = supply.build([emp], [], no_holiday, date(2026, 11, 8), MON, FRI)
+    row = sup.people["p"][MON]
+    assert row.holiday == 8.0 and row.absence == 0.0

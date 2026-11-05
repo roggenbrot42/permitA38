@@ -120,6 +120,8 @@ def _attribute(states: list[_State], bookings: list[Booking]) -> float:
     weekly = sorted((s for s in states if s.weekly), key=lambda s: _sort_key(s.item))
     totals = sorted((s for s in states if not s.weekly), key=lambda s: _sort_key(s.item))
     for day in sorted(by_day):
+        if not any(s.item.start <= day <= s.item.end for s in states):
+            continue  # history outside every item period
         rest = by_day[day]
         mon = _monday(day)
         for s in weekly:
@@ -209,7 +211,7 @@ def _suggestions(it: Item, supply: Supply, owners: Sequence[Owner], today: date)
     return out
 
 
-def _explain(s: _State, project_name: str) -> str:
+def _explain(s: _State, project_name: str, today: date) -> str:
     it = s.item
     if s.weekly:
         head = f"{_h(it.hours_per_week or 0.0)} h per week from {_dmy(it.start)} to {_dmy(it.end)}:"
@@ -218,6 +220,11 @@ def _explain(s: _State, project_name: str) -> str:
         weeks = ", ".join(w.strftime("%d.%m.") for w in sorted(s.short_weeks))
         return f"{head} short {_h(s.shortfall)} h in {len(s.short_weeks)} {'week' if len(s.short_weeks) == 1 else 'weeks'} ({weeks})."
     promised, after = ("promised", "its weekly contracts") if it.kind == "contract" else ("offered", "its contracts")
+    if _pos(s.shortfall) and not _window(it, today):
+        return (
+            f"{_h(it.total_hours or 0.0)} h {promised} − {_h(s.got_total)} h booked = {_h(s.remaining)} h remaining. "
+            f"Ended on {_dmy(it.end)} with {_h(s.shortfall)} h not delivered."
+        )
     tail = f"Short {_h(s.shortfall)} h." if _pos(s.shortfall) else "Covered."
     return (
         f"{_h(it.total_hours or 0.0)} h {promised} − {_h(s.got_total)} h booked = {_h(s.remaining)} h remaining. "
@@ -243,9 +250,9 @@ def _verdict(s: _State, project_name: str, supply: Supply, owners: Sequence[Owne
         shortfall=round(s.shortfall, 2),
         weekly_shortfalls=[s.short_weeks[w] for w in sorted(s.short_weeks)],
         rate=it.rate,
-        value=q2(dec(promised) * it.rate),
+        value=q2(dec(round(promised, 6)) * it.rate),
         win_probability=it.win * 100 if it.kind == "offer" else None,
-        explanation=_explain(s, project_name),
+        explanation=_explain(s, project_name, today),
         suggestions=_suggestions(it, supply, owners, today) if _pos(s.shortfall) else [],
     )
 
@@ -326,6 +333,8 @@ def cover(
     """One verdict per project with an item (the caller filtered, D1); ``None`` for the unassigned scope (C5)."""
     groups: dict[str | None, list[Item]] = {}
     for it in items:
+        if it.end > supply.hi:
+            raise ValueError(f"supply ends before item {it.id}")
         groups.setdefault(it.project_id, []).append(it)
     past = [b for b in bookings if b.day <= today]
     out = [
