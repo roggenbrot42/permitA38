@@ -64,8 +64,25 @@ minutes alone do not say when the break was). Night shifts (end before start) en
 
 These are format checks. Whether a number is *registered* can only be confirmed by VIES / the BZSt service.
 
+## Stored data check
+
+`permita38 check-db [--json] [--only CODE_PREFIX ...]` reads every stored record and reports what breaks the rules.
+It is read-only (it never migrates or writes; exit code 0 = no errors, 1 = errors found, 2 = could not run, e.g. a
+pending migration). Messages carry ids, codes and field names only. Code prefixes (usable with `--only`):
+
+- `type.` a value does not fit its column type (it landed in the `extra` JSON, so filters miss it)
+- `model.` a stored record violates the rules of the API request model, or a date column is malformed
+- `ref.` a reference points to a record that does not exist
+- `numbering.` duplicate or similar numbers, drafts with a number, finalized invoices without one, stale counters, gaps
+- `money.` line amounts, itemised expense totals, non-finite or oversized amounts
+- `state.` reversed periods, no active boss, inconsistent receipt/document scans, timers without a start
+- `file.` missing attachments, orphan files, sync-conflict copies
+- `check.crashed` a rule of the check itself failed
+
+Spec: `docs/specs/db-integrity-check.md`.
+
 ## Not covered (yet)
 
-User-tunable thresholds and per-rule switches, a "data health" report over stored records, average-48-hours and
+User-tunable thresholds and per-rule switches, average-48-hours and
 weekly rest rules, and a confirm-before-save flow. The thresholds are constants in
 `permita38/core/service/sanity_rules.py`.
