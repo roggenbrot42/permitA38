@@ -72,7 +72,7 @@ list it under "Open design decisions" with the path.
 | Code | Tables / columns | Rule (checked for new or changed values only) |
 |---|---|---|
 | `numbering.duplicate` | `invoices.number`, `offers.number` | unique within the table when set and not `''` |
-| `format.date` | `entries.date`; `invoices`/`offers` `date`, `due_date`, `valid_until`, `paid_date`, `service_from`, `service_to`; `expenses.date`, `paid_on`; `absences`, `contracts`, `projects`, `allocations`, `trips` `start`/`end`; `allocations.cancelled_from`; `incoming_offers.received_on`, `valid_until` | `GLOB '[0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]'` when set (format only; the calendar check stays in the models) |
+| `format.date` | `entries.date`; `invoices`/`offers` `date`, `due_date`, `valid_until`, `paid_date`, `service_from`, `service_to`; `expenses.date`, `paid_on`; `absences`, `contracts`, `projects`, `allocations` `start`/`end`; `allocations.cancelled_from`; `incoming_offers.received_on`, `valid_until` | `GLOB '[0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]'` when set (format only; the calendar check stays in the models) |
 | `range.negative` | `entries.minutes`; `rate` on customers, projects, tasks, entries, contracts, allocations, suppliers; `projects.budget_hours`; `contracts`/`allocations` `hours_per_week`, `total_hours`; `expenses.net`, `vat` | `>= 0` when set (looser than the API on purpose, e.g. `minutes` is 1..1440 there) |
 | `state.period_reversed` | `absences`, `contracts`, `projects`, `allocations`, `trips` `start`/`end`; `invoices`/`offers` `service_from`/`service_to` | `end >= start` when both are set |
 
@@ -96,14 +96,15 @@ Guards are part of the schema, so they go into `schema.py`, not only into SQL (d
 ```python
 @dataclass(frozen=True)
 class Guard:
-    name: str                 # trigger name stem, e.g. "guard_invoices_number_unique"
+    name: str  # trigger name stem, e.g. "guard_invoices_number_unique"
     table: str
-    kind: str                 # "unique" | "date" | "non_negative" | "order"
+    kind: str  # "unique" | "date" | "non_negative" | "order"
     columns: tuple[str, ...]  # one column, or (start, end) for "order"
-    code: str                 # the RAISE code, e.g. "numbering.duplicate"
+    code: str  # the RAISE code, e.g. "numbering.duplicate"
 
-GUARDS: tuple[Guard, ...] = (...)
-CHECKS = {"allocations": ('allocations_one_owner', '<sql>')}  # declared for the drift test; SQL stays in 0011
+
+GUARDS: tuple[Guard, ...] = ...
+CHECKS = {"allocations": ("allocations_one_owner", "<sql>")}  # declared for the drift test; SQL stays in 0011
 ```
 
 `dialect.py` gets `SQLiteDialect.guard_sql(guard) -> list[str]` (the INSERT and UPDATE trigger) and the PostgreSQL /

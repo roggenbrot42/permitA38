@@ -44,16 +44,17 @@ permita38 check-db [--json] [--only CODE_PREFIX ...] [--config ...] [--data ...]
 ```python
 @dataclass(frozen=True)
 class Finding:
-    code: str            # e.g. "numbering.duplicate"
-    severity: str        # "error" | "warning" | "info"
+    code: str  # e.g. "numbering.duplicate"
+    severity: str  # "error" | "warning" | "info"
     collection: str | None
     id: str | None
     field: str | None
     message: str
 
+
 class IntegrityService:
     def __init__(self, store: Repository): ...
-    def run(self, only: Sequence[str] = ()) -> list[Finding]: ...   # sorted by (severity rank, code, collection, id)
+    def run(self, only: Sequence[str] = ()) -> list[Finding]: ...  # sorted by (severity rank, code, collection, id)
 ```
 
 Each rule is a small function `(ctx) -> Iterable[Finding]`, registered in a list. A rule that raises is reported as
@@ -97,8 +98,9 @@ decisions".
 
 For the tables without a CRUD model (`allocations`, `suppliers`, `incoming_offers`, `trips`, `users`,
 `receipt_scans`, `document_scans`), check only the date columns (`model.date_format`, warning): `start`, `end`,
-`cancelled_from` (allocations), `start`, `end` (trips), `received_on`, `valid_until` (incoming offers),
-`tracking_start` (users). Use `validation._iso_date` (make it public as `iso_date` if needed). Do **not** treat
+`cancelled_from` (allocations), `received_on`, `valid_until` (incoming offers),
+`tracking_start` (users). Use `validation._iso_date` (make it public as `iso_date` if needed). Trips `start`/`end` are local datetimes
+(`YYYY-MM-DDTHH:MM`): check them with `validation.local_datetime`. Do **not** treat
 `entries.start`/`end` as dates: they are clock times.
 
 ### 3. References (`ref.*`)
