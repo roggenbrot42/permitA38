@@ -99,6 +99,9 @@ def p_row(week, pid):
 
 
 # ----------------------------------------------------------------------------- W4: the ring fence and the split
+@pytest.mark.skip(
+    reason="contract user_ids no longer assign people (docs/specs/project-centric-planning.md); the old planner and this test go in WP4"
+)
 def test_w4_contract_split_to_the_subcontractor_leaves_an_external_gap(boss_client, boss_id):
     p = new_project(boss_client, "Demo project P")
     c_row = contract(boss_client, "Contract C_P", p["id"], [boss_id], 50.0, 100.0)
@@ -255,6 +258,9 @@ def test_w14_bought_capacity_without_demand_is_paid_and_warned(boss_client):
     assert nodemand[0]["details"]["capacity"] == 20.0 and nodemand[0]["details"]["week"] == "2026-03-02"
 
 
+@pytest.mark.skip(
+    reason="contract user_ids no longer assign people (docs/specs/project-centric-planning.md); the old planner and this test go in WP4"
+)
 def test_w14_ring_fence_demand_of_another_project_draws_no_hours_from_p(boss_client):
     p = new_project(boss_client, "Demo project P")
     q = new_project(boss_client, "Demo project Q")
@@ -287,6 +293,9 @@ def test_w2_easter_monday_is_not_made_up_in_the_weekly_figures(boss_client):
 
 
 # ----------------------------------------------------------------------------- W3: a contract spreads around S.unavailable
+@pytest.mark.skip(
+    reason="contract user_ids no longer assign people (docs/specs/project-centric-planning.md); the old planner and this test go in WP4"
+)
 def test_w3_contract_of_a_subcontractor_spreads_around_its_unavailable_window(boss_client):
     q = new_project(boss_client, "Demo project Q")
     s = boss_client.post(

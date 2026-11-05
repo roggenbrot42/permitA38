@@ -360,6 +360,9 @@ def test_read_only_token_reads_the_new_routes(app, boss_client, url):
 
 
 # ----------------------------------------------------------------------------- T8: contract assignees that are suppliers
+@pytest.mark.skip(
+    reason="contract user_ids no longer assign people (docs/specs/project-centric-planning.md); the old planner and this test go in WP4"
+)
 def test_contract_user_ids_accept_active_subcontractors_only(boss_client, store):
     p = project(boss_client, "Demo project P")
     boss_id = next(u["id"] for u in store.list("users") if u["role"] == "boss")
