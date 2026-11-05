@@ -523,6 +523,9 @@ def test_allocations_migration_has_both_owner_columns_indexes_and_the_one_owner_
             "idx_allocations_user",
             "idx_allocations_project",
         }
+        # the reference guards (0017) refuse an allocation that points at a missing row: create the targets first
+        for table, rid in (("users", "u1"), ("suppliers", "s1"), ("projects", "p1")):
+            raw.execute(f'INSERT INTO "{table}" ("id") VALUES (?)', (rid,))
         ins = 'INSERT INTO "allocations" ("id", "user_id", "supplier_id", "project_id") VALUES (?, ?, ?, ?)'
         raw.execute(ins, ("a1", "u1", None, "p1"))
         raw.execute(ins, ("a2", None, "s1", "p1"))

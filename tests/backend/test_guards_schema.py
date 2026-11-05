@@ -59,7 +59,13 @@ def test_guard_declarations_are_well_formed():
         "format.date",
         "range.negative",
         "state.period_reversed",
+        "ref.dangling",
     }
+    for g in GUARDS:
+        if g.kind == "reference":
+            assert g.target in TABLES and len(g.columns) == 1, g.name
+        else:
+            assert g.target is None, g.name
     # trips start/end are local datetimes: only the order guard
     assert [g.kind for g in GUARDS if g.table == "trips"] == ["order"]
     assert CHECKS["allocations"][0] == "allocations_one_owner"
@@ -69,9 +75,11 @@ def test_migrated_triggers_equal_guard_sql(repo):
     d = SQLiteDialect()
     want = {}
     for g in GUARDS:
-        ins, upd = d.guard_sql(g)
-        want[f"{g.name}_ins"] = norm(ins)
-        want[f"{g.name}_upd"] = norm(upd)
+        stmts = d.guard_sql(g)
+        suffixes = ("_ins", "_upd", "_del") if g.kind == "reference" else ("_ins", "_upd")
+        assert len(stmts) == len(suffixes), g.name  # reference guards: three triggers, all others: two
+        for suffix, stmt in zip(suffixes, stmts):
+            want[g.name + suffix] = norm(stmt)
     got = {
         name: norm(sql) for name, sql in repo.conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'")
     }
@@ -80,20 +88,31 @@ def test_migrated_triggers_equal_guard_sql(repo):
 
 def test_sqlite_migration_file_is_exactly_the_generated_statements(tmp_path):
     d = SQLiteDialect()
-    sql = next(m for m in CHAIN if m.name == "guards").sql()
-    statements = [s for g in GUARDS for s in d.guard_sql(g)]
-    for s in statements:
-        assert s in sql
-    assert sql.count("CREATE TRIGGER") == len(statements)
+    v1 = next(m for m in CHAIN if m.name == "guards").sql()
+    refs = next(m for m in CHAIN if m.name == "reference_guards").sql()
+    v1_statements = [s for g in GUARDS if g.kind != "reference" for s in d.guard_sql(g)]
+    ref_statements = [s for g in GUARDS if g.kind == "reference" for s in d.guard_sql(g)]
+    assert ref_statements
+    # every guard's SQL is in exactly one migration file: v1 guards in 0016, reference guards in 0017
+    for s in v1_statements:
+        assert s in v1 and s not in refs
+    for s in ref_statements:
+        assert s in refs and s not in v1
+    assert v1.count("CREATE TRIGGER") == len(v1_statements)
+    assert refs.count("CREATE TRIGGER") == len(ref_statements)
 
 
 @pytest.mark.parametrize("dialect", ["postgresql", "mariadb"])
 def test_native_dialects_cover_every_guard(dialect):
     d = DIALECTS[dialect]
-    sql = next(m for m in database.list_migrations(dialect) if m.name == "guards").sql()
+    migrations = database.list_migrations(dialect)
+    sql = next(m for m in migrations if m.name == "guards").sql()
+    ref_sql = next(m for m in migrations if m.name == "reference_guards").sql()
     for g in GUARDS:
+        want = ref_sql if g.kind == "reference" else sql
+        other = sql if g.kind == "reference" else ref_sql
         for s in d.guard_sql(g):
-            assert s in sql
+            assert s in want and s not in other  # exactly one migration file
     assert "CHECK" in sql and "UNIQUE INDEX" in sql
 
 
@@ -156,25 +175,28 @@ DATE_CASES = [
 ]
 
 
-def _owner(table):
-    return {"user_id": "inv001"} if table == "allocations" else {}
+def _owner(repo, table):
+    """The owner columns a row of `table` needs: an allocation points at an existing (invented) user."""
+    if table == "allocations":
+        return {"user_id": repo.save("users", {"name": "inv001"})["id"]}
+    return {}
 
 
 @pytest.mark.parametrize(("table", "col"), DATE_CASES)
 def test_date_guard_refuses_a_bad_format_and_accepts_iso(repo, table, col):
-    refused("format.date", repo.save, table, {**_owner(table), col: "2026-1-5"})
-    refused("format.date", repo.save, table, {**_owner(table), col: "05.01.2026"})
-    ok = repo.save(table, {**_owner(table), col: "2026-01-05"})
+    refused("format.date", repo.save, table, {**_owner(repo, table), col: "2026-1-5"})
+    refused("format.date", repo.save, table, {**_owner(repo, table), col: "05.01.2026"})
+    ok = repo.save(table, {**_owner(repo, table), col: "2026-01-05"})
     assert ok[col] == "2026-01-05"
     refused("format.date", repo.save, table, {**ok, col: "tomorrow"})
     assert repo.get(table, ok["id"])[col] == "2026-01-05"
-    repo.save(table, {**_owner(table), col: None})  # not set
-    repo.save(table, {**_owner(table)})
+    repo.save(table, {**_owner(repo, table), col: None})  # not set
+    repo.save(table, {**_owner(repo, table)})
 
 
 @pytest.mark.parametrize(("table", "col"), DATE_CASES)
 def test_date_and_order_guards_accept_empty_string_date(repo, table, col):
-    ok = repo.save(table, {**_owner(table), col: ""})
+    ok = repo.save(table, {**_owner(repo, table), col: ""})
     assert ok[col] == ""
 
 
@@ -205,12 +227,12 @@ NEGATIVE_CASES = [
 
 @pytest.mark.parametrize(("table", "col"), NEGATIVE_CASES)
 def test_negative_guard_refuses_below_zero_and_accepts_zero(repo, table, col):
-    refused("range.negative", repo.save, table, {**_owner(table), col: -1})
-    ok = repo.save(table, {**_owner(table), col: 0})
+    refused("range.negative", repo.save, table, {**_owner(repo, table), col: -1})
+    ok = repo.save(table, {**_owner(repo, table), col: 0})
     assert ok[col] == 0
-    repo.save(table, {**_owner(table), col: 1})
+    repo.save(table, {**_owner(repo, table), col: 1})
     refused("range.negative", repo.save, table, {**ok, col: -2})
-    repo.save(table, {**_owner(table)})  # not set
+    repo.save(table, {**_owner(repo, table)})  # not set
 
 
 def test_negative_guard_covers_every_declared_column():
@@ -231,7 +253,7 @@ ORDER_CASES = [
 
 @pytest.mark.parametrize(("table", "a", "b", "late", "early"), ORDER_CASES)
 def test_period_guard_refuses_a_reversed_period_and_accepts_equal_ends(repo, table, a, b, late, early):
-    o = _owner(table)
+    o = _owner(repo, table)
     refused("state.period_reversed", repo.save, table, {**o, a: late, b: early})
     ok = repo.save(table, {**o, a: early, b: late})
     assert (ok[a], ok[b]) == (early, late)
@@ -245,7 +267,7 @@ def test_period_guard_refuses_a_reversed_period_and_accepts_equal_ends(repo, tab
 
 @pytest.mark.parametrize(("table", "a", "b", "late", "early"), ORDER_CASES)
 def test_date_and_order_guards_accept_empty_string(repo, table, a, b, late, early):
-    o = _owner(table)
+    o = _owner(repo, table)
     for first, second in (("", late), (late, ""), ("", early)):
         ok = repo.save(table, {**o, a: first, b: second})
         assert (ok[a], ok[b]) == (first, second)
@@ -269,7 +291,10 @@ def old_db(tmp_path, monkeypatch):
     """A database at the previous head (0016 removed from a copy of the real chain) holding violations."""
     root = real_chain_copy(tmp_path)
     for d in DIALECT_NAMES:
-        (root / d / "0016-guards.sql").unlink()
+        # 0017 requires 0016: remove every migration after 0015
+        for later in (root / d).glob("*.sql"):
+            if int(later.name[:4]) > 15:
+                later.unlink()
     data = tmp_path / "data"
     with monkeypatch.context() as m:
         use_chain(m, root)

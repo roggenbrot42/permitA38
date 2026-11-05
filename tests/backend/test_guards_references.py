@@ -52,10 +52,11 @@ def refused(code, fn, *args):
 
 
 def refused_delete(repo, coll, rid):
-    """The repository's delete does not translate the trigger error: the raw database error carries the code."""
-    with pytest.raises(sqlite3.IntegrityError) as e:
+    """The repository's delete translates the trigger error into a ConstraintViolation(ref.in_use, collection)."""
+    with pytest.raises(ConstraintViolation) as e:
         repo.delete(coll, rid)
-    assert str(e.value) == "permita38:ref.in_use"
+    assert e.value.code == "ref.in_use"
+    assert e.value.collection == coll
     assert repo.get(coll, rid) is not None
 
 
