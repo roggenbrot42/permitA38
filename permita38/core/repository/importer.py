@@ -1,13 +1,23 @@
 """Import the legacy file-per-record JSON layout (permitA38/Timely 0.1/0.2) into a repository."""
 
 import json
+import logging
 import re
 import shutil
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .base import ID_RE, Repository
 from .schema import COLLECTIONS, INTERNAL_COLLECTIONS
+
+log = logging.getLogger("permita38.import")
+
+#: guard kinds a verbatim restore may suspend; the number guard (``unique``) never is
+RESTORE_SUSPENDED = {"date", "non_negative", "order"}
+RESTORE_FINDING_CODES = ("format.date", "range.negative", "state.period_reversed")
+NUMBERED = ("invoices", "offers")
 
 _FILE_RE = re.compile(r"^[0-9a-z]{6,32}\.json$")
 
@@ -20,6 +30,23 @@ class ImportReport:
     attachments: int = 0
     usernames_derived: list[str] = field(default_factory=list)
     users_without_password: list[str] = field(default_factory=list)
+    warnings: list[dict] = field(default_factory=list)
+
+
+def drop_empty_number(rec: dict) -> None:
+    """A document with ``number == ""`` has no number; drop the key (shared by the up-front check and the write)."""
+    if rec.get("number") == "":
+        del rec["number"]
+
+
+def duplicate_numbers(numbers: Iterable[Any]) -> list[str]:
+    """The numbers that occur more than once (exact strings), sorted."""
+    seen: set[str] = set()
+    dup: set[str] = set()
+    for n in numbers:
+        if isinstance(n, str) and n:
+            (dup if n in seen else seen).add(n)
+    return sorted(dup)
 
 
 def is_legacy_layout(folder: Path) -> bool:
@@ -35,13 +62,49 @@ def _slug(name: str) -> str:
     return (s if len(s) >= 2 else "user")[:32]
 
 
+def _read_new(repo: Repository, folder: Path, coll: str) -> Iterable[tuple[str, dict]]:
+    """(id, record) of the files that would be imported (valid JSON, valid id, not stored yet)."""
+    if not folder.is_dir():
+        return
+    for p in sorted(folder.iterdir()):
+        if not _FILE_RE.match(p.name):
+            continue
+        try:
+            rec = json.loads(p.read_text(encoding="utf-8"))
+        except ValueError:
+            continue
+        if not isinstance(rec, dict):
+            continue
+        rid = rec.get("id") or p.stem
+        if not ID_RE.match(str(rid)) or repo.get(coll, rid):
+            continue
+        yield rid, rec
+
+
+def _check_numbers(repo: Repository, old: Path) -> None:
+    """Refuse the whole import when it would create a duplicate invoice or offer number."""
+    for coll in NUMBERED:
+        incoming: list[str] = []
+        for _, rec in _read_new(repo, old / coll, coll):
+            drop_empty_number(rec)
+            if isinstance(rec.get("number"), str):
+                incoming.append(rec["number"])
+        stored = [r.get("number") for r in repo.list(coll)]
+        dup = duplicate_numbers(incoming)
+        taken = {n for n in stored if isinstance(n, str) and n}
+        dup = sorted({*dup, *(n for n in incoming if n in taken)})
+        if dup:
+            raise ValueError(f"numbering.duplicate: duplicate {coll} numbers, nothing was imported: {', '.join(dup)}")
+
+
 def import_json(repo: Repository, old_dir: Path) -> ImportReport:
     """Idempotent: records whose id already exists are skipped, settings are only imported into an empty DB."""
     old = Path(old_dir)
     if not old.is_dir():
         raise FileNotFoundError(f"{old} is not a directory")
     report = ImportReport()
-    with repo.transaction():
+    _check_numbers(repo, old)
+    with repo.transaction(), repo.guards_suspended(RESTORE_SUSPENDED):
         if (old / "settings.json").is_file() and not repo.settings():
             repo.save_settings(json.loads((old / "settings.json").read_text(encoding="utf-8")))
             report.settings = True
@@ -63,6 +126,8 @@ def import_json(repo: Repository, old_dir: Path) -> ImportReport:
                         skipped += 1
                         continue
                     rec["id"] = rid
+                    if coll in NUMBERED:
+                        drop_empty_number(rec)
                     if coll == "users":
                         if not rec.get("username"):
                             base = _slug(rec.get("name", ""))
@@ -79,6 +144,16 @@ def import_json(repo: Repository, old_dir: Path) -> ImportReport:
                     imported += 1
             if imported or skipped:
                 report.imported[coll], report.skipped[coll] = imported, skipped
+        from permita38.core.service.integrity import IntegrityService
+
+        for finding in IntegrityService(repo).run(only=RESTORE_FINDING_CODES):
+            report.warnings.append(finding.as_dict())
+    if report.warnings:
+        log.warning(
+            "import-json: %d integrity findings: %s",
+            len(report.warnings),
+            ", ".join(f"{w['code']}:{w['collection']}:{w['id']}" for w in report.warnings[:50]),
+        )
     src_att, dst_att = old / "attachments", Path(getattr(repo, "data_dir", old)) / "attachments"
     if src_att.is_dir() and src_att.resolve() != dst_att.resolve():
         dst_att.mkdir(parents=True, exist_ok=True)
