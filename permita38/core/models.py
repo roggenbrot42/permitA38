@@ -331,14 +331,18 @@ class TimelineAbsence(BaseModel):
     label: str | None = None
 
 
-class TimelineContract(BaseModel):
+class TimelineAssignment(BaseModel):
+    """An active employee allocation of one person (project and customer by name; null when gone)."""
+
     model_config = ConfigDict(extra="allow")
     id: str | None = None
-    title: str | None = None
+    project_id: str | None = None
+    project: str | None = None
     customer: str | None = None
     start: str
-    end: str | None = None
+    end: str
     hours_per_week: float | None = None
+    total_hours: float | None = None
 
 
 class TimelinePerson(BaseModel):
@@ -348,7 +352,7 @@ class TimelinePerson(BaseModel):
     color: str | None = None
     weekly_hours: float | None = None
     absences: list[TimelineAbsence] = []
-    contracts: list[TimelineContract] = []
+    assignments: list[TimelineAssignment] = []
 
 
 class TeamTimeline(BaseModel):

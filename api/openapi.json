@@ -19453,7 +19453,7 @@
         "title": "TimelineAbsence",
         "description": "One stored absence as the viewer may see it (``kind`` and ``label`` are null where the level hides them)."
       },
-      "TimelineContract": {
+      "TimelineAssignment": {
         "properties": {
           "id": {
             "anyOf": [
@@ -19466,7 +19466,7 @@
             ],
             "title": "Id"
           },
-          "title": {
+          "project_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -19475,7 +19475,18 @@
                 "type": "null"
               }
             ],
-            "title": "Title"
+            "title": "Project Id"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
           },
           "customer": {
             "anyOf": [
@@ -19493,14 +19504,7 @@
             "title": "Start"
           },
           "end": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "End"
           },
           "hours_per_week": {
@@ -19513,14 +19517,27 @@
               }
             ],
             "title": "Hours Per Week"
+          },
+          "total_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Hours"
           }
         },
         "additionalProperties": true,
         "type": "object",
         "required": [
-          "start"
+          "start",
+          "end"
         ],
-        "title": "TimelineContract"
+        "title": "TimelineAssignment",
+        "description": "An active employee allocation of one person (project and customer by name; null when gone)."
       },
       "TimelinePerson": {
         "properties": {
@@ -19569,12 +19586,12 @@
             "title": "Absences",
             "default": []
           },
-          "contracts": {
+          "assignments": {
             "items": {
-              "$ref": "#/components/schemas/TimelineContract"
+              "$ref": "#/components/schemas/TimelineAssignment"
             },
             "type": "array",
-            "title": "Contracts",
+            "title": "Assignments",
             "default": []
           }
         },
