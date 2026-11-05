@@ -201,8 +201,11 @@ done in their own PRs **before** this migration). A guard refuses only **new or 
 grandfathered and reported by `check-db` under the same code. There are no table CHECKs, no table rebuild and no
 rejects table (D6 and D7 decided this way, 2026-11-05).
 
-**Migration `NNNN-project-planning`** (one file per dialect; `requires` = the head at merge time, `0018` if part B
-is merged first). Order inside the file:
+**Migration `0018-project-planning`** (one file per dialect; `requires: dea6e12b` = `0017-reference_guards` of
+db-guards-v2 part B, PR #99, stacked on part A #97 with `0016-guards` = `e4b70dba`; if the chain on `main` differs at
+merge time, rebase `requires` onto the head). Part B already refuses deleting a project that allocations, entries,
+contracts, offers, invoices or a running timer still use (409 "This project is still used by …; archive it
+instead."); the planner's own rule that `internaladmin` is never deleted stays separate. Order inside the file:
 
 1. Schema: `ALTER TABLE projects ADD COLUMN kind`, then `ALTER TABLE projects DROP COLUMN personal` (`DROP COLUMN`
    keeps the other triggers and indexes; no guard reads `personal`).
