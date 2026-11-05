@@ -61,7 +61,7 @@
       if (a.delete) return { id: out.id, delete: true };
       return out;
     });
-    const commitments = Object.values(P.com).map(c => ({ kind: c.kind, id: c.id, start: c.start, end: c.end, hours_per_week: c.hours_per_week ?? null, total_hours: c.total_hours ?? null }));
+    const commitments = Object.values(P.com).map(c => ({ kind: c.kind, id: c.id, start: c.start, end: c.end, ...(c.hours_per_week != null ? { hours_per_week: c.hours_per_week } : { total_hours: c.total_hours ?? null }) }));
     const allocations = Object.entries(P.alloc).map(([k, a]) => {
       if (a.delete) return { id: a.id, delete: true };
       const out = { user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, hours_per_week: a.hours_per_week };
@@ -155,8 +155,8 @@
   }
   function comBars() {
     const uid = userId();
-    const items = [...S.d.contracts.filter(c => c.status !== 'done').map(c => ({ kind: 'contract', id: c.id, title: c.title || 'Contract', project_id: c.project_id || null, user_ids: c.user_ids || [], sub: 'contract' })),
-      ...S.d.offers.filter(o => o.status === 'sent' && o.plan && !S.d.contracts.some(c => c.offer_id === o.id)).map(o => ({ kind: 'offer', id: o.id, title: 'Offer ' + (o.number || '(draft)'), project_id: o.project_id || null, user_ids: (o.plan && o.plan.user_ids) || [], sub: 'offer' }))];
+    const items = [...S.d.contracts.filter(c => c.status !== 'done').map(c => ({ kind: 'contract', id: c.id, title: c.title || 'Contract', project_id: c.project_id || null, sub: 'contract' })),
+      ...S.d.offers.filter(o => o.status === 'sent' && o.plan && !S.d.contracts.some(c => c.offer_id === o.id)).map(o => ({ kind: 'offer', id: o.id, title: 'Offer ' + (o.number || '(draft)'), project_id: o.project_id || null, sub: 'offer' }))];
     let html = '', group;
     items.sort((a, b) => (x => x[0] < x[1] ? -1 : x[0] > x[1] ? 1 : 0)([projName(a.project_id), projName(b.project_id)].map(n => n.toLowerCase())));
     for (const it of items) {
@@ -164,10 +164,9 @@
       if (it.project_id !== group) { group = it.project_id; html += `<div class="pln-row pln-group"><div class="pln-label"><b>${esc(projName(group))}</b></div></div>`; }
       const c = P.com[key] || comOrig(key);
       if (!c) continue;
-      const mine = !uid || it.user_ids.length === 0 || it.user_ids.includes(uid);
       const sel = P.sel === key ? ' sel' : '';
       const otherProject = P.project && (P.project === 'unassigned' ? !!it.project_id : it.project_id !== P.project);
-      const dim = mine && !otherProject ? '' : ' dim';
+      const dim = !otherProject ? '' : ' dim';
       const hours = c.hours_per_week ? `${num(c.hours_per_week, 2)} h/week` : `${num(c.total_hours || 0, 2)} h total`;
       const row = `<div class="pln-row${dim}"><div class="pln-label"><button type="button" class="pln-pick${sel}" data-a="plnSelect" data-key="${esc(key)}">${esc(it.title)}</button><div class="small muted">${esc(hours)}</div></div>
         <div class="pln-lane" data-lane="com" style="width:${horizon() * DW}px">${cells()}${bar(c.start, c.end, `${it.sub}${P.com[key] ? ' draft' : ''}${sel}`, `${it.title}: ${fmtDate(c.start)} – ${fmtDate(c.end)}, ${hours}`, { kind: 'com', key, id: key })}</div></div>`;
@@ -568,7 +567,7 @@
   };
   A.plnStart = guard(async () => {
     // the what-if draft counts (changes = the same payload as simulate); the project filter scopes the offer
-    const body = { hours: +document.getElementById('plnHrs').value, deadline: document.getElementById('plnDead').value, earliest: todayISO(), user_ids: userId() ? [userId()] : [], changes: payload(), ...(P.project ? { project_id: P.project } : {}) };
+    const body = { hours: +document.getElementById('plnHrs').value, deadline: document.getElementById('plnDead').value, earliest: todayISO(), changes: payload(), ...(P.project ? { project_id: P.project } : {}) };
     const res = await api('POST', 'plan/suggest-start', body);
     P.sugg = { kind: 'start', result: res };
     paint();
