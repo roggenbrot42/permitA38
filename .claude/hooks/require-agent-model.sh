@@ -12,6 +12,7 @@ agent=$(printf '%s' "$input" | jq -r '.tool_input.subagent_type // empty')
 case "$agent" in
   implementer) want=sonnet; max=6 ;;
   implementer-small) want=haiku; max=3 ;;
+  reviewer) [ "$model" = sonnet ] || deny "reviewer runs on sonnet; reviews never run on Haiku. See AGENTS.md, Merge gate."; exit 0 ;;
   *) exit 0 ;;
 esac
 prompt=$(printf '%s' "$input" | jq -r '.tool_input.prompt // empty')

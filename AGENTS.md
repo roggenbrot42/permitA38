@@ -95,9 +95,9 @@
 ## Merge gate (before anything lands on `main`)
 - Implementation may be done with smaller/cheaper models. The review effort scales with the risk of the branch:
   - **Light** (cosmetic UI, docs, tooling, small bug fixes that touch no money, rights, storage or outside input):
-    one Haiku pass over the diff plus the targeted tests.
+    one Sonnet `reviewer` pass over the diff plus the targeted tests.
   - **Standard** (schema/migrations, advisory checks, other non-security logic): one Sonnet 5.5 pass covering code and
-    tests together; a smaller model may check the test list against the specification.
+    tests together.
   - **Full** (money/VAT/numbering, rights, uploads and served files, parsing of outside input, network access): three
     Sonnet 5.5 passes. (1) **code review** of the diff (correctness, security, edge cases), (2) **test review** (do the
     tests prove the intent, are assertions meaningful, are cases missing, would they fail if the code were wrong),
