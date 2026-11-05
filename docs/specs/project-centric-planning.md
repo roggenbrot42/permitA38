@@ -552,6 +552,24 @@ week (demand − shortfall); a shortfall or a weekly shortfall counts only when 
 item whose window has no day after today (it ended undelivered) keeps its whole remaining as shortfall; suggestions
 show the item's whole window as `from`/`to` but sum only the days inside the supply range.
 
+Architect decisions after the code and test review (2026-11-05):
+* C1 with several weekly items short in one week: the week's shortfall is shared out **pro rata to their remaining
+  demand of that week** (not earliest end first).
+* `win_probability` in responses is a **percentage** (0..100), like the setting `planning_default_win_probability`.
+* `cover()` judges an item only on the days of `supply`. The caller (WP4b) builds the supply from the day after today to
+  `max(end of the requested weeks, the latest item end)`, so no item is cut off; the week rows then show only the
+  requested weeks.
+* A total contract whose end has passed with hours still open keeps them as shortfall until it is set to `done`
+  (its explanation then reads "... Ended on {end} with {shortfall} h not delivered."). That is intended: undelivered
+  promised hours must stay visible.
+* D5 holds also late in the week: hours promised for the current week and neither booked nor coverable by the rest
+  of the week are a shortfall of that week.
+* S4 reason `time_off` only when a holiday or day off falls on a workday of the week **and** the week is over
+  capacity on another day because of it (the hours moved there); an overload on a week without lost days, or caused
+  by busy time, is `weekly_hours`. Project lists in messages are sorted by the displayed name.
+* The law checks (10 h day, 60 h week) and the boss limits judge **all** planned days of the week, also those on or
+  before today (spread with `today=None`), so a week that today cuts in half is not under-counted.
+
 Explanation texts (literal templates; `{h}` via `_fmt`, dates `DD.MM.YYYY`):
 * total: `"{promised} h promised − {booked} h booked = {remaining} h remaining. Until {end} {project} has {left} h of
   assigned time left after its weekly contracts. Short {shortfall} h."` where `left` is the leftover available to
