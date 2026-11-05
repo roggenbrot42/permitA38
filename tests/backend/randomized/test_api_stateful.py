@@ -445,7 +445,7 @@ class ApiMachine(RuleBasedStateMachine):
             req = {"name": TEXT, "project_id": self.ref("projects", none=False)}
             opt = {"rate": maybe_none(RATE)}
         elif coll == "entries":
-            req = {"date": DATES, "minutes": st.integers(1, 600), "user_id": self.user_ref()}
+            req = {"date": DATES, "minutes": st.integers(1, 600), "user_id": maybe_none(self.user_ref())}
             opt = dict(note=maybe_none(TEXT), billable=st.sampled_from([True, True, True, False]),
                        rate=st.one_of(st.none(), st.none(), st.none(), RATE),
                        start=maybe_none(st.just("09:00")), end=maybe_none(st.just("10:00")))  # fmt: skip
@@ -511,6 +511,8 @@ class ApiMachine(RuleBasedStateMachine):
             exp["member_ids"] = list(body.get("member_ids") or [])
         if coll in ("entries", "absences") and actor_user["role"] != "boss":
             exp["user_id"] = actor_user["id"]
+        elif coll == "entries" and not exp.get("user_id"):  # an entry without a person belongs to its writer
+            exp["user_id"] = (old or {}).get("user_id") or actor_user["id"]
         if coll == "entries" and actor_user["role"] != "boss":
             # billing fields are boss/system-only: a member can neither set nor change them
             for k in ("rate", "invoice_id"):
@@ -770,6 +772,18 @@ class ApiMachine(RuleBasedStateMachine):
     def assert_refused_by_rule(self, r):
         assert r.status_code == 422 and r.json() == {"detail": "Project belongs to another customer"}, r.text
 
+    def personal(self, body, old=None) -> bool:
+        """Mirror of the billable-project rule: an offer or invoice is refused (422) when its project is personal and
+        the project changed vs the record (same keep-the-stored-value convention as :meth:`mismatch`)."""
+        old = old or {}
+        pid = body.get("project_id") if body.get("project_id") is not None else old.get("project_id")
+        if not pid or (old and old.get("project_id") == pid):
+            return False
+        return bool(self.m["projects"].get(pid, {}).get("personal"))
+
+    def assert_refused_personal(self, r):
+        assert r.status_code == 422 and r.json() == {"detail": "Personal projects cannot be billed"}, r.text
+
     def op_create(self, s, coll, body):
         r = self.call("POST", f"/{coll}", s, json=body)
         if (g := self.gate(s, boss_only=coll not in MEMBER_OWN)) is not None:
@@ -908,6 +922,9 @@ class ApiMachine(RuleBasedStateMachine):
         if self.mismatch(coll, body):
             self.assert_refused_by_rule(r)
             return
+        if self.personal(body):
+            self.assert_refused_personal(r)
+            return
         assert r.status_code == 200, r.text
         exp = self.doc_expected(coll, body, None) | {"id": r.json()["id"]}
         settle_default_date(exp, r.json(), days)
@@ -944,6 +961,9 @@ class ApiMachine(RuleBasedStateMachine):
             return
         if self.mismatch(coll, body, self.m[coll][rid]):
             self.assert_refused_by_rule(r)
+            return
+        if self.personal(body, self.m[coll][rid]):
+            self.assert_refused_personal(r)
             return
         assert r.status_code == 200, r.text
         exp = self.doc_expected(coll, body, self.m[coll][rid]) | {"id": rid}
@@ -1030,6 +1050,21 @@ class ApiMachine(RuleBasedStateMachine):
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
+        # one customer per invoice: the one asked for, else the chosen project's customer
+        prec = self.m["projects"].get(proj) if proj else None
+        if proj and prec is None:
+            assert r.status_code == 404, r.text
+            return
+        if prec and prec["personal"]:
+            assert r.status_code == 422 and r.json() == {"detail": "Personal projects cannot be billed"}, r.text
+            return
+        cust = cust or (prec or {}).get("customer_id")
+        if not cust:
+            assert r.status_code == 422, r.text
+            return
+        if cust not in self.m["customers"]:
+            assert r.status_code == 404, r.text
+            return
         picked, groups = [], {}
         for e in self.m["entries"].values():
             p = self.m["projects"].get(e.get("project_id"))
@@ -1037,7 +1072,7 @@ class ApiMachine(RuleBasedStateMachine):
                 continue
             if (lo and e["date"] < lo) or (hi and e["date"] > hi):
                 continue
-            if (proj and p["id"] != proj) or (cust and p.get("customer_id") != cust):
+            if (proj and p["id"] != proj) or p.get("customer_id") != cust:
                 continue
             t = self.m["tasks"].get(e.get("task_id"))
             key = (p["id"], t["id"] if t else None, self.entry_rate(e))
@@ -1057,8 +1092,7 @@ class ApiMachine(RuleBasedStateMachine):
         dates = sorted(e["date"] for e in picked)
         assert inv["status"] == "draft" and inv["service_from"] == dates[0] and inv["service_to"] == dates[-1]
         assert inv["vat_rate"] == 19 and inv["date"] in days and ("number" not in inv)
-        candidates = {self.m["projects"][k[0]].get("customer_id") for k in groups}
-        assert inv.get("customer_id") == cust if cust else inv.get("customer_id") in candidates | {None}
+        assert inv["customer_id"] == cust
         assert inv.get("project_id") == proj if proj else "project_id" not in inv
         for e in picked:
             e["invoice_id"] = inv["id"]
@@ -1147,6 +1181,9 @@ class ApiMachine(RuleBasedStateMachine):
         body.update(date=TODAY.isoformat(), offer_id=rid)  # sent, but the server ignores it and stamps its own date
         if self.mismatch("invoices", body):  # a legacy offer whose project moved to another customer
             self.assert_refused_by_rule(r)
+            return
+        if self.personal(body):  # a legacy offer whose project was made personal later
+            self.assert_refused_personal(r)
             return
         assert r.status_code == 200, r.text
         exp = self.doc_expected("invoices", {k: v for k, v in body.items() if k != "date"}, None) | {

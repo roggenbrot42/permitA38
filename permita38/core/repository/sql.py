@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import builtins
 import contextlib
-import math
 import os
 import re
 import secrets
@@ -24,9 +23,19 @@ from typing import Any, Iterable, Iterator
 
 from permita38.core.database import LEGACY_IDS, Migration, list_migrations
 
-from .base import ID_RE, DatabaseRevisionError, Record, RecordList, Repository, StrList, check_collection, new_id
+from .base import (
+    ID_RE,
+    ConstraintViolation,
+    DatabaseRevisionError,
+    Record,
+    RecordList,
+    Repository,
+    StrList,
+    check_collection,
+    new_id,
+)
 from .dialect import Dialect
-from .schema import BOOL, FLOAT, ID, INT, JSON, STR, TABLES, TEXT, Column, Table
+from .schema import BOOL, FLOAT, GUARD_KINDS, GUARDS, INT, JSON, TABLES, Column, Table, fits
 
 MIGRATIONS_TABLE = "schema_migrations"
 ATTACHMENT_RE = re.compile(r"[0-9a-z]{6,32}\.[a-z0-9]{1,5}")
@@ -39,6 +48,9 @@ def _now() -> str:
 
 _INT_MIN, _INT_MAX = -(2**63), 2**63 - 1
 _CONFLICT_MARKERS = (".sync-conflict-", "conflicted copy")
+
+
+_GUARD_PREFIX = "permita38:"
 
 
 class SQLRepository(Repository):
@@ -56,6 +68,16 @@ class SQLRepository(Repository):
     def _live_columns(self, table: str) -> set[str] | None:
         """Column names the database really has for ``table`` (None = assume the schema as described)."""
         return None
+
+    def _guard_triggers(self) -> set[str]:
+        """Names of the guard triggers the database currently has."""
+        raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
+
+    def _drop_guard(self, name: str) -> None:
+        raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
+
+    def _create_guard(self, statement: str) -> None:
+        raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
 
     @abstractmethod
     def _open(self) -> None:
@@ -253,24 +275,63 @@ class SQLRepository(Repository):
                 self._depth = 0
                 self._commit()
 
+    @contextmanager
+    def guards_suspended(self, kinds: set[str]) -> Iterator[None]:
+        kinds = set(kinds)
+        unknown = kinds - set(GUARD_KINDS)
+        if unknown or "unique" in kinds:
+            raise ValueError(f"guards of kind {sorted(unknown | (kinds & {'unique'}))} cannot be suspended")
+        with self.lock:
+            self._ensure()
+            if not self._depth:
+                raise RuntimeError("guards_suspended() is only allowed inside transaction()")
+            existing = self._guard_triggers()
+            live: dict[str, set[str] | None] = {}
+            drops: list[str] = []
+            creates: list[str] = []
+            for g in GUARDS:
+                if g.kind not in kinds:
+                    continue
+                cols = live.setdefault(g.table, self._live_columns(g.table))
+                if cols is not None and not set(g.columns) <= cols:
+                    continue
+                for stmt in self.dialect.guard_sql(g):
+                    m = re.match(r'CREATE TRIGGER "([^"]+)"', stmt)
+                    if m and m.group(1) in existing:
+                        drops.append(m.group(1))
+                        creates.append(stmt)
+            for name in drops:
+                self._drop_guard(name)
+            try:
+                yield
+            except BaseException as exc:
+                # re-create the guards, but never let a failure here hide the original error
+                for stmt in creates:
+                    try:
+                        self._create_guard(stmt)
+                    except Exception as e2:
+                        if hasattr(exc, "add_note"):  # Python 3.11+
+                            exc.add_note(f"re-creating a guard failed too: {e2!r}")
+                raise
+            else:
+                for stmt in creates:
+                    self._create_guard(stmt)
+
     # ------------------------------------------------------------------ value coding
     def _coerce(self, col: Column, v: Any) -> tuple[bool, Any]:
         """(ok, database value). Values that do not fit the column type go to the `extra` JSON instead."""
         t, d = col.type, self.dialect
-        if t in (ID, STR, TEXT):
-            return isinstance(v, str), v
-        if t == INT:
-            if isinstance(v, float) and v.is_integer():
-                v = int(v)
-            return (isinstance(v, int) and not isinstance(v, bool) and _INT_MIN <= v <= _INT_MAX), v
-        if t == FLOAT:
-            ok = isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
-            return ok, (float(v) if ok else v)
-        if t == BOOL:
-            return isinstance(v, bool), (d.encode_bool(v) if isinstance(v, bool) else v)
-        if t == JSON:
-            return True, d.encode_json(v)
-        return False, v
+        if not fits(t, v):
+            return False, v
+        if t == INT and isinstance(v, float):
+            v = int(v)
+        elif t == FLOAT:
+            v = float(v)
+        elif t == BOOL:
+            v = d.encode_bool(v)
+        elif t == JSON:
+            v = d.encode_json(v)
+        return True, v
 
     def _encode(self, table: Table, obj: Record) -> dict[str, Any]:
         values: dict[str, Any] = {}
@@ -396,6 +457,16 @@ class SQLRepository(Repository):
         if not isinstance(rid, str) or not ID_RE.match(rid):
             raise ValueError("bad id")
         now = int(time.time())
+        try:
+            return self._save(coll, obj, rid, now, touch)
+        except Exception as e:
+            # driver-neutral: sqlite3, psycopg and pymysql all name their class IntegrityError
+            msg = str(e)
+            if type(e).__name__ == "IntegrityError" and msg.startswith(_GUARD_PREFIX):
+                raise ConstraintViolation(msg[len(_GUARD_PREFIX) :].strip(), coll) from e
+            raise
+
+    def _save(self, coll: str, obj: Record, rid: str, now: int, touch: bool) -> Record:
         with self.transaction():
             table = self._table(coll)
             if not obj.get("created"):

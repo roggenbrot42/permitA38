@@ -10,7 +10,7 @@ from permita38.core.settings import effective_settings
 
 from .numbering import NumberingService
 from .plan_service import PlanningService
-from .project_customer import check_project_customer
+from .project_customer import check_billable_project, check_project_customer
 from .records import RecordService
 
 
@@ -114,6 +114,7 @@ class SalesService:
         inv = {k: o[k] for k in keys if o.get(k) is not None}
         inv.update(date=date.today().isoformat(), offer_id=rid)
         check_project_customer(self.store, inv, None)
+        check_billable_project(self.store, inv, None)  # an old offer whose project was made personal later
         return self.store.save("invoices", self.records.prepare_document(inv, None))
 
     def invoice_from_time(
@@ -121,6 +122,17 @@ class SalesService:
     ) -> dict:
         d0, d1 = date_from or "0000-00-00", date_to or "9999-99-99"
         ctx = calc.context(self.store)
+        # an invoice goes to exactly one customer: the one asked for, else the customer of the chosen project
+        proj = ctx["projects"].get(project_id) if project_id else None
+        if project_id and not proj:
+            raise ServiceError(404, "Project not found")
+        if proj and proj.get("personal"):
+            raise ServiceError(422, "Personal projects cannot be billed")
+        customer_id = customer_id or (proj or {}).get("customer_id")
+        if not customer_id:
+            raise ServiceError(422, "Choose a customer: an invoice goes to one customer only")
+        if not self.store.get("customers", customer_id):
+            raise ServiceError(404, "Customer not found")
         groups: dict = {}
         picked = []
         for e in self.store.list("entries"):
@@ -131,7 +143,7 @@ class SalesService:
                 continue
             if project_id and p["id"] != project_id:
                 continue
-            if customer_id and p.get("customer_id") != customer_id:
+            if p.get("customer_id") != customer_id:
                 continue
             rate = calc.rate_for(e, ctx)
             t = ctx["tasks"].get(e.get("task_id"))
@@ -150,9 +162,8 @@ class SalesService:
             for g in groups.values()
         ]
         dates = sorted(e["date"] for e in picked)
-        first = next(iter(groups.values()))
         inv = dict(
-            customer_id=customer_id or first["p"].get("customer_id"),
+            customer_id=customer_id,
             lines=lines,
             date=date.today().isoformat(),
             service_from=dates[0],

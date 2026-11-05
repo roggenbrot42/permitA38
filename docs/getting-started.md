@@ -53,7 +53,7 @@ That's it. Everything else is planning and billing, which you do when you need t
 2. Under **Planning (optional)** enter when the work should happen: start, end and hours per week (or total hours). While the offer is open, it shows up as *tentative* load in your forecast.
 3. **Finalize & number** → the offer gets its number (e.g. `AN-2026-0001`). **Preview PDF** and send it to your customer.
 4. The customer says yes → **✓ Accepted → create project**. permitA38 creates the project *and* a contract so your forecast is now firm.
-5. Track your time as usual. When it's time to bill, go to **Offers & Invoices → Invoice tracked time…** – permitA38 groups the unbilled hours by project, task and rate into a draft invoice. Or use **→ Invoice** on the offer to copy its items.
+5. Track your time as usual. When it's time to bill, go to **Offers & Invoices → Invoice tracked time…**, choose the customer – permitA38 groups that customer's unbilled hours by project, task and rate into a draft invoice (one customer per invoice; personal projects are never billed). Or use **→ Invoice** on the offer to copy its items.
 6. **Finalize & number**, send the PDF, and when the money arrives set the status to **Paid**. Only *paid* invoices count as revenue (EÜR).
 
 Don't like the look? **Settings → Document templates** has three starting points you can copy and customise, and you can upload your logo (JPEG).

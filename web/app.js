@@ -113,21 +113,22 @@ function parseDur(s) {            // "1:30", "1.5", "90m", "2h 15m" -> minutes
 // Project choices. customerId undefined = no customer concept next to the picker (all projects). Otherwise only the
 // projects of that customer plus general projects without a customer; '' (no customer chosen) gives the general ones.
 // currentId is the stored project of a record: when it belongs to another customer (legacy data) it stays listed,
-// marked, so it is not silently lost; no other mismatching project is offered.
-const projectOptions = (withNone = true, customerId = undefined, currentId = null) => {
+// marked, so it is not silently lost; no other mismatching project is offered. billable = for an offer or invoice:
+// personal projects are never billed, so they are left out (a stored one is kept, marked, like a mismatch).
+const projectOptions = (withNone = true, customerId = undefined, currentId = null, billable = false) => {
   const live = (S.d.projects || []).filter(p => p.status !== 'archived');
   const label = p => p.name + (p.personal ? ' (personal)' : '');
-  const fits = p => customerId === undefined || !p.customer_id || p.customer_id === customerId;
+  const fits = p => (!billable || !p.personal) && (customerId === undefined || !p.customer_id || p.customer_id === customerId);
   const out = [...(withNone ? [['', '— no project —']] : []), ...live.filter(fits).map(p => [p.id, label(p)])];
   const cur = currentId && live.find(p => p.id === currentId);
-  if (cur && !fits(cur)) out.push([cur.id, label(cur) + ' (other customer)']);
+  if (cur && !fits(cur)) out.push([cur.id, label(cur) + (billable && cur.personal ? '' : ' (other customer)')]);
   return out;
 };
 // Rebuilds a project <select> after the customer next to it changed; a project that is no longer listed is cleared.
-function refreshProjectSelect(sel, customerId) {
+function refreshProjectSelect(sel, customerId, billable = false) {
   if (!sel) return;
   const cur = sel.value;
-  const opts = projectOptions(true, customerId || '');
+  const opts = projectOptions(true, customerId || '', null, billable);
   sel.innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('');
   sel.value = opts.some(([v]) => v === cur) ? cur : '';
 }
@@ -430,7 +431,7 @@ A.timerAdd = timerOnce('add', async () => {
   if (s === null || e === null) throw new Error('Enter start and stop times');
   if (e <= s) throw new Error('Stop must be after start');
   // no guard() wrapper here: a failed save throws to the click handler, which toasts it, and the form keeps the typed values
-  await api.upsert('entries', { date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: true });
+  await api.upsert('entries', { user_id: S.me.id, date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: true });
   toast('Saved');
   await loadAll(['entries']);
   render();

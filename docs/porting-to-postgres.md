@@ -89,5 +89,11 @@ web → API routers → services → Repository (interface) → SQLRepository (g
 | Ordering | `ORDER BY created, id` is explicit everywhere – never rely on insertion order | | |
 | DDL in transactions | yes | yes | **no** |
 
+Constraints: the SQLite guards (triggers, see [`validation.md`](validation.md)) check new or changed values only, so
+they grandfather old rows. The native PostgreSQL and MariaDB constraints (unique index on the number, `CHECK`
+constraints) apply to every row and refuse existing violations. Run `permita38 check-db` on an existing SQLite
+database before porting it and fix what it reports for `numbering.duplicate`, `format.date`, `range.negative` and
+`state.period_reversed`.
+
 Not yet decided for a server mode: multi-instance deployments (token secret shared via config), moving attachments into
 the database, and per-user row-level security (permissions are enforced in the service layer today).

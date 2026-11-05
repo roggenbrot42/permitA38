@@ -13,6 +13,7 @@ from starlette.concurrency import run_in_threadpool
 from permita38 import __version__
 from permita38.core.config import Config
 from permita38.core.errors import ServiceError
+from permita38.core.repository import ConstraintViolation
 from permita38.core.service.audit import UNMATCHED_ROUTE
 from permita38.core.service.calendar.service import ResourceFetcher
 
@@ -131,6 +132,12 @@ def get_app(config: Config, *, calendar_fetcher: ResourceFetcher | None = None) 
     @app.exception_handler(ServiceError)
     async def service_error_handler(_: Request, exc: ServiceError):
         return JSONResponse({"detail": exc.message, **exc.body}, status_code=exc.status, headers=exc.headers)
+
+    @app.exception_handler(ConstraintViolation)
+    async def constraint_violation_handler(_: Request, exc: ConstraintViolation):
+        return JSONResponse(
+            {"detail": f"The database refused the change ({exc.code}).", "code": exc.code}, status_code=409
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(_: Request, exc: RequestValidationError):

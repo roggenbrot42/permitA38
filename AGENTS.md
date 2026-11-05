@@ -26,8 +26,10 @@
 
 ## Running tests economically
 - While iterating run only the affected files (`pytest tests/backend/test_x.py -q`). **CI is the heavy runner**
-  (`.github/workflows/ci.yaml`: lint, OpenAPI contract, backend on Linux and Windows with Python 3.10-3.13, and the
-  browser suite, on every push to `main` and every pull request): push the branch and open a (draft) pull request instead
+  (`.github/workflows/ci.yaml`: lint, OpenAPI contract, backend on Linux Python 3.12-3.14 plus Windows 3.13 on pull
+  requests (full Windows matrix on `main`), and the browser suite without the boss monkey, on every push to `main` and
+  every pull request; the boss monkey (`monkey_walk`) runs only in the nightly and `make test-web`, and a red nightly
+  opens or updates the issue "Nightly randomized tests failing"): push the branch and open a (draft) pull request instead
   of running the whole browser suite locally. Local full runs are the exception, see below.
 - The stateful and fuzz **randomized suites** (`tests/backend/randomized`, `make test-random`) run in CI only in the
   nightly workflow. Run them locally **once** (`make test-summary SUITES="random"`) before a branch is merged when it
@@ -93,9 +95,9 @@
 ## Merge gate (before anything lands on `main`)
 - Implementation may be done with smaller/cheaper models. The review effort scales with the risk of the branch:
   - **Light** (cosmetic UI, docs, tooling, small bug fixes that touch no money, rights, storage or outside input):
-    one Haiku pass over the diff plus the targeted tests.
+    one Sonnet `reviewer` pass over the diff plus the targeted tests.
   - **Standard** (schema/migrations, advisory checks, other non-security logic): one Sonnet 5.5 pass covering code and
-    tests together; a smaller model may check the test list against the specification.
+    tests together.
   - **Full** (money/VAT/numbering, rights, uploads and served files, parsing of outside input, network access): three
     Sonnet 5.5 passes. (1) **code review** of the diff (correctness, security, edge cases), (2) **test review** (do the
     tests prove the intent, are assertions meaningful, are cases missing, would they fail if the code were wrong),
