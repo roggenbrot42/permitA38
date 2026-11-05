@@ -193,9 +193,9 @@ A.newDoc = el => { location.hash = `#/doc/${el.dataset.coll}/new${el.dataset.cus
 A.billTime = el => {
   openForm({
     title: 'Create invoice from tracked time', saveLabel: 'Create draft',
-    vals: { customer_id: el?.dataset?.cust || '' }, fields: [{ k: 'customer_id', l: 'Customer', t: 'select', o: [['', 'All customers'], ...S.d.customers.map(c => [c.id, c.name])] }, { k: 'from', l: 'From', t: 'date', row: 1 }, { k: 'to', l: 'To', t: 'date', row: 1 }],
-    note: '<p class="muted small">All unbilled, billable time of the selection is grouped by project, task and rate. Personal projects are skipped.</p>',
-    save: async v => { const inv = await api('POST', 'invoices/from-time', { customer_id: v.customer_id || null, from: v.from || null, to: v.to || null }); location.hash = '#/doc/invoices/' + inv.id; }
+    vals: { customer_id: el?.dataset?.cust || '' }, fields: [{ k: 'customer_id', l: 'Customer', t: 'select', o: [['', '— choose a customer —'], ...S.d.customers.map(c => [c.id, c.name])] }, { k: 'from', l: 'From', t: 'date', row: 1 }, { k: 'to', l: 'To', t: 'date', row: 1 }],
+    note: '<p class="muted small">All unbilled, billable time of this customer's projects is grouped by project, task and rate. An invoice goes to one customer only; personal projects are never billed.</p>',
+    save: async v => { if (!v.customer_id) throw new Error('Choose a customer'); const inv = await api('POST', 'invoices/from-time', { customer_id: v.customer_id || null, from: v.from || null, to: v.to || null }); location.hash = '#/doc/invoices/' + inv.id; }
   });
 };
 
@@ -226,7 +226,7 @@ PAGES.doc = async (coll, id) => {
   ${d.status === 'draft' && !d.number ? `<div class="banner info">This is a <b>draft</b>: it has no number yet, is not counted in revenue or planning, and the PDF is marked as a draft. It gets its ${isInv ? 'invoice' : 'offer'} number when you press <b>Finalize &amp; number</b>.</div>` : ''}
   ${locked ? '<div class="banner">This document has a number and was probably sent. Changing it now changes the PDF – only edit for corrections.</div>' : ''}
   <div class="card"><div class="grid g3"><div class="field"><label>Customer</label><select id="d_cust">${opt([['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])], d.customer_id)}</select></div>
-    <div class="field"><label>Project</label><select id="d_proj">${opt(projectOptions(true, d.customer_id || '', d.project_id), d.project_id || '')}</select></div><div class="field"><label>Title / subject</label><input id="d_title" value="${esc(d.title || '')}"></div>
+    <div class="field"><label>Project</label><select id="d_proj">${opt(projectOptions(true, d.customer_id || '', d.project_id, true), d.project_id || '')}</select></div><div class="field"><label>Title / subject</label><input id="d_title" value="${esc(d.title || '')}"></div>
     <div class="field"><label>Date</label><input type="date" id="d_date" value="${esc(d.date || '')}"></div>
     ${isInv ? `<div class="field"><label>Due date</label><input type="date" id="d_due" value="${esc(d.due_date || '')}"></div><div class="field"><label>Paid on</label><input type="date" id="d_paid" value="${esc(d.paid_date || '')}"></div>` : `<div class="field"><label>Valid until</label><input type="date" id="d_valid" value="${esc(d.valid_until || '')}"></div>`}
     <div class="field"><label>Service period from</label><input type="date" id="d_sf" value="${esc(d.service_from || '')}"></div><div class="field"><label>to</label><input type="date" id="d_st" value="${esc(d.service_to || '')}"></div>
@@ -269,7 +269,7 @@ PAGES.doc = async (...a) => {
   const h = await _origDoc(...a);
   render.after = () => {
     recalcDoc();
-    $('#d_cust')?.addEventListener('change', e => { refreshProjectSelect($('#d_proj'), e.target.value); repriceNewDoc(); });
+    $('#d_cust')?.addEventListener('change', e => { refreshProjectSelect($('#d_proj'), e.target.value, true); repriceNewDoc(); });
     $('#d_proj')?.addEventListener('change', repriceNewDoc);
   };
   return h;

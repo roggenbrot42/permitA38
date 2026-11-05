@@ -11,7 +11,7 @@ from permita38.core.settings import effective_settings
 from permita38.core.validation import ALLOWED_VAT_RATES, MAX_MONEY
 
 from .auth import public_user
-from .project_customer import PROJECT_CUSTOMER_COLLECTIONS, check_project_customer
+from .project_customer import PROJECT_CUSTOMER_COLLECTIONS, check_billable_project, check_project_customer
 
 # collections where a LIMITED scope means "own records only" (write) / "own records or assigned projects" (read)
 OWN_COLLECTIONS = {"entries", "absences"}
@@ -134,6 +134,7 @@ class RecordService:
         if coll in PROJECT_CUSTOMER_COLLECTIONS:
             check_project_customer(self.store, data, old)
         if coll in ("offers", "invoices"):
+            check_billable_project(self.store, data, old)
             self._check_vat_rates(data.get("vat_rate"), *(ln.get("vat") for ln in data.get("lines") or []))
             data = self.prepare_document(data, old)
             self._check_document_amounts(data)

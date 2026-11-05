@@ -3918,7 +3918,7 @@
           "sales"
         ],
         "summary": "Invoice From Time",
-        "description": "Group unbilled, billable time by project/task/rate into a draft invoice.",
+        "description": "Group unbilled, billable time of one customer by project/task/rate into a draft invoice.\n\nThe customer is ``customer_id`` or, when only ``project_id`` is given, that project's customer; one of them is\nrequired. Personal projects are never billed.",
         "operationId": "invoice_from_time_api_invoices_from_time_post",
         "requestBody": {
           "content": {
