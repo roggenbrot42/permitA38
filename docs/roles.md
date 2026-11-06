@@ -61,7 +61,7 @@ and on your own row.
 
 Notes
 
-* Planning, scenarios, allocations (planner per project) and the vacation planner are boss only. Accepting offers, finalising and numbering invoices,
+* Planning (overview, assignments), scenarios and the vacation planner are boss only. Accepting offers, finalising and numbering invoices,
   billing tracked time and deleting documents belong to the *offers* / *invoices* write access (boss only).
 * **Suppliers and subcontractors** (`contracts/subcontractors.md`): `limited` read of `suppliers` is the limited view
   `{id, name, kind, tags, active}` (no address, IBAN, tax numbers, rate, notes) on every `GET /api/suppliers*` route the
