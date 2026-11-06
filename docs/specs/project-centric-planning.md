@@ -719,6 +719,18 @@ Vanilla JS as today, numbers only from the server, every label with its derivati
   booked / Left this week, a total row, tooltips with the derivation, and a line "No assignments this week" when the
   list is empty. Clicking a project name starts the timer on it if the existing timer control allows that, else
   links to the project.
+* Owner, 2026-11-06 (Today page):
+  1. **Change project and task while the timer runs**: `PATCH /api/timer` (area `timer` write) with `project_id`,
+     `task_id`, `note` (each optional; a task must belong to the project, a project must exist and not be internal-
+     incompatible with the rules of time entries; 409 without a running timer); `started` is kept. The timer card shows
+     project and task selects while running and sends the change at once.
+  2. **Play buttons**: every row of "Your projects this week" and, below each project, one row per task the person
+     booked on this week (`projects[].tasks: [{task_id, name, booked_week}]` in the dashboard) gets a play button that
+     calls `POST /api/timer/start` with that project/task; a running timer is stopped and saved first (existing
+     behaviour of start), so switching never loses time.
+  3. **Manual time without a start**: in the timer card's manual mode a duration alone is enough: for today the entry
+     ends now and starts at now − duration (not before 00:00; then it starts at 00:00 and ends at 00:00 + duration);
+     for another day it starts at 09:00. Start and end stay editable; entering them keeps today's behaviour.
 
 ## WP4b: the planner behind the API (binding, 2026-11-06)
 
