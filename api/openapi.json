@@ -2157,7 +2157,7 @@
         "tags": [
           "planning"
         ],
-        "summary": "give hours per week of a person to a project",
+        "summary": "give hours of a person or subcontractor to a project",
         "operationId": "create_allocation_api_allocations_post",
         "security": [
           {
@@ -2199,57 +2199,6 @@
             }
           }
         }
-      }
-    },
-    "/api/allocations/bootstrap": {
-      "post": {
-        "tags": [
-          "planning"
-        ],
-        "summary": "preview (confirm false) or create one allocation per active contract with a project and assignee",
-        "operationId": "bootstrap_allocations_api_allocations_bootstrap_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AllocationBootstrapIn"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Bootstrap Allocations Api Allocations Bootstrap Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          },
-          {
-            "ApiToken": []
-          }
-        ]
       }
     },
     "/api/allocations/{allocation_id}": {
@@ -3829,6 +3778,76 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PersonalTax"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/settings/work-limits": {
+      "get": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "the signed-in boss's own planning limits (defaults when not stored)",
+        "operationId": "get_work_limits_api_settings_work_limits_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkLimits"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "settings"
+        ],
+        "summary": "replace the signed-in boss's own planning limits",
+        "operationId": "put_work_limits_api_settings_work_limits_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkLimitsIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkLimits"
                 }
               }
             }
@@ -9895,18 +9914,6 @@
         "title": "Allocation",
         "description": "Response: an employee or (once the subcontractor feature exists) external allocation."
       },
-      "AllocationBootstrapIn": {
-        "properties": {
-          "confirm": {
-            "type": "boolean",
-            "title": "Confirm",
-            "default": false
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "title": "AllocationBootstrapIn"
-      },
       "AllocationChange": {
         "properties": {
           "id": {
@@ -9994,9 +10001,28 @@
       "AllocationIn": {
         "properties": {
           "user_id": {
-            "type": "string",
-            "pattern": "^[0-9a-z]{6,32}$",
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "User Id"
+          },
+          "supplier_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-z]{6,32}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Supplier Id"
           },
           "project_id": {
             "type": "string",
@@ -10012,23 +10038,54 @@
             "title": "End"
           },
           "hours_per_week": {
-            "type": "number",
-            "maximum": 80.0,
-            "minimum": 0.25,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 80.0,
+                "minimum": 0.25
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Hours Per Week"
+          },
+          "total_hours": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Hours"
+          },
+          "rate": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "user_id",
           "project_id",
           "start",
-          "end",
-          "hours_per_week"
+          "end"
         ],
         "title": "AllocationIn",
-        "description": "An employee allocation: hours per week of one person given to one project for a period."
+        "description": "An assignment: hours of one person (``user_id``) or subcontractor (``supplier_id``) given to one project for a\nperiod, as ``hours_per_week`` or as ``total_hours`` over the whole period. A subcontractor row needs a ``rate``."
       },
       "ApiTokenCreateIn": {
         "properties": {
@@ -21749,6 +21806,22 @@
             ],
             "title": "Timezone"
           },
+          "planning_warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planning Warnings",
+            "description": "POST/PUT only: advisory, never stored"
+          },
           "auth": {
             "anyOf": [
               {
@@ -21804,6 +21877,86 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkLimits": {
+        "properties": {
+          "info_day": {
+            "type": "number",
+            "title": "Info Day",
+            "default": 10
+          },
+          "warn_day": {
+            "type": "number",
+            "title": "Warn Day",
+            "default": 12
+          },
+          "max_day": {
+            "type": "number",
+            "title": "Max Day",
+            "default": 16
+          },
+          "info_week": {
+            "type": "number",
+            "title": "Info Week",
+            "default": 60
+          },
+          "info_average": {
+            "type": "number",
+            "title": "Info Average",
+            "default": 48
+          },
+          "stored": {
+            "type": "boolean",
+            "title": "Stored",
+            "default": false
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "WorkLimits"
+      },
+      "WorkLimitsIn": {
+        "properties": {
+          "info_day": {
+            "type": "number",
+            "maximum": 24.0,
+            "minimum": 1.0,
+            "title": "Info Day",
+            "default": 10
+          },
+          "warn_day": {
+            "type": "number",
+            "maximum": 24.0,
+            "minimum": 1.0,
+            "title": "Warn Day",
+            "default": 12
+          },
+          "max_day": {
+            "type": "number",
+            "maximum": 24.0,
+            "minimum": 1.0,
+            "title": "Max Day",
+            "default": 16
+          },
+          "info_week": {
+            "type": "number",
+            "maximum": 168.0,
+            "minimum": 1.0,
+            "title": "Info Week",
+            "default": 60
+          },
+          "info_average": {
+            "type": "number",
+            "maximum": 168.0,
+            "minimum": 1.0,
+            "title": "Info Average",
+            "default": 48
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "WorkLimitsIn",
+        "description": "The boss's own planning limits (S6); defaults as in the spec. Infos and warnings only, nothing is refused."
       },
       "permita38__api__routers__document_scans__ConfirmResult": {
         "properties": {

@@ -244,6 +244,7 @@ class UserOut(Record):
     work_start: str | None = None
     work_end: str | None = None
     timezone: str | None = None
+    planning_warnings: list[dict] | None = Field(None, description="POST/PUT only: advisory, never stored")
     auth: AuthInfo | None = Field(
         None, description="how this request was authenticated (GET /auth/me only): a session or an API token"
     )
@@ -277,6 +278,38 @@ class UserIn(v.CheckedBody):
         if any(d < 0 or d > 6 for d in days) or len(set(days)) != len(days):
             raise ValueError("must be unique weekday numbers 0 (Monday) to 6 (Sunday)")
         return sorted(days)
+
+
+# ---------------------------------------------------------------- boss work limits (setting key work_limits.<user_id>)
+_DayHours = Annotated[float, Field(ge=1, le=24, allow_inf_nan=False)]
+_WeekHours = Annotated[float, Field(ge=1, le=168, allow_inf_nan=False)]
+
+
+class WorkLimitsIn(v.CheckedBody):
+    """The boss's own planning limits (S6); defaults as in the spec. Infos and warnings only, nothing is refused."""
+
+    model_config = ConfigDict(extra="forbid")
+    info_day: _DayHours = 10
+    warn_day: _DayHours = 12
+    max_day: _DayHours = 16
+    info_week: _WeekHours = 60
+    info_average: _WeekHours = 48
+
+    @model_validator(mode="after")
+    def _ordered(self):
+        if not self.info_day <= self.warn_day <= self.max_day:
+            raise ValueError("must satisfy info_day <= warn_day <= max_day")
+        return self
+
+
+class WorkLimits(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    info_day: float = 10
+    warn_day: float = 12
+    max_day: float = 16
+    info_week: float = 60
+    info_average: float = 48
+    stored: bool = False
 
 
 #: tax inputs that moved into the personal tax profile; no longer settings

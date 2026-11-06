@@ -12,6 +12,7 @@ from permita38.core.settings import effective_settings
 from permita38.core.validation import ALLOWED_VAT_RATES, MAX_MONEY
 
 from .auth import public_user
+from .planning_warnings import warning
 from .project_customer import (
     PROJECT_CUSTOMER_COLLECTIONS,
     check_billable_project,
@@ -25,6 +26,19 @@ VIEW_COLLECTIONS = {"projects", "tasks"}
 
 #: fields that only exist in responses
 RESPONSE_ONLY = ("sanity_warnings", "planning_warnings")
+
+
+LAW_WEEKLY_HOURS = 48
+
+
+def user_warnings(user: dict) -> list[dict]:
+    """Advisory warnings on a saved user (S6): an employee's weekly hours above the Working Time Act's average."""
+    hours = calc.fnum(user.get("weekly_hours"))
+    if rights.normalize_role(user.get("role")) == rights.BOSS or hours <= LAW_WEEKLY_HOURS:
+        return []
+    h = ("%.2f" % hours).rstrip("0").rstrip(".")
+    msg = f"{user.get('name') or user.get('username')} is set to {h} h a week; the Working Time Act allows 48 h on average (§3 ArbZG)."
+    return [warning("user.weekly_hours_above_law", "warning", "weekly_hours", msg, {"user_id": user.get("id")})]
 
 
 SCAN_PREFIX = "scan:"

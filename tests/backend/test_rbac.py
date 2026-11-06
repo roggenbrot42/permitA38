@@ -176,6 +176,8 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("PUT", "/api/settings"): ("settings", "write", False),
     ("GET", "/api/settings/personal-tax"): ("settings", "write", True),
     ("PUT", "/api/settings/personal-tax"): ("settings", "write", True),
+    ("GET", "/api/settings/work-limits"): ("settings", "write", True),
+    ("PUT", "/api/settings/work-limits"): ("settings", "write", True),
     # numbering and import management is boss-only: settings write at full scope
     ("GET", "/api/numbering/preview"): ("settings", "write", True),
     ("GET", "/api/numbering/status"): ("settings", "write", True),
@@ -365,6 +367,8 @@ def test_every_route_is_denied_exactly_where_the_matrix_says(app, clients):
 SESSION_ONLY = {
     ("GET", "/api/settings/personal-tax"),
     ("PUT", "/api/settings/personal-tax"),
+    ("GET", "/api/settings/work-limits"),
+    ("PUT", "/api/settings/work-limits"),
     ("POST", "/api/auth/change-password"),
     ("GET", "/api/auth/totp/status"),
     ("POST", "/api/auth/totp/setup"),
