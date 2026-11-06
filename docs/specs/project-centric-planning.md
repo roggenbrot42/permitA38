@@ -742,6 +742,13 @@ Vanilla JS as today, numbers only from the server, every label with its derivati
   4. **Internal projects are never billable** (owner, 2026-11-06): the time-entry dialog unticks and disables
      "billable" when an internal project is chosen (and enables it again for a customer project); the server stores
      `billable: false` for every entry created or changed onto an internal project, also via the timer and the API.
+  5. **A timer stopped within the first minute** (owner, 2026-11-06): `POST /api/timer/stop` takes an optional
+     `discard: bool = false`; with `true` the timer is reset and no entry is written (`{"running": false}`, no
+     `entry`). The web asks when Stop is pressed less than 60 s after `started`: confirm "Less than a minute tracked.
+     Delete it instead of booking 1 min?" -> OK sends `discard: true`, Cancel books as today (1 min). From 60 s on
+     there is no question.
+  6. **Play on today's entries**: every row of the "Today" entry list gets the same ▶ button (`timerPlay`) with the
+     entry's project and task (no button for an entry without a project), so earlier work continues in one click.
 
 ## WP4b: the planner behind the API (binding, 2026-11-06)
 
