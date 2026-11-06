@@ -179,7 +179,7 @@ const ROLE_LABEL = { boss: 'Boss', employee: 'Employee', accountant: 'Accountant
 function route() { const [p, ...a] = (location.hash.replace(/^#\/?/, '') || 'today').split('/'); return [p, a]; }
 function deny() { toast('Not available for your role'); const first = navFor()[0]; location.hash = '#/' + (first ? first[0] : 'today'); }
 /* a page whose area the role may read but not write: take the write controls away */
-const WRITE_ACTIONS = ['editCustomer', 'newDoc', 'billTime', 'billTimeInto', 'editProject', 'editTask', 'supNew', 'supEdit', 'supDelete', 'supAdopt', 'offNew', 'offEdit', 'offDelete', 'offReview', 'offAccept', 'offReject', 'offReopen', 'offUnaccept', 'allocCancel', 'docSave', 'docFinalize', 'docAccept', 'docToInvoice', 'addLine', 'saveSettings', 'editTemplate', 'editUser', 'delLine', 'docPdfDelete', 'newTrip', 'timerStart', 'timerStop', 'timerAdd'];
+const WRITE_ACTIONS = ['editCustomer', 'newDoc', 'billTime', 'billTimeInto', 'editProject', 'editTask', 'supNew', 'supEdit', 'supDelete', 'supAdopt', 'offNew', 'offEdit', 'offDelete', 'offReview', 'offAccept', 'offReject', 'offReopen', 'offUnaccept', 'allocCancel', 'docSave', 'docFinalize', 'docAccept', 'docToInvoice', 'addLine', 'saveSettings', 'editTemplate', 'editUser', 'delLine', 'docPdfDelete', 'newTrip', 'timerStart', 'timerStop', 'timerAdd', 'timerPlay'];
 function lockPage(root, p) {
   root.querySelectorAll('[data-a]').forEach(el => { if (WRITE_ACTIONS.includes(el.dataset.a)) { if (el.tagName === 'TR') { delete el.dataset.a; el.classList.remove('click'); } else el.remove(); } });
   root.querySelectorAll('[data-change="docStatus"]').forEach(el => el.remove());
@@ -337,9 +337,11 @@ PAGES.today = async () => {
 };
 function projectsCard(list) {   // planned (assignments, rule S1) vs booked hours per project, Today page
   const h = n => num(n, 2), sum = k => list.reduce((t, p) => t + p[k], 0), left = list.reduce((t, p) => t + p.left_week, 0);
-  const head = `<th class="right" title="Hours the plan gives you today">Today planned</th><th class="right" title="Hours you booked today">Today booked</th><th class="right" title="Hours your assignments give you in this week, including days already past">Week planned</th><th class="right" title="Hours you booked this week">Week booked</th><th class="right" title="Week planned minus week booked, never below 0">Left this week</th>`;
-  const row = p => `<tr><td title="${esc(p.kind === 'internal' ? 'Internal project' : 'Customer project')}"><b>${esc(p.name)}</b></td><td class="right">${h(p.planned_today)}</td><td class="right">${h(p.booked_today)}</td><td class="right">${h(p.planned_week)}</td><td class="right">${h(p.booked_week)}</td><td class="right" title="${esc(h(p.planned_week) + ' planned − ' + h(p.booked_week) + ' booked')}"><b>${h(p.left_week)}</b></td></tr>`;
-  return `<div class="card" id="proj-hours"><h2>Your projects this week</h2>${list.length ? `<table><tr><th>Project</th>${head}</tr>${list.map(row).join('')}<tr class="total"><td><b>Total</b></td><td class="right">${h(sum('planned_today'))}</td><td class="right">${h(sum('booked_today'))}</td><td class="right">${h(sum('planned_week'))}</td><td class="right">${h(sum('booked_week'))}</td><td class="right"><b>${h(left)}</b></td></tr></table>` : '<div class="empty">No assignments this week</div>'}</div>`;
+  const head = `<th class="right" title="Hours the plan gives you today">Today planned</th><th class="right" title="Hours you booked today">Today booked</th><th class="right" title="Hours your assignments give you in this week, including days already past">Week planned</th><th class="right" title="Hours you booked this week">Week booked</th><th class="right" title="Week planned minus week booked, never below 0">Left this week</th><th></th>`;
+  const play = (label, pid, tid) => `<td class="right"><button type="button" class="ghost" data-a="timerPlay" data-project="${esc(pid)}" data-task="${esc(tid || '')}" aria-label="Start timer on ${esc(label)}" title="Start timer on ${esc(label)}">▶</button></td>`;
+  const taskRow = (p, t) => `<tr class="task-row"><td style="padding-left:28px" class="small">${esc(t.name)}</td><td></td><td></td><td></td><td class="right small">${h(t.booked_week)}</td><td></td>${play(p.name + ' / ' + t.name, p.project_id || p.id, t.task_id)}</tr>`;
+  const row = p => `<tr><td title="${esc(p.kind === 'internal' ? 'Internal project' : 'Customer project')}"><b>${esc(p.name)}</b></td><td class="right">${h(p.planned_today)}</td><td class="right">${h(p.booked_today)}</td><td class="right">${h(p.planned_week)}</td><td class="right">${h(p.booked_week)}</td><td class="right" title="${esc(h(p.planned_week) + ' planned − ' + h(p.booked_week) + ' booked')}"><b>${h(p.left_week)}</b></td>${play(p.name, p.project_id || p.id)}</tr>${(p.tasks || []).map(t => taskRow(p, t)).join('')}`;
+  return `<div class="card" id="proj-hours"><h2>Your projects this week</h2>${list.length ? `<table><tr><th>Project</th>${head}</tr>${list.map(row).join('')}<tr class="total"><td><b>Total</b></td><td class="right">${h(sum('planned_today'))}</td><td class="right">${h(sum('booked_today'))}</td><td class="right">${h(sum('planned_week'))}</td><td class="right">${h(sum('booked_week'))}</td><td class="right"><b>${h(left)}</b></td><td></td></tr></table>` : '<div class="empty">No assignments this week</div>'}</div>`;
 }
 const docTotal = d => Money.docGross(d, S.settings);
 function entryRow(e, projects) {
@@ -352,12 +354,25 @@ A.addTime = () => entryForm({}, v => {   // show the new entry: Today lists only
   if (to && location.hash !== to) location.hash = to; else render();
 });
 A.editEntry = el => entryForm(S.d.entries.find(e => e.id === el.dataset.id), render);
-A.timerProj = () => { localStorage.lastProj = projIdOf(); $('#t_task').innerHTML = taskOptions(localStorage.lastProj).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join(''); timerUpd(); };
-A.timerTask = () => timerUpd();
+/* While a timer runs, a changed project/task is sent to the server (PATCH timer); the clock keeps its start. */
+async function timerPatch(body) {
+  const r = await api('PATCH', 'timer', { ...body, note: $('#t_note').value });
+  S.timer = { ...S.timer, ...(r && typeof r === 'object' ? r : {}), running: true };
+  timerUpd();
+}
+A.timerProj = async () => {
+  const running = !!S.timer?.running, pid = running ? projIdOrThrow() : projIdOf();
+  if (!running) localStorage.lastProj = pid;
+  $('#t_task').innerHTML = taskOptions(pid).map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('');
+  if (running) await timerPatch({ project_id: pid || null, task_id: null });
+  timerUpd();
+};
+A.timerTask = async () => { if (S.timer?.running) await timerPatch({ project_id: S.timer.project_id || null, task_id: $('#t_task').value || null }); timerUpd(); };
 /* One request per action at a time: a second click while it is pending is ignored (no duplicate entry or timer call). */
 const timerInFlight = {};
 const timerOnce = (key, fn) => async (...a) => { if (timerInFlight[key]) return; timerInFlight[key] = true; try { return await fn(...a); } finally { timerInFlight[key] = false; } };
 A.timerStart = timerOnce('timer', async () => { const body = { project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value }; S.timer = await api('POST', 'timer/start', body); render(); });
+A.timerPlay = timerOnce('timer', async el => { S.timer = await api('POST', 'timer/start', { project_id: el.dataset.project, ...(el.dataset.task ? { task_id: el.dataset.task } : {}) }); moneyView = false; await loadAll(['entries']); render(); });
 /* ---- time tracking card (Today page) ---- */
 let moneyView = false;   // per view, not stored: tracker shows money earned instead of the clock
 const projLabel = p => p.name + ((p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? ' (internal)' : '');
@@ -412,8 +427,8 @@ function timerCard() {
   const modeBtn = (m, glyph, label) => `<button type="button" class="ghost" data-a="timeMode" data-mode="${m}" aria-label="${label}" title="${label}" aria-pressed="${tracker === (m === 'tracker')}">${glyph}</button>`;
   return `<div class="card"><div class="timer">
     <div class="field" style="flex:2;min-width:200px;margin:0"><label for="t_note">Description</label><input id="t_note" value="${esc(run ? t.note || '' : '')}" placeholder="What are you working on?"></div>
-    <div class="field" style="margin:0"><label for="t_proj">Project</label><input id="t_proj" list="t_proj_list" value="${esc(labelById(pid))}" placeholder="Search projects" autocomplete="off" data-change="timerProj" ${run ? 'disabled' : ''}><datalist id="t_proj_list">${projectOptions(false).map(([, l]) => `<option value="${esc(l)}"></option>`).join('')}</datalist></div>
-    <div class="field" style="margin:0"><label for="t_task">Task</label><select id="t_task" data-change="timerTask" ${run ? 'disabled' : ''}>${taskOptions(pid).map(([v, l]) => `<option value="${esc(v)}" ${v === tid ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
+    <div class="field" style="margin:0"><label for="t_proj">Project</label><input id="t_proj" list="t_proj_list" value="${esc(labelById(pid))}" placeholder="Search projects" autocomplete="off" data-change="timerProj"><datalist id="t_proj_list">${projectOptions(false).map(([, l]) => `<option value="${esc(l)}"></option>`).join('')}</datalist></div>
+    <div class="field" style="margin:0"><label for="t_task">Task</label><select id="t_task" data-change="timerTask">${taskOptions(pid).map(([v, l]) => `<option value="${esc(v)}" ${v === tid ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
     <div id="t_mode_area" class="timer" style="flex:none">${timerModeHtml()}</div>
     <div class="row tight" style="flex:none">${modeBtn('manual', '✎', 'Manual')}${modeBtn('tracker', '⏱', 'Time tracker')}</div>
   </div></div>`;
@@ -428,8 +443,14 @@ A.timerMoney = () => { if (rateOf(activePid()) === null) return; moneyView = !mo
 A.timerTimes = () => { const s = toMin($('#t_start').value), e = toMin($('#t_end').value); $('#t_dur').value = s !== null && e !== null && e > s ? hm((e - s) / 60) : ''; };
 A.timerDur = () => {
   const s = toMin($('#t_start').value), d = parseDur($('#t_dur').value);
-  if (s === null) { toast('Enter a start time first', true); return; }
   if (!d || d <= 0 || isNaN(d)) { toast('Enter a duration like 1:30', true); return; }
+  if (s === null) {   // duration only: today ends now, another day starts at 09:00
+    let a, b;
+    if (($('#t_date').value || todayISO()) === todayISO()) { const n = new Date(); b = n.getHours() * 60 + n.getMinutes(); a = b - d; if (a < 0) { a = 0; b = d; } }
+    else { a = 540; b = 540 + d; }
+    if (b >= 1440) { toast('An entry must end on the same day', true); return; }
+    $('#t_start').value = hhmm(a); $('#t_end').value = hhmm(b); $('#t_dur').value = hm(d / 60); return;
+  }
   if (s + d >= 1440) { toast('An entry must end on the same day', true); return; }
   $('#t_end').value = hhmm(s + d); $('#t_dur').value = hm(d / 60);
 };

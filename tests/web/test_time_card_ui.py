@@ -1,5 +1,7 @@
 """Browser tests of the time tracking row on the Today page (docs/specs/time-tracking-element.md). Live server, fake names."""
 
+import json
+
 import httpx
 import pytest
 
@@ -192,18 +194,57 @@ def test_failed_add_keeps_the_typed_inputs(pg, srv):
     assert [e for e in api(srv, "GET", "entries") if e.get("note") == "Beispiel Fehler"] == []
 
 
-def test_project_and_task_are_locked_while_a_timer_runs(pg, srv):
-    project = api(srv, "POST", "projects", {"name": "Projekt Theta"})
-    api(srv, "POST", "timer/start", {"project_id": project["id"], "note": "Beispiel Gesperrt"})
+def test_project_and_task_stay_editable_while_a_timer_runs_and_a_change_patches(pg, srv):
+    one = api(srv, "POST", "projects", {"name": "Projekt Theta"})
+    two = api(srv, "POST", "projects", {"name": "Projekt Kappa"})
+    task = api(srv, "POST", "tasks", {"project_id": two["id"], "name": "Aufgabe Eins"})
+    timer = api(srv, "POST", "timer/start", {"project_id": one["id"], "note": "Beispiel Wechsel"})
     pg.reload()
     pg.wait_for_selector("#t_proj")
-    assert pg.is_disabled("#t_proj")
-    assert pg.is_disabled("#t_task")
+    assert not pg.is_disabled("#t_proj") and not pg.is_disabled("#t_task")
     assert pg.input_value("#t_proj") == "Projekt Theta (internal)"
-    pg.click("[data-a=timerStop]")
-    pg.wait_for_selector("[data-a=timerAdd]")  # stopped: back to the manual form
-    assert not pg.is_disabled("#t_proj")
-    assert not pg.is_disabled("#t_task")
+    sent = []
+
+    def fake(route, req):
+        if req.method != "PATCH":
+            return route.continue_()
+        sent.append(req.post_data_json)
+        body = {**timer, "project_id": req.post_data_json["project_id"], "task_id": req.post_data_json["task_id"]}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    pg.route("**/api/timer", fake)
+    pg.fill("#t_note", "Beispiel Notiz")
+    pg.fill("#t_proj", "Projekt Kappa (internal)")
+    pg.dispatch_event("#t_proj", "change")
+    pg.wait_for_function("() => document.querySelector('#t_task').options.length > 1")
+    assert sent == [{"project_id": two["id"], "task_id": None, "note": "Beispiel Notiz"}]
+    pg.select_option("#t_task", task["id"])
+    pg.wait_for_timeout(300)
+    assert sent[1] == {"project_id": two["id"], "task_id": task["id"], "note": "Beispiel Notiz"}
+    # no restart: the clock still counts from the original start and Stop is still there
+    assert pg.evaluate("() => S.timer.started") == timer["started"]
+    assert pg.is_visible("[data-a=timerStop]") and pg.is_visible("#clock")
+    pg.unroute("**/api/timer")
+
+
+def test_failed_project_change_while_running_is_a_toast(pg, srv):
+    one = api(srv, "POST", "projects", {"name": "Projekt Lambda"})
+    api(srv, "POST", "projects", {"name": "Projekt My"})
+    api(srv, "POST", "timer/start", {"project_id": one["id"]})
+    pg.reload()
+    pg.wait_for_selector("#t_proj")
+    pg.route(
+        "**/api/timer",
+        lambda route, req: (
+            route.fulfill(status=400, content_type="application/json", body='{"detail": "Timer rejected"}')
+            if req.method == "PATCH"
+            else route.continue_()
+        ),
+    )
+    pg.fill("#t_proj", "Projekt My (internal)")
+    pg.dispatch_event("#t_proj", "change")
+    pg.wait_for_function("() => document.querySelector('#toast').classList.contains('err')")
+    pg.unroute("**/api/timer")
 
 
 def strip_default_rate(pg):
@@ -254,3 +295,31 @@ def test_money_uses_the_customer_rate_and_grows_while_the_timer_runs(pg, srv):
     assert pg.inner_text("#t_hint") == ""
     clock.click()  # money -> time again
     assert clock.inner_text().strip().count(":") == 2
+
+
+def test_duration_only_for_today_ends_now(pg, srv):
+    pg.clock.set_fixed_time("2026-11-06T14:30:00")
+    pg.fill("#t_date", "2026-11-06")
+    pg.dispatch_event("#t_date", "change")
+    pg.fill("#t_dur", "1:30")
+    pg.dispatch_event("#t_dur", "change")
+    assert pg.input_value("#t_start") == "13:00" and pg.input_value("#t_end") == "14:30"
+    assert pg.input_value("#t_dur") == "1:30"
+
+
+def test_duration_only_for_today_never_starts_before_midnight(pg, srv):
+    pg.clock.set_fixed_time("2026-11-06T00:20:00")
+    pg.fill("#t_date", "2026-11-06")
+    pg.fill("#t_dur", "1:00")
+    pg.dispatch_event("#t_dur", "change")
+    assert pg.input_value("#t_start") == "00:00" and pg.input_value("#t_end") == "01:00"
+
+
+def test_duration_only_for_another_day_starts_at_nine(pg, srv):
+    pg.clock.set_fixed_time("2026-11-06T14:30:00")
+    pg.fill("#t_date", "2026-11-03")
+    pg.dispatch_event("#t_date", "change")
+    pg.fill("#t_dur", "2:15")
+    pg.dispatch_event("#t_dur", "change")
+    assert pg.input_value("#t_start") == "09:00" and pg.input_value("#t_end") == "11:15"
+    assert "err" not in (pg.get_attribute("#toast", "class") or "")
