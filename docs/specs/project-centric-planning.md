@@ -665,8 +665,9 @@ Explanation texts (literal templates; `{h}` via `_fmt`, dates `DD.MM.YYYY`):
   When the current ISO week (the week of today) is one of the short weeks, the sentence gets a second one
   (owner, 2026-11-06, option (a): the rule stays, the message says why): `" This week {booked} of {hours_per_week} h
   are booked and {left} h of assigned time is left after today."` with `booked` = the hours booked on the item in the
-  current week (`got` of that week), `left` = the leftover supply of the days after today in that week before the
-  item took any (`WeekShortfall.supply` of that week, i.e. what the week could still give). Example: 6 h per week,
+  current week (`got` of that week), `left` = the project's leftover supply of the days after today in that week before
+  the weekly group took any (the local `supply` in `_cover_weekly`, kept per item and week; `WeekShortfall.supply`
+  stays the covered hours). Example: 6 h per week,
   Friday, nothing booked, no assignment on Saturday/Sunday -> `"... short 6 h in 1 week (02.11.). This week 0 of
   6 h are booked and 0 h of assigned time is left after today."`. Past weeks are never judged (unchanged).
 
