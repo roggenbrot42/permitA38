@@ -253,6 +253,14 @@ def test_internal_over_budget():
     assert _project(body, "adm")["status"] == "ok"  # 10 + 180 is exactly the budget
 
 
+def test_legacy_internal_project_with_a_contract_is_listed_once():
+    # "orchard" carries contracts; if a legacy row also lists it as internal, the verdict wins and it appears once
+    internal = [{"project_id": "orchard", "name": "Orchard", "budget_hours": None, "booked": 0.0}]
+    body, _, _ = _scene(internal=internal)
+    listed = [p for p in body["projects"] if p["project_id"] == "orchard"]
+    assert len(listed) == 1 and listed[0]["kind"] == "customer"
+
+
 def test_no_supply_warning():
     pine = _item("contract", "P1", "pine", START, END, hpw=5.0)
     body, _, warnings = _scene(extra_items=[pine])

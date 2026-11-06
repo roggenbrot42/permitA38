@@ -263,7 +263,14 @@ def plan_json(
         )
 
     projects = [_project_json(v, names, subcontractor_cost, invoiced) for v in verdicts]
-    projects.extend(_internal_json(e, supply) for e in sorted(internal, key=lambda e: str(e.get("name", ""))))
+    # a legacy internal project that still carries a contract or offer is judged like a customer project (its verdict
+    # wins, so the shortfall stays visible); it is not listed a second time as an internal entry
+    judged = {v.project_id for v in verdicts}
+    projects.extend(
+        _internal_json(e, supply)
+        for e in sorted(internal, key=lambda e: str(e.get("name", "")))
+        if e.get("project_id") not in judged
+    )
     if project_id is not None:
         projects = [p for p in projects if p["project_id"] == project_id]
 
