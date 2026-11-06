@@ -14,6 +14,7 @@ from datetime import date, timedelta
 
 from permita38.core import calc
 from permita38.core.errors import ServiceError
+from permita38.core.models import scenario_project_refs
 from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
@@ -979,6 +980,10 @@ class PlanningService:
 
     def save_scenario(self, me: dict, rid: str | None, name: str, changes: dict) -> dict:
         old = self.get_scenario(me, rid) if rid else None
+        known = {pid for _, pid in scenario_project_refs((old or {}).get("changes"))}
+        for _, pid in scenario_project_refs(changes):
+            if pid not in known and not self.store.get("projects", pid):
+                raise ServiceError(422, "Unknown project")
         rec = {**(old or {}), "name": name, "user_id": me["id"], "changes": changes}
         return self.store.save("plan_scenarios", rec)
 

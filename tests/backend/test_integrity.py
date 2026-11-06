@@ -223,6 +223,14 @@ def test_scenario_project_ids_are_checked_inside_the_json(store):
     assert got == [("ref.dangling", "warning", "plan_scenarios", "scen01", "changes.allocations[1].project_id")]
 
 
+def test_scenario_changes_stored_as_a_json_string_are_checked_too(store):
+    alloc = {"user_id": "boss01", "start": "2026-03-02", "end": "2026-03-20"}
+    text = json.dumps({"allocations": [{**alloc, "project_id": "proj99"}]})
+    store.save("plan_scenarios", {"id": "scen05", "name": "E", "user_id": "boss01", "changes": text})
+    got = [(f.code, f.severity, f.collection, f.id, f.field) for f in IntegrityService(store).run(["ref."])]
+    assert got == [("ref.dangling", "warning", "plan_scenarios", "scen05", "changes.allocations[0].project_id")]
+
+
 def test_dangling_audit_is_info(store):
     store.save("audit_log", {"id": "aud001", "token_id": "tok999", "user_id": "gone01", "at": 1, "status": 200})
     got = [(f.code, f.severity, f.field) for f in IntegrityService(store).run(["ref."])]

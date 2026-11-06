@@ -186,7 +186,7 @@ def test_task_and_expense_with_unknown_project_are_refused(boss_client):
     assert c.get("/api/tasks").json()[0]["project_id"] == p["id"]
 
 
-def test_adopt_and_scan_booking_go_through_the_project_check(boss_client, app):
+def test_scan_booking_goes_through_the_project_check(boss_client, app):
     from permita38.core.errors import ServiceError
 
     svc = app.state.services
@@ -195,6 +195,118 @@ def test_adopt_and_scan_booking_go_through_the_project_check(boss_client, app):
         svc.records.create_scanned(me, {"date": TODAY, "net": 10, "project_id": GHOST}, "scan0001")
     assert (err.value.status, err.value.message) == (422, "Unknown project")
     assert svc.store.list("expenses") == []
+
+
+def test_adopt_vendors_cannot_carry_a_new_project_so_a_legacy_ghost_stays_and_the_expense_is_adopted(
+    boss_client, app, unguarded
+):
+    """adopt-vendors only sets the supplier: the project id is the unchanged legacy one, so it is not re-checked."""
+    c = boss_client
+    store = app.state.services.store
+    legacy = unguarded(
+        store, "expenses", {"date": TODAY, "net": 10, "vendor": "demo ghost shop", "project_id": GHOST}, "ref.dangling"
+    )
+    sup = c.post("/api/suppliers", json={"name": "Demo Ghost Shop GmbH", "kind": "company"}).json()
+    body = {"dry_run": False, "items": [{"vendors": ["demo ghost shop"], "supplier_id": sup["id"]}]}
+    r = c.post("/api/suppliers/adopt-vendors", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["expenses_changed"] == 1
+    row = store.get("expenses", legacy["id"])
+    assert row["supplier_id"] == sup["id"] and row["project_id"] == GHOST
+
+
+def _alloc(pid):
+    return {"user_id": "u0000001", "project_id": pid, "start": "2026-03-02", "end": "2026-03-20", "hours_per_week": 10}
+
+
+def test_delete_refused_scenario_with_the_project_in_its_second_allocation(boss_client, app):
+    c = boss_client
+    p = _project(c)
+    other = _project(c, "Other")
+    store = app.state.services.store
+    changes = {"allocations": [_alloc(other["id"]), _alloc(p["id"])]}
+    store.save("plan_scenarios", {"name": "Second", "user_id": _uid(c), "changes": changes})
+    _refused(c, p["id"], "This project is still used by 1 planning scenario; archive it instead.")
+
+
+def test_scenario_naming_the_project_twice_counts_once(boss_client, app):
+    c = boss_client
+    p = _project(c)
+    store = app.state.services.store
+    changes = {"allocations": [_alloc(p["id"]), _alloc(p["id"])]}
+    store.save("plan_scenarios", {"name": "Twice", "user_id": _uid(c), "changes": changes})
+    _refused(c, p["id"], "This project is still used by 1 planning scenario; archive it instead.")
+
+
+def test_scenario_with_malformed_allocations_does_not_block_or_crash(boss_client, app):
+    c = boss_client
+    p = _project(c)
+    store = app.state.services.store
+    store.save(
+        "plan_scenarios",
+        {"name": "Odd", "user_id": _uid(c), "changes": {"allocations": [None, "x", {"project_id": 5}]}},
+    )
+    assert c.delete(f"/api/projects/{p['id']}").status_code == 204
+
+
+def test_refused_delete_leaves_a_legacy_stopped_timer_untouched(boss_client, app):
+    c = boss_client
+    store = app.state.services.store
+    p = _project(c)
+    t = c.post("/api/tasks", json={"name": "Wire up", "project_id": p["id"]})
+    assert t.status_code == 200, t.text
+    store.save("timers", {"id": _uid(c), "running": False, "project_id": p["id"], "task_id": t.json()["id"]})
+    _refused(c, p["id"], "This project is still used by 1 task; archive it instead.")
+    timer = store.get("timers", _uid(c))
+    assert timer["project_id"] == p["id"] and timer["task_id"] == t.json()["id"]
+
+
+def test_grandfathered_dangling_task_and_expense_can_be_resaved_but_not_moved_to_another_ghost(
+    boss_client, app, unguarded
+):
+    c = boss_client
+    store = app.state.services.store
+    other_ghost = "1" * 32
+    task = unguarded(store, "tasks", {"name": "Old task", "project_id": GHOST}, "ref.dangling")
+    exp = unguarded(store, "expenses", {"date": TODAY, "net": 10, "project_id": GHOST}, "ref.dangling")
+    r = c.put(f"/api/tasks/{task['id']}", json={"name": "Old task", "project_id": GHOST})
+    assert r.status_code == 200, r.text
+    r = c.put(f"/api/tasks/{task['id']}", json={"name": "Renamed task", "project_id": GHOST})
+    assert (r.status_code, r.json()["name"], r.json()["project_id"]) == (200, "Renamed task", GHOST)
+    r = c.put(f"/api/tasks/{task['id']}", json={"name": "Renamed task", "project_id": other_ghost})
+    assert (r.status_code, r.json()["detail"]) == (422, "Unknown project")
+    body = {"date": TODAY, "net": 10, "project_id": GHOST}
+    r = c.put(f"/api/expenses/{exp['id']}", json=body)
+    assert r.status_code == 200, r.text
+    r = c.put(f"/api/expenses/{exp['id']}", json={**body, "net": 12})
+    assert r.status_code == 200, r.text
+    assert r.json()["project_id"] == GHOST
+    r = c.put(f"/api/expenses/{exp['id']}", json={**body, "project_id": other_ghost})
+    assert (r.status_code, r.json()["detail"]) == (422, "Unknown project")
+
+
+def test_saving_a_scenario_checks_its_projects(boss_client):
+    c = boss_client
+    p = _project(c)
+    r = c.post("/api/plan/scenarios", json={"name": "Ghost", "changes": {"allocations": [_alloc(GHOST)]}})
+    assert (r.status_code, r.json()["detail"]) == (422, "Unknown project")
+    r = c.post("/api/plan/scenarios", json={"name": "Real", "changes": {"allocations": [_alloc(p["id"])]}})
+    assert r.status_code == 200, r.text
+    sid = r.json()["id"]
+    r = c.put(f"/api/plan/scenarios/{sid}", json={"name": "Real", "changes": {"allocations": [_alloc(GHOST)]}})
+    assert (r.status_code, r.json()["detail"]) == (422, "Unknown project")
+
+
+def test_scenario_update_keeps_a_legacy_dangling_project_but_refuses_a_new_ghost(boss_client, app):
+    c = boss_client
+    store = app.state.services.store
+    sc = store.save("plan_scenarios", {"name": "Old", "user_id": _uid(c), "changes": {"allocations": [_alloc(GHOST)]}})
+    r = c.put(f"/api/plan/scenarios/{sc['id']}", json={"name": "Renamed", "changes": {"allocations": [_alloc(GHOST)]}})
+    assert (r.status_code, r.json()["name"]) == (200, "Renamed")
+    r = c.put(
+        f"/api/plan/scenarios/{sc['id']}", json={"name": "Renamed", "changes": {"allocations": [_alloc("1" * 32)]}}
+    )
+    assert (r.status_code, r.json()["detail"]) == (422, "Unknown project")
 
 
 def test_delete_refused_running_timer_only(boss_client):

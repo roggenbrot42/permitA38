@@ -1,11 +1,10 @@
 """Generic CRUD with role-based permissions (the scopes come from `core/rights.py`)."""
 
-import json
 from decimal import Decimal
-from typing import Any
 
 from permita38.core import calc, rights
 from permita38.core.errors import ServiceError
+from permita38.core.models import scenario_project_refs
 from permita38.core.money import dec
 from permita38.core.repository import COLLECTIONS, ID_RE, Repository
 from permita38.core.rights import Scope
@@ -291,7 +290,11 @@ class RecordService:
         def count(coll: str) -> int:
             return len(find(coll, project_id=rid))
 
-        scenarios = sum(1 for sc in self.store.list("plan_scenarios") if rid in scenario_project_ids(sc.get("changes")))
+        scenarios = sum(
+            1
+            for sc in self.store.list("plan_scenarios")
+            if any(pid == rid for _, pid in scenario_project_refs(sc.get("changes")))
+        )
         running = [t for t in find("timers", project_id=rid) if t.get("running")]
         found = [
             (count("allocations"), "allocation", "allocations"),
@@ -355,19 +358,6 @@ class RecordService:
         if rights.scope_for(me, "team") == Scope.ALL:
             return [public_user(u) for u in users]
         return [{"id": u["id"], "name": u.get("name"), "role": rights.normalize_role(u.get("role"))} for u in users]
-
-
-def scenario_project_ids(changes: Any) -> set[str]:
-    """Every project id a saved planning scenario refers to (only ``allocations[].project_id`` carries one)."""
-    if isinstance(changes, str):
-        try:
-            changes = json.loads(changes)
-        except ValueError:
-            return set()
-    allocs = changes.get("allocations") if isinstance(changes, dict) else None
-    if not isinstance(allocs, list):
-        return set()
-    return {a["project_id"] for a in allocs if isinstance(a, dict) and isinstance(a.get("project_id"), str)}
 
 
 _PROJECT_REF_COLLECTIONS = frozenset({"entries", "contracts", "offers", "invoices", "tasks", "expenses"})

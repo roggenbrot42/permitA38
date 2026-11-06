@@ -7,7 +7,6 @@ and field names only (never names, amounts, addresses or document text). Spec: d
 from __future__ import annotations
 
 import copy
-import json
 import math
 import re
 from collections.abc import Callable, Iterable, Sequence
@@ -19,7 +18,7 @@ from pydantic import ValidationError
 
 from permita38.core import calc, documents, money
 from permita38.core import validation as v
-from permita38.core.models import RECORD_MODELS
+from permita38.core.models import RECORD_MODELS, scenario_project_refs
 from permita38.core.numbering import Pattern, PatternError, normalize_text, parse_pattern, period_key
 from permita38.core.repository import Repository
 from permita38.core.repository import schema as _schema
@@ -203,18 +202,8 @@ def rule_ref_dangling(ctx: Ctx) -> Iterable[Finding]:
 def rule_ref_scenario_project(ctx: Ctx) -> Iterable[Finding]:
     """Saved planning scenarios keep project ids in JSON; no trigger sees them."""
     for rec in ctx.rows("plan_scenarios"):
-        changes = rec.get("changes")
-        if isinstance(changes, str):
-            try:
-                changes = json.loads(changes)
-            except ValueError:
-                continue
-        allocs = changes.get("allocations") if isinstance(changes, dict) else None
-        if not isinstance(allocs, list):
-            continue
-        for i, a in enumerate(allocs):
-            pid = a.get("project_id") if isinstance(a, dict) else None
-            if isinstance(pid, str) and pid and pid not in ctx.ids["projects"]:
+        for i, pid in scenario_project_refs(rec.get("changes")):
+            if pid not in ctx.ids["projects"]:
                 yield Finding(
                     "ref.dangling",
                     WARNING,
