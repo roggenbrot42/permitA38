@@ -788,9 +788,10 @@ class ApiMachine(RuleBasedStateMachine):
         return (
             any(
                 r.get("project_id") == pid
-                for c in ("entries", "contracts", "offers", "invoices")
+                for c in ("entries", "contracts", "offers", "invoices", "tasks", "expenses")
                 for r in self.m[c].values()
             )
+            or any(o.get("project_id") == pid for o in self.inc.values())
             or any(a["project_id"] == pid for a in self.allocs.values())
             or any(t and t.get("project_id") == pid for t in self.timers.values())
         )
@@ -815,7 +816,7 @@ class ApiMachine(RuleBasedStateMachine):
         if (g := self.gate(s, boss_only=coll not in MEMBER_OWN)) is not None:
             assert r.status_code == g, (coll, r.status_code, r.text)
             return
-        if coll in ("entries", "contracts") and self.unknown_project(body):
+        if coll in ("entries", "contracts", "tasks", "expenses") and self.unknown_project(body):
             self.assert_unknown_project(r)
             return
         if self.mismatch(coll, body):
@@ -853,7 +854,7 @@ class ApiMachine(RuleBasedStateMachine):
         if coll == "entries" and old.get("invoice_id") and me["role"] != "boss":
             assert r.status_code == 403
             return
-        if coll in ("entries", "contracts") and self.unknown_project(body, old):
+        if coll in ("entries", "contracts", "tasks", "expenses") and self.unknown_project(body, old):
             self.assert_unknown_project(r)
             return
         if self.mismatch(coll, body, old):
@@ -889,7 +890,8 @@ class ApiMachine(RuleBasedStateMachine):
                 assert r.status_code == 403
                 return
         if coll == "projects" and old is not None and self.project_users(rid):
-            # a project still used by entries, contracts, offers, invoices, allocations or a timer cannot be deleted
+            # a project still used by entries, contracts, offers, invoices, tasks, expenses, incoming offers, allocations or a
+            # timer cannot be deleted (the machine never creates trips, saved scenarios or legacy timers)
             assert r.status_code == 409 and "archive it instead" in r.text, r.text
             return
         assert r.status_code == 204
