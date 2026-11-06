@@ -253,6 +253,17 @@ write path, including import, transfer and procurement accept, comes before the 
   <number>").
 * Procurement accept: `total_hours` = sum of the `h` lines, refused with 422 when it is 0 or above 100000, and when the
   derived rate is above 10000.
+* WP1 review (2026-11-06): `kind` is derived from the customer only when a project is **created**; an update that omits
+  `kind` keeps the stored one. Changing a project to `internal` while an offer, contract or invoice refers to it is a
+  409 ("This project has offers, contracts or invoices; it stays a customer project."). Accepting an offer on an
+  internal project is a 409 like creating one. The sum of `h` lines is rounded to 2 decimals before it is checked;
+  0 or above 100000 is a 422 ("The offer's hour lines must add up to more than 0 and at most 100000 h"). A legacy plan
+  whose `hours_per_week` is 0 or missing falls back to its `total_hours`, then to the `h` lines. Until WP4, a capacity
+  offer whose plan has no hours or both fields books the sum of its `h` lines as `total_hours` on accept (422 rules as
+  above, rate above 10000 is a 422); plans with only `hours_per_week` keep today's behaviour. A restore into a fresh
+  instance ignores `internaladmin` only while it is untouched (name "Administration", kind internal, status active, no
+  members, no budget, no notes). PostgreSQL/MariaDB: the guards are CHECKs that also validate existing rows, like
+  0016; those dialects are prepared but not wired (db-constraints.md), so this is accepted until they are.
 
 **Data transfer:** an `UPGRADES` hook in `transfer/upgrades.py` maps `personal` to `kind` for archives of older heads
 (same rule as the data fix) and applies the hour-field fix. Restores suspend the guard kinds that v2 allows (never the
