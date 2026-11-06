@@ -25,7 +25,7 @@ def _monday(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
 
-def spread(owner: Owner, a: Assignment, holiday: Holiday, today: date | None) -> dict[date, float]:
+def _spread_full(owner: Owner, a: Assignment, holiday: Holiday, today: date | None) -> dict[date, float]:
     """Hours per available day of the assignment. ``today=None``: the whole period; else only days after ``today``."""
     out: dict[date, float] = {}
     if a.end < a.start:
@@ -55,13 +55,22 @@ def spread(owner: Owner, a: Assignment, holiday: Holiday, today: date | None) ->
     return out
 
 
+def spread(owner: Owner, a: Assignment, holiday: Holiday, today: date | None) -> dict[date, float]:
+    """Hours per available day. A cancelled assignment (``cut``) is spread over its ORIGINAL period exactly like an
+    uncut one; then the days from ``cut`` on are dropped (S1)."""
+    out = _spread_full(owner, a, holiday, today)
+    if a.cut is not None:
+        out = {d: h for d, h in out.items() if d < a.cut}
+    return out
+
+
 def planned_hours(owner: Owner, a: Assignment, holiday: Holiday) -> float:
     return round(sum(spread(owner, a, holiday, None).values()), 2)
 
 
 def planned_net(owner: Owner, a: Assignment, holiday: Holiday, rate: Decimal) -> Decimal:
     """M1: total assignment ``q2(total_hours x rate)``; weekly: the spread hours x rate."""
-    if a.total_hours is not None:
+    if a.total_hours is not None and a.cut is None:
         return q2(dec(a.total_hours) * rate)
     exact = sum(spread(owner, a, holiday, None).values())
     return q2(dec(round(exact, 6)) * rate)

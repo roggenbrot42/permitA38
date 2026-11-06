@@ -51,6 +51,9 @@ class Assignment:
     hours_per_week: float | None  # exactly one of the two is set
     total_hours: float | None
     booked: float = 0.0  # total assignments: hours the owner booked on the project in the period
+    cut: date | None = (
+        None  # cancelled: first day that is no longer used (hours are spread over the whole period first)
+    )
 
 
 @dataclass(frozen=True)

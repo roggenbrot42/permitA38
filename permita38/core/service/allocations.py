@@ -19,7 +19,6 @@ from permita38.core.service.planner import supply
 from permita38.core.service.planner.model import Assignment, Holiday, Owner
 from permita38.core.service.planner.spread import planned_hours as spread_hours
 from permita38.core.service.planner.spread import planned_net as spread_net
-from permita38.core.service.planner.spread import spread
 from permita38.core.settings import effective_settings
 
 from . import external_capacity as ext
@@ -124,14 +123,10 @@ class _Spreader:
             end=e,
             hours_per_week=hours[0],
             total_hours=hours[1],
+            cut=None if _active(row) else calc.d(row.get("cancelled_from")),
         )
         supplier = self.suppliers.get(owner.id) or {}
         rate = planner_load._rate(row.get("rate"), supplier.get("rate"))
-        cut = None if _active(row) else calc.d(row.get("cancelled_from"))
-        if cut is not None:
-            # cancelled: the whole period is spread, the days before the cut keep their hours (and cost)
-            exact = sum(h for day, h in spread(owner, asg, self.holiday, None).items() if day < cut)
-            return round(exact, 2), (q2(dec(round(exact, 6)) * rate) if external else None)
         planned = spread_hours(owner, asg, self.holiday)
         return planned, (spread_net(owner, asg, self.holiday, rate) if external else None)
 

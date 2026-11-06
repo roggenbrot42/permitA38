@@ -333,16 +333,19 @@ def load(store: Repository, today: date, busy: BusyTimeProvider | None = None, c
             continue
         start, end = calc.d(r["start"]), calc.d(r["end"])
         assert start and end
+        cut: date | None = None
         if status == "cancelled":
             cut = calc.d(r.get("cancelled_from"))
-            if cut is not None:
-                end = min(end, cut - timedelta(days=1))
-            if end < start:
+            if cut is not None and cut <= start:
                 continue
         pid = r["project_id"]
         booked = 0.0
         if hours[1] is not None:
-            booked = sum(h for day, h in per_user.get((owner_id, pid), {}).items() if start <= day <= end)
+            booked = sum(
+                h
+                for day, h in per_user.get((owner_id, pid), {}).items()
+                if start <= day <= end and (cut is None or day < cut)
+            )
         project = projects.get(pid)
         asg = Assignment(
             id=r.get("id") or "",
@@ -354,6 +357,7 @@ def load(store: Repository, today: date, busy: BusyTimeProvider | None = None, c
             hours_per_week=hours[0],
             total_hours=hours[1],
             booked=booked,
+            cut=cut,
         )
         assignments.append(asg)
         if owner.kind == "subcontractor":

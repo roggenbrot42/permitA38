@@ -159,7 +159,7 @@ def test_assignment_kinds_and_cancelled_cut(repo):
     assert (by["alloc00001"].project_kind, by["alloc00001"].hours_per_week) == ("customer", 20.0)
     a2 = by["alloc00002"]
     assert (a2.project_kind, a2.total_hours, a2.hours_per_week) == ("internal", 30.0, None)
-    assert by["alloc00003"].end == D(2026, 11, 15) and by["alloc00003"].start == D(2026, 11, 9)
+    assert by["alloc00003"].cut == D(2026, 11, 16) and by["alloc00003"].start == D(2026, 11, 9)
     assert by["alloc00004"].owner_id == SUP
     assert snap.skipped == []
 
