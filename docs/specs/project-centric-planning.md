@@ -731,6 +731,9 @@ Vanilla JS as today, numbers only from the server, every label with its derivati
   3. **Manual time without a start**: in the timer card's manual mode a duration alone is enough: for today the entry
      ends now and starts at now − duration (not before 00:00; then it starts at 00:00 and ends at 00:00 + duration);
      for another day it starts at 09:00. Start and end stay editable; entering them keeps today's behaviour.
+  4. **Internal projects are never billable** (owner, 2026-11-06): the time-entry dialog unticks and disables
+     "billable" when an internal project is chosen (and enables it again for a customer project); the server stores
+     `billable: false` for every entry created or changed onto an internal project, also via the timer and the API.
 
 ## WP4b: the planner behind the API (binding, 2026-11-06)
 
