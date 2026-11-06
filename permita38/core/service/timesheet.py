@@ -12,6 +12,7 @@ from permita38.core.repository import Repository
 
 MAX_DAYS = 400
 GROUPS = ("week", "month")
+MAX_PERIODS = {"week": 60, "month": 14}  # hard bound of the period walk for MAX_DAYS
 DELETED_USER = "(deleted user)"
 
 
@@ -28,8 +29,25 @@ def _parse(value: str | None, field: str) -> date | None:
         raise ServiceError(422, f"'{field}' must be an ISO date (YYYY-MM-DD)") from None
 
 
+def _lenient(value: str | None) -> date | None:
+    """A stored project date: an invalid value is ignored (the entries' range is used instead)."""
+    try:
+        return date.fromisoformat(value) if value else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _add_days(d: date, days: int) -> date:
+    try:
+        return d + timedelta(days=days)
+    except OverflowError:
+        return date.max
+
+
 def _period_start(d: date, group: str) -> date:
-    return d - timedelta(days=d.weekday()) if group == "week" else d.replace(day=1)
+    if group == "week":
+        return d - timedelta(days=d.weekday()) if d.toordinal() > 7 else date.min
+    return d.replace(day=1)
 
 
 def _next_period(d: date, group: str) -> date:
@@ -61,9 +79,9 @@ class TimesheetService:
         dates = sorted(e["date"] for e in entries)
         explicit_from = d_from is not None
         if d_from is None:
-            d_from = _parse(project.get("start") or (dates[0] if dates else None), "from")
+            d_from = _lenient(project.get("start")) or _lenient(dates[0] if dates else None)
         if d_to is None:
-            d_to = _parse(project.get("end") or (dates[-1] if dates else None), "to")
+            d_to = _lenient(project.get("end")) or _lenient(dates[-1] if dates else None)
         # a default range (project period or entries) is adjusted, never refused
         if d_from and d_to and d_to < d_from:
             if explicit_from:
@@ -72,16 +90,22 @@ class TimesheetService:
                 d_from = d_to
         if d_from and d_to and (d_to - d_from).days > MAX_DAYS:
             if explicit_from:
-                d_to = d_from + timedelta(days=MAX_DAYS)
+                d_to = _add_days(d_from, MAX_DAYS)
             else:
                 d_from = d_to - timedelta(days=MAX_DAYS)
 
         periods: list[date] = []
         if d_from and d_to:
             p = _period_start(d_from, group)
+            limit = MAX_PERIODS[group]
             while p <= d_to:
+                if len(periods) >= limit:
+                    raise ServiceError(422, f"The range may span at most {MAX_DAYS} days")
                 periods.append(p)
-                p = _next_period(p, group)
+                try:
+                    p = _next_period(p, group)
+                except (OverflowError, ValueError):  # the last representable period (year 9999)
+                    break
         index = {p.isoformat(): i for i, p in enumerate(periods)}
 
         # per person: [total, billable, unbilled] minutes and minutes per period
@@ -105,7 +129,7 @@ class TimesheetService:
                     s[2] += m
             per[uid][i] += m
 
-        names = {u["id"]: u.get("name") or u.get("username") or DELETED_USER for u in self.store.list("users")}
+        names = {u["id"]: u.get("name") or u.get("username") or u["id"] for u in self.store.list("users")}
 
         def row(uid: str | None) -> dict:
             s = sums[uid]
