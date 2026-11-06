@@ -1,6 +1,7 @@
 """Offers and invoices: numbering, finalizing, conversion, billing tracked time, PDF."""
 
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 from permita38.core import calc, documents
 from permita38.core.errors import ServiceError
@@ -10,7 +11,7 @@ from permita38.core.settings import effective_settings
 
 from .numbering import NumberingService
 from .plan_service import PlanningService
-from .project_customer import check_billable_project, check_project_customer
+from .project_customer import check_billable_project, check_project_customer, project_kind
 from .records import RecordService
 
 
@@ -73,18 +74,22 @@ class SalesService:
         o = self.store.save("offers", o)
         plan = o.get("plan") or {}
         existing = self.store.get("projects", o["project_id"]) if o.get("project_id") else None
+        if existing and project_kind(existing) == "internal":
+            raise ServiceError(409, "Internal projects cannot have offers, contracts or invoices")
         title = (o.get("title") or "").strip()
         hours: dict = {}
         if plan and plan.get("start") and plan.get("end"):
-            if plan.get("hours_per_week") is not None:
+            if (plan.get("hours_per_week") or 0) > 0:
                 hours["hours_per_week"] = plan["hours_per_week"]
-            elif plan.get("total_hours") is not None:
+            elif (plan.get("total_hours") or 0) > 0:
                 hours["total_hours"] = plan["total_hours"]
             else:
                 h_lines = [ln for ln in o.get("lines") or [] if ln.get("unit") == "h"]
-                total = sum((dec(ln.get("qty")) for ln in h_lines), ZERO)
-                if total <= 0:
+                if not h_lines:
                     raise ServiceError(422, "The offer has no hours to plan")
+                total = sum((dec(ln.get("qty")) for ln in h_lines), ZERO).quantize(Decimal("0.01"), ROUND_HALF_UP)
+                if total <= 0 or total > 100000:
+                    raise ServiceError(422, "The offer's hour lines must add up to more than 0 and at most 100000 h")
                 hours["total_hours"] = to_float(total)
         if existing:  # the offer belongs to a project: widen its period to cover the plan (recorded)
             proj = self.store.save("projects", PlanningService.cover_plan(existing, plan, rid))
@@ -92,7 +97,9 @@ class SalesService:
             proj = self.store.save(
                 "projects",
                 dict(
-                    name=title or "Offer " + (o.get("number") or ""),
+                    name=title or ("Offer " + (o.get("number") or "")).strip()
+                    if o.get("number")
+                    else title or "Offer draft",
                     kind="customer",
                     customer_id=o.get("customer_id"),
                     status="active",

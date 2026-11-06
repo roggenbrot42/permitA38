@@ -86,3 +86,82 @@ def test_apply_total_hours_clears_hours_per_week(boss_client):
     got = boss_client.get(f"/api/contracts/{ct['id']}").json()
     assert got["total_hours"] == 99
     assert got.get("hours_per_week") is None
+
+
+def _contract_after(c, plan, lines=None):
+    o = _offer(c, plan, lines)
+    return o, _accept(c, o).json()["contract"]
+
+
+def _apply(c, kind, rid, **fields):
+    r = c.post(
+        "/api/plan/apply",
+        json={"confirm": True, "changes": {"commitments": [{"kind": kind, "id": rid, **fields}]}},
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_accept_on_internal_project_is_refused(boss_client, app):
+    c = boss_client
+    store = app.state.services.store
+    o = _offer(c, {"start": TODAY, "end": END, "total_hours": 10})
+    proj = store.save("projects", {"name": "Own", "kind": "internal", "status": "active"})
+    store.save("offers", {**store.get("offers", o["id"]), "project_id": proj["id"]})
+    r = _accept(c, o)
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "Internal projects cannot have offers, contracts or invoices"
+    assert c.get("/api/contracts").json() == []
+    assert c.get(f"/api/offers/{o['id']}").json()["status"] != "accepted"
+
+
+def _h(qty):
+    return [{"description": "Work", "qty": qty, "unit": "h", "price": 10}]
+
+
+def test_hour_line_sum_bounds(boss_client):
+    for qty in (0.0001, 100000.5):
+        o = _offer(boss_client, {"start": TODAY, "end": END}, _h(qty))
+        r = _accept(boss_client, o)
+        assert r.status_code == 422, (qty, r.text)
+        assert r.json()["detail"] == "The offer's hour lines must add up to more than 0 and at most 100000 h"
+    assert boss_client.get("/api/contracts").json() == []
+
+
+def test_legacy_zero_hours_per_week_falls_back_to_total_hours(boss_client, app):
+    store = app.state.services.store
+    o = _offer(boss_client, {"start": TODAY, "end": END, "total_hours": 50})
+    legacy = store.get("offers", o["id"])
+    legacy["plan"] = {**legacy["plan"], "hours_per_week": 0}
+    store.save("offers", legacy)
+    ct = _accept(boss_client, o).json()["contract"]
+    assert ct["total_hours"] == 50 and ct.get("hours_per_week") is None
+
+
+def test_draft_without_number_gets_a_fallback_name(boss_client):
+    o = _offer(boss_client, {"start": TODAY, "end": END, "total_hours": 10}, title="  ")
+    assert not o.get("number")
+    assert _accept(boss_client, o).json()["project"]["name"] == "Offer draft"
+
+
+def test_apply_both_directions_on_a_contract(boss_client):
+    c = boss_client
+    _, ct = _contract_after(c, {"start": TODAY, "end": END, "hours_per_week": 12})
+    _apply(c, "contract", ct["id"], total_hours=99)
+    got = c.get(f"/api/contracts/{ct['id']}").json()
+    assert got["total_hours"] == 99 and got.get("hours_per_week") is None
+    _apply(c, "contract", ct["id"], hours_per_week=7)
+    got = c.get(f"/api/contracts/{ct['id']}").json()
+    assert got["hours_per_week"] == 7 and got.get("total_hours") is None
+
+
+def test_apply_both_directions_on_an_offer_plan(boss_client, app):
+    c = boss_client
+    o = _offer(c, {"start": TODAY, "end": END, "hours_per_week": 12})
+    store = app.state.services.store
+    store.save("offers", {**store.get("offers", o["id"]), "status": "sent"})
+    _apply(c, "offer", o["id"], total_hours=99)
+    plan = c.get(f"/api/offers/{o['id']}").json()["plan"]
+    assert plan["total_hours"] == 99 and plan.get("hours_per_week") is None
+    _apply(c, "offer", o["id"], hours_per_week=7)
+    plan = c.get(f"/api/offers/{o['id']}").json()["plan"]
+    assert plan["hours_per_week"] == 7 and plan.get("total_hours") is None

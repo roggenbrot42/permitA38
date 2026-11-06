@@ -181,6 +181,7 @@ class RecordService:
             data.pop("user_ids", None)  # contracts are not assigned to people; the project carries the team
         elif coll == "projects":
             data.pop("personal", None)  # replaced by ``kind``
+            self._resolve_project_kind(data, old)
             # the extension history is server-managed: never taken from the request
             data.pop("extensions", None)
             if old and old.get("extensions") is not None:
@@ -197,6 +198,27 @@ class RecordService:
             data.pop("created", None)
         saved = self.store.save(coll, data)
         return _expense_view(saved) if coll == "expenses" else saved
+
+    def _resolve_project_kind(self, data: dict, old: dict | None) -> None:
+        """``kind`` is derived from the customer only on create; an update that omits it keeps the stored kind."""
+        given = data.get("kind")
+        customer = data.get("customer_id")
+        if given is None:
+            data.pop("kind", None)
+            if old is None:
+                data["kind"] = "customer" if customer else "internal"
+                return
+            data["kind"] = project_kind(old)
+            if data["kind"] == "customer" and not customer and not old.get("customer_id"):
+                return  # a legacy customer project without a customer stays editable
+        if data["kind"] == "customer" and not customer:
+            raise ServiceError(422, "a customer project needs a customer_id")
+        if data["kind"] == "internal" and customer:
+            raise ServiceError(422, "an internal project cannot have a customer_id")
+        if old is not None and data["kind"] == "internal" and project_kind(old) != "internal":
+            pid = old["id"]
+            if any(r.get("project_id") == pid for coll in PROJECT_CUSTOMER_COLLECTIONS for r in self.store.list(coll)):
+                raise ServiceError(409, "This project has offers, contracts or invoices; it stays a customer project.")
 
     def _check_not_internal(self, data: dict, old: dict | None) -> None:
         """Offers, contracts and invoices never sit on an internal project (an unchanged legacy link stays editable)."""

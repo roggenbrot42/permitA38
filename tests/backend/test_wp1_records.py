@@ -84,3 +84,65 @@ def test_project_kind_fallback_for_rows_without_kind():
     assert project_kind({}) == "internal"
     assert project_kind({"kind": "internal", "customer_id": "abc"}) == "internal"
     assert project_kind({"kind": "customer"}) == "customer"
+
+
+def _contract_on(store, proj):
+    return store.save(
+        "contracts",
+        {
+            "title": "Demo contract",
+            "project_id": proj["id"],
+            "start": "2026-01-05",
+            "end": "2026-03-27",
+            "hours_per_week": 10,
+            "status": "confirmed",
+        },
+    )
+
+
+def test_update_to_internal_with_a_contract_is_refused(boss_client, app):
+    c = boss_client
+    cust = _customer(c)
+    p = c.post("/api/projects", json={"name": "Job", "customer_id": cust["id"]}).json()
+    _contract_on(app.state.services.store, p)
+    r = c.put(f"/api/projects/{p['id']}", json={"name": "Job", "kind": "internal"})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == "This project has offers, contracts or invoices; it stays a customer project."
+    got = c.get(f"/api/projects/{p['id']}").json()
+    assert got["kind"] == "customer" and got["customer_id"] == cust["id"]
+
+
+def test_update_without_kind_keeps_the_stored_kind(boss_client, app):
+    c = boss_client
+    store = app.state.services.store
+    p = store.save("projects", {"name": "Legacy", "kind": "customer", "status": "active"})
+    _contract_on(store, p)
+    r = c.put(f"/api/projects/{p['id']}", json={"name": "Renamed"})
+    assert r.status_code == 200, r.text
+    assert r.json()["kind"] == "customer" and r.json()["name"] == "Renamed"
+    q = store.save("projects", {"name": "Own", "kind": "internal", "status": "active"})
+    r = c.put(f"/api/projects/{q['id']}", json={"name": "Own 2"})
+    assert r.status_code == 200 and r.json()["kind"] == "internal"
+
+
+def test_create_derives_kind_from_customer(boss_client):
+    c = boss_client
+    cust = _customer(c)
+    assert c.post("/api/projects", json={"name": "A", "customer_id": cust["id"]}).json()["kind"] == "customer"
+    assert c.post("/api/projects", json={"name": "B"}).json()["kind"] == "internal"
+
+
+def test_kind_customer_combinations_on_update(boss_client):
+    c = boss_client
+    cust = _customer(c)
+    p = c.post("/api/projects", json={"name": "Job", "customer_id": cust["id"]}).json()
+    # omitted kind keeps customer, but the customer was dropped
+    assert c.put(f"/api/projects/{p['id']}", json={"name": "Job"}).status_code == 422
+    assert c.put(f"/api/projects/{p['id']}", json={"name": "Job", "kind": "customer"}).status_code == 422
+    q = c.post("/api/projects", json={"name": "Own", "kind": "internal"}).json()
+    r = c.put(f"/api/projects/{q['id']}", json={"name": "Own", "customer_id": cust["id"]})
+    assert r.status_code == 422, r.text
+    r = c.put(f"/api/projects/{q['id']}", json={"name": "Own", "kind": "customer", "customer_id": cust["id"]})
+    assert r.status_code == 200 and r.json()["kind"] == "customer"
+    r = c.put(f"/api/projects/{q['id']}", json={"name": "Own", "kind": "internal"})
+    assert r.status_code == 200 and r.json()["kind"] == "internal"

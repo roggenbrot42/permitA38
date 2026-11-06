@@ -39,6 +39,7 @@ def old_db(tmp_path, monkeypatch):
             ("projectc", "C personal with customer", "cust0001", 1, "active"),
             ("projectd", "D with a contract", "", 0, "active"),
             ("projecte", "E no status", None, 0, None),
+            ("projectf", "F empty customer, no documents", "", 0, "active"),
         ],
     )
     con = 'INSERT INTO "contracts" ("id", "title", "project_id", "start", "end", "hours_per_week", "total_hours", "status") VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
@@ -92,6 +93,10 @@ def test_e8_data_fixes(repo):
     assert h["incoming_offer_id"] == "inoff001" and h["status"] == "active"
     assert "total_hours" not in h and h["hours_per_week"] == 8
     assert "personal" not in {r[1] for r in repo.conn.execute('PRAGMA table_info("projects")')}
+
+
+def test_empty_customer_id_without_documents_becomes_internal(repo):
+    assert repo.get("projects", "projectf")["kind"] == "internal"
 
 
 def test_an_offer_or_invoice_makes_a_project_a_customer_project(tmp_path, monkeypatch):

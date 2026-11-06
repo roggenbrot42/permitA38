@@ -413,9 +413,9 @@ class ProjectIn(v.StrictRecord):
     @model_validator(mode="after")
     def _period(self):
         v.check_period(self.start, self.end, "project end")
-        if self.kind is None:
-            self.kind = "customer" if self.customer_id else "internal"
-        elif self.kind == "customer" and not self.customer_id:
+        if self.kind is None:  # derived by the service on create; an update that omits it keeps the stored kind
+            return self
+        if self.kind == "customer" and not self.customer_id:
             raise ValueError("a customer project needs a customer_id")
         elif self.kind == "internal" and self.customer_id:
             raise ValueError("an internal project cannot have a customer_id")
