@@ -5,7 +5,29 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0-alpha.6] - 2026-11-06
+
+Sixth alpha. Highlights: project-centric planning (assignments instead of per-contract assignees, an *Overview*
+instead of the forecast), receipt scan and scan of old offers and invoices, a real tax burden estimate with a personal
+tax profile and split settings, and database guards plus `permita38 check-db`. Adds the migrations
+`0014-receipt_scans`, `0015-document_scans`, `0016-guards`, `0017-reference_guards` and `0018-project_planning`; an
+upgraded database can no longer be opened by alpha.5. Back up your data folder before upgrading (the app also does it
+automatically). Not for production bookkeeping yet; the tax rules marked *(verify)* in `docs/compliance.md` and
+`docs/tax-adviser-review.md` still need your tax adviser.
+
 ### Added
+- **Scan of old offers and invoices**: upload or drop PDFs or JPEG photos of old offers and invoices on *Offers &
+  Invoices*. A clean file is added as an imported document with its original number (old invoices as sent, unpaid);
+  anything ambiguous waits under *To check*. Duplicates are refused. See `docs/specs/document-scan.md`.
+- **Tax burden estimate**: *Money & Taxes* shows what you currently owe (year to date) and a monthly reserve for
+  freelancers, trades and GmbH owners (health and care insurance, pension, pension deductions, child allowance, solidarity
+  surcharge, church tax, trade tax, optional employment income). Rates are year-dated tables; values marked *(verify)*
+  need your tax adviser. See `docs/tax-profile.md`.
+- **Personal tax profile**: new page *My settings -> Tax profile* (boss only). The accountant and API tokens only see
+  business figures.
+- **Tax adviser checklist**: `docs/tax-adviser-review.md` lists the 26 open questions for your tax adviser.
+- **Trip budget**: the trips overview shows one *Budget (actual / estimate)* column including mileage; 15 more planned
+  item types, including *gift to a business partner* with the new expense category *Gifts*.
 - **Database guards**: the database refuses duplicate invoice and offer numbers, malformed dates, negative amounts and
   reversed periods (HTTP 409 with a code); old data is kept and reported by `permita38 check-db`.
 - **Stored data check**: `permita38 check-db` reports stored records that break the rules (types, references,
@@ -36,6 +58,9 @@ All notable changes to this project are documented here. The format is based on
   under a minute.
 
 ### Changed
+- **Settings**: the Settings page is split into *Business settings* and *My settings* (profile, calendars, API tokens).
+  The five old flat tax fields are removed; `PUT /settings` refuses them (422).
+- **Mileage** is a regular row of the trip expenses table; the separate mileage table is gone.
 - **Planner**: *Planning -> Forecast* is now *Overview*; contracts and offers no longer name a person, a new contract
   needs a project, and a contract has either hours per week or total hours. Holidays and vacation reduce the assigned
   time, not what a contract promises. Over-assignment is warned, never scaled down.
@@ -54,6 +79,19 @@ All notable changes to this project are documented here. The format is based on
 - **Personal projects**: `personal` became *internal* (or *customer* when a customer was set).
 - **Per-contract assignees**: `user_ids` on contracts and offers is ignored and no longer written.
 - **Project team**: `member_ids` ("Team") on projects.
+
+### Fixed
+- **Manual time entry**: the saved entry shows up (the view jumps to its week), the date field is wide enough and
+  future dates are refused.
+- **Manual time on Today** now belongs to you: it appears in the timesheet, the Today list, weekly hours and flex-time
+  balance. An update without a user keeps the old owner. Entries saved earlier without an owner are not migrated.
+- **Invoice from tracked time** bills one customer only (a customer or project is required, else 422), and personal
+  projects can no longer be put on offers or invoices.
+- **Docker build**: `pydantic` is pinned to a version that matches `pydantic-core`.
+
+### Dependencies
+- Updated fastapi, starlette, pydantic-core, anyio, python-multipart, opentelemetry-api, tzdata, playwright and the
+  GitHub actions `setup-python` and `docker/login-action`.
 
 ## [0.4.0-alpha.5] - 2026-10-27
 
@@ -434,7 +472,8 @@ limitations and what is planned for the next alphas. Not for production bookkeep
 ## [0.1.0]
 - Initial version as *Timely*: time tracking, weekly goal, forecast, offers, invoices, expenses, tax estimates.
 
-[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.5...HEAD
+[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.6...HEAD
+[0.4.0-alpha.6]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.5...v0.4.0-alpha.6
 [0.4.0-alpha.5]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.4...v0.4.0-alpha.5
 [0.4.0-alpha.4]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.3...v0.4.0-alpha.4
 [0.4.0-alpha.3]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.2...v0.4.0-alpha.3

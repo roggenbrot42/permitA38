@@ -1350,7 +1350,7 @@ def open_dialog(browser, api, **kw):
 def test_allocations_dialog_creates_a_subcontractor_row_with_total_hours_and_rate(browser):
     api = FakeApi()
     ctx, pg, problems, dlg = open_dialog(browser, api)
-    dlg.locator("[data-a=alNew]").click()
+    dlg.locator("[data-a=alNew]").first.click()
     expect(dlg.locator("#al_owner optgroup")).to_have_count(2)  # people, subcontractors
     expect(dlg.locator("#al_ratebox")).to_be_hidden()  # an employee has no rate
     pg.select_option("#al_owner", "s:5d1c0aa2")
@@ -1406,7 +1406,7 @@ def test_allocations_dialog_shows_the_planning_warnings_after_a_save(browser):
     api = FakeApi()
     api.save_warnings = [fixture("warning_w11")]
     ctx, pg, problems, dlg = open_dialog(browser, api)
-    dlg.locator("[data-a=alNew]").click()
+    dlg.locator("[data-a=alNew]").first.click()
     dlg.locator("[data-a=alSave]").click()
     expect(dlg.locator(".al-warn li[data-code='%s']" % fixture("warning_w11")["code"])).to_have_count(1)
     body = api.calls("POST", "allocations")[0][3]
