@@ -13,6 +13,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import pytest
@@ -288,10 +289,14 @@ class ApiMachine(RuleBasedStateMachine):
         self.dirty: set[str] = set()
         self.steps = 0
         self.timers: dict[str, dict | None] = {}
-        self.allocs: dict[str, dict] = {}  # id -> {user_id, project_id, start, end, hours_per_week}
+        self.allocs: dict[
+            str, dict
+        ] = {}  # id -> stored fields (user_id or supplier_id, project_id, start, end, hours_per_week or total_hours, rate)
         self.sup: dict[str, dict] = {}  # suppliers: id -> {name, kind, active}
         self.inc: dict[str, dict] = {}  # incoming offers: id -> {supplier_id, project_id, status, allocation_id, ...}
-        self.ext_allocs: dict[str, str] = {}  # external allocations: id -> incoming offer id
+        self.ext_allocs: dict[
+            str, str
+        ] = {}  # offer-linked assignments (from accepted incoming offers): id -> incoming offer id
         self.m: dict[str, dict] = {c: {} for c in (*CRUD, "offers", "invoices", "users")}
         self.bodies: dict[str, dict] = {}  # last submitted body per document id
         self.settings = {"kleinunternehmer": False, "accounting": "eur"}
@@ -658,7 +663,7 @@ class ApiMachine(RuleBasedStateMachine):
         s = data.draw(st.sampled_from([None, Session("x.y.z", None, 0), Session("", None, 0)]))
         method, path, kw = data.draw(st.sampled_from([
             ("GET", "/customers", {}), ("GET", "/users", {}), ("GET", "/bootstrap", {}), ("GET", "/settings", {}),
-            ("GET", "/finance", {}), ("GET", "/dashboard", {}), ("GET", "/timer", {}), ("GET", "/forecast", {}),
+            ("GET", "/finance", {}), ("GET", "/dashboard", {}), ("GET", "/timer", {}), ("GET", "/plan", {}),
             ("GET", "/auth/me", {}), ("POST", "/customers", {"json": {"name": "x"}}),
             ("DELETE", f"/invoices/{DEAD_ID}", {}), ("PUT", f"/entries/{DEAD_ID}", {"json": {"date": "2026-01-01", "minutes": 5}}),
             ("POST", "/users", {"json": {"username": "evil", "name": "e", "password": "password1", "role": "boss"}}),
@@ -677,7 +682,7 @@ class ApiMachine(RuleBasedStateMachine):
         s = data.draw(st.sampled_from(members))
         path = data.draw(st.sampled_from(
             ["/customers", "/contracts", "/expenses", "/templates", "/offers", "/invoices", "/settings", "/finance",
-             "/project-report", "/forecast", f"/attachments/{DEAD_ID}.pdf"]))  # fmt: skip
+             "/project-report", "/plan", f"/attachments/{DEAD_ID}.pdf"]))  # fmt: skip
         assert self.call("GET", path, s).status_code == 403, path
 
     @rule(data=st.data(), attempts=st.integers(5, 8))
@@ -1517,7 +1522,7 @@ class ApiMachine(RuleBasedStateMachine):
             assert r.status_code == 204
         elif rid == s.user_id:
             assert r.status_code == 400
-        elif any(a["user_id"] == rid for a in self.allocs.values()):
+        elif any(a.get("user_id") == rid for a in self.allocs.values()):
             assert r.status_code == 409  # a person with allocations is deactivated, not deleted
         else:
             assert r.status_code == 204, r.text
@@ -1525,85 +1530,181 @@ class ApiMachine(RuleBasedStateMachine):
             self.timers.pop(rid, None)
             self.dirty.add("users")
 
-    # ------------------------------------------------------------------ rules: allocations (planner per project)
+    # ------------------------------------------------------------------ rules: allocations (assignments)
+    @staticmethod
+    def alloc_hours(kind: str, amount: float) -> dict:
+        return {"hours_per_week": amount} if kind == "weekly" else {"total_hours": amount}
+
+    def alloc_expect(self, r, body):
+        """The outcome the model predicts for a valid-shaped create or update of an assignment: returns the stored
+        row when the call must succeed, else asserts the error and returns None."""
+        uid, sid, pid = body.get("user_id"), body.get("supplier_id"), body["project_id"]
+        project = self.m["projects"].get(pid)
+        span = (date.fromisoformat(body["end"]) - date.fromisoformat(body["start"])).days
+        if sid:
+            owner = self.sup.get(sid)
+            if owner is None:
+                assert r.status_code == 404 and r.json()["detail"] == "Supplier not found", r.text
+                return None
+        else:
+            owner = self.m["users"].get(uid)
+            if owner is None:
+                assert r.status_code == 404 and r.json()["detail"] == "User not found", r.text
+                return None
+        if project is None:
+            assert r.status_code == 404 and r.json()["detail"] == "Project not found", r.text
+        elif span < 0:
+            assert r.status_code == 409 and r.json()["detail"] == "The end date is before the start date", r.text
+        elif project["status"] in ("done", "archived"):
+            assert r.status_code == 409 and r.json()["detail"] == "The project is closed", r.text
+        elif not owner["active"]:
+            assert r.status_code == 409, r.text
+            assert r.json()["detail"] == ("The supplier is not active" if sid else "The user is not active")
+        elif sid and owner["kind"] != "person-capacity":
+            assert r.status_code == 409 and r.json()["detail"] == "The supplier does not provide person capacity"
+        else:
+            assert r.status_code in (200, 201), r.text
+            return {k: v for k, v in body.items() if v is not None}
+        return None
+
     @precondition(lambda self: len(self.allocs) < 12)
     @rule(
         data=st.data(),
-        hpw=st.sampled_from([0.25, 10.0, 30.0, 80.0]),
+        owner_kind=st.sampled_from(["employee", "employee", "subcontractor"]),
+        hours_kind=st.sampled_from(["weekly", "weekly", "total"]),
+        amount=st.sampled_from([0.25, 10.0, 30.0, 80.0]),
         span=st.integers(-3, 40),
         project_ok=st.booleans(),
     )
-    def allocation_create(self, data, hpw, span, project_ok):
+    def allocation_create(self, data, owner_kind, hours_kind, amount, span, project_ok):
+        """Create an assignment of a person or a subcontractor; only the boss writes (both kinds)."""
         self.tick()
         s = data.draw(self.actor())
-        uid = data.draw(st.sampled_from(list(self.m["users"]) + [DEAD_ID]))
         pid = data.draw(st.sampled_from(list(self.m["projects"]))) if project_ok and self.m["projects"] else DEAD_ID
         start = TODAY + timedelta(days=data.draw(st.integers(0, 20)))
-        body = dict(user_id=uid, project_id=pid, start=start.isoformat(),
-                    end=(start + timedelta(days=span)).isoformat(), hours_per_week=hpw)  # fmt: skip
+        body = dict(project_id=pid, start=start.isoformat(), end=(start + timedelta(days=span)).isoformat(),
+                    **self.alloc_hours(hours_kind, amount))  # fmt: skip
+        if owner_kind == "employee":
+            body["user_id"] = data.draw(st.sampled_from(list(self.m["users"]) + [DEAD_ID]))
+        else:
+            body["supplier_id"] = data.draw(st.sampled_from(list(self.sup) + [DEAD_ID]))
+            body["rate"] = data.draw(st.sampled_from([60.0, 90.5]))
         r = self.call("POST", "/allocations", s, json=body)
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
-        user, project = self.m["users"].get(uid), self.m["projects"].get(pid)
-        if user is None:
-            assert r.status_code == 404 and r.json()["detail"] == "User not found"
-        elif project is None:
-            assert r.status_code == 404 and r.json()["detail"] == "Project not found"
-        elif span < 0:
-            assert r.status_code == 409
-        elif project["status"] in ("done", "archived"):
-            assert r.status_code == 409 and r.json()["detail"] == "The project is closed"
-        elif not user["active"]:
-            assert r.status_code == 409 and r.json()["detail"] == "The user is not active"
-        else:
-            assert r.status_code == 201, r.text
-            got = r.json()
-            assert got["kind"] == "employee" and got["status"] == "active" and got["hours_per_week"] == hpw
-            assert got["planned_hours"] >= 0 and isinstance(got["planning_warnings"], list)
-            self.allocs[got["id"]] = {k: body[k] for k in body}
+        stored = self.alloc_expect(r, body)
+        if stored is None:
             return
-        assert r.status_code in (404, 409)
+        assert r.status_code == 201, r.text
+        got = r.json()
+        assert got["status"] == "active" and got["planned_hours"] >= 0 and isinstance(got["planning_warnings"], list)
+        assert got["kind"] == ("external" if owner_kind == "subcontractor" else "employee")
+        subset_eq(stored, got)
+        if owner_kind == "subcontractor" and hours_kind == "total":  # M1: q2(total_hours x rate)
+            expected = (Decimal(str(amount)) * Decimal(str(body["rate"]))).quantize(Decimal("0.01"), ROUND_HALF_UP)
+            assert Decimal(str(got["planned_net"])) == expected
+        self.allocs[got["id"]] = stored
 
-    @precondition(lambda self: self.allocs)
-    @rule(data=st.data())
-    def allocation_delete(self, data):
+    @rule(
+        data=st.data(),
+        why=st.sampled_from(
+            ["both_owners", "no_owner", "both_hours", "no_hours", "rate_on_employee", "no_rate", "unassigned_project"]
+        ),
+    )
+    def allocation_invalid_shape(self, data, why):
+        """The strict body: every wrong combination is a 422 and creates nothing."""
         self.tick()
         s = data.draw(self.actor())
-        rid = data.draw(st.sampled_from(list(self.allocs) + [DEAD_ID]))
+        user = data.draw(st.sampled_from(list(self.m["users"])))
+        pid = data.draw(st.sampled_from(list(self.m["projects"]))) if self.m["projects"] else DEAD_ID
+        sid = data.draw(st.sampled_from(list(self.sup) + [DEAD_ID]))
+        body = dict(project_id=pid, start=TODAY.isoformat(), end=(TODAY + timedelta(days=10)).isoformat(),
+                    user_id=user, hours_per_week=10.0)  # fmt: skip
+        match why:
+            case "both_owners":
+                body.update(supplier_id=sid, rate=60.0)
+            case "no_owner":
+                del body["user_id"]
+            case "both_hours":
+                body["total_hours"] = 10.0
+            case "no_hours":
+                del body["hours_per_week"]
+            case "rate_on_employee":
+                body["rate"] = 60.0
+            case "no_rate":
+                del body["user_id"]
+                body["supplier_id"] = sid
+            case "unassigned_project":
+                body["project_id"] = "unassigned"
+        r = self.call("POST", "/allocations", s, json=body)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g
+            return
+        assert r.status_code == 422, (why, r.status_code, r.text)
+
+    @precondition(lambda self: self.allocs)
+    @rule(
+        data=st.data(),
+        hours_kind=st.sampled_from(["weekly", "total"]),
+        amount=st.sampled_from([0.25, 10.0, 30.0]),
+        span=st.integers(-2, 40),
+        switch=st.booleans(),
+    )
+    def allocation_update(self, data, hours_kind, amount, span, switch):
+        """PUT replaces the row; an employee row cannot turn into a subcontractor row and vice versa (409)."""
+        self.tick()
+        s = data.draw(self.actor())
+        rid = data.draw(st.sampled_from(sorted(self.allocs)))
+        external = bool(self.allocs[rid].get("supplier_id"))
+        start = TODAY + timedelta(days=data.draw(st.integers(0, 20)))
+        body = dict(project_id=self.allocs[rid]["project_id"], start=start.isoformat(),
+                    end=(start + timedelta(days=span)).isoformat(), **self.alloc_hours(hours_kind, amount))  # fmt: skip
+        to_external = external != switch
+        if to_external:
+            body.update(supplier_id=data.draw(st.sampled_from(list(self.sup) or [DEAD_ID])), rate=60.0)
+        else:
+            body["user_id"] = data.draw(st.sampled_from(list(self.m["users"])))
+        r = self.call("PUT", f"/allocations/{rid}", s, json=body)
+        if (g := self.gate(s, boss_only=True)) is not None:
+            assert r.status_code == g
+            return
+        if to_external != external:
+            assert r.status_code == 409
+            assert r.json()["detail"] == "An allocation cannot change between employee and subcontractor"
+            return
+        stored = self.alloc_expect(r, body)
+        if stored is not None:
+            subset_eq(stored, r.json())
+            self.allocs[rid] = stored
+
+    @precondition(lambda self: self.allocs or self.ext_allocs)
+    @rule(data=st.data())
+    def allocation_delete(self, data):
+        """Delete works for both kinds; a row that came from an accepted incoming offer is cancelled, never deleted."""
+        self.tick()
+        s = data.draw(self.actor())
+        rid = data.draw(st.sampled_from(sorted(self.allocs) + sorted(self.ext_allocs) + [DEAD_ID]))
         r = self.call("DELETE", f"/allocations/{rid}", s)
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
         if rid in self.allocs:
-            assert r.status_code == 204
+            assert r.status_code == 204, r.text
             del self.allocs[rid]
+        elif rid in self.ext_allocs:
+            assert r.status_code == 409, r.text
+            assert r.json()["detail"] == "An allocation from an incoming offer cannot be deleted; cancel it instead"
         else:
             assert r.status_code == 404
 
     @rule(data=st.data())
-    def allocation_bootstrap(self, data):
-        """Preview equals confirm, and a second confirm creates nothing (only the boss may call it)."""
+    def allocation_bootstrap_is_gone(self, data):
+        """The old bootstrap endpoint was removed: the suggestions of GET /plan replace it."""
         self.tick()
         s = data.draw(self.actor())
         r = self.call("POST", "/allocations/bootstrap", s, json={})
-        if (g := self.gate(s, boss_only=True)) is not None:
-            assert r.status_code == g
-            return
-        if r.status_code == 409:  # more than 500 proposals cannot happen here; nothing else is a 409
-            raise AssertionError(r.text)
-        assert r.status_code == 200, r.text
-        pre = r.json()
-        assert pre["created"] is False and len(self.allocs) == len(self.call("GET", "/allocations", s).json())
-        done = self.call("POST", "/allocations/bootstrap", s, json={"confirm": True})
-        assert done.status_code == 200, done.text
-        made = done.json()
-        strip = lambda rows: [{k: v for k, v in a.items() if k not in ("id", "kind")} for a in rows]  # noqa: E731
-        assert strip(made["allocations"]) == pre["allocations"] and made["warnings"] == pre["warnings"]
-        for a in made["allocations"]:
-            self.allocs[a["id"]] = {k: a[k] for k in ("user_id", "project_id", "start", "end", "hours_per_week")}
-        again = self.call("POST", "/allocations/bootstrap", s, json={"confirm": True}).json()
-        assert again["allocations"] == []
+        assert r.status_code in (401, 403, 404, 405, 422), r.status_code
 
     # ------------------------------------------------------------------ rules: suppliers and incoming offers
     @rule(data=st.data(), kind=st.sampled_from(["company", "person-capacity"]), active=st.booleans())
@@ -1658,7 +1759,11 @@ class ApiMachine(RuleBasedStateMachine):
             return
         if sid not in self.sup:
             assert r.status_code == 404
-        elif any(o["supplier_id"] == sid for o in self.inc.values()) or sid in self._ext_suppliers():
+        elif (
+            any(o["supplier_id"] == sid for o in self.inc.values())
+            or sid in self._ext_suppliers()
+            or any(a.get("supplier_id") == sid for a in self.allocs.values())
+        ):
             assert r.status_code == 409
             assert r.json() == {
                 "detail": "Supplier is used by incoming offers, allocations or expenses; archive it instead"
@@ -1834,20 +1939,34 @@ class ApiMachine(RuleBasedStateMachine):
         }
 
     def allocations_match_model(self):
-        rows = self.call("GET", "/allocations", self._boss()).json()
-        employee = [r for r in rows if not r.get("supplier_id")]
-        external = {r["id"] for r in rows if r.get("supplier_id")}
-        assert {r["id"] for r in employee} == set(self.allocs)
-        for row in employee:
-            subset_eq(self.allocs[row["id"]], row)
-        # an external allocation exists exactly while its offer is accepted (and not unaccepted)
-        assert external == set(self.ext_allocs)
-        # ring fence: whatever the allocations, the scopes of a week add up to the team row and the gaps to its gap
-        out = self.call("GET", "/forecast", self._boss(), params={"weeks": 6}).json()
+        boss = self._boss()
+        rows = {r["id"]: r for r in self.call("GET", "/allocations", boss).json()}
+        assert set(rows) == set(self.allocs) | set(self.ext_allocs)
+        for rid, exp in self.allocs.items():
+            subset_eq(exp, rows[rid])
+            assert rows[rid]["kind"] == ("external" if exp.get("supplier_id") else "employee")
+        # an offer-linked row exists exactly while its offer is accepted (and not unaccepted)
+        for rid, oid in self.ext_allocs.items():
+            assert rows[rid]["kind"] == "external" and rows[rid]["incoming_offer_id"] == oid
+        # the plan: the week rows add up (S3) and name exactly the active people
+        out = self.call("GET", "/plan", boss, params={"weeks": 6}).json()
+        assert len(out["weeks"]) == 6
         for w in out["weeks"]:
-            assert abs(sum(p["capacity"] for p in w["projects"]) - w["capacity"]) < 0.01
-            assert abs(sum(p["gap"] for p in w["projects"]) - w["gap"]) < 0.01
-            assert (w["gap"] > 0.001) <= (w["status"] == "over")
+            assert min(w["capacity"], w["unassigned"], w["over_assigned"], w["subcontractor_hours"]) >= 0
+            total = w["assigned_customer"] + w["assigned_internal"] + w["unassigned"] - w["over_assigned"]
+            assert abs(w["capacity"] - total) <= 0.04, w
+        active = {k for k, u in self.m["users"].items() if u["active"]}
+        assert {p["user_id"] for p in out["people"]} == active
+        for p in out["projects"]:
+            if p["kind"] == "customer":
+                assert p["shortfall_contracts"] >= 0 and p["shortfall_worst_case"] + 0.011 >= p["shortfall_contracts"]
+        if active:
+            uid = sorted(active)[0]
+            one = self.call("GET", "/plan", boss, params={"weeks": 2, "user_id": uid}).json()
+            assert [p["user_id"] for p in one["people"]] == [uid] and len(one["weeks"]) == 2
+        assert self.call("GET", "/plan", boss, params={"project_id": DEAD_ID}).status_code == 404
+        assert self.call("GET", "/plan", boss, params={"weeks": 0}).status_code == 422
+        assert self.call("GET", "/plan", boss, params={"weeks": 53}).status_code == 422
 
     # ------------------------------------------------------------------ rules: API tokens
     def revoke_tokens_of(self, user_id):
