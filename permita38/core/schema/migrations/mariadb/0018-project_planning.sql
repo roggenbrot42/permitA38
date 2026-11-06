@@ -1,5 +1,5 @@
 -- migration: 7ca84bdc
--- requires: e4b70dba
+-- requires: dea6e12b
 -- permitA38 migration: project_planning (mariadb)
 
 -- 1. schema
