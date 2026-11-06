@@ -5,6 +5,7 @@ import pytest
 
 TODAY = "2026-03-02"
 GHOST = "0" * 32  # well-formed id of a project that does not exist
+ALLOC = {"start": "2026-03-02", "end": "2026-03-20", "hours_per_week": 8, "status": "active"}  # planner guards
 LINES = [{"description": "Dev", "qty": 1, "unit": "h", "price": 90}]
 
 
@@ -12,8 +13,12 @@ def _uid(c):
     return c.get("/api/auth/me").json()["id"]
 
 
-def _project(c, name="Website", **kw):
-    r = c.post("/api/projects", json={"name": name, **kw})
+def _project(c, name="Website", customer=False, **kw):
+    """An internal project; `customer=True` makes a customer project (it may carry offers, contracts, invoices)."""
+    if customer:
+        cid = c.post("/api/customers", json={"name": "Demo customer"}).json()["id"]
+        kw = {"kind": "customer", "customer_id": cid, **kw}
+    r = c.post("/api/projects", json={"name": name, "kind": "internal", **kw})
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -56,7 +61,7 @@ def _refused(c, pid, message):
 def test_delete_refused_names_allocations(boss_client, app):
     c = boss_client
     p = _project(c)
-    app.state.services.store.save("allocations", {"project_id": p["id"], "user_id": _uid(c)})
+    app.state.services.store.save("allocations", {**ALLOC, "project_id": p["id"], "user_id": _uid(c)})
     _refused(c, p["id"], "This project is still used by 1 allocation; archive it instead.")
 
 
@@ -71,7 +76,7 @@ def test_delete_refused_time_entries_plural(boss_client):
 
 def test_delete_refused_time_entries_and_invoice(boss_client):
     c = boss_client
-    p = _project(c)
+    p = _project(c, customer=True)
     _entry(c, p["id"])
     _entry(c, p["id"])
     _invoice(c, p["id"])
@@ -80,7 +85,7 @@ def test_delete_refused_time_entries_and_invoice(boss_client):
 
 def test_delete_refused_singular_contract_offer(boss_client):
     c = boss_client
-    p = _project(c)
+    p = _project(c, customer=True)
     _contract(c, p["id"])
     _offer(c, p["id"])
     _refused(c, p["id"], "This project is still used by 1 contract and 1 offer; archive it instead.")
@@ -89,8 +94,8 @@ def test_delete_refused_singular_contract_offer(boss_client):
 def test_delete_refused_all_kinds_in_order(boss_client, app):
     c = boss_client
     store = app.state.services.store
-    p = _project(c)
-    store.save("allocations", {"project_id": p["id"], "user_id": _uid(c)})
+    p = _project(c, customer=True)
+    store.save("allocations", {**ALLOC, "project_id": p["id"], "user_id": _uid(c)})
     store.save("tasks", {"project_id": p["id"], "name": "Wire up"})
     _entry(c, p["id"])
     _contract(c, p["id"])
@@ -432,7 +437,7 @@ MSG = "The offer's project no longer exists; set another project on the offer fi
 
 def test_offer_to_invoice_with_vanished_project_refused(boss_client, app, unguarded):
     c = boss_client
-    p = _project(c)
+    p = _project(c, customer=True)
     o = _offer(c, p["id"])
     store = app.state.services.store
     unguarded(store, "offers", {**store.get("offers", o["id"]), "project_id": GHOST}, "ref.dangling")  # legacy data
@@ -444,7 +449,7 @@ def test_offer_to_invoice_with_vanished_project_refused(boss_client, app, unguar
 
 def test_offer_to_invoice_with_existing_or_no_project_works(boss_client):
     c = boss_client
-    p = _project(c)
+    p = _project(c, customer=True)
     r = c.post(f"/api/offers/{_offer(c, p['id'])['id']}/to-invoice")
     assert r.status_code == 200 and r.json()["project_id"] == p["id"]
     off = c.post("/api/offers", json={"lines": LINES}).json()

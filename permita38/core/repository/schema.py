@@ -112,8 +112,8 @@ TABLES: dict[str, Table] = {
         Table(
             "projects",
             _cols(
-                _BASE + "name:str customer_id:id personal:bool rate:float budget_hours:float status:str color:str "
-                "notes:text member_ids:json offer_id:id start:str end:str extensions:json" + _EXTRA
+                _BASE + "name:str customer_id:id kind:str rate:float budget_hours:float status:str color:str "
+                "notes:text offer_id:id start:str end:str extensions:json" + _EXTRA
             ),
             (Index("idx_projects_customer", ("customer_id",)),),
         ),
@@ -649,7 +649,78 @@ def _build_guards() -> tuple[Guard, ...]:
         for t in ("invoices", "offers")
     ]
     out += [Guard(f"guard_{t}_{c}_ref", t, "reference", (c,), "ref.dangling", target=g) for t, c, g in _REFERENCES]
+    out += _planning_guards()  # migration 0018-project_planning, after 0017-reference_guards
     return tuple(out)
+
+
+def _model_literal(model: Any, field_name: str) -> Any:
+    """The `Literal` of a pydantic field (a `Literal | None` is unwrapped), so a vocabulary is never typed twice."""
+    ann = model.model_fields[field_name].annotation
+    for arg in (ann, *get_args(ann)):
+        if get_origin(arg) is Literal:
+            return arg
+    raise ValueError(f"{model.__name__}.{field_name} is not a Literal")
+
+
+def _planning_guards() -> list[Guard]:
+    """Guards of migration project_planning (docs/specs/project-centric-planning.md, "Strict schema")."""
+    from permita38.core.models import ContractIn, ProjectIn  # late: models do not import the repository
+
+    def implies(table: str, stem: str, if_: Condition, then: Condition) -> Guard:
+        name = f"guard_{table}_{stem}_implies"
+        return Guard(name, table, "implies", (), f"state.implies:{name}", if_=if_, then=then)
+
+    def required(table: str, col: str) -> Guard:
+        return Guard(f"guard_{table}_{col}_required", table, "required", (col,), "state.required")
+
+    def rng(table: str, col: str, lo: float, hi: float, exclusive: bool) -> Guard:
+        return Guard(
+            f"guard_{table}_{col}_range", table, "range", (col,), "range.bounds", lo=lo, hi=hi, lo_exclusive=exclusive
+        )
+
+    def exactly_one(table: str) -> Guard:
+        return Guard(
+            f"guard_{table}_hours_exactly_one",
+            table,
+            "exactly_one",
+            ("hours_per_week", "total_hours"),
+            "state.exactly_one",
+        )
+
+    out = [
+        required("projects", "kind"),
+        one_of_from_literal("guard_projects_kind_one_of", "projects", "kind", _model_literal(ProjectIn, "kind")),
+        one_of_from_literal("guard_projects_status_one_of", "projects", "status", _model_literal(ProjectIn, "status")),
+        required("projects", "name"),
+        implies("projects", "internal_customer", Eq("kind", "internal"), IsBlank("customer_id")),
+        rng("projects", "budget_hours", 0, 100000, True),
+    ]
+    out += [required("allocations", c) for c in ("project_id", "start", "end")]
+    out += [
+        Guard("guard_allocations_status_one_of", "allocations", "one_of", ("status",), "vocab.unknown",
+              values=("active", "cancelled")),
+        exactly_one("allocations"),
+        rng("allocations", "hours_per_week", 0, 80, True),
+        rng("allocations", "total_hours", 0, 100000, True),
+        Guard("guard_allocations_period_max_days", "allocations", "max_days", ("start", "end"), "range.too_long",
+              days=1830),
+        rng("allocations", "rate", 0, 10000, False),
+        implies("allocations", "cancelled_from", Eq("status", "cancelled"), IsSet("cancelled_from")),
+        implies("allocations", "active_no_cancelled_from", Eq("status", "active"), IsBlank("cancelled_from")),
+        implies("allocations", "supplier_rate", IsSet("supplier_id"), IsSet("rate")),
+        implies("allocations", "user_no_incoming_offer", IsSet("user_id"), IsBlank("incoming_offer_id")),
+    ]  # fmt: skip
+    out += [required("contracts", c) for c in ("title", "start", "end")]
+    out += [
+        one_of_from_literal(
+            "guard_contracts_status_one_of", "contracts", "status", _model_literal(ContractIn, "status")
+        ),
+        exactly_one("contracts"),
+        rng("contracts", "hours_per_week", 0, 10000, True),
+        rng("contracts", "total_hours", 0, 100000, True),
+        rng("contracts", "rate", 0, 10000, False),
+    ]
+    return out
 
 
 # trips.start / trips.end are local datetimes ("YYYY-MM-DDTHH:MM"): only the order guard, no date format guard

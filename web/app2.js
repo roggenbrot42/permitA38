@@ -128,29 +128,32 @@ PAGES.projects = async () => {
   await loadAll(['projects', 'customers', 'tasks']);
   const rep = await api('GET', 'project-report');
   const ps = S.d.projects.filter(p => p.status !== 'archived');
-  return `<div class="head"><div><h1>Projects</h1><div class="muted">Customer work and personal projects – hours, rates and margin.</div></div><button class="primary" data-a="editProject">+ New project</button></div>
+  return `<div class="head"><div><h1>Projects</h1><div class="muted">Customer work and internal projects – hours, rates and margin.</div></div><button class="primary" data-a="editProject">+ New project</button></div>
   <div class="card">${ps.length ? `<table><tr><th>Project</th><th>Customer</th><th class="num">Hours</th><th>Budget</th><th class="num">Revenue</th><th class="num">Unbilled</th><th class="num">Margin</th></tr>${ps.map(p => {
     const r = rep[p.id] || {}, pct = p.budget_hours ? Math.min(100, r.hours / p.budget_hours * 100) : 0;
-    return `<tr class="click" data-href="#/project/${p.id}"><td><span class="dot" style="background:${esc(p.color || '#888')}"></span><b>${esc(p.name)}</b>${p.personal ? ' <span class="pill">personal</span>' : ''}</td><td>${esc(nameOf('customers', p.customer_id))}</td><td class="num">${hm(r.hours || 0)}</td>
+    return `<tr class="click" data-href="#/project/${p.id}"><td><span class="dot" style="background:${esc(p.color || '#888')}"></span><b>${esc(p.name)}</b>${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? ' <span class="pill">internal</span>' : ''}</td><td>${esc(nameOf('customers', p.customer_id))}</td><td class="num">${hm(r.hours || 0)}</td>
     <td style="min-width:110px">${p.budget_hours ? `<div class="bar ${pct > 100 ? '' : ''}"><div style="width:${pct}%;${r.hours > p.budget_hours ? 'background:var(--bad)' : ''}"></div></div><span class="small muted">${num(r.hours, 0)} / ${p.budget_hours} h</span>` : '<span class="muted small">–</span>'}</td>
-    <td class="num">${p.personal ? '' : eur(r.revenue)}</td><td class="num">${r.unbilled_revenue ? eur(r.unbilled_revenue) : ''}</td><td class="num ${r.margin < 0 ? 'free-bad' : ''}">${p.personal ? '' : eur(r.margin)}</td></tr>`;
+    <td class="num">${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? '' : eur(r.revenue)}</td><td class="num">${r.unbilled_revenue ? eur(r.unbilled_revenue) : ''}</td><td class="num ${r.margin < 0 ? 'free-bad' : ''}">${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? '' : eur(r.margin)}</td></tr>`;
   }).join('')}</table>` : '<div class="empty">No projects yet. Create one to start tracking time.</div>'}</div>`;
 };
 A.editProject = el => {
-  const p = el?.dataset?.id ? S.d.projects.find(x => x.id === el.dataset.id) : { status: 'active', color: COLORS[S.d.projects.length % COLORS.length] };
+  const p0 = el?.dataset?.id ? S.d.projects.find(x => x.id === el.dataset.id) : null;
+  const p = p0 ? { ...p0, kind: p0.kind || (p0.customer_id ? 'customer' : 'internal') } : { kind: 'customer', status: 'active', color: COLORS[S.d.projects.length % COLORS.length] };
   if (el?.dataset?.cust) p.customer_id = el.dataset.cust;
   openForm({
     title: p.id ? 'Edit project' : 'New project', vals: p,
-    fields: [{ k: 'name', l: 'Project name' }, { k: 'personal', l: 'Personal project (no customer, never billed)', t: 'check' },
-      { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '— none —'], ...S.d.customers.map(c => [c.id, c.name])] },
+    fields: [{ k: 'name', l: 'Project name' }, { k: 'kind', l: 'Kind', t: 'select', o: [['customer', 'Customer project'], ['internal', 'Internal project (no customer, never billed)']] },
+      { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])] },
       { k: 'rate', l: 'Hourly rate (€)', t: 'number', row: 1, h: 'Overrides the customer rate' }, { k: 'budget_hours', l: 'Budget (hours)', t: 'number', row: 1 },
       { k: 'start', l: 'Start (period)', t: 'date', row: 3, h: 'Required for customer projects' }, { k: 'end', l: 'End (period)', t: 'date', row: 3 },
       { k: 'status', l: 'Status', t: 'select', o: ['active', 'paused', 'done', 'archived'], row: 2 }, { k: 'color', l: 'Colour', t: 'color', row: 2 },
       { k: 'notes', l: 'Notes', t: 'area' }],
-    extra: `<div class="field"><label>Team (leave empty = everyone)</label>${S.d.users.filter(u => u.active !== false).map(u => `<label style="display:inline-block;margin-right:14px"><input type="checkbox" class="pm" value="${u.id}" ${(p.member_ids || []).includes(u.id) ? 'checked' : ''}> ${esc(u.name)}</label>`).join('')}</div>`,
-    save: async v => { if (!v.name) throw new Error('Name is required'); if (!v.personal && v.customer_id && (!v.start || !v.end)) throw new Error('Customer projects need a start and an end date'); v.member_ids = [...document.querySelectorAll('.pm:checked')].map(x => x.value); v.customer_id = v.customer_id || null; if (v.personal) v.customer_id = null; const r = await save('projects', v); if (!p.id) location.hash = '#/project/' + r.id; else render(); },
+    save: async v => { if (!v.name) throw new Error('Name is required'); if (v.kind !== 'internal' && !v.customer_id) throw new Error('A customer project needs a customer'); if (v.kind !== 'internal' && (!v.start || !v.end)) throw new Error('Customer projects need a start and an end date'); if (!(v.budget_hours > 0)) v.budget_hours = null; v.customer_id = v.customer_id || null; if (v.kind === 'internal') v.customer_id = null; const r = await save('projects', v); if (!p.id) location.hash = '#/project/' + r.id; else render(); },
     del: p.id ? async () => { await api('DELETE', 'projects/' + p.id); location.hash = '#/projects'; await loadAll(['projects']); render(); } : null
   });
+  const kindEl = $('#f_kind'), custEl = $('#f_customer_id');   // internal projects have no customer
+  const syncKind = () => { const f = custEl && custEl.closest('.field'); if (f) f.style.display = kindEl.value === 'internal' ? 'none' : ''; if (kindEl.value === 'internal' && custEl) custEl.value = ''; };
+  if (kindEl) { kindEl.addEventListener('change', syncKind); syncKind(); }
 };
 PAGES.project = async id => {
   await loadAll(['projects', 'customers', 'tasks', 'entries', 'expenses', 'contracts']);   // loadAll skips contracts without the right
@@ -158,18 +161,47 @@ PAGES.project = async id => {
   const r = (await api('GET', 'project-report'))[id] || {}, tasks = S.d.tasks.filter(t => t.project_id === id);
   const contracts = can('contracts') ? S.d.contracts : [];
   const mine = contracts.filter(c => c.project_id === id).sort((a, b) => a.start < b.start ? -1 : 1);
-  const others = p.customer_id && !p.personal ? contracts.filter(c => c.customer_id === p.customer_id && !c.project_id).length : 0;
+  const others = p.customer_id && (p.kind || 'customer') !== 'internal' ? contracts.filter(c => c.customer_id === p.customer_id && !c.project_id).length : 0;
   const writeC = can('contracts', 'write');
   const th = t => S.d.entries.filter(e => e.task_id === t.id).reduce((a, e) => a + e.minutes, 0) / 60;
   const ex = S.d.expenses.filter(e => e.project_id === id);
-  return `<div class="head"><div><a href="#/projects" class="small">← Projects</a><h1><span class="dot" style="background:${esc(p.color || '#888')}"></span>${esc(p.name)}</h1><div class="muted">${esc(nameOf('customers', p.customer_id) || (p.personal ? 'Personal project' : ''))}</div></div><span>${can('planning') ? `<button data-a="allocations" data-project="${esc(id)}">Allocations</button> ` : ''}<button data-a="editProject" data-id="${id}">Edit</button></span></div>
+  return `<div class="head"><div><a href="#/projects" class="small">← Projects</a><h1><span class="dot" style="background:${esc(p.color || '#888')}"></span>${esc(p.name)}</h1><div class="muted">${esc(nameOf('customers', p.customer_id) || ((p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? 'Internal project' : ''))}</div></div><span>${can('planning') ? `<button data-a="allocations" data-project="${esc(id)}">Allocations</button> ` : ''}<button data-a="editProject" data-id="${id}">Edit</button></span></div>
   <div class="grid g4"><div class="card kpi"><div class="l">Hours</div><div class="v">${hm(r.hours || 0)}</div></div><div class="card kpi"><div class="l">Revenue (at rates)</div><div class="v">${eur(r.revenue)}</div></div><div class="card kpi"><div class="l">Costs</div><div class="v">${eur((r.cost || 0) + (r.expenses || 0))}</div><span class="small muted">team ${eur(r.cost)} · expenses ${eur(r.expenses)}</span></div><div class="card kpi ${r.margin < 0 ? 'bad' : 'good'}"><div class="l">Margin</div><div class="v">${eur(r.margin)}</div></div></div>
   ${can('contracts') ? `<div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Contracts</h2><div class="right auto">${writeC ? `<button class="primary" data-a="editContract" data-proj="${esc(id)}">+ New contract</button>` : ''}</div></div>
   ${mine.length ? `<table><tr><th>Contract</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${mine.map(c => `<tr data-id="${c.id}"${writeC ? ' class="click" data-a="editContract"' : ''}><td><b>${esc(c.title)}</b></td><td class="nowrap">${contractPeriod(c)}</td><td class="num">${contractHours(c)}</td><td class="num">${c.rate ? eur(c.rate) : ''}</td><td>${contractPill(c)}</td></tr>`).join('')}</table>` : '<div class="empty">No contracts for this project yet.</div>'}
   ${others ? `<div class="small muted" style="margin-top:10px">${others} more ${others === 1 ? 'contract' : 'contracts'} of ${esc(nameOf('customers', p.customer_id))} without a project${can('planning') ? ' – <a href="#/plan/contracts">show in Planning</a>' : ''}</div>` : ''}</div>` : ''}
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Tasks & task rates</h2><div class="right auto"><button data-a="editTask" data-proj="${id}">+ Task</button></div></div>
   ${tasks.length ? `<table><tr><th>Task</th><th class="num">Hours</th><th class="num">Rate</th></tr>${tasks.map(t => `<tr class="click" data-a="editTask" data-id="${t.id}" data-proj="${id}"><td>${esc(t.name)}</td><td class="num">${hm(th(t))}</td><td class="num">${t.rate ? eur(t.rate) : '<span class="muted">project rate</span>'}</td></tr>`).join('')}</table>` : '<div class="empty">No tasks. Tasks are optional – use them when different work has a different rate (e.g. "Consulting" vs "Development").</div>'}</div>
+  ${can('time') ? await timesheetCard(id) : ''}
   ${ex.length ? `<div class="card"><h2>Expenses on this project</h2><table>${ex.map(e => `<tr><td>${fmtDate(e.date)}</td><td>${esc(e.vendor || '')}</td><td class="num">${eur(e.net)}</td></tr>`).join('')}</table></div>` : ''}`;
+};
+/* project time sheet card: GET projects/{id}/timesheet; the options live in TS (per page visit, not stored) */
+let TS = { group: 'week', from: '', to: '', data: null };
+async function timesheetCard(id) {
+  if (TS.id !== id) TS = { id, group: 'week', from: '', to: '', data: null };
+  let t = null, err = '';
+  try { t = TS.data = await api('GET', `projects/${id}/timesheet?group=${TS.group}${TS.from ? '&from=' + TS.from : ''}${TS.to ? '&to=' + TS.to : ''}`); } catch (e) { err = e.message || String(e); TS.data = null; }
+  const lab = d => TS.group === 'month' ? fmtDate(d).slice(3) : fmtDate(d).slice(0, 5);
+  const link = pp => pp.user_id ? `<a href="#/time/${mondayOf(t.from || todayISO())}/${esc(pp.user_id)}">${esc(pp.name)}</a>` : esc(pp.name);
+  const cell = h => h ? num(h, 2) : '<span class="muted">–</span>';
+  const tbl = t && t.people.length ? `<div style="overflow-x:auto"><table><tr><th>Person</th>${t.periods.map(d => `<th class="num nowrap">${lab(d)}</th>`).join('')}<th class="num">Hours</th><th class="num">Billable</th><th class="num">Unbilled</th></tr>
+    ${t.people.map(pp => `<tr><td>${link(pp)}</td>${pp.by_period.map(h => `<td class="num">${cell(h)}</td>`).join('')}<td class="num"><b>${num(pp.hours, 2)}</b></td><td class="num">${num(pp.billable_hours, 2)}</td><td class="num">${num(pp.unbilled_hours, 2)}</td></tr>`).join('')}
+    <tr><td><b>Total</b></td>${t.total.by_period.map(h => `<td class="num"><b>${cell(h)}</b></td>`).join('')}<td class="num"><b>${num(t.total.hours, 2)}</b></td><td class="num"><b>${num(t.total.billable_hours, 2)}</b></td><td class="num"><b>${num(t.total.unbilled_hours, 2)}</b></td></tr></table></div>` : (err ? '' : '<div class="empty">No time booked on this project in this range.</div>');
+  return `<div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Time sheet</h2><div class="right auto row tight" style="align-items:center">
+    <select style="width:auto" data-change="tsOpt" data-k="group" aria-label="Group by"><option value="week" ${TS.group === 'week' ? 'selected' : ''}>Week</option><option value="month" ${TS.group === 'month' ? 'selected' : ''}>Month</option></select>
+    <label class="small muted" for="ts_from">From</label><input type="date" id="ts_from" style="width:auto" value="${esc(TS.from)}" data-change="tsOpt" data-k="from">
+    <label class="small muted" for="ts_to">To</label><input type="date" id="ts_to" style="width:auto" value="${esc(TS.to)}" data-change="tsOpt" data-k="to">
+    <button data-a="tsCsv" ${t && t.people.length ? '' : 'disabled'}>CSV</button></div></div>
+    ${err ? `<div class="banner warn">${esc(err)}</div>` : `<div class="small muted">${t && t.from ? fmtDate(t.from) + ' – ' + fmtDate(t.to) + ' · ' : ''}hours; a name opens that person's week in the time view</div>`}${tbl}</div>`;
+}
+A.tsOpt = el => { TS[el.dataset.k] = el.value; render(); };
+A.tsCsv = () => {
+  const t = TS.data; if (!t) return;
+  const cellText = v => { let x = typeof v === 'number' ? String(v).replace('.', ',') : String(v ?? ''); if (typeof v !== 'number' && /^[=+\-@\t\r]/.test(x)) x = "'" + x; return /[;"\n\r]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
+  const rows = [['Person', ...t.periods, 'Hours', 'Billable', 'Unbilled'], ...t.people.map(p => [p.name, ...p.by_period, p.hours, p.billable_hours, p.unbilled_hours]), ['Total', ...t.total.by_period, t.total.hours, t.total.billable_hours, t.total.unbilled_hours]];
+  const url = URL.createObjectURL(new Blob(['﻿' + rows.map(r => r.map(cellText).join(';')).join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a'); a.href = url; a.download = `timesheet-${t.project_id}-${t.group}.csv`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 };
 A.editTask = el => {
   const t = el.dataset.id ? S.d.tasks.find(x => x.id === el.dataset.id) : { project_id: el.dataset.proj };
@@ -194,7 +226,7 @@ A.billTime = el => {
   openForm({
     title: 'Create invoice from tracked time', saveLabel: 'Create draft',
     vals: { customer_id: el?.dataset?.cust || '' }, fields: [{ k: 'customer_id', l: 'Customer', t: 'select', o: [['', '— choose a customer —'], ...S.d.customers.map(c => [c.id, c.name])] }, { k: 'from', l: 'From', t: 'date', row: 1 }, { k: 'to', l: 'To', t: 'date', row: 1 }],
-    note: '<p class="muted small">All unbilled, billable time of the chosen customer’s projects is grouped by project, task and rate. An invoice goes to one customer only; personal projects are never billed.</p>',
+    note: '<p class="muted small">All unbilled, billable time of the chosen customer’s projects is grouped by project, task and rate. An invoice goes to one customer only; internal projects are never billed.</p>',
     save: async v => { if (!v.customer_id) throw new Error('Choose a customer'); const inv = await api('POST', 'invoices/from-time', { customer_id: v.customer_id || null, from: v.from || null, to: v.to || null }); location.hash = '#/doc/invoices/' + inv.id; }
   });
 };
@@ -240,7 +272,7 @@ PAGES.doc = async (coll, id) => {
     <div class="right" id="d_totals" style="margin-top:12px"></div></div>
   <div class="card"><div class="grid g2"><div class="field"><label>Intro text (empty = from template)</label><textarea id="d_intro" rows="4">${esc(d.intro || '')}</textarea></div><div class="field"><label>Closing text (empty = from template)</label><textarea id="d_outro" rows="4">${esc(d.outro || '')}</textarea></div></div>
     <div class="field"><label>Internal notes (not printed)</label><textarea id="d_notes" rows="2">${esc(d.notes || '')}</textarea></div></div>
-  ${isInv ? '' : `<div class="card"><h2>Planning (optional)</h2><div class="muted small" style="margin-bottom:8px">When should this work happen? While the offer is open, the Planning forecast shows it as tentative; once accepted it becomes a contract.</div><div class="row"><div><label>Start</label><input type="date" id="p_s" value="${esc(plan.start || '')}"></div><div><label>End</label><input type="date" id="p_e" value="${esc(plan.end || '')}"></div><div><label>Hours per week</label><input type="number" id="p_hpw" value="${esc(plan.hours_per_week ?? '')}"></div><div><label>or total hours</label><input type="number" id="p_tot" value="${esc(plan.total_hours ?? '')}"></div></div></div>`}`;
+  ${isInv ? '' : `<div class="card"><h2>Planning (optional)</h2><div class="muted small" style="margin-bottom:8px">When should this work happen? Enter hours per week or total hours, not both; without hours, the offer's hour lines are booked on acceptance. While the offer is open, the Planning forecast shows it as tentative; once accepted it becomes a contract.</div><div class="row"><div><label>Start</label><input type="date" id="p_s" value="${esc(plan.start || '')}"></div><div><label>End</label><input type="date" id="p_e" value="${esc(plan.end || '')}"></div><div><label>Hours per week</label><input type="number" min="0" step="any" id="p_hpw" value="${esc(plan.hours_per_week ?? '')}"></div><div><label>or total hours</label><input type="number" min="0" step="any" id="p_tot" value="${esc(plan.total_hours ?? '')}"></div></div></div>`}`;
 };
 // Hourly rate for a new document: project > customer > your default (the same order the time entries use).
 const AUTO_PRICED = new WeakSet();   // lines whose price was set by us, not typed by hand
@@ -278,7 +310,7 @@ function syncDoc() {
   if (!DOC || !$('#d_cust')) return;
   const g = i => $('#' + i)?.value, d = DOC;
   Object.assign(d, { customer_id: g('d_cust'), project_id: g('d_proj') || null, title: g('d_title'), date: g('d_date'), service_from: g('d_sf') || null, service_to: g('d_st') || null, reference: g('d_ref'), template_id: g('d_tpl'), language: g('d_lang'), intro: g('d_intro'), outro: g('d_outro'), notes: g('d_notes') });
-  if (d.coll === 'invoices') Object.assign(d, { due_date: g('d_due') || null, paid_date: g('d_paid') || null }); else Object.assign(d, { valid_until: g('d_valid') || null, plan: g('p_s') && g('p_e') ? { start: g('p_s'), end: g('p_e'), hours_per_week: g('p_hpw') ? +g('p_hpw') : null, total_hours: g('p_tot') ? +g('p_tot') : null } : null });
+  if (d.coll === 'invoices') Object.assign(d, { due_date: g('d_due') || null, paid_date: g('d_paid') || null }); else Object.assign(d, { valid_until: g('d_valid') || null, plan: g('p_s') && g('p_e') ? { start: g('p_s'), end: g('p_e'), hours_per_week: +g('p_hpw') > 0 ? +g('p_hpw') : null, total_hours: +g('p_hpw') > 0 ? null : +g('p_tot') > 0 ? +g('p_tot') : null } : null });
   if ($('#d_vat')) d.vat_rate = +g('d_vat');
   document.querySelectorAll('[data-l]').forEach(inp => { const l = d.lines[+inp.dataset.l], k = inp.dataset.k; l[k] = ['qty', 'price', 'vat'].includes(k) ? (inp.value === '' ? (k === 'vat' ? null : 0) : parseFloat(inp.value)) : inp.value; });
 }

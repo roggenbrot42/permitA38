@@ -206,7 +206,7 @@ class FakeApi:
                 self.allocs.append({**out["allocations"][0], "status": "active", "planned_hours": 100.0})
                 self.forecast = forecast_b(after=True)
             return _json(route, 200, out)
-        if path.startswith("projects/") and path.endswith("/planning"):
+        if path.startswith("projects/") and path.endswith(("/planning", "/timesheet")):
             return _json(route, 404, {"detail": "Not found"})
         return _json(route, 200, [])
 

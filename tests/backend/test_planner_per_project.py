@@ -37,8 +37,13 @@ class World:
                 username="boss", name="Demo Boss", role="boss", weekly_hours=40, workdays=[0, 1, 2, 3, 4], active=True
             ),
         )
-        self.p = repo.save("projects", dict(name="Demo project P", status="active"))
-        self.q = repo.save("projects", dict(name="Demo project Q", status="active"))
+        cust = repo.save("customers", dict(name="Demo customer", type="company"))
+        self.p = repo.save(
+            "projects", dict(name="Demo project P", status="active", kind="customer", customer_id=cust["id"])
+        )
+        self.q = repo.save(
+            "projects", dict(name="Demo project Q", status="active", kind="customer", customer_id=cust["id"])
+        )
         self.svc = PlanningService(repo)
 
     def erika(self):
@@ -259,7 +264,7 @@ def test_e2_existing_data_without_allocations_then_bootstrap(w):
 
 def test_e2_bootstrap_rounds_the_peak_up_to_a_quarter_hour_and_skips_closed_projects(w):
     w.contract(w.boss, w.p, hpw=10.1)
-    done = w.repo.save("projects", dict(name="Demo done", status="done"))
+    done = w.repo.save("projects", dict(name="Demo done", status="done", kind="internal"))
     w.contract(w.boss, done, hpw=5)
     w.contract(w.boss, None, hpw=5)
     res = AllocationService(w.repo).bootstrap(False, TODAY)
@@ -677,21 +682,24 @@ def test_bootstrap_warnings_are_bounded_to_ten_weeks(w):
 @pytest.mark.parametrize(
     "row, code",
     [
-        (dict(user_id="u1", project_id="p1", status="active"), None),  # no period
+        (dict(user_id="u1", project_id="p1", status="active"), "state.required"),  # no period
         (
             dict(user_id="u1", project_id="p1", start="garbage", end="2026-03-27", status="active"),
             ("format.date", "state.period_reversed"),  # "garbage" sorts after the end date
         ),
-        (dict(user_id="u1", start="2026-03-02", end="2026-03-27", status="active"), None),  # no project
+        (dict(user_id="u1", start="2026-03-02", end="2026-03-27", status="active"), "state.required"),  # no project
         (
             dict(user_id="u1", project_id="p1", start="2026-03-27", end="2026-03-02", status="active"),
             "state.period_reversed",
         ),
-        (dict(user_id="u1", project_id="p1", start=5, end=6, status="active"), None),  # numbers: kept in extra
+        (
+            dict(user_id="u1", project_id="p1", start=5, end=6, status="active"),  # numbers: kept in extra
+            "state.required",
+        ),
     ],
 )
 def test_a_damaged_allocation_row_is_skipped_everywhere(w, row, code, unguarded):
-    planted = {**row, "user_id": w.boss["id"]}
+    planted = {**row, "user_id": w.boss["id"], "hours_per_week": 10}
     if "project_id" in row:
         planted["project_id"] = w.p["id"]  # an existing project; only the damage in `row` is intended
     if code:
@@ -718,7 +726,7 @@ def test_simulate_enforces_the_same_rules_as_apply(w):
         return w.svc.simulate(dict(allocations=[{**base, **kw}]), 1, TODAY, None, today=TODAY)
 
     sim()
-    done = w.repo.save("projects", dict(name="Done", status="done"))
+    done = w.repo.save("projects", dict(name="Done", status="done", kind="internal"))
     gone = w.repo.save("users", dict(username="gone", name="Gone", role="employee", weekly_hours=40, active=False))
     for kw, status, msg in [
         (dict(project_id=done["id"]), 409, "The project is closed"),

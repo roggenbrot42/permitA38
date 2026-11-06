@@ -1,4 +1,4 @@
-/* permitA38 – Team timeline: who is away and who has contracts, drawn at the viewer's visibility level (read-only).
+/* permitA38 – Team timeline: who is away and who is assigned to which project, drawn at the viewer's visibility level (read-only).
    The server removes what the level does not allow (GET /api/team/timeline); this file draws what it receives and
    computes the clash days itself from the absences. Vanilla JS, no build step. Reuses the planner's grid classes. */
 const TL_DAY_W = { week: 24, month: 8 };                  // px per day: week zoom (numbers visible) and month zoom (compact)
@@ -6,14 +6,14 @@ const TL_SPANS = [4, 8, 13, 26];                          // window length in we
 const TL_LEVEL_TEXT = {
   away: 'away only: who is away and when, without reasons',
   'time-off': 'time off with kind and vacation labels',
-  full: 'full details: sick kind, contracts and weekly hours',
+  full: 'full details: sick kind, assignments and weekly hours',
 };
 const TL_KIND = { vacation: 'vacation', holiday: 'personal day off', sick: 'sick', other: 'other' };
 const TL_SETTING_LEVELS = [
   ['off', 'Off: no Team timeline (the page answers "switched off")'],
   ['away', 'Away: who is away and when, no reasons'],
   ['time-off', 'Time off: plus kind and vacation labels'],
-  ['full', 'Full: plus sick kind, contracts and weekly hours'],
+  ['full', 'Full: plus sick kind, assignments and weekly hours'],
 ];
 const TL_COLOR = /^#[0-9a-fA-F]{6}$/;
 const tlInt = (v, lo, hi, d) => { const x = Math.trunc(Number(v)); return Number.isFinite(x) && x >= lo && x <= hi ? x : d; };
@@ -100,7 +100,7 @@ function tlPaint(data, n) {
     <div class="pln-row tl-head"><div class="pln-label">People away</div><div class="pln-lane tl-lane" style="width:${W}px;height:24px">${awayRow}</div></div>`;
   data.people.forEach((p, pi) => {
     const own = p.id === viewerId;
-    const contracts = p.contracts || [];
+    const contracts = p.assignments || [];  // CSS class stays 'contract'
     const hasCon = contracts.length > 0;
     const h = hasCon ? 68 : 34;
     const hoursText = p.weekly_hours != null ? `${p.weekly_hours} hours per week`
@@ -122,10 +122,10 @@ function tlPaint(data, n) {
       absItems.push(tlAdd({ lane: pi * 2, s, e, text, aria: `${p.name}, ${text}, ${range}`, cls: `tl-${a.kind || 'away'}`, title: `${p.name}${own ? ' (you)' : ''}`, lines, link }));
     }
     const conItems = contracts.map(c => {
-      const s = Math.max(0, tlIdx(c.start)), e = c.end ? Math.min(N - 1, tlIdx(c.end)) : N - 1;
-      const hours = c.hours_per_week != null ? `${c.hours_per_week} hours per week` : 'hours not set';
-      const dates = c.end ? tlRange(c.start, c.end) : `from ${tlRange(c.start, c.start)}, open-ended`;
-      const title = c.title || 'Contract';
+      const s = Math.max(0, tlIdx(c.start)), e = Math.min(N - 1, tlIdx(c.end));
+      const hours = c.hours_per_week != null ? `${c.hours_per_week} h/week` : c.total_hours != null ? `${c.total_hours} h total` : 'hours not set';
+      const dates = tlRange(c.start, c.end);
+      const title = c.project || 'Project';
       return tlAdd({ lane: pi * 2 + 1, s, e, text: title, aria: `${title}, ${c.customer || 'no customer'}, ${hours}, ${dates}`, cls: 'contract', title, lines: [`Customer: ${c.customer || 'none'}`, hours, `Dates: ${dates}`], link: null });
     }).filter(x => x.e >= 0 && x.s <= N - 1);
     const absBars = absItems.map(it => tlBar(it, dayW, 4, it.cls)).join('');
@@ -222,7 +222,7 @@ PAGES.timeline = async () => {
       ? `<p class="small">More than ${n} people away. Weekends and public holidays never count.</p><ul class="tl-clashlist">${clash.map(d => `<li data-day="${d}"><b>${esc(tlDayLabel(d))}</b>: ${counts[d]} people away</li>`).join('')}</ul>`
       : `<p class="small">No clash days: no weekday has more than ${n} people away.</p>`}
     ${holKeys.length ? `<p class="small"><b>Public holidays:</b> ${holKeys.map(d => `${esc(tlDayLabel(d))} ${esc(hol[d])}`).join('; ')}</p>` : ''}
-    ${data.level !== 'full' ? '<p class="small muted">Contract bars are shown at level Full only.</p>' : ''}
+    ${data.level !== 'full' ? '<p class="small muted">Assignment bars are shown at level Full only.</p>' : ''}
   </div>
   ${html}
   <div id="tlDetail" class="tl-detail" aria-live="polite">Click or Tab to a bar to see its details here.</div>

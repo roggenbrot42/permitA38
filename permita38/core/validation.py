@@ -177,10 +177,24 @@ Rate = Annotated[float, Field(ge=0, le=MAX_RATE, allow_inf_nan=False)]
 Hours = Annotated[float, Field(ge=0, le=168, allow_inf_nan=False)]
 TotalHours = Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False)]
 # hours per week of one allocation (docs/contracts/planner-per-project.md); stored as sent, no rounding
+# contract / offer plan / commitment hours per week: (0, 10000]; total hours: (0, 100000]
+ContractHours = Annotated[float, Field(gt=0, le=10_000, allow_inf_nan=False)]
+PositiveTotalHours = Annotated[float, Field(gt=0, le=100_000, allow_inf_nan=False)]
 AllocHours = Annotated[float, Field(ge=0.25, le=80, allow_inf_nan=False)]
 UNASSIGNED = "unassigned"
 # a planner scope: a project id or the literal "unassigned" (which also matches the id pattern)
 ScopeId = Annotated[str, StringConstraints(pattern=ID_PATTERN)]
+
+
+def _not_unassigned(value: str | None) -> str | None:
+    if value == UNASSIGNED:
+        raise ValueError("project_id must be a project, not 'unassigned'")
+    return value
+
+
+# a stored project reference: like Id / OptId, but never the implicit planner scope "unassigned"
+ProjectId = Annotated[Id, AfterValidator(_not_unassigned)]
+OptProjectId = Annotated[ProjectId | None, BeforeValidator(blank_to_none)]
 NonNegQty = Annotated[float, Field(ge=0, le=MAX_QTY, allow_inf_nan=False)]
 Country = Annotated[str, AfterValidator(_country)]
 Iban = Annotated[str | None, BeforeValidator(blank_to_none), AfterValidator(_optional(_iban))]  # None allowed

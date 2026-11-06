@@ -88,10 +88,9 @@ class ApiSim:
             b = {
                 "name": f"Projekt {self.n}",
                 "customer_id": cid,
+                "kind": "customer" if cid else "internal",
                 "rate": r.choice([None, 75, 99.5]),
                 "budget_hours": r.choice([None, 20, 100.5]),
-                "personal": cid is None,
-                "member_ids": [],
             }
         elif coll == "tasks":
             b = {
@@ -136,16 +135,19 @@ class ApiSim:
                 "title": f"Vertrag {self.n}",
                 "start": s.isoformat(),
                 "end": (s + timedelta(days=40)).isoformat(),
-                "hours_per_week": r.choice([4, 10.5]),
-                "user_ids": [self.boss_id],
+                "project_id": r.choice(self.customer_projects()),
+                **r.choice([{"hours_per_week": r.choice([4, 10.5])}, {"total_hours": r.choice([40, 120.5])}]),
             }
         if r.random() < 0.2:  # unknown fields must survive (files written by newer versions/other devices)
             b["x_future_field"] = {"nested": [1, "zwei", None]}
         return b
 
+    def customer_projects(self) -> list[str]:
+        return [i for i, p in self.model["projects"].items() if p.get("customer_id")]
+
     def can(self, coll) -> bool:
         need = {"projects": [], "tasks": ["projects"]}.get(coll, [])
-        return all(self.model[c] for c in need)
+        return all(self.model[c] for c in need) and (coll != "contracts" or bool(self.customer_projects()))
 
     DAY_LIMIT = 1380  # a person may log at most 24 h a day; stay 60 min below it so timers and member entries fit
 
@@ -177,6 +179,9 @@ class ApiSim:
         if coll == "entries" and self.model[coll][rid].get("invoice_id"):
             return
         b = self.body(coll)
+        if coll == "projects" and any(c.get("project_id") == rid for c in self.model["contracts"].values()):
+            b["customer_id"] = self.model["projects"][rid]["customer_id"]  # a contract needs a customer project
+            b["kind"] = "customer"
         r = self.boss.http.put(f"/{coll}/{rid}", json=b)
         assert r.status_code == 200, (coll, b, r.status_code, r.text)
         assert r.json()["id"] == rid
@@ -335,7 +340,7 @@ class ApiSim:
             "/projects", {"name": f"ZP {self.n}", "customer_id": cust["id"], "rate": r.choice([None, 120])}
         )
         task = self.boss.post("/tasks", {"project_id": proj["id"], "name": "Spezial", "rate": r.choice([None, 175])})
-        personal = self.boss.post("/projects", {"name": f"Privat {self.n}", "personal": True})
+        personal = self.boss.post("/projects", {"name": f"Intern {self.n}"})
         expect: dict[str, tuple[int, float]] = {}
         for _ in range(r.randint(2, 6)):
             use_task = r.random() < 0.4
@@ -358,7 +363,7 @@ class ApiSim:
         self.boss.post(
             "/entries",
             {"user_id": self.boss_id, "date": self.today.isoformat(), "minutes": 99, "project_id": personal["id"]},
-        )  # personal: never billed
+        )  # internal project (no customer): never billed
         self.boss.post(
             "/entries",
             {

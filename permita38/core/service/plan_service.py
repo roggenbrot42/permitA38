@@ -945,6 +945,9 @@ class PlanningService:
                     for k in ("start", "end", "hours_per_week", "total_hours"):
                         if c.get(k) is not None:
                             rec[k] = c[k]
+                    for k, other in (("hours_per_week", "total_hours"), ("total_hours", "hours_per_week")):
+                        if c.get(k) is not None:
+                            rec[other] = None
                     if rec["end"] < rec["start"]:
                         raise ServiceError(422, "The end must not be before the start")
                     self.store.save("contracts", rec)
@@ -956,6 +959,9 @@ class PlanningService:
                     for k in ("start", "end", "hours_per_week", "total_hours"):
                         if c.get(k) is not None:
                             plan[k] = c[k]
+                    for k, other in (("hours_per_week", "total_hours"), ("total_hours", "hours_per_week")):
+                        if c.get(k) is not None:
+                            plan[other] = None
                     if plan.get("start") and plan.get("end") and plan["end"] < plan["start"]:
                         raise ServiceError(422, "The end must not be before the start")
                     self.store.save("offers", {**old, "plan": plan})

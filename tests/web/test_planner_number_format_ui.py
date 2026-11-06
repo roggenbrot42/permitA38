@@ -36,6 +36,10 @@ def seeded(srv):
     h = {"Authorization": "Bearer " + srv.token}
     me = httpx.get(srv.base + "/api/auth/me", headers=h).json()
     start = monday(date.today()) + timedelta(days=7)
+    cust = httpx.post(srv.base + "/api/customers", headers=h, json={"name": "Demo Customer A"}).json()
+    proj = httpx.post(
+        srv.base + "/api/projects", headers=h, json={"name": "Demo project P", "customer_id": cust["id"]}
+    ).json()
     for body in (
         {
             "title": "Part-time retainer",
@@ -44,7 +48,8 @@ def seeded(srv):
             "hours_per_week": 12.5,
             "rate": 90,
             "status": "confirmed",
-            "user_ids": [me["id"]],
+            "project_id": proj["id"],
+            "customer_id": cust["id"],
         },
         {
             "title": "Short workshop",
@@ -53,7 +58,8 @@ def seeded(srv):
             "total_hours": 7.25,
             "rate": 90,
             "status": "confirmed",
-            "user_ids": [me["id"]],
+            "project_id": proj["id"],
+            "customer_id": cust["id"],
         },
     ):
         r = httpx.post(srv.base + "/api/contracts", headers=h, json=body)

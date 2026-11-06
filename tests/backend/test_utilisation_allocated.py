@@ -37,8 +37,8 @@ class World:
                 username="boss", name="Demo Boss", role="boss", weekly_hours=40, workdays=[0, 1, 2, 3, 4], active=True
             ),
         )
-        self.a = repo.save("projects", dict(name="Demo project A", status="active"))
-        self.b = repo.save("projects", dict(name="Demo project B", status="active"))
+        self.a = repo.save("projects", dict(name="Demo project A", status="active", kind="internal"))
+        self.b = repo.save("projects", dict(name="Demo project B", status="active", kind="internal"))
         self.svc = PlanningService(repo)
 
     def alloc(self, project, hpw, start=START, end=END):

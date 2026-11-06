@@ -144,6 +144,7 @@ release; `proposed` means not yet scheduled.
 | **Bank statement import** (CAMT.053/MT940/CSV) and payment matching; **EPC GiroCode QR** on invoices | Faster payment and reconciliation | alpha.7 |
 | **SEPA direct-debit file export** | Optional collection of recurring payments | beta |
 | **Working-time law checks** (ArbZG breaks, rest, 10 h) as sanity warnings; absence entitlement (BUrlG) | Teams with employees | warnings released in alpha.2; entitlement (BUrlG) beta |
+| **ArbZG averages for booked time**: §3 average of 8 h per working day over the rolling 24 weeks, 60 h week; for the boss own limits from "My settings" (`work_limits`, shared with the planner, defaults: more than 10 h a day info, more than 12 h warning, more than 16 h warning "more than your maximum"; long weeks and a high average info), never a refused booking and no law wording, no break, rest or Sunday messages; never for subcontractors; **automatic breaks for employees** as a business setting (`auto_break_employees`, default on: the missing 30/45 minutes of §4 deducted on booking, shown on the entry and replaceable by real break times), never for the boss | Teams with employees | after the planner rework |
 | **Scheinselbständigkeit hint** (one customer dominates the forecast) | Informational risk hint for freelancers | beta |
 | **One-Stop-Shop (OSS)** support | EU sales to private customers | later |
 | **Security baseline self-assessment (OWASP ASVS L2)** and **CRA readiness** review | Trust, regulatory outlook | beta |

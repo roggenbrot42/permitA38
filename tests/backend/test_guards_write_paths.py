@@ -104,12 +104,20 @@ def test_offer_accept_with_a_one_day_plan_and_to_invoice(boss_client):
 
 # ------------------------------------------------------------------ periods and rates
 def test_project_contract_absence_with_start_equal_end(boss_client, me):
+    cust = _customer(boss_client)
     p = ok(
-        boss_client.post("/api/projects", json={"name": "P", "start": DAY, "end": DAY, "rate": 0, "budget_hours": 0})
+        boss_client.post(
+            "/api/projects", json={"name": "P", "start": DAY, "end": DAY, "rate": 0, "customer_id": cust["id"]}
+        )
     )
     assert p["start"] == p["end"] == DAY
-    body = {"title": "C", "start": DAY, "end": DAY, "hours_per_week": 0, "total_hours": 0, "rate": 0}
-    k = ok(boss_client.post("/api/contracts", json=body))
+    # zero hours and "both hour fields" are refused by the API before the database guards
+    assert boss_client.post("/api/projects", json={"name": "P0", "budget_hours": 0}).status_code == 422
+    body = {"title": "C", "project_id": p["id"], "start": DAY, "end": DAY, "rate": 0}
+    assert boss_client.post("/api/contracts", json={**body, "hours_per_week": 0}).status_code == 422
+    assert boss_client.post("/api/contracts", json={**body, "total_hours": 0}).status_code == 422
+    assert boss_client.post("/api/contracts", json={**body, "hours_per_week": 1, "total_hours": 1}).status_code == 422
+    k = ok(boss_client.post("/api/contracts", json={**body, "total_hours": 0.0001}))
     assert k["start"] == k["end"] == DAY
     a = ok(boss_client.post("/api/absences", json={"user_id": me["id"], "start": DAY, "end": DAY}))
     assert a["start"] == a["end"] == DAY
@@ -210,5 +218,5 @@ def test_store_refuses_a_negative_value(store):
 
 def test_store_refuses_a_reversed_period(store):
     with pytest.raises(ConstraintViolation) as e:
-        store.save("projects", {"name": "P", "start": "2026-03-03", "end": DAY})
+        store.save("projects", {"name": "P", "kind": "customer", "start": "2026-03-03", "end": DAY})
     assert e.value.code == "state.period_reversed"

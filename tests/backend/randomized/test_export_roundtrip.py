@@ -94,9 +94,20 @@ def populate(store, data: dict) -> None:
             if coll == "allocations":  # exactly one owner: the instance's first user (no dangling reference)
                 owner = {
                     "user_id": store.list("users")[0]["id"],
-                    "project_id": store.save("projects", {"name": "p"})["id"],
+                    "project_id": store.save("projects", {"name": "p", "kind": "internal"})["id"],
                 }
                 rec = {**rec, **owner, "start": "2026-03-02", "end": "2026-03-27", "hours_per_week": 20.0}
+            elif coll == "projects":
+                rec = {**rec, "name": "p" + rec["name"], "kind": "internal"}  # name is required (not blank)
+            elif coll == "contracts":  # a contract needs a project and exactly one hour field
+                rec = {
+                    **rec,
+                    "title": "c",
+                    "project_id": store.save("projects", {"name": "pc", "kind": "internal"})["id"],
+                    "start": "2026-03-02",
+                    "end": "2026-03-27",
+                    "hours_per_week": 20.0,
+                }
             store.save(coll, rec)
     for u in data["users"]:
         store.save("users", u)

@@ -58,7 +58,6 @@ REFERENCES: dict[str, str] = {
     "created_by": "users",
 }
 LIST_REFERENCES: dict[str, tuple[str, str]] = {  # (collection, column) -> target collection
-    "projects.member_ids": ("projects", "users"),
     "contracts.user_ids": ("contracts", "users"),
 }
 #: attachment names referenced by a record
@@ -158,7 +157,8 @@ def instance_state(store: Repository, *, allow_no_users: bool) -> str | None:
     for name in TABLES:
         if name in ("users", "settings"):
             continue
-        n = len(store.list(name))
+        rows = store.list(name)
+        n = len(rows)
         if n:
             found.append(f"{name}: {n}")
     users = store.list("users")

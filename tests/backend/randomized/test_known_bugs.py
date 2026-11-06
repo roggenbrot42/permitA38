@@ -132,24 +132,24 @@ def test_password_change_invalidates_tokens_issued_in_the_same_second(api, monke
 
 
 # ------------------------------------------------------------------ member visibility
-def test_member_cannot_read_unassigned_project_details(api):
+def test_member_sees_every_project_but_no_rates(api):
     _boss(api)
     member = _member(api)
-    p = api.post(
-        "/api/projects", json={"name": "Secret", "rate": 175, "notes": "margin 40%", "member_ids": ["nobody0000x"]}
-    ).json()
-    assert p["id"] not in {x["id"] for x in member.get("/api/projects").json()}  # hidden in the list...
+    p = api.post("/api/projects", json={"name": "Open", "kind": "internal", "rate": 175, "notes": "margin 40%"}).json()
+    assert p["id"] in {x["id"] for x in member.get("/api/projects").json()}  # every user sees every project
     r = member.get(f"/api/projects/{p['id']}")
-    assert r.status_code in (403, 404), "...so it must be hidden by id as well"
+    assert r.status_code == 200
+    assert "rate" not in r.json(), "a member must not see the billing rate"
+    assert all("rate" not in x for x in member.get("/api/projects").json())
 
 
-def test_member_task_list_hides_rates_and_unassigned_projects(api):
+def test_member_task_list_shows_every_project_but_hides_rates(api):
     _boss(api)
     member = _member(api)
-    p = api.post("/api/projects", json={"name": "Secret", "member_ids": ["nobody0000x"]}).json()
+    p = api.post("/api/projects", json={"name": "Open", "kind": "internal"}).json()
     api.post("/api/tasks", json={"name": "Consulting", "project_id": p["id"], "rate": 175})
     rows = member.get("/api/tasks").json()
-    assert not [t for t in rows if t["project_id"] == p["id"]]
+    assert [t for t in rows if t["project_id"] == p["id"]]
     assert not [t for t in rows if "rate" in t]
 
 

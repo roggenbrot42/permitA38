@@ -1,5 +1,5 @@
 """Team timeline: visibility per level, redaction on the server, the window bounds and the setting that sets the level.
-Every expected value is written out by hand from the fixture (docs/contracts/team-timeline.md)."""
+Every expected value is written out by hand from the fixture (docs/specs/team-timeline.md)."""
 
 from datetime import date, timedelta
 
@@ -12,13 +12,13 @@ from .conftest import PASSWORD, _login
 TIMELINE = "/api/team/timeline?start=2026-11-02&end=2026-12-27"
 SECRETS_OF_OTHERS = (  # notes of entries that are not the viewer's (Dana's own notes are not in this list)
     "Dentist", "Autumn break", "Flu", "Christmas shift", "Early start", "Company day", "Weekend trip", "Gift shop",
-    "Website relaunch", "Example GmbH", "Support", "Inactive secret", "Long ago",
+    "Website relaunch", "Example GmbH", "Support", "Dana project", "Inactive secret", "Long ago",
 )  # fmt: skip
 
 
 @pytest.fixture
 def world(app, boss_client):
-    """Three active people (Alex, Bea, Dana), one inactive (Cem) and contracts, absences inside and outside the window.
+    """Three active people (Alex, Bea, Dana), one inactive (Cem) and assignments, absences inside and outside the window.
 
     Window 2026-11-02 (Mon) .. 2026-12-27 (Sun). 2026-12-25 is a Friday and a nationwide public holiday.
     """
@@ -66,21 +66,27 @@ def world(app, boss_client):
     absence("bea", "vacation", "2026-12-25", "2026-12-25", "Gift shop")
     absence("dana", "vacation", "2026-12-25", "2026-12-25", "Home")
 
-    def contract(title, customer, start, end, hours, users):
-        r = boss.post(
-            "/api/contracts",
-            json={"title": title, "customer_id": customer, "start": start, "end": end, "hours_per_week": hours,
-                  "user_ids": users},
-        )  # fmt: skip
+    def project(name, customer):
+        r = boss.post("/api/projects", json={"name": name, "customer_id": customer})
         assert r.status_code == 200, r.text
         return r.json()["id"]
 
-    ids["c_web"] = contract(
-        "Website relaunch", ids["customer"], "2026-10-01", "2026-12-31", 20, [ids["boss"], ids["alex"]]
-    )
-    ids["c_support"] = contract("Support", None, "2026-12-01", "2026-12-31", None, [ids["alex"]])
-    ids["c_dana"] = contract("Dana project", None, "2026-11-01", "2026-11-30", 10, [ids["dana"]])
-    contract("Last year", None, "2025-01-01", "2025-06-30", 5, [ids["dana"]])  # no overlap with the window
+    def allocate(key, user, proj, start, end, hours):
+        r = boss.post(
+            "/api/allocations",
+            json={"user_id": ids[user], "project_id": proj, "start": start, "end": end, "hours_per_week": hours},
+        )
+        assert r.status_code == 201, r.text
+        ids[key] = r.json()["id"]
+
+    ids["p_web"] = project("Website relaunch", ids["customer"])
+    ids["p_support"] = project("Support", None)
+    ids["p_dana"] = project("Dana project", None)
+    allocate("a_web_boss", "boss", ids["p_web"], "2026-10-01", "2026-12-31", 20)
+    allocate("a_web", "alex", ids["p_web"], "2026-10-01", "2026-12-31", 20)
+    allocate("a_support", "alex", ids["p_support"], "2026-12-01", "2026-12-31", 8)
+    allocate("a_dana", "dana", ids["p_dana"], "2026-11-01", "2026-11-30", 10)
+    allocate("a_old", "dana", ids["p_dana"], "2025-01-01", "2025-06-30", 5)  # no overlap with the window
     return {"ids": ids, "alex": alex, "bea": bea, "dana": dana, "boss": boss}
 
 
@@ -93,14 +99,14 @@ def _by_name(body):
     return {p["name"]: p for p in body["people"]}
 
 
-def _web(ids):
-    return {"id": ids["c_web"], "title": "Website relaunch", "customer": "Example GmbH", "start": "2026-10-01",
-            "end": "2026-12-31", "hours_per_week": 20}  # fmt: skip
+def _web(ids, key="a_web"):
+    return {"id": ids[key], "project_id": ids["p_web"], "project": "Website relaunch", "customer": "Example GmbH",
+            "start": "2026-10-01", "end": "2026-12-31", "hours_per_week": 20, "total_hours": None}  # fmt: skip
 
 
 def _support(ids):
-    return {"id": ids["c_support"], "title": "Support", "customer": None, "start": "2026-12-01", "end": "2026-12-31",
-            "hours_per_week": None}  # fmt: skip
+    return {"id": ids["a_support"], "project_id": ids["p_support"], "project": "Support", "customer": None,
+            "start": "2026-12-01", "end": "2026-12-31", "hours_per_week": 8, "total_hours": None}  # fmt: skip
 
 
 def _away(*spans):
@@ -138,7 +144,7 @@ def test_boss_gets_everything_exactly(world):
             {
                 "id": ids["boss"], "name": "Test Boss", "color": "#2563eb", "weekly_hours": 40,  # setup default
                 "absences": [{"start": "2026-11-16", "end": "2026-11-16", "kind": "vacation", "label": "Private"}],
-                "contracts": [_web(ids)],
+                "assignments": [_web(ids, "a_web_boss")],
             },
             {
                 "id": ids["alex"], "name": "Alex Example", "color": "#cc6633", "weekly_hours": 32,
@@ -148,7 +154,7 @@ def test_boss_gets_everything_exactly(world):
                     {"start": "2026-11-18", "end": "2026-11-18", "kind": "sick", "label": "Flu"},
                     {"start": "2026-12-25", "end": "2026-12-25", "kind": "other", "label": "Christmas shift"},
                 ],
-                "contracts": [_web(ids), _support(ids)],
+                "assignments": [_web(ids), _support(ids)],
             },
             {
                 "id": ids["bea"], "name": "Bea Example", "color": None, "weekly_hours": 38.5,
@@ -158,7 +164,7 @@ def test_boss_gets_everything_exactly(world):
                     {"start": "2026-11-14", "end": "2026-11-15", "kind": "vacation", "label": "Weekend trip"},
                     {"start": "2026-12-25", "end": "2026-12-25", "kind": "vacation", "label": "Gift shop"},
                 ],
-                "contracts": [],
+                "assignments": [],
             },
             {
                 "id": ids["dana"], "name": "Dana Example", "color": "#339966", "weekly_hours": 40,
@@ -168,8 +174,9 @@ def test_boss_gets_everything_exactly(world):
                     {"start": "2026-11-18", "end": "2026-11-18", "kind": "sick", "label": "Migraine"},
                     {"start": "2026-12-25", "end": "2026-12-25", "kind": "vacation", "label": "Home"},
                 ],
-                "contracts": [{"id": ids["c_dana"], "title": "Dana project", "customer": None, "start": "2026-11-01",
-                               "end": "2026-11-30", "hours_per_week": 10}],  # fmt: skip
+                "assignments": [{"id": ids["a_dana"], "project_id": ids["p_dana"], "project": "Dana project",
+                                 "customer": None, "start": "2026-11-01", "end": "2026-11-30",
+                                 "hours_per_week": 10, "total_hours": None}],  # fmt: skip
             },
         ],
     }  # fmt: skip
@@ -184,14 +191,18 @@ def test_the_viewer_is_first_then_by_name_and_inactive_people_are_missing(world)
     ]  # fmt: skip
 
 
-def test_open_ended_contract_is_listed_with_null_end(world, app):
+def test_assignment_of_a_deleted_project_has_null_project_and_cancelled_ones_are_skipped(world, app, unguarded):
     store = app.state.services.store
-    store.save("contracts", {"title": "Retainer", "start": "2026-11-05", "end": None, "user_ids": [world["ids"]["bea"]],
-                             "hours_per_week": 5})  # fmt: skip
-    body = world["boss"].get(TIMELINE).json()
-    bea = _by_name(body)["Bea Example"]
-    assert bea["contracts"] == [{"id": bea["contracts"][0]["id"], "title": "Retainer", "customer": None,
-                                 "start": "2026-11-05", "end": None, "hours_per_week": 5}]  # fmt: skip
+    ids = world["ids"]
+    unguarded(store, "allocations", {"user_id": ids["bea"], "project_id": "gone", "start": "2026-11-05",
+                                     "end": "2026-11-06", "hours_per_week": 5, "status": "active"}, "ref.dangling")  # fmt: skip
+    store.save("allocations", {"user_id": ids["bea"], "project_id": ids["p_web"], "start": "2026-11-05",
+                               "end": "2026-11-06", "hours_per_week": 5, "status": "cancelled", "cancelled_from": "2026-11-05"})  # fmt: skip
+    bea = _by_name(world["boss"].get(TIMELINE).json())["Bea Example"]
+    assert len(bea["assignments"]) == 1
+    a = bea["assignments"][0]
+    assert (a["project"], a["customer"], a["project_id"], a["hours_per_week"]) == (None, None, "gone", 5)
+    assert "contracts" not in bea
 
 
 # ------------------------------------------------------------------ away (the default for employees)
@@ -208,18 +219,18 @@ def test_employee_default_away_shows_own_entries_in_full_and_nothing_else(world)
             {"start": "2026-11-18", "end": "2026-11-18", "kind": "sick", "label": "Flu"},
             {"start": "2026-12-25", "end": "2026-12-25", "kind": "other", "label": "Christmas shift"},
         ],
-        "contracts": [],
+        "assignments": [],
     }  # fmt: skip
     assert by["Bea Example"]["absences"] == _away(
         ("2026-10-30", "2026-11-02"), ("2026-11-09", "2026-11-10"), ("2026-11-14", "2026-11-15"), ("2026-12-25", "2026-12-25")
     )  # fmt: skip
-    assert by["Bea Example"]["weekly_hours"] is None and by["Bea Example"]["contracts"] == []
+    assert by["Bea Example"]["weekly_hours"] is None and by["Bea Example"]["assignments"] == []
     assert by["Dana Example"]["absences"] == _away(
         ("2026-11-10", "2026-11-11"), ("2026-11-14", "2026-11-15"), ("2026-11-18", "2026-11-18"), ("2026-12-25", "2026-12-25")
     )  # fmt: skip
     assert by["Dana Example"]["color"] == "#339966"  # the colour is shown at every level
     assert by["Test Boss"]["absences"] == _away(("2026-11-16", "2026-11-16"))
-    assert all(p["contracts"] == [] for p in body["people"])
+    assert all(p["assignments"] == [] for p in body["people"])
 
 
 def test_no_hidden_note_appears_anywhere_in_the_raw_response_at_away(world):
@@ -257,7 +268,7 @@ def test_time_off_adds_kind_and_vacation_or_holiday_labels_but_not_sick_labels(w
         "label": "Migraine",
     }  # own row: full
     assert by["Dana Example"]["weekly_hours"] == 40 and by["Alex Example"]["weekly_hours"] is None
-    assert all(p["contracts"] == [] for p in body["people"])
+    assert all(p["assignments"] == [] for p in body["people"])
 
 
 # ------------------------------------------------------------------ full for employees
@@ -378,7 +389,7 @@ def test_the_window_is_at_most_366_days_inclusive(world):
 
 
 # ------------------------------------------------------------------ clash days: FIXTURE DATA, not the rule
-# The backend does not compute clashes (the UI does, docs/contracts/team-timeline.md "Clash threshold"). These tests
+# The backend does not compute clashes (the UI does, docs/specs/team-timeline.md "Clash threshold"). These tests
 # do not call production code: they check that the fixture's hand-computed clash days equal a local oracle, so the
 # same expected values can be reused by the UI tests.
 @pytest.mark.parametrize(
@@ -434,7 +445,7 @@ def test_accountant_at_time_off_and_full_end_to_end(world):
                                                  "label": "Autumn break"}  # fmt: skip
     assert by["Alex Example"]["absences"][2] == {"start": "2026-11-18", "end": "2026-11-18", "kind": None,
                                                  "label": None}  # fmt: skip
-    assert by["Alex Example"]["weekly_hours"] is None and by["Alex Example"]["contracts"] == []
+    assert by["Alex Example"]["weekly_hours"] is None and by["Alex Example"]["assignments"] == []
     assert by["Bea Example"]["absences"][0] == {
         "start": "2026-10-30",
         "end": "2026-11-02",
@@ -449,7 +460,7 @@ def test_accountant_at_time_off_and_full_end_to_end(world):
     by = _by_name(body)
     assert by["Alex Example"]["absences"][2] == {"start": "2026-11-18", "end": "2026-11-18", "kind": "sick",
                                                  "label": "Flu"}  # fmt: skip
-    assert by["Alex Example"]["contracts"] == [_web(ids), _support(ids)]
+    assert by["Alex Example"]["assignments"] == [_web(ids), _support(ids)]
     assert by["Alex Example"]["weekly_hours"] == 32
 
 

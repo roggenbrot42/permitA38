@@ -33,6 +33,7 @@ from permita38.core.service.settings import SettingsService
 from permita38.core.service.suppliers import SupplierService
 from permita38.core.service.team_timeline import TeamTimelineService
 from permita38.core.service.time import TimeService
+from permita38.core.service.timesheet import TimesheetService
 from permita38.core.service.tokens import PREFIX as TOKEN_PREFIX
 from permita38.core.service.tokens import TokenService
 from permita38.core.service.totp import TotpService
@@ -54,6 +55,7 @@ class Services:
     document_scans: DocumentScanService
     sales: SalesService
     time: TimeService
+    timesheet: TimesheetService
     settings: SettingsService
     personal_tax: PersonalTaxService
     impressum: ImpressumService
@@ -99,6 +101,7 @@ class Services:
             sales=SalesService(store, records),
             imports=ImportService(store, numbering=None),
             time=TimeService(store),
+            timesheet=TimesheetService(store),
             settings=SettingsService(store),
             personal_tax=PersonalTaxService(store),
             team_timeline=TeamTimelineService(store),

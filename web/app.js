@@ -114,14 +114,15 @@ function parseDur(s) {            // "1:30", "1.5", "90m", "2h 15m" -> minutes
 // projects of that customer plus general projects without a customer; '' (no customer chosen) gives the general ones.
 // currentId is the stored project of a record: when it belongs to another customer (legacy data) it stays listed,
 // marked, so it is not silently lost; no other mismatching project is offered. billable = for an offer or invoice:
-// personal projects are never billed, so they are left out (a stored one is kept, marked, like a mismatch).
+// internal projects are never billed, so they are left out (a stored one is kept, marked, like a mismatch).
 const projectOptions = (withNone = true, customerId = undefined, currentId = null, billable = false) => {
   const live = (S.d.projects || []).filter(p => p.status !== 'archived');
-  const label = p => p.name + (p.personal ? ' (personal)' : '');
-  const fits = p => (!billable || !p.personal) && (customerId === undefined || !p.customer_id || p.customer_id === customerId);
+  const isInt = p => (p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal';
+  const label = p => p.name + (isInt(p) ? ' (internal)' : '');
+  const fits = p => (!billable || !isInt(p)) && (customerId === undefined || !p.customer_id || p.customer_id === customerId);
   const out = [...(withNone ? [['', '— no project —']] : []), ...live.filter(fits).map(p => [p.id, label(p)])];
   const cur = currentId && live.find(p => p.id === currentId);
-  if (cur && !fits(cur)) out.push([cur.id, label(cur) + (billable && cur.personal ? '' : ' (other customer)')]);
+  if (cur && !fits(cur)) out.push([cur.id, label(cur) + (billable && isInt(cur) ? '' : ' (other customer)')]);
   return out;
 };
 // Rebuilds a project <select> after the customer next to it changed; a project that is no longer listed is cleared.
@@ -319,7 +320,7 @@ PAGES.today = async () => {
   }
   if (isBoss() && (!S.d.customers?.length || !S.d.projects?.length)) {
     const numLog = await api('GET', 'numbering/log'), batches = await api('GET', 'import/batches');
-    const st = S.settings, steps = [[numLog.length > 0 || S.d.invoices.some(i => i.number), 'Check your document numbering (start number, pattern)', '#/numbering'], [batches.length > 0 || S.d.invoices.some(i => i.imported), 'Import existing offers and invoices (optional)', '#/import'], [!!st.company_name && !!(st.tax_number || st.vat_id), 'Fill in your business details (address, tax number, bank)', '#/settings'], [S.d.customers.length > 0, 'Add your first customer', '#/customers'], [S.d.projects.length > 0, 'Create a project (customer work or personal)', '#/projects'], [entries.length > 0 || S.d.entries.length > 0, 'Track your first hour with the Start button above', '#/today']];
+    const st = S.settings, steps = [[numLog.length > 0 || S.d.invoices.some(i => i.number), 'Check your document numbering (start number, pattern)', '#/numbering'], [batches.length > 0 || S.d.invoices.some(i => i.imported), 'Import existing offers and invoices (optional)', '#/import'], [!!st.company_name && !!(st.tax_number || st.vat_id), 'Fill in your business details (address, tax number, bank)', '#/settings'], [S.d.customers.length > 0, 'Add your first customer', '#/customers'], [S.d.projects.length > 0, 'Create a project (customer work or internal)', '#/projects'], [entries.length > 0 || S.d.entries.length > 0, 'Track your first hour with the Start button above', '#/today']];
     extras = `<div class="card" style="border-color:var(--accent)"><h2>👋 Getting started</h2><div class="muted small" style="margin-bottom:8px">Four steps to your first tracked hour. Full guide: <code>docs/getting-started.md</code></div>${steps.map(([done, t, h]) => `<div style="padding:4px 0">${done ? '✅' : '⬜'} <a href="${h}">${t}</a></div>`).join('')}</div>` + extras;
   }
   render.after = () => { timerUpd(); timerTick(); };
@@ -352,7 +353,7 @@ const timerOnce = (key, fn) => async (...a) => { if (timerInFlight[key]) return;
 A.timerStart = timerOnce('timer', async () => { const body = { project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value }; S.timer = await api('POST', 'timer/start', body); render(); });
 /* ---- time tracking card (Today page) ---- */
 let moneyView = false;   // per view, not stored: tracker shows money earned instead of the clock
-const projLabel = p => p.name + (p.personal ? ' (personal)' : '');
+const projLabel = p => p.name + ((p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? ' (internal)' : '');
 const labelById = id => { const p = (S.d.projects || []).find(x => x.id === id); return p ? projLabel(p) : ''; };
 /* Project id from the typed label or name (case-insensitive); '' when nothing matches. */
 function projIdOf() {
@@ -592,17 +593,19 @@ function contractsView() {
 }
 A.editContract = el => {
   const proj = el.dataset.proj ? S.d.projects.find(x => x.id === el.dataset.proj) : null;   // "+ New contract" on a project page
-  const c = el.dataset.id ? S.d.contracts.find(x => x.id === el.dataset.id) : { status: 'confirmed', start: todayISO(), user_ids: [], ...(proj ? { project_id: proj.id, customer_id: proj.customer_id || '' } : {}) };
+  const c = el.dataset.id ? S.d.contracts.find(x => x.id === el.dataset.id) : { status: 'confirmed', start: todayISO(), ...(proj ? { project_id: proj.id, customer_id: proj.customer_id || '' } : {}) };
   openForm({
     title: c.id ? 'Edit contract' : 'New contract', vals: c,
     fields: [{ k: 'title', l: 'Title' }, { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '—'], ...S.d.customers.map(x => [x.id, x.name])] },
-      { k: 'project_id', l: 'Project', t: 'select', o: projectOptions() },
+      { k: 'project_id', l: 'Project', t: 'select', o: projectOptions(c.id && !c.project_id, undefined, c.project_id || null, true) },
       { k: 'start', l: 'Start', t: 'date', row: 1 }, { k: 'end', l: 'End', t: 'date', row: 1 },
-      { k: 'hours_per_week', l: 'Hours per week', t: 'number', row: 2, h: 'Either this…' }, { k: 'total_hours', l: 'Total hours', t: 'number', row: 2, h: '…or this (spread over the period)' }, { k: 'rate', l: 'Hourly rate (€)', t: 'number', row: 2 },
+      { k: 'hours_per_week', l: 'Hours per week', t: 'number', row: 2, h: 'Either this… (entering one clears the other)' }, { k: 'total_hours', l: 'Total hours', t: 'number', row: 2, h: '…or this (spread over the period)' }, { k: 'rate', l: 'Hourly rate (€)', t: 'number', row: 2 },
       { k: 'status', l: 'Status', t: 'select', o: ['confirmed', 'done'] }],
-    save: async v => { if (!v.title || !v.start || !v.end) throw new Error('Title, start and end are required'); if (!v.hours_per_week && !v.total_hours) throw new Error('Enter hours per week or total hours'); v.user_ids = c.user_ids || []; await save('contracts', v); render(); },
+    save: async v => { if (!v.title || !v.start || !v.end) throw new Error('Title, start and end are required'); if (!v.project_id) throw new Error('Choose a project'); if (!(v.hours_per_week > 0) && !(v.total_hours > 0)) throw new Error('Enter hours per week or total hours'); if (v.hours_per_week > 0) v.total_hours = null; else v.hours_per_week = null; await save('contracts', v); render(); },
     del: c.id ? async () => { await api('DELETE', 'contracts/' + c.id); await loadAll(['contracts']); render(); } : null
   });
+  const hpw = $('#f_hours_per_week'), tot = $('#f_total_hours');   // exclusive: entering one clears the other
+  if (hpw && tot) { hpw.addEventListener('input', () => { if (hpw.value !== '') tot.value = ''; }); tot.addEventListener('input', () => { if (tot.value !== '') hpw.value = ''; }); }
 };
 
 /* ---- time off ---- */

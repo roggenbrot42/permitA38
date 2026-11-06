@@ -70,14 +70,16 @@ def example_full() -> dict:
                 "color": "#3366cc",
                 "weekly_hours": 40,
                 "absences": [],
-                "contracts": [
+                "assignments": [
                     {
-                        "id": "c5d6e7f8g9",
-                        "title": "Website relaunch",
+                        "id": "a5d6e7f8g9",
+                        "project_id": "p1q2w3e4r5",
+                        "project": "Website relaunch",
                         "customer": "Example GmbH",
                         "start": "2026-10-01",
                         "end": "2026-12-31",
                         "hours_per_week": 20,
+                        "total_hours": None,
                     }
                 ],
             },
@@ -90,7 +92,7 @@ def example_full() -> dict:
                     {"start": "2026-11-09", "end": "2026-11-13", "kind": "vacation", "label": "Autumn break"},
                     {"start": "2026-11-18", "end": "2026-11-18", "kind": "sick", "label": None},
                 ],
-                "contracts": [],
+                "assignments": [],
             },
         ],
     }
@@ -111,7 +113,7 @@ def clash_fixture() -> dict:
         "name": "Sam Example",
         "color": "#2f855a",
         "weekly_hours": 40,
-        "contracts": [],
+        "assignments": [],
         "absences": [
             {"start": "2026-11-06", "end": "2026-11-08", "kind": "vacation", "label": "Long weekend"},
             {"start": "2026-11-09", "end": "2026-11-11", "kind": "vacation", "label": "City trip"},
@@ -123,7 +125,7 @@ def clash_fixture() -> dict:
         "name": "Kim Example",
         "color": None,
         "weekly_hours": None,
-        "contracts": [],
+        "assignments": [],
         "absences": [
             {"start": "2026-11-06", "end": "2026-11-08", "kind": "other", "label": None},
             {"start": "2026-11-10", "end": "2026-11-10", "kind": "sick", "label": None},
@@ -272,12 +274,12 @@ def test_renders_the_example_bars_with_text_labels(open_app):
     labels = bar_labels(pg)
     assert "Alex Example, vacation: Autumn break, 9 to 13 November" in labels
     assert "Alex Example, sick, 18 November" in labels
-    assert "Website relaunch, Example GmbH, 20 hours per week, 1 October to 31 December" in labels
+    assert "Website relaunch, Example GmbH, 20 h/week, 1 October to 31 December" in labels
     assert pg.locator("#tlWrap .tl-bar").count() == 3
     # the bars land on the right days: window starts 2 Nov (day 0), week zoom is 24 px per day
     assert bar_left_width(pg, "Alex Example, vacation: Autumn break, 9 to 13 November") == (7 * 24, 5 * 24 - 2)
     assert bar_left_width(pg, "Alex Example, sick, 18 November") == (16 * 24, 24 - 2)
-    assert bar_left_width(pg, "Website relaunch, Example GmbH, 20 hours per week, 1 October to 31 December")[0] == 0
+    assert bar_left_width(pg, "Website relaunch, Example GmbH, 20 h/week, 1 October to 31 December")[0] == 0
     assert "KW 45" in pg.inner_text("#tlWrap")
     assert pg.locator("#tlWrap [data-day='2026-12-25'].hol").count() >= 1
     assert pg.locator("#tlWrap [data-day='2026-11-07'].wk").count() >= 1
@@ -289,7 +291,7 @@ def test_bar_details_are_text_and_keyboard_moves_between_bars(open_app):
     pg, problems = open_timeline(open_app, api)
     pg.focus("#tlWrap .tl-bar[aria-label^='Website relaunch']")
     assert "Website relaunch" in pg.inner_text("#tlDetail")
-    pg.keyboard.press("ArrowDown")  # from the contract row to Alex's row, nearest start day
+    pg.keyboard.press("ArrowDown")  # from the assignment row to Alex's row, nearest start day
     assert (
         pg.evaluate("document.activeElement.getAttribute('aria-label')")
         == "Alex Example, vacation: Autumn break, 9 to 13 November"
@@ -337,7 +339,7 @@ def test_weekends_and_public_holidays_never_clash(open_app):
 
 
 def test_levels_hide_the_details_others_are_away(open_app):
-    """Level away (employee): others' reasons and contracts are not sent; own entries stay full."""
+    """Level away (employee): others' reasons and assignments are not sent; own entries stay full."""
     away = {
         "level": "away",
         "start": "2026-11-02",
@@ -353,7 +355,7 @@ def test_levels_hide_the_details_others_are_away(open_app):
                     {"start": "2026-11-09", "end": "2026-11-13", "kind": "vacation", "label": "Autumn break"},
                     {"start": "2026-11-18", "end": "2026-11-18", "kind": "sick", "label": None},
                 ],
-                "contracts": [],
+                "assignments": [],
             },
             {
                 "id": "u1a2b3c4d5",
@@ -361,7 +363,7 @@ def test_levels_hide_the_details_others_are_away(open_app):
                 "color": "#3366cc",
                 "weekly_hours": None,
                 "absences": [{"start": "2026-11-20", "end": "2026-11-22", "kind": None, "label": None}],
-                "contracts": [],
+                "assignments": [],
             },
         ],
     }
@@ -375,7 +377,7 @@ def test_levels_hide_the_details_others_are_away(open_app):
     assert "hours hidden at your level" in text
     assert "Skiing" not in pg.content()  # never sent at this level, so never drawn
     assert "Website relaunch" not in pg.content()
-    assert "Contract bars are shown at level Full only." in text
+    assert "Assignment bars are shown at level Full only." in text
     assert problems == []
 
 
@@ -392,7 +394,7 @@ def test_time_off_level_shows_kind_and_label_but_sick_days_only_as_away(open_app
                 "color": "#cc6633",
                 "weekly_hours": 32,
                 "absences": [{"start": "2026-11-09", "end": "2026-11-13", "kind": "vacation", "label": "Autumn break"}],
-                "contracts": [],
+                "assignments": [],
             },
             {
                 "id": "u1a2b3c4d5",
@@ -403,7 +405,7 @@ def test_time_off_level_shows_kind_and_label_but_sick_days_only_as_away(open_app
                     {"start": "2026-11-20", "end": "2026-11-22", "kind": "vacation", "label": "Skiing trip"},
                     {"start": "2026-11-25", "end": "2026-11-25", "kind": None, "label": None},
                 ],
-                "contracts": [],
+                "assignments": [],
             },
         ],
     }
@@ -440,7 +442,7 @@ def test_boss_settings_form_sends_the_contract_body(open_app):
 
 def test_empty_period_says_nobody_is_away(open_app):
     empty = example_full()
-    empty["people"][0]["contracts"] = []
+    empty["people"][0]["assignments"] = []
     empty["people"][1]["absences"] = []
     pg, problems = open_timeline(open_app, Api(BOSS, timeline=empty))
     assert "Nobody has time off in this period." in pg.inner_text("#main")

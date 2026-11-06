@@ -270,7 +270,7 @@ def test_simulate_without_changes_equals_forecast(repo):
 
 
 @settings(max_examples=25, deadline=None)
-@given(hpw=st.floats(0, 40, allow_nan=False), days=st.integers(0, 40), weeks=st.integers(1, 6))
+@given(hpw=st.floats(0.01, 40, allow_nan=False), days=st.integers(0, 40), weeks=st.integers(1, 6))
 def test_simulate_equals_forecast_for_random_contracts(hpw, days, weeks):
     """Property: with no change set the what-if engine returns exactly what the forecast returns."""
     import tempfile

@@ -16,8 +16,47 @@ def _roles(records: Records) -> None:
             user["role"] = "employee"
 
 
+_PROJECT_REFS = ("offers", "contracts", "invoices")
+
+
+def referenced_project_ids(records: Records) -> set[str]:
+    """Ids of the projects that an offer, contract or invoice of ``records`` points to."""
+    return {r["project_id"] for coll in _PROJECT_REFS for r in records.get(coll, []) if r.get("project_id")}
+
+
+def normalise_planning_record(coll: str, rec: dict, referenced: set[str]) -> None:
+    """Migration 0017 for one record (in place); ``referenced`` is ``referenced_project_ids``.
+
+    Also used by the legacy JSON import (core/repository/importer.py), so the rules exist once."""
+    if coll == "projects":
+        if rec.get("kind") in (None, ""):
+            customer = rec.get("customer_id")
+            rec["kind"] = (
+                "customer" if (customer is not None and customer != "") or rec.get("id") in referenced else "internal"
+            )
+        rec.pop("personal", None)
+        rec.pop("member_ids", None)  # assignments decide who sees a project
+        if rec.get("status") is None:
+            rec["status"] = "active"
+    elif coll in ("contracts", "allocations"):
+        if rec.get("hours_per_week") is not None and rec.get("total_hours") is not None:
+            rec["total_hours"] = None
+        if rec.get("status") is None:
+            rec["status"] = "confirmed" if coll == "contracts" else "active"
+
+
+def _project_planning(records: Records) -> None:
+    """Migration 0017: projects get a kind and lose ``personal`` and ``member_ids``; a record with both hour
+    fields keeps only hours_per_week; a missing status becomes the default."""
+    referenced = referenced_project_ids(records)
+    for coll in ("projects", "contracts", "allocations"):
+        for rec in records.get(coll, []):
+            normalise_planning_record(coll, rec, referenced)
+
+
 UPGRADES: dict[str, Callable[[Records], None]] = {
     "4d5e0131": _roles,  # 0006-roles
+    "7ca84bdc": _project_planning,  # 0017-project_planning
 }
 NO_UPGRADE_NEEDED: dict[str, str] = {
     "00000002": "0002-totp: adds columns that are never exported",

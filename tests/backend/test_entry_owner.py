@@ -12,6 +12,21 @@ def _project(c):
     return c.post("/api/projects", json={"name": "Demo Project", "customer_id": cust["id"], "rate": 100}).json()
 
 
+def _assign(boss, emp, proj):
+    r = boss.post(
+        "/api/allocations",
+        json={
+            "user_id": emp.user_id,
+            "project_id": proj["id"],
+            "start": "2026-03-02",
+            "end": "2026-03-31",
+            "hours_per_week": 8,
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
 @pytest.mark.parametrize("owner", [{}, {"user_id": None}])
 def test_boss_entry_without_user_gets_the_boss(boss_client, owner):
     me = boss_client.get("/api/auth/me").json()
@@ -33,7 +48,7 @@ def test_entry_without_user_counts_in_the_writers_day(boss_client):
 
 def test_boss_update_without_user_keeps_the_owner(boss_client, member_client):
     proj = _project(boss_client)
-    boss_client.put(f"/api/projects/{proj['id']}", json={**proj, "member_ids": [member_client.user_id]})
+    _assign(boss_client, member_client, proj)
     e = member_client.post("/api/entries", json={"date": "2026-03-02", "minutes": 60, "project_id": proj["id"]}).json()
     assert e["user_id"] == member_client.user_id
     body = {k: v for k, v in e.items() if k not in ("user_id", "created", "updated")} | {"minutes": 75}
@@ -48,3 +63,14 @@ def test_boss_can_still_book_for_someone_else(boss_client, member_client):
     r = boss_client.post("/api/entries", json=body)
     assert r.status_code == 200, r.text
     assert r.json()["user_id"] == member_client.user_id
+
+
+def test_employee_without_assignment_may_book_on_any_project(boss_client, member_client):
+    proj = _project(boss_client)
+    body = {"date": "2026-03-02", "minutes": 60, "project_id": proj["id"]}
+    r = member_client.post("/api/entries", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["project_id"] == proj["id"]
+    other = _project(boss_client)
+    body = {k: v for k, v in r.json().items() if k not in ("created", "updated")} | {"project_id": other["id"]}
+    assert member_client.put(f"/api/entries/{r.json()['id']}", json=body).status_code == 200

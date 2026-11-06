@@ -8,7 +8,7 @@ to make under "Open design decisions" in its report.
 ## Goal
 
 A **Team** tab in *Planning → Plan & vacation* with a read-only timeline chart: one row per person, days on the
-horizontal axis, bars for time off and for contracts. It answers "who is away when" and "who is booked on what" at a
+horizontal axis, bars for time off and for assignments (a person's project allocations). It answers "who is away when" and "who is booked on what" at a
 glance. Who may see which details is a **setting the boss configures**, not hard-coded.
 
 Non-goals: dependency arrows between tasks (not a project Gantt chart), editing from the team view, a project-per-row
@@ -22,9 +22,9 @@ and "everything", set per role by the boss under *Settings → Team visibility*:
 | Level | A person with this level sees |
 |---|---|
 | `off` | no Team tab (API answers `403`). |
-| `away` | who is away and when, **without the reason**: the bar says "away". Contracts are not shown. |
+| `away` | who is away and when, **without the reason**: the bar says "away". Assignments are not shown. |
 | `time-off` | as `away`, plus the kind (vacation / sick / other) and the label of vacation entries; sick days still show only as "away". |
-| `full` | `time-off` plus every person's sick-day kind and the contract bars (title, customer, hours per week). Boss only by default. |
+| `full` | `time-off` plus every person's sick-day kind and the assignment bars (project, customer, hours per week). Boss only by default. |
 
 * A new setting `team_timeline_visibility`: `{ "employee": "away", "accountant": "off" }` (roles other than `boss`;
   the boss always has `full`). Defaults: employee `away`, accountant `off`. Stored in the settings row (extra JSON, no
@@ -51,14 +51,15 @@ Requires level `away` or higher. Response:
   "people": [
     {"id": "…", "name": "…", "color": "#…",
      "absences": [{"start": "2026-11-09", "end": "2026-11-13", "kind": null, "label": null}],
-     "contracts": [],
+     "assignments": [],
      "weekly_hours": 40}
   ]
 }
 ```
 
 * `kind` and `label` are `null` below `time-off`. Sick days always have `kind: null` and `label: null` below `full`.
-* `contracts` is empty below `full`; each entry has `id`, `title`, `customer`, `start`, `end`, `hours_per_week`.
+* `assignments` is empty below `full`. It lists the person's active employee allocations (`allocations`, `user_id` = the person) overlapping the window, sorted by `(start, id)`; each entry has `id`, `project_id`, `project` (name, `null` when the project is gone), `customer` (the project's customer name or `null`), `start`, `end`, `hours_per_week`, `total_hours`.
+* Change of 2026-11-06: `contracts` was replaced by `assignments` because contracts no longer belong to people (project-centric planning).
 * Inactive users are excluded. The list is sorted by name; the viewer is first.
 * The state (federal state) of the business determines `holidays`, as in the rest of the planner.
 * A strict query model bounds the window; a malformed range is a `ServiceError` (422), never a 500.
@@ -70,8 +71,8 @@ Requires level `away` or higher. Response:
 * A **Team** tab next to *Plan* in the planner (shown only if the API grants it). It reuses the planner's day grid,
   the week/zoom controls and the holiday shading; it does not reuse the draft machinery (nothing is editable here).
 * Rows: one per person, label column on the left (name, small colour chip). Time-off bars in the vacation colour,
-  `away` bars in a neutral hatched style so a viewer without details cannot mistake them for vacation; contract bars
-  (level `full`) in the contract colour, drawn in a second sub-row so they do not hide time off.
+  `away` bars in a neutral hatched style so a viewer without details cannot mistake them for vacation; assignment bars
+  (level `full`) in the accent colour, drawn in a second sub-row so they do not hide time off.
 * A **today line**, weekends and public holidays shaded, a weekly header with calendar week numbers.
 * A clash marker: days on which *more than N people are away* (N configurable in the view, default 2, a plain number
   input, not stored on the server) get a coloured stripe in the header.
@@ -84,8 +85,8 @@ Requires level `away` or higher. Response:
 
 ## Tests
 
-* Backend, per level: exact JSON for a fixed fixture (three people, vacation, sick, other, two contracts, a holiday);
-  assert that at `away` no `kind`, `label`, contract or sick detail appears anywhere in the raw response text (search
+* Backend, per level: exact JSON for a fixed fixture (three people, vacation, sick, other, two assignments, a holiday);
+  assert that at `away` no `kind`, `label`, assignment or sick detail appears anywhere in the raw response text (search
   for the secret strings, not only fields); own entries always full; inactive users excluded; window bounds and
   malformed ranges give 422; unauthenticated 401; level `off` gives 403 and the setting validation rejects unknown
   roles and levels; changing the setting changes the response immediately; matrix/doc test updated.

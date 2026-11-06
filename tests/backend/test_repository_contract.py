@@ -28,8 +28,8 @@ def repo(request, tmp_path) -> Repository:
     r.close()
 
 
-def sample(table: Table, i: int = 0) -> dict:
-    """A record using every column with a value of the right logical type."""
+def sample_columns(table: Table, i: int = 0) -> dict:
+    """Every column of ``table`` with a value of its logical type (no guard adjustments)."""
     values = {
         "id": f"ref{i}abc",
         "str": f"Müller & Söhne “{i}” €",
@@ -39,13 +39,50 @@ def sample(table: Table, i: int = 0) -> dict:
         "bool": bool(i % 2),
         "json": [1, "two", {"k": [True, None, 2.5]}],
     }
-    rec = {c.name: values[c.type] for c in table.columns if c.name not in ("id", "created", "updated")}
+    return {c.name: values[c.type] for c in table.columns if c.name not in ("id", "created", "updated")}
+
+
+def sample(table: Table, i: int = 0) -> dict:
+    """A record using every column with a value of the right logical type."""
+    rec = sample_columns(table, i)
     for g in GUARDS:  # the database refuses dates in another format
         if g.table == table.name and g.kind == "date":
             rec[g.columns[0]] = "2026-01-05"
     if table.name == "allocations":
         rec.pop("supplier_id")  # a row has exactly one owner (the allocations_one_owner check)
+        # the guards of migration project_planning: one hour field, a known status, no cancel date while active,
+        # no incoming offer on an employee allocation
+        for col in ("total_hours", "cancelled_from", "incoming_offer_id"):
+            rec.pop(col)
+        rec["status"] = "active"
+    elif table.name == "contracts":
+        rec.pop("total_hours")  # exactly one hour field
+        rec["status"] = "confirmed"
+    elif table.name == "projects":
+        rec.pop("customer_id")  # an internal project has no customer
+        rec.update(kind="internal", status="active")
     return rec
+
+
+def sample_alt(table: Table, i: int = 0) -> dict:
+    """The second valid combination of the tables whose guards exclude columns of ``sample``: a cancelled
+    subcontractor allocation (supplier, rate, incoming offer, cancel date, total hours only) and a finished contract
+    with total hours only."""
+    rec = sample_columns(table, i)
+    for g in GUARDS:
+        if g.table == table.name and g.kind == "date":
+            rec[g.columns[0]] = "2026-01-05"
+    if table.name == "allocations":
+        rec.pop("user_id")  # a subcontractor row has no employee
+        rec.pop("hours_per_week")  # exactly one hour field
+        rec.update(status="cancelled", cancelled_from="2026-01-05", rate=55.5, total_hours=120.5)
+    elif table.name == "contracts":
+        rec.pop("hours_per_week")
+        rec.update(total_hours=120.5, status="done")
+    return rec
+
+
+ALT = ("allocations", "contracts")
 
 
 def seed_references(repo, table: Table, rec: dict) -> None:
@@ -53,14 +90,21 @@ def seed_references(repo, table: Table, rec: dict) -> None:
     for g in GUARDS:
         if g.table == table.name and g.kind == "reference" and rec.get(g.columns[0]) is not None:
             if repo.get(g.target, rec[g.columns[0]]) is None:
-                repo.save(g.target, {"id": rec[g.columns[0]], "name": "Demo"})
+                target = {"id": rec[g.columns[0]], "name": "Demo"}
+                if g.target == "projects":
+                    target.update(kind="internal", status="active")  # an internal project needs no customer
+                repo.save(g.target, target)
 
 
 # ------------------------------------------------------------------ CRUD and fidelity
-@pytest.mark.parametrize("coll", ALL)
+@pytest.mark.parametrize("coll", [*ALL, *[f"{c}:alt" for c in ALT]])
 @pytest.mark.parametrize("i", [0, 1])  # i=0 -> bools False, i=1 -> True
 def test_round_trip_every_collection(repo, coll, i):
-    rec = sample(TABLES[coll], i)
+    if coll.endswith(":alt"):
+        coll = coll.removesuffix(":alt")
+        rec = sample_alt(TABLES[coll], i)
+    else:
+        rec = sample(TABLES[coll], i)
     seed_references(repo, TABLES[coll], rec)
     saved = repo.save(coll, dict(rec))
     assert saved["id"] and isinstance(saved["created"], int) and isinstance(saved["updated"], int)
@@ -89,8 +133,8 @@ def test_created_preserved_updated_refreshed(repo):
 
 
 def test_zero_false_and_empty_values_are_kept(repo):
-    p = repo.save("projects", {"name": "P", "personal": False, "rate": 0, "member_ids": [], "notes": ""})
-    assert p["personal"] is False and p["rate"] == 0 and p["member_ids"] == [] and p["notes"] == ""
+    p = repo.save("projects", {"name": "P", "kind": "internal", "rate": 0, "member_ids": [], "notes": ""})
+    assert p["kind"] == "internal" and p["rate"] == 0 and p["member_ids"] == [] and p["notes"] == ""
 
 
 def test_unknown_fields_survive(repo):
@@ -385,7 +429,7 @@ def test_audit_log_keeps_unknown_fields_and_filters_by_token_and_user(repo):
 
 def test_allocations_employee_and_supplier_rows_with_nullable_owner_columns(repo):
     u1 = repo.save("users", {"name": "Demo User"})["id"]
-    p1 = repo.save("projects", {"name": "Demo Project"})["id"]
+    p1 = repo.save("projects", {"name": "Demo Project", "kind": "internal", "status": "active"})["id"]
     s1 = repo.save("suppliers", {"name": "Demo Supplier"})["id"]
     emp = repo.save(
         "allocations",
@@ -416,9 +460,10 @@ def test_allocations_employee_and_supplier_rows_with_nullable_owner_columns(repo
     assert "supplier_id" not in got and "user_id" not in repo.get("allocations", sup["id"])
     assert [r["id"] for r in repo.find("allocations", user_id=u1)] == [emp["id"]]
     assert {r["id"] for r in repo.find("allocations", project_id=p1)} == {emp["id"], sup["id"]}
-    for bad in ({"project_id": p1}, {"user_id": u1, "supplier_id": s1, "project_id": p1}):
+    valid = {"project_id": p1, "start": "2026-03-02", "end": "2026-03-27", "hours_per_week": 10, "rate": 80.0}
+    for bad in (dict(valid), {**valid, "user_id": u1, "supplier_id": s1}):
         with pytest.raises(integrity_error(repo)):  # exactly one owner
-            repo.save("allocations", dict(bad))
+            repo.save("allocations", bad)
     assert len(repo.list("allocations")) == 2
 
 

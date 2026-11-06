@@ -894,6 +894,101 @@
         }
       }
     },
+    "/api/projects/{rid}/timesheet": {
+      "get": {
+        "tags": [
+          "time"
+        ],
+        "summary": "who booked how many hours on a project, per week or month",
+        "operationId": "project_timesheet_api_projects__rid__timesheet_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "rid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 10
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 10
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 10,
+              "default": "week",
+              "title": "Group"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Timesheet"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/forecast": {
       "get": {
         "tags": [
@@ -11283,8 +11378,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 168.0,
-                "minimum": 0.0
+                "maximum": 10000.0,
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -11297,7 +11392,7 @@
               {
                 "type": "number",
                 "maximum": 100000.0,
-                "minimum": 0.0
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -11750,15 +11845,8 @@
             "title": "Customer Id"
           },
           "project_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^[0-9a-z]{6,32}$"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "pattern": "^[0-9a-z]{6,32}$",
             "title": "Project Id"
           },
           "start": {
@@ -11773,8 +11861,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 168.0,
-                "minimum": 0.0
+                "maximum": 10000.0,
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -11787,7 +11875,7 @@
               {
                 "type": "number",
                 "maximum": 100000.0,
-                "minimum": 0.0
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -11844,6 +11932,7 @@
         "type": "object",
         "required": [
           "title",
+          "project_id",
           "start",
           "end"
         ],
@@ -16105,8 +16194,8 @@
             "anyOf": [
               {
                 "type": "number",
-                "maximum": 168.0,
-                "minimum": 0.0
+                "maximum": 10000.0,
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -16119,7 +16208,7 @@
               {
                 "type": "number",
                 "maximum": 100000.0,
-                "minimum": 0.0
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -16218,10 +16307,10 @@
             ],
             "title": "Customer Id"
           },
-          "personal": {
-            "type": "boolean",
-            "title": "Personal",
-            "default": false
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "customer"
           },
           "rate": {
             "anyOf": [
@@ -16271,14 +16360,6 @@
               }
             ],
             "title": "Notes"
-          },
-          "member_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Member Ids",
-            "default": []
           },
           "offer_id": {
             "anyOf": [
@@ -16356,10 +16437,20 @@
             ],
             "title": "Customer Id"
           },
-          "personal": {
-            "type": "boolean",
-            "title": "Personal",
-            "default": false
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "customer",
+                  "internal"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
           },
           "rate": {
             "anyOf": [
@@ -16379,7 +16470,7 @@
               {
                 "type": "number",
                 "maximum": 100000.0,
-                "minimum": 0.0
+                "exclusiveMinimum": 0.0
               },
               {
                 "type": "null"
@@ -19449,7 +19540,7 @@
         "title": "TimelineAbsence",
         "description": "One stored absence as the viewer may see it (``kind`` and ``label`` are null where the level hides them)."
       },
-      "TimelineContract": {
+      "TimelineAssignment": {
         "properties": {
           "id": {
             "anyOf": [
@@ -19462,7 +19553,7 @@
             ],
             "title": "Id"
           },
-          "title": {
+          "project_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -19471,7 +19562,18 @@
                 "type": "null"
               }
             ],
-            "title": "Title"
+            "title": "Project Id"
+          },
+          "project": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project"
           },
           "customer": {
             "anyOf": [
@@ -19489,14 +19591,7 @@
             "title": "Start"
           },
           "end": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "End"
           },
           "hours_per_week": {
@@ -19509,14 +19604,27 @@
               }
             ],
             "title": "Hours Per Week"
+          },
+          "total_hours": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Hours"
           }
         },
         "additionalProperties": true,
         "type": "object",
         "required": [
-          "start"
+          "start",
+          "end"
         ],
-        "title": "TimelineContract"
+        "title": "TimelineAssignment",
+        "description": "An active employee allocation of one person (project and customer by name; null when gone)."
       },
       "TimelinePerson": {
         "properties": {
@@ -19565,12 +19673,12 @@
             "title": "Absences",
             "default": []
           },
-          "contracts": {
+          "assignments": {
             "items": {
-              "$ref": "#/components/schemas/TimelineContract"
+              "$ref": "#/components/schemas/TimelineAssignment"
             },
             "type": "array",
-            "title": "Contracts",
+            "title": "Assignments",
             "default": []
           }
         },
@@ -19636,6 +19744,159 @@
         "type": "object",
         "title": "TimerStopIn",
         "description": "Stop the running timer and save it as a time entry; the note is optional."
+      },
+      "Timesheet": {
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "title": "Project Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          },
+          "group": {
+            "type": "string",
+            "title": "Group"
+          },
+          "periods": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Periods",
+            "default": []
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/TimesheetPerson"
+            },
+            "type": "array",
+            "title": "People",
+            "default": []
+          },
+          "total": {
+            "$ref": "#/components/schemas/TimesheetTotal"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "project_id",
+          "group",
+          "total"
+        ],
+        "title": "Timesheet",
+        "description": "GET /api/projects/{id}/timesheet (docs/specs/project-centric-planning.md, \"Project time sheet\")."
+      },
+      "TimesheetPerson": {
+        "properties": {
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "hours": {
+            "type": "number",
+            "title": "Hours"
+          },
+          "billable_hours": {
+            "type": "number",
+            "title": "Billable Hours"
+          },
+          "unbilled_hours": {
+            "type": "number",
+            "title": "Unbilled Hours"
+          },
+          "by_period": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "By Period",
+            "default": []
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "name",
+          "hours",
+          "billable_hours",
+          "unbilled_hours"
+        ],
+        "title": "TimesheetPerson"
+      },
+      "TimesheetTotal": {
+        "properties": {
+          "hours": {
+            "type": "number",
+            "title": "Hours"
+          },
+          "billable_hours": {
+            "type": "number",
+            "title": "Billable Hours"
+          },
+          "unbilled_hours": {
+            "type": "number",
+            "title": "Unbilled Hours"
+          },
+          "by_period": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "By Period",
+            "default": []
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "hours",
+          "billable_hours",
+          "unbilled_hours"
+        ],
+        "title": "TimesheetTotal"
       },
       "TokenResult": {
         "properties": {
@@ -21951,10 +22212,10 @@
             ],
             "title": "Customer Id"
           },
-          "personal": {
-            "type": "boolean",
-            "title": "Personal",
-            "default": false
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "customer"
           },
           "rate": {
             "anyOf": [
@@ -22004,14 +22265,6 @@
               }
             ],
             "title": "Notes"
-          },
-          "member_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Member Ids",
-            "default": []
           },
           "offer_id": {
             "anyOf": [

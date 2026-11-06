@@ -219,6 +219,7 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("PUT", "/api/tasks/{rid}"): ("projects", "write", False),
     ("DELETE", "/api/tasks/{rid}"): ("projects", "write", False),
     ("GET", "/api/entries"): ("time", "read", False),
+    ("GET", "/api/projects/{rid}/timesheet"): ("time", "read", False),
     ("POST", "/api/entries"): ("time", "write", False),
     ("GET", "/api/entries/{rid}"): ("time", "read", False),
     ("PUT", "/api/entries/{rid}"): ("time", "write", False),
@@ -647,6 +648,11 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
         raw.execute('DROP TABLE "document_scans"')
     if "guards" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         raw.executescript('DROP INDEX "idx_invoices_number"; DROP INDEX "idx_offers_number";')
+    if "project_planning" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.executescript(
+            'ALTER TABLE "projects" DROP COLUMN "kind"; ALTER TABLE "projects" ADD COLUMN "personal" INTEGER;'
+            ' ALTER TABLE "projects" ADD COLUMN "member_ids" TEXT;'
+        )
     if "reference_guards" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         for (trigger,) in raw.execute(
             "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'guard%_ref_%'"
@@ -745,16 +751,17 @@ def test_planning_warnings_only_for_roles_with_planning_access():
     assert _with_warnings(Stub, "projects", rec, {"role": "boss"})["planning_warnings"] == [{"kind": "x"}]
 
 
-def test_employee_gets_404_for_unassigned_project_and_does_not_see_its_tasks(boss_client, clients):
+def test_employee_without_assignment_sees_every_project_and_its_tasks(boss_client, clients):
     emp = clients["employee"]
     mine = boss_client.post("/api/projects", json={"name": "Mine", "member_ids": [emp.user_id]}).json()
-    other = boss_client.post(
-        "/api/projects", json={"name": "Other", "member_ids": [boss_client.get("/api/auth/me").json()["id"]]}
-    ).json()
+    other = boss_client.post("/api/projects", json={"name": "Other"}).json()
+    assert "member_ids" not in mine and "member_ids" not in boss_client.get(f"/api/projects/{mine['id']}").json()
     t_mine = boss_client.post("/api/tasks", json={"name": "T1", "project_id": mine["id"]}).json()
     t_other = boss_client.post("/api/tasks", json={"name": "T2", "project_id": other["id"]}).json()
-    assert emp.get(f"/api/projects/{other['id']}").status_code == 404
+    assert emp.get(f"/api/projects/{other['id']}").status_code == 200
     assert emp.get(f"/api/projects/{mine['id']}").status_code == 200
-    assert [p["id"] for p in emp.get("/api/projects").json()] == [mine["id"]]
-    assert emp.get(f"/api/tasks/{t_other['id']}").status_code == 404
-    assert [t["id"] for t in emp.get("/api/tasks").json()] == [t_mine["id"]]
+    listed = emp.get("/api/projects").json()
+    assert {mine["id"], other["id"]} <= {p["id"] for p in listed}
+    assert all("member_ids" not in p for p in listed)
+    assert emp.get(f"/api/tasks/{t_other['id']}").status_code == 200
+    assert {t_mine["id"], t_other["id"]} <= {t["id"] for t in emp.get("/api/tasks").json()}

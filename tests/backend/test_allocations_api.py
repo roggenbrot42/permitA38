@@ -168,10 +168,10 @@ def test_error_codes(boss_client, boss_id, project, store):
     r = boss_client.post("/api/allocations", json=body(boss_id, project, start=day(8), end=day(0)))
     assert r.status_code == 409 and r.json() == {"detail": "The end date is before the start date"}
     for status in ("done", "archived"):
-        closed = store.save("projects", {"name": "Closed", "status": status})
+        closed = store.save("projects", {"name": "Closed", "status": status, "kind": "internal"})
         r = boss_client.post("/api/allocations", json=body(boss_id, closed))
         assert r.status_code == 409 and r.json() == {"detail": "The project is closed"}
-    paused = store.save("projects", {"name": "Paused", "status": "paused"})
+    paused = store.save("projects", {"name": "Paused", "status": "paused", "kind": "internal"})
     assert boss_client.post("/api/allocations", json=body(boss_id, paused)).status_code == 201
     gone = store.save("users", {"username": "gone", "name": "Gone", "role": "employee", "active": False})
     r = boss_client.post("/api/allocations", json=body(gone["id"], project))
@@ -192,7 +192,15 @@ def test_external_rows_cannot_be_changed_here(boss_client, boss_id, project, sto
     store.save("suppliers", {"id": "supp0001", "name": "Demo Supplier"})
     ext = store.save(
         "allocations",
-        {"supplier_id": "supp0001", "project_id": project["id"], "start": START, "end": END, "status": "active"},
+        {
+            "supplier_id": "supp0001",
+            "project_id": project["id"],
+            "start": START,
+            "end": END,
+            "hours_per_week": 5,
+            "rate": 80,
+            "status": "active",
+        },
     )
     r = boss_client.put(f"/api/allocations/{ext['id']}", json=body(boss_id, project))
     assert r.status_code == 409 and r.json() == {"detail": "This allocation cannot be changed here"}
@@ -322,7 +330,7 @@ def test_bootstrap_preview_equals_the_write_and_a_second_run_creates_nothing(bos
 
 
 def test_bootstrap_skips_closed_projects_done_contracts_and_long_periods(boss_client, boss_id, project, store):
-    closed = store.save("projects", {"name": "Old", "status": "archived"})
+    closed = store.save("projects", {"name": "Old", "status": "archived", "kind": "internal"})
     add_contract(store, boss_id, closed, 10)
     add_contract(store, boss_id, project, 10, status="done")
     add_contract(store, boss_id, project, 10, end=day(1831), title="Long")  # longer than 1830 days
@@ -447,7 +455,15 @@ def test_simulate_with_allocation_changes_and_delta(boss_client, boss_id, projec
     assert sim_err({"id": "nothing0001", "hours_per_week": 5}).json() == {"detail": "Allocation not found"}
     store.save("suppliers", {"id": "supp0001", "name": "Demo Supplier"})
     ext = store.save(
-        "allocations", {"supplier_id": "supp0001", "project_id": project["id"], "start": START, "end": END}
+        "allocations",
+        {
+            "supplier_id": "supp0001",
+            "project_id": project["id"],
+            "start": START,
+            "end": END,
+            "hours_per_week": 5,
+            "rate": 80,
+        },
     )
     assert sim_err({"id": ext["id"], "hours_per_week": 5}).status_code == 409
     assert sim_err({**new, "user_id": "nobody0001"}).json() == {"detail": "User not found"}
@@ -532,6 +548,7 @@ def test_cancelled_rows_and_referenced_deletes_are_409(boss_client, boss_id, pro
             "end": END,
             "hours_per_week": 5,
             "status": "cancelled",
+            "cancelled_from": START,
         },
     )
     assert boss_client.put(f"/api/allocations/{row['id']}", json=body(boss_id, project)).status_code == 409
@@ -611,18 +628,18 @@ def test_put_changes_person_and_project_and_keeps_unknown_fields(boss_client, bo
 @pytest.mark.parametrize(
     "row, code",
     [
-        ({"project_id": "{p}"}, None),
+        ({"project_id": "{p}"}, "state.required"),
         (
             {"project_id": "{p}", "start": "garbage", "end": "2026-03-01"},
             ("format.date", "state.period_reversed"),  # "garbage" sorts after the end date
         ),
-        ({"start": "2026-03-01", "end": "2026-03-05"}, None),
-        ({"project_id": "{p}", "start": 5, "end": [1]}, None),  # not date strings: kept in extra
+        ({"start": "2026-03-01", "end": "2026-03-05"}, "state.required"),
+        ({"project_id": "{p}", "start": 5, "end": [1]}, "state.required"),  # not dates: kept in extra
     ],
 )
 def test_damaged_allocation_rows_do_not_break_the_views(boss_client, boss_id, project, store, row, code, unguarded):
     row = {k: (project["id"] if v == "{p}" else v) for k, v in row.items()}
-    planted = {"user_id": boss_id, "status": "active", **row}
+    planted = {"user_id": boss_id, "status": "active", "hours_per_week": 10, **row}
     if code:
         unguarded(store, "allocations", planted, code)
     else:
@@ -646,7 +663,7 @@ def test_empty_project_and_user_filters_mean_no_filter(boss_client, boss_id, pro
 
 
 def test_simulate_refuses_what_apply_would_refuse(boss_client, boss_id, project, store):
-    closed = store.save("projects", {"name": "Closed", "status": "archived"})
+    closed = store.save("projects", {"name": "Closed", "status": "archived", "kind": "internal"})
     gone = store.save("users", {"username": "gone", "name": "Gone", "role": "employee", "active": False})
     new = {"user_id": boss_id, "project_id": project["id"], "start": START, "end": END, "hours_per_week": 5}
 

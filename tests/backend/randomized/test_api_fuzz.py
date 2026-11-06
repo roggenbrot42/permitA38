@@ -67,7 +67,7 @@ class World:
         s = self.svc.store
         self.ids: list[str] = [self.boss["id"], self.member["id"]]
         c = s.save("customers", dict(name="ACME", rate=100.0, street="Main 1", zip="10115", city="Berlin"))
-        p = s.save("projects", dict(name="Site", customer_id=c["id"], personal=False, status="active", member_ids=[]))
+        p = s.save("projects", dict(name="Site", kind="customer", customer_id=c["id"], status="active"))
         t = s.save("tasks", dict(name="Dev", project_id=p["id"], rate=120.0))
         e = s.save("entries", dict(user_id=self.member["id"], date="2026-10-20", minutes=90, project_id=p["id"],
                                    task_id=t["id"], billable=True))  # fmt: skip
@@ -76,7 +76,7 @@ class World:
         )
         x = s.save("expenses", dict(date="2026-10-01", net=10.0, vat=1.9, deductible=100))
         ab = s.save("absences", dict(user_id=self.member["id"], kind="vacation", start="2026-12-24", end="2026-12-31"))
-        k = s.save("contracts", dict(title="Retainer", customer_id=c["id"], start="2026-10-01", end="2027-03-01",
+        k = s.save("contracts", dict(title="Retainer", customer_id=c["id"], project_id=p["id"], start="2026-10-01", end="2027-03-01",
                                      hours_per_week=10, status="confirmed", user_ids=[self.boss["id"]]))  # fmt: skip
         line = dict(description="Work", qty=2.0, price=100.0, unit="h", amount=200.0)
         o = s.save("offers", dict(customer_id=c["id"], title="Offer", status="draft", date="2026-10-01", lines=[line]))

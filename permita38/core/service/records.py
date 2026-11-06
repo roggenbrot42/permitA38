@@ -12,7 +12,12 @@ from permita38.core.settings import effective_settings
 from permita38.core.validation import ALLOWED_VAT_RATES, MAX_MONEY
 
 from .auth import public_user
-from .project_customer import PROJECT_CUSTOMER_COLLECTIONS, check_billable_project, check_project_customer
+from .project_customer import (
+    PROJECT_CUSTOMER_COLLECTIONS,
+    check_billable_project,
+    check_project_customer,
+    project_kind,
+)
 
 # collections where a LIMITED scope means "own records only" (write) / "own records or assigned projects" (read)
 OWN_COLLECTIONS = {"entries", "absences"}
@@ -57,10 +62,9 @@ class RecordService:
         if coll in OWN_COLLECTIONS:
             rows = [r for r in rows if r.get("user_id") == me["id"]]
         elif coll == "projects":
-            rows = [_member_project_view(p) for p in rows if _project_visible(p, me)]
+            rows = [_member_project_view(p) for p in rows]
         elif coll == "tasks":
-            visible = {p["id"] for p in self.store.list("projects") if _project_visible(p, me)}
-            rows = [_member_task_view(t) for t in rows if t.get("project_id") in visible]
+            rows = [_member_task_view(t) for t in rows]
         return rows
 
     def get(self, me: dict, coll: str, rid: str) -> dict:
@@ -77,14 +81,8 @@ class RecordService:
             if coll in OWN_COLLECTIONS and rec.get("user_id") != me["id"]:
                 raise ServiceError(403, "Forbidden")
             if coll == "projects":
-                if not _project_visible(rec, me):
-                    raise ServiceError(404, "Not found")  # do not reveal that it exists
                 return _member_project_view(rec)
             if coll == "tasks":
-                pid = rec.get("project_id")
-                project = self.store.get("projects", pid) if isinstance(pid, str) and _valid_id(pid) else None
-                if not project or not _project_visible(project, me):
-                    raise ServiceError(404, "Not found")
                 return _member_task_view(rec)
         return rec
 
@@ -139,6 +137,7 @@ class RecordService:
         if coll in _PROJECT_REF_COLLECTIONS:
             self._check_project_exists(data, old)
         if coll in PROJECT_CUSTOMER_COLLECTIONS:
+            self._check_not_internal(data, old)
             check_project_customer(self.store, data, old)
         if coll in ("offers", "invoices"):
             check_billable_project(self.store, data, old)
@@ -175,8 +174,12 @@ class RecordService:
                 data.pop("lines", None)
                 self._check_vat_rates(data.get("vat_rate"))
         elif coll == "contracts":
-            self._check_contract_users(data)
-        elif coll == "projects":  # the extension history is server-managed: never taken from the request
+            data.pop("user_ids", None)  # contracts are not assigned to people; the project carries the team
+        elif coll == "projects":
+            data.pop("personal", None)  # replaced by ``kind``
+            data.pop("member_ids", None)  # replaced by allocations; old clients may still send it
+            self._resolve_project_kind(data, old)
+            # the extension history is server-managed: never taken from the request
             data.pop("extensions", None)
             if old and old.get("extensions") is not None:
                 data["extensions"] = old["extensions"]
@@ -193,15 +196,35 @@ class RecordService:
         saved = self.store.save(coll, data)
         return _expense_view(saved) if coll == "expenses" else saved
 
-    def _check_contract_users(self, data: dict) -> None:
-        """``user_ids`` of a contract: people, or active subcontractors (person-capacity). An id of another supplier
-        kind, or of an inactive one, is refused; any other unknown id keeps today's behaviour (the planner ignores it)."""
-        for uid in data.get("user_ids") or []:
-            supplier = self.store.get("suppliers", uid) if isinstance(uid, str) else None
-            if supplier is None:
-                continue
-            if supplier.get("kind") != "person-capacity" or not supplier.get("active", True):
-                raise ServiceError(422, "A contract can only list people or active subcontractors")
+    def _resolve_project_kind(self, data: dict, old: dict | None) -> None:
+        """``kind`` is derived from the customer only on create; an update that omits it keeps the stored kind."""
+        given = data.get("kind")
+        customer = data.get("customer_id")
+        if given is None:
+            data.pop("kind", None)
+            if old is None:
+                data["kind"] = "customer" if customer else "internal"
+                return
+            data["kind"] = project_kind(old)
+            if data["kind"] == "customer" and not customer and not old.get("customer_id"):
+                return  # a legacy customer project without a customer stays editable
+        if data["kind"] == "customer" and not customer:
+            raise ServiceError(422, "a customer project needs a customer_id")
+        if data["kind"] == "internal" and customer:
+            raise ServiceError(422, "an internal project cannot have a customer_id")
+        if old is not None and data["kind"] == "internal" and project_kind(old) != "internal":
+            pid = old["id"]
+            if any(r.get("project_id") == pid for coll in PROJECT_CUSTOMER_COLLECTIONS for r in self.store.list(coll)):
+                raise ServiceError(409, "This project has offers, contracts or invoices; it stays a customer project.")
+
+    def _check_not_internal(self, data: dict, old: dict | None) -> None:
+        """Offers, contracts and invoices never sit on an internal project (an unchanged legacy link stays editable)."""
+        pid = data["project_id"] if "project_id" in data else (old or {}).get("project_id")
+        if not pid or (old is not None and old.get("project_id") == pid):
+            return
+        project = self.store.get("projects", pid)
+        if project and project_kind(project) == "internal":
+            raise ServiceError(409, "Internal projects cannot have offers, contracts or invoices")
 
     def _link_supplier(self, data: dict, keep_vendor: bool = False) -> None:
         """Expense links (docs/contracts/subcontractors.md): the supplier must exist and gives ``vendor`` (a snapshot
@@ -362,7 +385,7 @@ class RecordService:
 
 _PROJECT_REF_COLLECTIONS = frozenset({"entries", "contracts", "offers", "invoices", "tasks", "expenses"})
 _ENTRY_BILLING_FIELDS = ("rate", "invoice_id")
-_MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
+_MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "kind")
 
 
 def _scope(me: dict, coll: str, op: rights.Op) -> Scope:
@@ -375,10 +398,6 @@ def _expense_view(expense: dict) -> dict:
     if expense.get("lines") and "vat_rate" not in expense:
         return {**expense, "vat_rate": None}
     return expense
-
-
-def _project_visible(project: dict, me: dict) -> bool:
-    return not project.get("member_ids") or me["id"] in project["member_ids"]
 
 
 def _member_project_view(project: dict) -> dict:

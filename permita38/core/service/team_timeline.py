@@ -1,11 +1,11 @@
-"""Team timeline: who is away and when, and which contracts people work on (docs/contracts/team-timeline.md).
+"""Team timeline: who is away and when, and which projects people are assigned to (docs/specs/team-timeline.md).
 
 The matrix (``rights.py``) decides only whether a role may open the timeline. The viewer's *level* decides what the
 response contains: ``off`` (403), ``away``, ``time-off`` or ``full``. Redaction happens here, on the server: a value the
 level does not allow is removed or set to ``null``, never masked, so it cannot be recovered from the response.
 
-Own absences are always returned in full (any level above ``off``); own contracts are not (they are not part of the
-absences right). Contracts and weekly hours are shown at ``full`` only, weekly hours also on the viewer's own row.
+Own absences are always returned in full (any level above ``off``); own assignments are not (they are not part of the
+absences right). Assignments and weekly hours are shown at ``full`` only, weekly hours also on the viewer's own row.
 """
 
 from collections import defaultdict
@@ -73,9 +73,9 @@ class TeamTimelineService:
         people = self._people(viewer)
         ids = {p["id"] for p in people}
         absences = self._absences(start, end)
-        contracts: dict[str, list[dict]] = {}
-        if level == "full":  # contracts are not part of the absences right: nothing below full
-            contracts = self._contracts(start, end, ids)
+        assignments: dict[str, list[dict]] = {}
+        if level == "full":  # assignments are not part of the absences right: nothing below full
+            assignments = self._assignments(start, end, ids)
         out = []
         for u in people:
             own = u["id"] == viewer.get("id")
@@ -86,7 +86,7 @@ class TeamTimelineService:
                     "color": u.get("color") or None,
                     "weekly_hours": u.get("weekly_hours") if (level == "full" or own) else None,
                     "absences": [_absence(a, level, own) for a in sorted(absences.get(u["id"], []), key=_sort_key)],
-                    "contracts": contracts.get(u["id"], []),
+                    "assignments": assignments.get(u["id"], []),
                 }
             )
         return {
@@ -142,26 +142,31 @@ class TeamTimelineService:
             out[a["user_id"]].append({"start": s, "end": e, "kind": a.get("kind", "vacation"), "note": a.get("note")})
         return out
 
-    def _contracts(self, start: date, end: date, user_ids: set[str]) -> dict[str, list[dict]]:
-        """Contracts that overlap the window and list an active person, per user (open-ended: ``end`` is None)."""
+    def _assignments(self, start: date, end: date, user_ids: set[str]) -> dict[str, list[dict]]:
+        """Active employee allocations that overlap the window, per active person (project and customer by name)."""
         out: dict[str, list[dict]] = defaultdict(list)
         customers = {c["id"]: c.get("name") for c in self.store.list("customers")}
-        for c in self.store.list("contracts"):
-            s = _day(c.get("start"))
-            e = _day(c.get("end"))
-            if s is None or s > end or (e is not None and e < start):
+        projects = {p["id"]: p for p in self.store.list("projects")}
+        for r in self.store.list("allocations"):
+            uid = r.get("user_id")
+            if uid not in user_ids or r.get("supplier_id") or r.get("status", "active") != "active":
                 continue
-            entry = {
-                "id": c.get("id"),
-                "title": c.get("title"),
-                "customer": customers.get(c.get("customer_id")) if c.get("customer_id") else None,
-                "start": s.isoformat(),
-                "end": e.isoformat() if e else None,
-                "hours_per_week": c.get("hours_per_week"),
-            }
-            for uid in c.get("user_ids") or []:
-                if uid in user_ids:
-                    out[uid].append(entry)
+            s, e = _day(r.get("start")), _day(r.get("end"))
+            if s is None or e is None or e < s or e < start or s > end:
+                continue
+            project = projects.get(r.get("project_id"))
+            out[uid].append(
+                {
+                    "id": r.get("id"),
+                    "project_id": r.get("project_id"),
+                    "project": project.get("name") if project else None,
+                    "customer": customers.get(project.get("customer_id")) if project else None,
+                    "start": s.isoformat(),
+                    "end": e.isoformat(),
+                    "hours_per_week": r.get("hours_per_week"),
+                    "total_hours": r.get("total_hours"),
+                }
+            )
         for entries in out.values():
             entries.sort(key=lambda x: (x["start"], x["id"] or ""))
         return out

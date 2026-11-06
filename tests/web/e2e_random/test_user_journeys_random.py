@@ -65,7 +65,7 @@ class MProject:
     name: str
     customer: MCustomer | None
     rate: int | None = None
-    personal: bool = False
+    internal: bool = False
     id: str | None = None
 
     def effective_rate(self) -> int:
@@ -157,7 +157,7 @@ class Model:
         return [
             e
             for e in self.entries
-            if e.billable and not e.invoiced and not e.project.personal and e.project.customer is not None
+            if e.billable and not e.invoiced and not e.project.internal and e.project.customer is not None
         ]
 
 
@@ -292,16 +292,16 @@ class Journey:
         assert self.hash_id() == c.id
 
     def a_add_project(self):
-        personal = not self.m.customers or self.rng.random() < 0.15
-        cust = None if personal else self.rng.choice(self.m.customers)
-        rate = None if personal else self.rng.choice([None, None, 70, 110, 130])
+        internal = not self.m.customers or self.rng.random() < 0.15
+        cust = None if internal else self.rng.choice(self.m.customers)
+        rate = None if internal else self.rng.choice([None, None, 70, 110, 130])
         name = f"Projekt {self.m.counters['name']} {self.rng.choice(['Relaunch', 'Beratung', 'App', 'Audit'])}"
         self.m.counters["name"] += 1
         self.nav("#/projects")
         self.page.click("[data-a=editProject]")
         vals: dict = {"name": name}
-        if personal:
-            vals["personal"] = True
+        if internal:
+            vals["kind"] = "internal"
         else:
             vals["customer_id"] = cust.id
             vals["start"], vals["end"] = "2026-01-01", "2027-12-31"  # customer projects need a period
@@ -311,9 +311,9 @@ class Journey:
         self.mark_old()
         self.page.click("#m-save")
         self.wait_render()
-        p = MProject(name, cust, rate, personal, self.hash_id())
+        p = MProject(name, cust, rate, internal, self.hash_id())
         self.m.projects.append(p)
-        self.say(f"project {name!r} customer={cust.name if cust else None} rate={rate} personal={personal}")
+        self.say(f"project {name!r} customer={cust.name if cust else None} rate={rate} internal={internal}")
         assert norm(self.page.inner_text("main h1")) == name
 
     def _new_tag(self) -> str:
@@ -369,8 +369,8 @@ class Journey:
         proj = self.rng.choice(self.m.projects)
         tag = self._new_tag()
         self.nav("#/today")
-        # the Today time card takes the project as typed text (datalist, label "name" or "name (personal)")
-        label = proj.name + (" (personal)" if proj.personal else "")
+        # the Today time card takes the project as typed text (datalist, label "name" or "name (internal)")
+        label = proj.name + (" (internal)" if proj.internal else "")
         self.page.fill("#t_proj", label)
         self.page.dispatch_event("#t_proj", "change")
         # Start/Stop exist in tracker mode only (the default is manual)
@@ -713,7 +713,7 @@ class Journey:
         assert set(projects) == {p.name for p in m.projects}
         for p in m.projects:
             rec = projects[p.name]
-            assert rec["id"] == p.id and rec.get("rate") == p.rate and bool(rec.get("personal")) == p.personal
+            assert rec["id"] == p.id and rec.get("rate") == p.rate and (rec.get("kind") == "internal") == p.internal
             assert rec.get("customer_id") == (p.customer.id if p.customer else None), rec
         entries = {(e.get("note") or "").split()[0]: e for e in api.get("/entries")}
         assert set(entries) == {e.tag for e in m.entries}, (set(entries), [e.tag for e in m.entries])

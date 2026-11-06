@@ -55,7 +55,9 @@ def seed(store, *, extras: bool = True) -> dict:
     """A small but connected data set with fake demo data. Returns the ids."""
     x = {"x_future_field": {"tags": ["a", "b"], "rank": 3}} if extras else {}
     cust = store.save("customers", {"name": "Beispiel GmbH", "city": "Köln", "rate": 95.0, **x})
-    proj = store.save("projects", {"name": "Relaunch", "customer_id": cust["id"], "status": "active"})
+    proj = store.save(
+        "projects", {"name": "Relaunch", "customer_id": cust["id"], "kind": "customer", "status": "active"}
+    )
     task = store.save("tasks", {"project_id": proj["id"], "name": "Design"})
     boss = store.list("users")[0]
     store.save(

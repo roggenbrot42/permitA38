@@ -75,7 +75,7 @@ OPTIONAL = {
 OPTIONAL["invoices"] = OPTIONAL["offers"]
 DEFAULTS = {
     "customers": {}, "tasks": {}, "absences": {"kind": "vacation"},
-    "projects": {"personal": False, "status": "active", "member_ids": []},
+    "projects": {"status": "active"},
     "entries": {"billable": True}, "contracts": {"status": "confirmed", "user_ids": []},
     "expenses": {"vat": 0.0, "deductible": 100.0},
     "templates": {"layout": "classic", "accent": "#1f4e79", "language": "de", "show_logo": True},
@@ -136,6 +136,17 @@ RATE = st.sampled_from([0, 25, 60, 80, 95, 130, 42.5])
 QTY = st.integers(1, 160).map(lambda n: n / 4)  # quarter units: products are exact to the cent
 PRICE = st.integers(0, 300).map(float)
 VATS = st.sampled_from([0, 7, 19])
+# hour fields of a contract (exactly one is required: 0 < hpw <= 10000, 0 < total <= 100000) and of an offer plan (at
+# most one); the first entries are valid, the rest are what the API refuses with 422
+HOURS = st.sampled_from(
+    [{"hours_per_week": 20}, {"total_hours": 120}, {"hours_per_week": 42.5}, {"total_hours": 80.5}, {"hours_per_week": 5},
+     {"hours_per_week": 10000}, {"total_hours": 100000}, {"hours_per_week": 0}, {"total_hours": 0}, {},
+     {"hours_per_week": 20, "total_hours": 100}, {"hours_per_week": 10001}, {"total_hours": 100001}]
+)  # fmt: skip
+PLAN_HOURS = st.sampled_from(
+    [{}, {}, {"hours_per_week": 20}, {"total_hours": 120}, {"hours_per_week": 42.5}, {"total_hours": 80.5},
+     {"hours_per_week": 0}, {"total_hours": 0}, {"hours_per_week": 20, "total_hours": 100}]
+)  # fmt: skip
 _PW_CHARS = st.characters(blacklist_categories=("Cs", "Cc"))
 PASSWORDS = st.one_of(st.text(_PW_CHARS, min_size=8, max_size=16), st.text(_PW_CHARS, max_size=7))  # long (valid) first
 BASE_USERNAME = st.from_regex(r"[a-z0-9][a-z0-9._-]{1,12}", fullmatch=True)
@@ -438,9 +449,13 @@ class ApiMachine(RuleBasedStateMachine):
         elif coll == "projects":
             req = {"name": TEXT}
             opt = dict(customer_id=self.ref("customers"), rate=maybe_none(RATE), budget_hours=maybe_none(RATE),
-                       color=maybe_none(st.just("#2563eb")), notes=maybe_none(TEXT), personal=st.sampled_from([False, False, False, True]),
-                       status=st.sampled_from(["active", "paused", "done", "archived"]),
-                       member_ids=st.lists(self.user_ref(), max_size=2, unique=True))  # fmt: skip
+                       color=maybe_none(st.just("#2563eb")), notes=maybe_none(TEXT),
+                       kind=st.sampled_from([None, None, "customer", "internal"]),
+                       status=st.sampled_from(["active", "paused", "done", "archived"]))  # fmt: skip
+            # `personal` is refused (422); `member_ids` is accepted and ignored
+            return st.tuples(st.fixed_dictionaries(req, optional=opt), st.integers(0, 19), self.user_ref()).map(
+                lambda t: t[0] | ({"personal": t[1] == 0} if t[1] == 0 else {"member_ids": [t[2]]} if t[1] == 1 else {})
+            )
         elif coll == "tasks":
             req = {"name": TEXT, "project_id": self.ref("projects", none=False)}
             opt = {"rate": maybe_none(RATE)}
@@ -456,10 +471,14 @@ class ApiMachine(RuleBasedStateMachine):
             )
         elif coll == "contracts":
             req = {"title": TEXT.filter(lambda t: t.strip()), "start": iso_days(-10, 5), "end": iso_days(6, 90)}
-            opt = dict(hours_per_week=maybe_none(RATE), total_hours=maybe_none(RATE), rate=maybe_none(RATE),
-                       customer_id=self.ref("customers"), project_id=self.ref("projects"),
+            opt = dict(rate=maybe_none(RATE), customer_id=self.ref("customers"),
                        status=st.sampled_from(["confirmed", "done"]),
                        user_ids=st.lists(self.user_ref(), max_size=2, unique=True))  # fmt: skip
+            # a contract needs a project and exactly one of the two hour fields (mostly valid, sometimes not)
+            pid = st.one_of(*[self.ref("projects", none=False)] * 6, st.none())
+            return st.tuples(st.fixed_dictionaries(req, optional=opt), pid, HOURS).map(
+                lambda t: t[0] | ({"project_id": t[1]} if t[1] is not None else {}) | t[2]
+            )
         elif coll == "absences":
             req = {"start": iso_days(-10, 10), "user_id": self.user_ref()}
             opt = dict(end=maybe_none(iso_days(11, 20)), note=maybe_none(TEXT),
@@ -489,9 +508,8 @@ class ApiMachine(RuleBasedStateMachine):
         if coll == "offers":
             plan = st.fixed_dictionaries(
                 {"start": iso_days(0, 10), "end": iso_days(20, 120)},
-                optional=dict(hours_per_week=maybe_none(RATE), total_hours=maybe_none(RATE), rate=maybe_none(RATE),
-                              user_ids=st.lists(self.user_ref(), max_size=2, unique=True)),
-            )  # fmt: skip
+                optional=dict(rate=maybe_none(RATE), user_ids=st.lists(self.user_ref(), max_size=2, unique=True)),
+            ).flatmap(lambda p: PLAN_HOURS.map(lambda h: p | h))  # fmt: skip
             opt["plan"] = plan
             opt["valid_until"] = maybe_none(iso_days(5, 40))
         else:
@@ -507,8 +525,12 @@ class ApiMachine(RuleBasedStateMachine):
         exp = {k: v for k, v in body.items() if v is not None}
         for k, v in DEFAULTS[coll].items():
             exp.setdefault(k, v)
-        if coll in ("projects",):
-            exp["member_ids"] = list(body.get("member_ids") or [])
+        if coll == "projects":
+            exp.pop("personal", None)
+            exp.pop("member_ids", None)  # accepted and ignored
+            exp["kind"] = self.project_kind_for(body, old)
+        elif coll == "contracts":
+            exp["user_ids"] = []  # contracts are not assigned to people: the field is ignored
         if coll in ("entries", "absences") and actor_user["role"] != "boss":
             exp["user_id"] = actor_user["id"]
         elif coll == "entries" and not exp.get("user_id"):  # an entry without a person belongs to its writer
@@ -799,25 +821,99 @@ class ApiMachine(RuleBasedStateMachine):
     def assert_refused_by_rule(self, r):
         assert r.status_code == 422 and r.json() == {"detail": "Project belongs to another customer"}, r.text
 
-    def personal(self, body, old=None) -> bool:
-        """Mirror of the billable-project rule: an offer or invoice is refused (422) when its project is personal and
-        the project changed vs the record (same keep-the-stored-value convention as :meth:`mismatch`)."""
+    @staticmethod
+    def project_kind_for(body, old) -> str:
+        """``kind`` as stored: the given one, else derived from the customer on create, else the stored one."""
+        if body.get("kind") is not None:
+            return body["kind"]
+        if old is None:
+            return "customer" if body.get("customer_id") else "internal"
+        return old["kind"]
+
+    def invalid(self, coll, body) -> bool:
+        """Mirror of the strict request models: what the API refuses with 422 before any service rule."""
+        if coll == "projects":
+            kind, cust = body.get("kind"), body.get("customer_id")
+            return (
+                "personal" in body
+                or (body.get("budget_hours") is not None and body["budget_hours"] <= 0)
+                or (kind == "customer" and not cust)
+                or (kind == "internal" and bool(cust))
+            )
+        if coll == "contracts":
+            hpw, total = body.get("hours_per_week"), body.get("total_hours")
+            return (
+                body.get("project_id") is None
+                or (hpw is None) == (total is None)
+                or (hpw is not None and not 0 < hpw <= 10_000)
+                or (total is not None and not 0 < total <= 100_000)
+            )
+        plan = body.get("plan") if coll == "offers" else None
+        if plan:
+            hpw, total = plan.get("hours_per_week"), plan.get("total_hours")
+            return (
+                (hpw is not None and total is not None)
+                or (hpw is not None and not 0 < hpw <= 10_000)
+                or (total is not None and not 0 < total <= 100_000)
+            )
+        return False
+
+    def project_refusal(self, body, old) -> int | None:
+        """The project service rules after validation: kind against customer (422), and a project that has offers,
+        contracts or invoices cannot become internal (409)."""
+        kind, cust = self.project_kind_for(body, old), body.get("customer_id")
+        if (
+            body.get("kind") is None
+            and old is not None
+            and kind == "customer"
+            and not cust
+            and not old.get("customer_id")
+        ):
+            return (
+                None  # a customer project without a customer (made by accepting a customer-less offer) stays editable
+            )
+        if (kind == "customer" and not cust) or (kind == "internal" and cust):
+            return 422
+        if old is not None and kind == "internal" and old["kind"] != "internal":
+            pid = old["id"]
+            if any(r.get("project_id") == pid for c in ("offers", "contracts", "invoices") for r in self.m[c].values()):
+                return 409
+        return None
+
+    def internal_conflict(self, coll, body, old=None) -> bool:
+        """Offers, contracts and invoices cannot be put on an internal project (409); an unchanged link is not checked
+        again (a field the request leaves out keeps the stored value)."""
+        if coll not in ("offers", "invoices", "contracts"):
+            return False
         old = old or {}
         pid = body.get("project_id") if body.get("project_id") is not None else old.get("project_id")
         if not pid or (old and old.get("project_id") == pid):
             return False
-        return bool(self.m["projects"].get(pid, {}).get("personal"))
+        return self.m["projects"].get(pid, {}).get("kind") == "internal"
 
-    def assert_refused_personal(self, r):
-        assert r.status_code == 422 and r.json() == {"detail": "Personal projects cannot be billed"}, r.text
+    def assert_refused_internal(self, r):
+        assert r.status_code == 409, r.text
+        assert r.json() == {"detail": "Internal projects cannot have offers, contracts or invoices"}, r.text
+
+    def assert_refused_unbillable(self, r):
+        assert r.status_code == 422 and r.json() == {"detail": "Internal projects cannot be billed"}, r.text
 
     def op_create(self, s, coll, body):
         r = self.call("POST", f"/{coll}", s, json=body)
         if (g := self.gate(s, boss_only=coll not in MEMBER_OWN)) is not None:
             assert r.status_code == g, (coll, r.status_code, r.text)
             return
+        if self.invalid(coll, body):
+            assert r.status_code == 422, (coll, body, r.text)
+            return
+        if coll == "projects" and (code := self.project_refusal(body, None)):
+            assert r.status_code == code, (body, r.text)
+            return
         if coll in ("entries", "contracts", "tasks", "expenses") and self.unknown_project(body):
             self.assert_unknown_project(r)
+            return
+        if self.internal_conflict(coll, body):
+            self.assert_refused_internal(r)
             return
         if self.mismatch(coll, body):
             self.assert_refused_by_rule(r)
@@ -845,6 +941,9 @@ class ApiMachine(RuleBasedStateMachine):
         if me["role"] != "boss" and coll not in MEMBER_OWN:
             assert r.status_code == 403  # the area check comes before the lookup: nothing is revealed
             return
+        if self.invalid(coll, body):
+            assert r.status_code == 422, (coll, body, r.text)  # validation comes before the lookup
+            return
         if old is None:
             assert r.status_code == 404
             return
@@ -854,8 +953,14 @@ class ApiMachine(RuleBasedStateMachine):
         if coll == "entries" and old.get("invoice_id") and me["role"] != "boss":
             assert r.status_code == 403
             return
+        if coll == "projects" and (code := self.project_refusal(body, old)):
+            assert r.status_code == code, (body, r.text)
+            return
         if coll in ("entries", "contracts", "tasks", "expenses") and self.unknown_project(body, old):
             self.assert_unknown_project(r)
+            return
+        if self.internal_conflict(coll, body, old):
+            self.assert_refused_internal(r)
             return
         if self.mismatch(coll, body, old):
             self.assert_refused_by_rule(r)
@@ -922,15 +1027,11 @@ class ApiMachine(RuleBasedStateMachine):
         elif old is None:
             assert r.status_code == 404
         elif me["role"] != "boss" and coll in ("projects", "tasks"):
-            pid = rid if coll == "projects" else old.get("project_id")
-            proj = self.m["projects"].get(pid)
-            if proj is None or (proj["member_ids"] and me["id"] not in proj["member_ids"]):
-                assert r.status_code == 404  # existence of unassigned projects/tasks is not revealed
-            else:
-                assert r.status_code == 200
-                body = r.json()
-                assert body["id"] == rid
-                assert not ({"rate", "notes", "budget_hours"} & set(body)), body
+            # every user sees every project and task, without rates, budgets and notes
+            assert r.status_code == 200
+            body = r.json()
+            assert body["id"] == rid
+            assert not ({"rate", "notes", "budget_hours"} & set(body)), body
         elif me["role"] != "boss" and (
             coll not in ("projects", "tasks", "entries", "absences")
             or (coll in MEMBER_OWN and old.get("user_id") != me["id"])
@@ -954,14 +1055,17 @@ class ApiMachine(RuleBasedStateMachine):
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
+        if self.invalid(coll, body):
+            assert r.status_code == 422, (coll, body, r.text)
+            return
         if self.unknown_project(body):
             self.assert_unknown_project(r)
             return
+        if self.internal_conflict(coll, body):
+            self.assert_refused_internal(r)
+            return
         if self.mismatch(coll, body):
             self.assert_refused_by_rule(r)
-            return
-        if self.personal(body):
-            self.assert_refused_personal(r)
             return
         assert r.status_code == 200, r.text
         exp = self.doc_expected(coll, body, None) | {"id": r.json()["id"]}
@@ -997,14 +1101,17 @@ class ApiMachine(RuleBasedStateMachine):
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
+        if self.invalid(coll, body):
+            assert r.status_code == 422, (coll, body, r.text)
+            return
         if self.unknown_project(body, self.m[coll][rid]):
             self.assert_unknown_project(r)
             return
+        if self.internal_conflict(coll, body, self.m[coll][rid]):
+            self.assert_refused_internal(r)
+            return
         if self.mismatch(coll, body, self.m[coll][rid]):
             self.assert_refused_by_rule(r)
-            return
-        if self.personal(body, self.m[coll][rid]):
-            self.assert_refused_personal(r)
             return
         assert r.status_code == 200, r.text
         exp = self.doc_expected(coll, body, self.m[coll][rid]) | {"id": rid}
@@ -1096,8 +1203,8 @@ class ApiMachine(RuleBasedStateMachine):
         if proj and prec is None:
             assert r.status_code == 404, r.text
             return
-        if prec and prec["personal"]:
-            assert r.status_code == 422 and r.json() == {"detail": "Personal projects cannot be billed"}, r.text
+        if prec and prec["kind"] == "internal":
+            self.assert_refused_unbillable(r)
             return
         cust = cust or (prec or {}).get("customer_id")
         if not cust:
@@ -1109,7 +1216,7 @@ class ApiMachine(RuleBasedStateMachine):
         picked, groups = [], {}
         for e in self.m["entries"].values():
             p = self.m["projects"].get(e.get("project_id"))
-            if e.get("invoice_id") or not e["billable"] or not p or p["personal"]:
+            if e.get("invoice_id") or not e["billable"] or not p or p["kind"] == "internal":
                 continue
             if (lo and e["date"] < lo) or (hi and e["date"] > hi):
                 continue
@@ -1155,12 +1262,28 @@ class ApiMachine(RuleBasedStateMachine):
             return
         offer0 = self.m["offers"][rid]
         plan0 = offer0.get("plan") or {}
-        if (
-            plan0.get("start")
-            and plan0.get("end")
-            and self.mismatch(
-                "contracts", {"customer_id": offer0.get("customer_id"), "project_id": offer0.get("project_id")}
-            )
+        existing0 = self.m["projects"].get(offer0.get("project_id"))
+        has_plan = bool(plan0.get("start") and plan0.get("end"))
+        hours = {}
+        if has_plan:
+            if plan0.get("hours_per_week"):
+                hours = {"hours_per_week": plan0["hours_per_week"]}
+            elif plan0.get("total_hours"):
+                hours = {"total_hours": plan0["total_hours"]}
+            else:
+                h_lines = [ln for ln in offer0.get("lines") or [] if ln.get("unit") == "h"]
+                if h_lines:
+                    hours = {"total_hours": round(sum(ln["qty"] for ln in h_lines), 2)}
+        if existing0 and existing0["kind"] == "internal":
+            assert r.status_code == 409, r.text  # the whole accept is rolled back
+            assert r.json() == {"detail": "Internal projects cannot have offers, contracts or invoices"}
+            return
+        if has_plan and not hours:
+            assert r.status_code == 422, r.text  # no hour field in the plan and no hour lines: rolled back
+            assert r.json() == {"detail": "The offer has no hours to plan"}
+            return
+        if has_plan and self.mismatch(
+            "contracts", {"customer_id": offer0.get("customer_id"), "project_id": offer0.get("project_id")}
         ):
             # the contract would take another customer's project: the whole accept is rolled back
             self.assert_refused_by_rule(r)
@@ -1168,15 +1291,18 @@ class ApiMachine(RuleBasedStateMachine):
         assert r.status_code == 200, r.text
         out, offer = r.json(), self.m["offers"][rid]
         assert out["offer"]["status"] == "accepted"
-        cust = self.m["customers"].get(offer.get("customer_id"))
         proj = out["project"]
         existing = self.m["projects"].get(offer.get("project_id"))
         if existing:  # the offer belongs to a project: it is widened, not replaced
             assert proj["id"] == offer["project_id"] and proj["name"] == existing["name"]
+            assert proj["kind"] == existing["kind"] == "customer"
         else:
-            assert proj["name"] == (offer.get("title") or "Project for " + (cust or {}).get("name", ""))
+            title = (offer.get("title") or "").strip()
+            number = offer.get("number")
+            assert proj["name"] == ((title or "Offer " + number) if number else (title or "Offer draft"))
             assert (
                 proj["status"] == "active"
+                and proj["kind"] == "customer"
                 and proj["offer_id"] == rid
                 and proj.get("customer_id") == offer.get("customer_id")
             )
@@ -1190,9 +1316,11 @@ class ApiMachine(RuleBasedStateMachine):
             c = out["contract"]
             assert c is not None and c["start"] == plan["start"] and c["end"] == plan["end"]
             assert c["offer_id"] == rid and c["project_id"] == proj["id"] and c["status"] == "confirmed"
-            assert c["user_ids"] == plan["user_ids"]
-            for k in ("hours_per_week", "total_hours", "rate"):
-                assert (c.get(k) == plan.get(k)) or approx(c.get(k), plan.get(k)), (k, c, plan)
+            assert c.get("user_ids", []) == []  # contracts are not assigned to people
+            assert {k for k in ("hours_per_week", "total_hours") if c.get(k) is not None} == set(hours)
+            for k, val in hours.items():
+                assert approx(c[k], val), (k, c, hours)
+            assert (c.get("rate") == plan.get("rate")) or approx(c.get("rate"), plan.get("rate")), (c, plan)
             self.m["contracts"][c["id"]] = DEFAULTS["contracts"] | {
                 k: v for k, v in c.items() if v is not None and k not in ("created", "updated")
             }
@@ -1226,8 +1354,8 @@ class ApiMachine(RuleBasedStateMachine):
         if self.mismatch("invoices", body):  # a legacy offer whose project moved to another customer
             self.assert_refused_by_rule(r)
             return
-        if self.personal(body):  # a legacy offer whose project was made personal later
-            self.assert_refused_personal(r)
+        if (self.m["projects"].get(body.get("project_id")) or {}).get("kind") == "internal":
+            self.assert_refused_unbillable(r)  # a legacy offer whose project is internal
             return
         assert r.status_code == 200, r.text
         exp = self.doc_expected("invoices", {k: v for k, v in body.items() if k != "date"}, None) | {
@@ -1950,12 +2078,12 @@ class ApiMachine(RuleBasedStateMachine):
             assert {e["id"] for e in self.call("GET", "/absences", ms).json()} == {
                 i for i, e in self.m["absences"].items() if e.get("user_id") == uid
             }
-            visible = {i for i, p in self.m["projects"].items() if not p["member_ids"] or uid in p["member_ids"]}
+            visible = set(self.m["projects"])  # every user sees every project
             plist = self.call("GET", "/projects", ms).json()
             assert {p["id"] for p in plist} == visible
             assert all(not ({"rate", "notes", "budget_hours"} & set(p)) for p in plist)
             tlist = self.call("GET", "/tasks", ms).json()
-            assert {t["id"] for t in tlist} == {i for i, t in self.m["tasks"].items() if t.get("project_id") in visible}
+            assert {t["id"] for t in tlist} == set(self.m["tasks"])
             assert all("rate" not in t for t in tlist)
             assert all(set(u) <= {"id", "name", "role"} for u in self.call("GET", "/users", ms).json())
 

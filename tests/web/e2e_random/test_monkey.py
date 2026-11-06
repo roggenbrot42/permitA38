@@ -138,7 +138,7 @@ def seed_dataset(api: Api, rng: random.Random) -> dict:
     projects = [
         api.post("/projects", {"name": "Website Relaunch", "customer_id": c1["id"], "budget_hours": 40}),
         api.post("/projects", {"name": "<svg onload=window.__xss=1>", "customer_id": c2["id"], "rate": 99}),
-        api.post("/projects", {"name": "Eigenes Lernen", "personal": True}),
+        api.post("/projects", {"name": "Eigenes Lernen"}),
     ]
     api.post("/tasks", {"project_id": projects[0]["id"], "name": "Beratung", "rate": 140})
     me = api.get("/auth/me")
@@ -158,12 +158,12 @@ def seed_dataset(api: Api, rng: random.Random) -> dict:
         "/contracts",
         {
             "title": "Wartung",
+            "project_id": projects[0]["id"],
             "customer_id": c1["id"],
             "start": ws.isoformat(),
             "end": (ws + timedelta(days=90)).isoformat(),
             "hours_per_week": 8,
             "rate": 100,
-            "user_ids": [me["id"]],
         },
     )
     api.post(

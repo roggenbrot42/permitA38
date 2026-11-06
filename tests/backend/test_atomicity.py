@@ -90,5 +90,7 @@ def test_accepting_an_offer_creates_project_and_contract_together(app, boss_clie
     with TestClient(app, raise_server_exceptions=False, headers=boss_client.headers) as c:
         assert c.post(f"/api/offers/{off['id']}/accept").status_code == 500
     store.save = real_save
-    assert boss_client.get("/api/projects").json() == []  # no project without its contract
+    assert [
+        p for p in boss_client.get("/api/projects").json() if p["id"] != "internaladmin"
+    ] == []  # no project without its contract
     assert boss_client.get(f"/api/offers/{off['id']}").json()["status"] == "sent"  # offer not marked accepted

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..service.transfer.upgrades import normalise_planning_record
 from . import schema as _schema
 from .base import ID_RE, Repository
 from .schema import COLLECTIONS, INTERNAL_COLLECTIONS
@@ -155,6 +156,26 @@ def _check_numbers(repo: Repository, old: Path) -> None:
             )
 
 
+def _referenced_projects(repo: Repository, old: Path) -> set[str]:
+    """Ids of the projects referenced by an offer, contract or invoice, in the stored data and the folder."""
+    found: set[str] = set()
+    for coll in ("offers", "contracts", "invoices"):
+        found.update(r["project_id"] for r in repo.list(coll) if r.get("project_id"))
+        folder = old / coll
+        if not folder.is_dir():
+            continue
+        for p in folder.iterdir():
+            if not _FILE_RE.match(p.name):
+                continue
+            try:
+                rec = json.loads(p.read_text(encoding="utf-8"))
+            except ValueError:
+                continue
+            if isinstance(rec, dict) and rec.get("project_id"):
+                found.add(rec["project_id"])
+    return found
+
+
 def import_json(repo: Repository, old_dir: Path) -> ImportReport:
     """Idempotent: records whose id already exists are skipped, settings are only imported into an empty DB."""
     old = Path(old_dir)
@@ -167,6 +188,7 @@ def import_json(repo: Repository, old_dir: Path) -> ImportReport:
             repo.save_settings(json.loads((old / "settings.json").read_text(encoding="utf-8")))
             report.settings = True
         taken = {u.get("username") for u in repo.list("users")}
+        referenced = _referenced_projects(repo, old)
         for coll in (*COLLECTIONS, *INTERNAL_COLLECTIONS):
             folder = old / coll
             imported = skipped = 0
@@ -186,6 +208,7 @@ def import_json(repo: Repository, old_dir: Path) -> ImportReport:
                     rec["id"] = rid
                     if coll in NUMBERED:
                         drop_empty_number(rec)
+                    normalise_planning_record(coll, rec, referenced)
                     if coll == "users":
                         if not rec.get("username"):
                             base = _slug(rec.get("name", ""))

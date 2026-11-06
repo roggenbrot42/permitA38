@@ -37,21 +37,24 @@ def worlds(draw):
         dict(
             start=(MON + timedelta(days=draw(st.integers(-7, 40)))).isoformat(),
             end=None,
-            hours_per_week=draw(st.one_of(st.none(), st.floats(0, 60, allow_nan=False))),
-            total_hours=draw(st.one_of(st.none(), st.floats(0, 300, allow_nan=False))),
+            hours_per_week=draw(st.one_of(st.none(), st.floats(0.01, 60, allow_nan=False))),
+            total_hours=draw(st.one_of(st.none(), st.floats(0.01, 300, allow_nan=False))),
             user=draw(st.integers(0, n_users - 1)),
         )
         for _ in range(draw(st.integers(0, 4)))
     ]
     for c in contracts:
         c["end"] = (date.fromisoformat(c["start"]) + timedelta(days=draw(st.integers(0, 60)))).isoformat()
+        # exactly one of the two hour fields (0 < h): both set -> keep hours_per_week; none set -> 5 h per week
         if c["hours_per_week"] is None and c["total_hours"] is None:
             c["hours_per_week"] = 5.0
+        elif c["hours_per_week"] is not None:
+            c["total_hours"] = None
     offers = [
         dict(
             start=(MON + timedelta(days=draw(st.integers(0, 40)))).isoformat(),
             days=draw(st.integers(0, 60)),
-            hpw=draw(st.floats(0, 40, allow_nan=False)),
+            hpw=draw(st.floats(0.01, 40, allow_nan=False)),
             user=draw(st.integers(0, n_users - 1)),
             valid=draw(st.sampled_from([None, "2026-01-01", "2026-12-31"])),
         )
@@ -71,11 +74,14 @@ def worlds(draw):
 def build(repo, world):
     users, contracts, offers, absences = world
     ids = [repo.save("users", dict(u, username=f"u{i}", active=True))["id"] for i, u in enumerate(users)]
+    customer = repo.save("customers", dict(name="Customer"))["id"]
+    main = repo.save("projects", dict(name="Main", kind="customer", customer_id=customer, status="active"))["id"]
     for c in contracts:
         repo.save(
             "contracts",
             dict(
                 title="C",
+                project_id=main,
                 start=c["start"],
                 end=c["end"],
                 hours_per_week=c["hours_per_week"],
@@ -94,7 +100,9 @@ def build(repo, world):
                 status="sent",
                 lines=[],
                 valid_until=o["valid"],
-                plan=dict(start=o["start"], end=end, hours_per_week=round(o["hpw"], 2), user_ids=[ids[o["user"]]]),
+                plan=dict(
+                    start=o["start"], end=end, hours_per_week=max(0.01, round(o["hpw"], 2)), user_ids=[ids[o["user"]]]
+                ),
             ),
         )
     for a in absences:
@@ -175,7 +183,7 @@ def fenced_worlds(draw):
     contracts = [
         dict(
             user=draw(st.integers(0, len(people) - 1)),
-            project=draw(st.sampled_from(["P", "Q", None])),
+            project=draw(st.sampled_from(["P", "Q"])),  # a contract always belongs to a project
             start=draw(st.integers(0, 20)),
             days=draw(st.integers(0, 40)),
             hpw=draw(st.sampled_from([5, 10, 25, 40])),
@@ -201,7 +209,13 @@ def fenced_worlds(draw):
 
 def build_fenced(repo, world, skip_contracts_of=None, extra_q_person=False, with_allocations=True):
     people, allocs, contracts, absences, offers = world
-    proj = {k: repo.save("projects", dict(name=f"Project {k}", status="active"))["id"] for k in "PQ"}
+    customer = repo.save("customers", dict(name="Customer"))["id"]
+    proj = {
+        k: repo.save("projects", dict(name=f"Project {k}", kind="customer", customer_id=customer, status="active"))[
+            "id"
+        ]
+        for k in "PQ"
+    }
     ids = [
         repo.save(
             "users",
@@ -447,7 +461,7 @@ def test_allocations_never_change_the_team_numbers(world):
 def _strip_ids(x):
     """Random ids differ between two databases: they are dropped before the forecasts are compared."""
     if isinstance(x, dict):
-        return {k: _strip_ids(v) for k, v in x.items() if k != "id"}
+        return {k: _strip_ids(v) for k, v in x.items() if k not in ("id", "project_id")}
     if isinstance(x, list):  # the order of records follows the random ids: compare them as multisets
         return sorted((_strip_ids(v) for v in x), key=lambda v: json.dumps(v, sort_keys=True, default=str))
     return x
@@ -477,7 +491,7 @@ def _forecast_without_externals(world, with_suppliers: bool):
                 )
                 for c in repo.list("contracts"):
                     repo.save("contracts", dict(c, user_ids=[*c["user_ids"], sup["id"]]))
-                proj = repo.save("projects", dict(name="Ext project", status="active"))
+                proj = repo.save("projects", dict(name="Ext project", kind="internal", status="active"))
                 repo.save(
                     "allocations",
                     dict(

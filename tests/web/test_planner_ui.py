@@ -29,19 +29,25 @@ def seeded(srv):
     h = {"Authorization": "Bearer " + srv.token}
     me = httpx.get(srv.base + "/api/auth/me", headers=h).json()
     start = monday(date.today()) + timedelta(days=7)
-    httpx.post(
+    cust = httpx.post(srv.base + "/api/customers", headers=h, json={"name": "Demo Customer A"}).json()
+    proj = httpx.post(
+        srv.base + "/api/projects", headers=h, json={"name": "Demo project P", "customer_id": cust["id"]}
+    ).json()
+    r = httpx.post(
         srv.base + "/api/contracts",
         headers=h,
         json={
+            "project_id": proj["id"],
+            "customer_id": cust["id"],
             "title": "Retainer",
             "start": start.isoformat(),
             "end": (start + timedelta(days=13)).isoformat(),
             "hours_per_week": 40,
             "rate": 90,
             "status": "confirmed",
-            "user_ids": [me["id"]],
         },
     )
+    assert r.status_code < 300, r.text
     return dict(me=me, week2=start)
 
 

@@ -31,8 +31,8 @@ PROJECT_READ = {
 CUST = "cu000001"
 OTHER_CUST = "cu000002"
 PROJECTS = [
-    {"id": "pr000001", "name": "Demo project P", "status": "active", "customer_id": CUST, "personal": False},
-    {"id": "pr000002", "name": "Demo project Q", "status": "active", "customer_id": CUST, "personal": False},
+    {"id": "pr000001", "name": "Demo project P", "status": "active", "customer_id": CUST},
+    {"id": "pr000002", "name": "Demo project Q", "status": "active", "customer_id": CUST},
 ]
 CUSTOMERS = [{"id": CUST, "name": "Demo GmbH"}, {"id": OTHER_CUST, "name": "Other AG"}]
 CONTRACTS = [
@@ -46,7 +46,6 @@ CONTRACTS = [
         "hours_per_week": 8,
         "rate": 90,
         "status": "confirmed",
-        "user_ids": [BOSS["id"]],
     },
     {
         "id": "ct000002",
@@ -58,7 +57,6 @@ CONTRACTS = [
         "total_hours": 40,
         "rate": None,
         "status": "done",
-        "user_ids": [BOSS["id"]],
     },
     {
         "id": "ct000003",
@@ -70,7 +68,6 @@ CONTRACTS = [
         "total_hours": 100,
         "rate": 80,
         "status": "confirmed",
-        "user_ids": [BOSS["id"]],
     },
     {
         "id": "ct000004",
@@ -82,7 +79,6 @@ CONTRACTS = [
         "hours_per_week": 4,
         "rate": 70,
         "status": "confirmed",
-        "user_ids": [BOSS["id"]],
     },
     {
         "id": "ct000005",
@@ -94,7 +90,6 @@ CONTRACTS = [
         "hours_per_week": 4,
         "rate": 70,
         "status": "confirmed",
-        "user_ids": [BOSS["id"]],
     },
 ]
 
@@ -167,8 +162,8 @@ class FakeApi:
         if path == "project-report":
             return ok({})
         if path.startswith("projects/") and path.endswith(
-            "/planning"
-        ):  # planner.js appends its box; no planning data here
+            ("/planning", "/timesheet")
+        ):  # planner.js appends its box and the time sheet card loads its own data; none here
             return route.fulfill(status=404, content_type="application/json", body='{"detail": "Not found"}')
         if path in ("tasks", "entries", "expenses", "absences", "offers", "invoices"):
             return ok([])
