@@ -13,11 +13,9 @@ UPDATE "allocations" SET "total_hours" = NULL WHERE "hours_per_week" IS NOT NULL
 UPDATE "projects" SET "status" = 'active' WHERE "status" IS NULL;
 UPDATE "allocations" SET "status" = 'active' WHERE "status" IS NULL;
 UPDATE "contracts" SET "status" = 'confirmed' WHERE "status" IS NULL;
-INSERT INTO "projects" ("id", "name", "kind", "status", "created", "updated")
-SELECT 'internaladmin', 'Administration', 'internal', 'active', CAST(strftime('%s', 'now') AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER)
-WHERE NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = 'internaladmin');
 
 ALTER TABLE "projects" DROP COLUMN "personal";
+ALTER TABLE "projects" DROP COLUMN "member_ids";
 
 -- 3. guards: generated from core/repository/schema.py GUARDS by Dialect.guard_sql (a test keeps them equal)
 CREATE TRIGGER "guard_projects_kind_required_ins" BEFORE INSERT ON "projects"

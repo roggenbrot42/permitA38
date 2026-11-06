@@ -1,5 +1,5 @@
 """Migration project_planning (docs/specs/project-centric-planning.md, example E8): `projects.kind`, data fixes, the
-internal project "Administration", the removal of `personal` and the planner's guards. All data is invented."""
+removal of `personal` and `member_ids` (no project is inserted) and the planner's guards. All data is invented."""
 
 import sqlite3
 
@@ -131,47 +131,33 @@ def test_an_offer_or_invoice_makes_a_project_a_customer_project(tmp_path, monkey
         r.close()
 
 
-def test_internaladmin_exists_once_and_a_second_run_changes_nothing(old_db):
-    for _ in range(2):
-        r = SQLiteRepository(old_db)
-        r.startup()
-        r.close()
-    raw = sqlite3.connect(old_db / DB_FILENAME)
-    rows = raw.execute(
-        'SELECT "id", "name", "kind", "status", "created", "updated" FROM "projects" WHERE "id" = ?', ("internaladmin",)
-    ).fetchall()
-    raw.close()
-    assert len(rows) == 1
-    pid, name, kind, status, created, updated = rows[0]
-    assert (pid, name, kind, status) == ("internaladmin", "Administration", "internal", "active")
-    assert created == updated and created > 1_700_000_000  # unix seconds
+def test_no_project_is_inserted_and_a_second_run_changes_nothing(old_db):
+    def snapshot():
+        raw = sqlite3.connect(old_db / DB_FILENAME)
+        try:
+            return raw.execute('SELECT * FROM "projects" ORDER BY "id"').fetchall()
+        finally:
+            raw.close()
 
-
-def test_existing_internaladmin_row_is_not_replaced(tmp_path, monkeypatch):
-    root = real_chain_copy(tmp_path)
-    for d in DIALECT_NAMES:
-        for f in (root / d).glob(f"*-{NAME}.sql"):
-            f.unlink()
-    data = tmp_path / "data"
-    with monkeypatch.context() as m:
-        use_chain(m, root)
-        old = SQLiteRepository(data)
-        old.startup()
-        old.close()
-    raw = sqlite3.connect(data / DB_FILENAME)
-    raw.execute(
-        'INSERT INTO "projects" ("id", "name", "personal", "status") VALUES (\'internaladmin\', \'Mine\', 0, \'paused\')'
-    )
-    raw.commit()
-    raw.close()
-    r = SQLiteRepository(data)
+    r = SQLiteRepository(old_db)
     r.startup()
-    try:
-        got = r.get("projects", "internaladmin")
-        assert got is not None
-        assert got["name"] == "Mine" and got["status"] == "paused" and got["kind"] == "internal"
-    finally:
-        r.close()
+    r.close()
+    first = snapshot()
+    assert [row[0] for row in first] == ["projecta", "projectb", "projectc", "projectd", "projecte", "projectf"]
+    r = SQLiteRepository(old_db)
+    r.startup()
+    r.close()
+    assert snapshot() == first
+
+
+def test_member_ids_and_personal_are_dropped_and_other_values_survive(repo):
+    cols = {r[1] for r in repo.conn.execute('PRAGMA table_info("projects")')}
+    assert "member_ids" not in cols and "personal" not in cols
+    c = repo.get("projects", "projectc")
+    assert c["name"] == "C personal with customer" and c["customer_id"] == "cust0001"
+    assert c["status"] == "active" and c["created"] == 1 and c["updated"] == 1
+    assert "member_ids" not in c and "personal" not in c
+    assert repo.get("projects", "internaladmin") is None
 
 
 def test_grandfathered_rows_can_be_resaved_and_are_reported(repo):

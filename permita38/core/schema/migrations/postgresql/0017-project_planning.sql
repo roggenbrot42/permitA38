@@ -13,11 +13,9 @@ UPDATE "allocations" SET "total_hours" = NULL WHERE "hours_per_week" IS NOT NULL
 UPDATE "projects" SET "status" = 'active' WHERE "status" IS NULL;
 UPDATE "allocations" SET "status" = 'active' WHERE "status" IS NULL;
 UPDATE "contracts" SET "status" = 'confirmed' WHERE "status" IS NULL;
-INSERT INTO "projects" ("id", "name", "kind", "status", "created", "updated")
-SELECT 'internaladmin', 'Administration', 'internal', 'active', CAST(EXTRACT(EPOCH FROM NOW()) AS BIGINT), CAST(EXTRACT(EPOCH FROM NOW()) AS BIGINT)
-WHERE NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = 'internaladmin');
 
 ALTER TABLE "projects" DROP COLUMN "personal";
+ALTER TABLE "projects" DROP COLUMN "member_ids";
 
 -- 3. guards: generated from core/repository/schema.py GUARDS by Dialect.guard_sql (a test keeps them equal)
 ALTER TABLE "projects" ADD CONSTRAINT "guard_projects_kind_required" CHECK (NOT COALESCE((NOT ("kind" IS NOT NULL AND btrim(CAST("kind" AS TEXT), E' \t\n\r\f\v') <> '')), FALSE));

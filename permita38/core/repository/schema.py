@@ -112,7 +112,7 @@ TABLES: dict[str, Table] = {
             "projects",
             _cols(
                 _BASE + "name:str customer_id:id kind:str rate:float budget_hours:float status:str color:str "
-                "notes:text member_ids:json offer_id:id start:str end:str extensions:json" + _EXTRA
+                "notes:text offer_id:id start:str end:str extensions:json" + _EXTRA
             ),
             (Index("idx_projects_customer", ("customer_id",)),),
         ),
