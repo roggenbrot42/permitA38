@@ -256,7 +256,10 @@ write path, including import, transfer and procurement accept, comes before the 
 
 **Data transfer:** an `UPGRADES` hook in `transfer/upgrades.py` maps `personal` to `kind` for archives of older heads
 (same rule as the data fix) and applies the hour-field fix. Restores suspend the guard kinds that v2 allows (never the
-number guard); the importer reports a row it cannot fix instead of writing it.
+number guard); the importer reports a row it cannot fix instead of writing it. A restore into a fresh instance ignores
+the untouched `internaladmin` project when it checks whether the target is empty (decided after WP1c). WP4 must
+update the transfer shape check `_allocation_problem` (`transfer/importer.py`) so employee allocations with only
+`total_hours` are restorable.
 
 ## API contract (binding; backend and web UI are built against it in parallel)
 
