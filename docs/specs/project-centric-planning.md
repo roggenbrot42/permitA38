@@ -663,6 +663,40 @@ Explanation texts (literal templates; `{h}` via `_fmt`, dates `DD.MM.YYYY`):
 * weekly: `"{hours_per_week} h per week from {start} to {end}: short {shortfall} h in {n} week|weeks ({weeks})."` (singular for one week) with
   the Mondays as `DD.MM.`, or `"{hours_per_week} h per week from {start} to {end}: covered every week."`.
 
+## WP5: the planner UI (binding, 2026-11-06)
+
+Vanilla JS as today, numbers only from the server, every label with its derivation as a `title` tooltip (texts of the
+"API contract"). German number format as the rest of the app (one decimal separator, see test_planner_number_format).
+
+* **W1 Overview tab** (`web/app.js`, PAGES.plan, replaces the "Forecast" tab; label "Overview"): filters weeks
+  (4/12/26/52), person, project (incl. "Unassigned"). From `GET /api/plan`:
+  1. a project list, customer projects first (status pill `ok` / `at risk` / `short`), each opens to its items: one
+     row per contract and offer with promised / booked / remaining / covered / shortfall, the explanation sentence in
+     full, value / invoiced / open (offers: net and expected net), and for a shortfall the suggestions as buttons
+     "Assign <name> (<h> h)" that open the assignment dialog pre-filled (project, person, period = the suggestion's
+     from..to, total_hours = the suggested hours); internal projects below with assigned / booked / budget;
+  2. a week table (team, or the chosen person): capacity, customer, internal, unassigned, over-assigned, billable
+     share, subcontractors, holiday / vacation / absence / busy as a small grey line; over-assigned in red;
+  3. the warnings as one list (severity colours as today), and, for the boss only, a collapsed "N damaged records
+     were skipped" line from `skipped`.
+* **W2 Plan & vacation tab** (`web/planner.js`, `web/planner.css`): keeps the timeline and its draft editing
+  (absences, contract/offer moves and hours, assignments) and the scenarios; recomputes with `POST
+  /api/plan/simulate` (no `first`, no `include_external`); the week header shows capacity and assigned of the chosen
+  person or team (red when over-assigned); a contract/offer bar is red when its item has a shortfall in the draft,
+  and its tooltip / "why" panel shows the item's explanation (the day-table call is gone); the draft bar shows the
+  `delta` per project ("Orchard: short 26 h -> 2 h"). Suggest-start without user_ids.
+* **W3 Assignments** (`web/allocations.js`, `web/procurement.js`): the dialog lists and edits employee AND
+  subcontractor rows: owner select (people and active capacity suppliers), project, period, "hours per week" or
+  "total hours" (exactly one), rate (subcontractors only, required), planned hours and planned net from the server;
+  offer-linked rows show the offer, can be edited and cancelled, not deleted; the bootstrap button and its preview are
+  removed; the save warnings are shown as today. Procurement: the capacity-offer form no longer asks for hours per
+  week (the hour lines are booked), it shows the period only.
+* **W4 My settings** (`web/app2.js` or the file that renders the "me" page): for a boss a card "Work limits" with the
+  five fields and their defaults (GET/PUT `/api/settings/work-limits`), explained in one sentence each; not shown to
+  other roles.
+* Web tests: each package rewrites the browser tests of its page (fake API answers built from E1/E7 numbers);
+  tests of removed features (forecast fields, day table, bootstrap, per-day pools) are deleted.
+
 ## WP4b: the planner behind the API (binding, 2026-11-06)
 
 WP4b and WP5 land together on branch `feat/planner-service`: the old endpoints and the old web planner are removed in
