@@ -85,6 +85,17 @@ def sample_alt(table: Table, i: int = 0) -> dict:
 ALT = ("allocations", "contracts")
 
 
+def seed_references(repo, table: Table, rec: dict) -> None:
+    """Create the rows a record points to (a new reference must exist, docs/specs/db-guards-v2.md section 3)."""
+    for g in GUARDS:
+        if g.table == table.name and g.kind == "reference" and rec.get(g.columns[0]) is not None:
+            if repo.get(g.target, rec[g.columns[0]]) is None:
+                target = {"id": rec[g.columns[0]], "name": "Demo"}
+                if g.target == "projects":
+                    target.update(kind="internal", status="active")  # an internal project needs no customer
+                repo.save(g.target, target)
+
+
 # ------------------------------------------------------------------ CRUD and fidelity
 @pytest.mark.parametrize("coll", [*ALL, *[f"{c}:alt" for c in ALT]])
 @pytest.mark.parametrize("i", [0, 1])  # i=0 -> bools False, i=1 -> True
@@ -94,6 +105,7 @@ def test_round_trip_every_collection(repo, coll, i):
         rec = sample_alt(TABLES[coll], i)
     else:
         rec = sample(TABLES[coll], i)
+    seed_references(repo, TABLES[coll], rec)
     saved = repo.save(coll, dict(rec))
     assert saved["id"] and isinstance(saved["created"], int) and isinstance(saved["updated"], int)
     for k, v in rec.items():
@@ -416,11 +428,14 @@ def test_audit_log_keeps_unknown_fields_and_filters_by_token_and_user(repo):
 
 
 def test_allocations_employee_and_supplier_rows_with_nullable_owner_columns(repo):
+    u1 = repo.save("users", {"name": "Demo User"})["id"]
+    p1 = repo.save("projects", {"name": "Demo Project", "kind": "internal", "status": "active"})["id"]
+    s1 = repo.save("suppliers", {"name": "Demo Supplier"})["id"]
     emp = repo.save(
         "allocations",
         {
-            "user_id": "u1",
-            "project_id": "p1",
+            "user_id": u1,
+            "project_id": p1,
             "start": "2026-03-02",
             "end": "2026-03-27",
             "hours_per_week": 25.0,
@@ -431,8 +446,8 @@ def test_allocations_employee_and_supplier_rows_with_nullable_owner_columns(repo
     sup = repo.save(
         "allocations",
         {
-            "supplier_id": "s1",
-            "project_id": "p1",
+            "supplier_id": s1,
+            "project_id": p1,
             "start": "2026-03-02",
             "end": "2026-03-27",
             "total_hours": 10.0,
@@ -443,10 +458,10 @@ def test_allocations_employee_and_supplier_rows_with_nullable_owner_columns(repo
     got = repo.get("allocations", emp["id"])
     assert got == emp and got["x_future"] == {"a": [1]}
     assert "supplier_id" not in got and "user_id" not in repo.get("allocations", sup["id"])
-    assert [r["id"] for r in repo.find("allocations", user_id="u1")] == [emp["id"]]
-    assert {r["id"] for r in repo.find("allocations", project_id="p1")} == {emp["id"], sup["id"]}
-    valid = {"project_id": "p1", "start": "2026-03-02", "end": "2026-03-27", "hours_per_week": 10, "rate": 80.0}
-    for bad in (dict(valid), {**valid, "user_id": "u1", "supplier_id": "s1"}):
+    assert [r["id"] for r in repo.find("allocations", user_id=u1)] == [emp["id"]]
+    assert {r["id"] for r in repo.find("allocations", project_id=p1)} == {emp["id"], sup["id"]}
+    valid = {"project_id": p1, "start": "2026-03-02", "end": "2026-03-27", "hours_per_week": 10, "rate": 80.0}
+    for bad in (dict(valid), {**valid, "user_id": u1, "supplier_id": s1}):
         with pytest.raises(integrity_error(repo)):  # exactly one owner
             repo.save("allocations", bad)
     assert len(repo.list("allocations")) == 2

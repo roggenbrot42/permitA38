@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from permita38.core import calc, documents, money
 from permita38.core import validation as v
-from permita38.core.models import RECORD_MODELS
+from permita38.core.models import RECORD_MODELS, scenario_project_refs
 from permita38.core.numbering import Pattern, PatternError, normalize_text, parse_pattern, period_key
 from permita38.core.repository import Repository
 from permita38.core.repository import schema as _schema
@@ -197,6 +197,21 @@ def rule_ref_dangling(ctx: Ctx) -> Iterable[Finding]:
                         yield Finding(
                             "ref.dangling", WARNING, coll, rec.get("id"), col, f"points to a missing {target} record"
                         )
+
+
+def rule_ref_scenario_project(ctx: Ctx) -> Iterable[Finding]:
+    """Saved planning scenarios keep project ids in JSON; no trigger sees them."""
+    for rec in ctx.rows("plan_scenarios"):
+        for i, pid in scenario_project_refs(rec.get("changes")):
+            if pid not in ctx.ids["projects"]:
+                yield Finding(
+                    "ref.dangling",
+                    WARNING,
+                    "plan_scenarios",
+                    rec.get("id"),
+                    f"changes.allocations[{i}].project_id",
+                    "points to a missing projects record",
+                )
 
 
 def rule_ref_project_customer(ctx: Ctx) -> Iterable[Finding]:
@@ -664,6 +679,7 @@ RULES: list[Callable[[Ctx], Iterable[Finding]]] = [
     rule_model_invalid,
     rule_model_date_format,
     rule_ref_dangling,
+    rule_ref_scenario_project,
     rule_ref_project_customer,
     rule_numbering_duplicates,
     rule_numbering_state,

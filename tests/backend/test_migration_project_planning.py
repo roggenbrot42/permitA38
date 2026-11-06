@@ -30,6 +30,15 @@ def old_db(tmp_path, monkeypatch):
         assert old.get_revision() != HEAD
         old.close()
     raw = sqlite3.connect(data / DB_FILENAME)
+    # the reference guards (0017) refuse a row that points at a missing target: create the targets first
+    for table, rid in (
+        ("customers", "cust0001"),
+        ("users", "user0001"),
+        ("users", "user0002"),
+        ("suppliers", "supp0001"),
+        ("incoming_offers", "inoff001"),
+    ):
+        raw.execute(f'INSERT INTO "{table}" ("id") VALUES (?)', (rid,))
     proj = 'INSERT INTO "projects" ("id", "name", "customer_id", "personal", "status", "created", "updated") VALUES (?, ?, ?, ?, ?, 1, 1)'
     raw.executemany(
         proj,
@@ -112,14 +121,14 @@ def test_an_offer_or_invoice_makes_a_project_a_customer_project(tmp_path, monkey
         old.startup()
         old.close()
     raw = sqlite3.connect(data / DB_FILENAME)
-    raw.execute('INSERT INTO "offers" ("id", "project_id") VALUES (\'offr0001\', \'projecto\')')
     raw.execute(
         'INSERT INTO "projects" ("id", "name", "personal", "status") VALUES (\'projecto\', \'O\', 1, \'active\')'
     )
-    raw.execute('INSERT INTO "invoices" ("id", "project_id") VALUES (\'invc0001\', \'projecti\')')
+    raw.execute('INSERT INTO "offers" ("id", "project_id") VALUES (\'offr0001\', \'projecto\')')
     raw.execute(
         'INSERT INTO "projects" ("id", "name", "personal", "status") VALUES (\'projecti\', \'I\', 1, \'active\')'
     )
+    raw.execute('INSERT INTO "invoices" ("id", "project_id") VALUES (\'invc0001\', \'projecti\')')
     raw.commit()
     raw.close()
     r = SQLiteRepository(data)

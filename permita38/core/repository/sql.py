@@ -438,7 +438,11 @@ class SQLRepository(Repository):
             where, params = self._where(table, equals)
             if not where:
                 raise ValueError("delete_where needs at least one condition")
-            return self._exec(f"DELETE FROM {self.dialect.quote(table.name)}{where}", params)
+            try:
+                return self._exec(f"DELETE FROM {self.dialect.quote(table.name)}{where}", params)
+            except Exception as e:
+                self._reraise_guard(e, coll)
+                raise
 
     def get(self, coll: str, rid: str) -> Record | None:
         check_collection(coll)
@@ -460,6 +464,9 @@ class SQLRepository(Repository):
         try:
             return self._save(coll, obj, rid, now, touch)
         except Exception as e:
+            # NOTE: only sqlite3 is mapped. PostgreSQL (psycopg ForeignKeyViolation / RaiseException, SQLSTATE 23503 /
+            # P0001) and MariaDB (pymysql OperationalError 1644 for SIGNAL SQLSTATE '45000') report the guard message
+            # differently from sqlite3's IntegrityError and need their own mapping when those drivers are wired.
             # driver-neutral: sqlite3, psycopg and pymysql all name their class IntegrityError
             msg = str(e)
             if type(e).__name__ == "IntegrityError" and msg.startswith(_GUARD_PREFIX):
@@ -490,7 +497,19 @@ class SQLRepository(Repository):
         if not isinstance(rid, str) or not ID_RE.match(rid):
             raise ValueError("bad id")
         with self.transaction():
-            return self._exec(self.dialect.delete_one(TABLES[coll]), [rid]) > 0
+            try:
+                return self._exec(self.dialect.delete_one(TABLES[coll]), [rid]) > 0
+            except Exception as e:
+                self._reraise_guard(e, coll)
+                raise
+
+    @staticmethod
+    def _reraise_guard(e: Exception, coll: str) -> None:
+        """Turn a guard's driver error (``permita38:<code>``) into a ConstraintViolation; other errors pass."""
+        # driver-neutral: sqlite3, psycopg and pymysql all name their class IntegrityError
+        msg = str(e)
+        if type(e).__name__ == "IntegrityError" and msg.startswith(_GUARD_PREFIX):
+            raise ConstraintViolation(msg[len(_GUARD_PREFIX) :].strip(), coll) from e
 
     # ------------------------------------------------------------------ settings
     def settings(self) -> Record:

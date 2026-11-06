@@ -196,6 +196,15 @@ class ApiSim:
         coll = self.rng.choice([c for c in COLLS if self.model[c]])
         rid = self.rng.choice(self.ids(coll))
         r = self.boss.http.delete(f"/{coll}/{rid}")
+        if coll == "projects" and any(
+            rec.get("project_id") == rid for c in COLLS for rec in self.model[c].values()
+        ):  # a project is deleted only when nothing uses it
+            assert r.status_code == 409, (coll, r.status_code, r.text)
+            assert "archive it instead" in r.json()["detail"], r.text
+            assert self.boss.http.get(f"/{coll}/{rid}").status_code == 200
+            self.say(f"delete {coll} {rid} refused: still used")
+            self.check(coll)
+            return
         assert r.status_code == 204, (coll, r.status_code)
         del self.model[coll][rid]
         assert self.boss.http.get(f"/{coll}/{rid}").status_code == 404
@@ -377,16 +386,18 @@ class ApiSim:
         assert self.boss.http.delete(f"/invoices/{inv['id']}").status_code == 204
         released = [e for e in self.boss.get("/entries") if e.get("invoice_id")]
         assert not released, "deleting an invoice must release its time entries"
-        for coll, rid in [
-            ("customers", cust["id"]),
-            ("projects", proj["id"]),
-            ("tasks", task["id"]),
-            ("projects", personal["id"]),
-        ]:
-            self.boss.http.delete(f"/{coll}/{rid}")
         for e in self.boss.get("/entries"):
             if e.get("project_id") in (proj["id"], personal["id"]):
-                self.boss.http.delete(f"/entries/{e['id']}")
+                r = self.boss.http.delete(f"/entries/{e['id']}")
+                assert r.status_code == 204, (e["id"], r.status_code, r.text)
+        for coll, rid in [
+            ("tasks", task["id"]),
+            ("projects", proj["id"]),
+            ("projects", personal["id"]),
+            ("customers", cust["id"]),
+        ]:
+            r = self.boss.http.delete(f"/{coll}/{rid}")
+            assert r.status_code == 204, (coll, r.status_code, r.text)
         self.say(f"from-time invoice with {len(expect)} groups verified, released after delete")
 
     # ---------------------------------------------------------------- timer and dashboard

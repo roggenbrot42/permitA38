@@ -355,9 +355,11 @@ def _row_in(table):
     def fill(store):
         row = {"name": "x"}
         if table == "allocations":
-            row = {  # the table needs exactly one owner and one hour field
-                "user_id": "boss0001",
-                "project_id": "proj0001",
+            # the table needs exactly one owner and one hour field; the references point at rows that exist
+            project = store.save("projects", {"name": "Demo project", "kind": "internal", "status": "active"})
+            row = {
+                "user_id": store.list("users")[0]["id"],
+                "project_id": project["id"],
                 "start": "2026-03-02",
                 "end": "2026-03-27",
                 "hours_per_week": 10,

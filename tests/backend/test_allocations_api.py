@@ -189,6 +189,7 @@ def test_closed_project_allocations_can_still_be_deleted(boss_client, boss_id, p
 
 
 def test_external_rows_cannot_be_changed_here(boss_client, boss_id, project, store):
+    store.save("suppliers", {"id": "supp0001", "name": "Demo Supplier"})
     ext = store.save(
         "allocations",
         {
@@ -452,6 +453,7 @@ def test_simulate_with_allocation_changes_and_delta(boss_client, boss_id, projec
         return boss_client.post("/api/plan/simulate", json={**base, "changes": {"allocations": [change]}})
 
     assert sim_err({"id": "nothing0001", "hours_per_week": 5}).json() == {"detail": "Allocation not found"}
+    store.save("suppliers", {"id": "supp0001", "name": "Demo Supplier"})
     ext = store.save(
         "allocations",
         {

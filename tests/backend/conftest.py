@@ -135,6 +135,7 @@ def unguarded():
         "state.required": "required",
         "range.too_long": "max_days",
         "range.bounds": "range",
+        "ref.dangling": "reference",
     }
 
     class _Kinds:

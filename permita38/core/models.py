@@ -1,6 +1,7 @@
 """Typed records. `extra="allow"` keeps unknown fields so files written by newer versions or
 other devices survive a round-trip through this version."""
 
+import json
 from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Any, Literal
@@ -1056,6 +1057,24 @@ class ScenarioChanges(v.CheckedBody):
     absences: list[AbsenceChange] = Field(default=[], max_length=500)
     commitments: list[CommitmentChange] = Field(default=[], max_length=500)
     allocations: list[AllocationChange] = Field(default=[], max_length=500)
+
+
+def scenario_project_refs(changes: Any) -> list[tuple[int, str]]:
+    """``(position, project_id)`` of every ``changes.allocations[position].project_id`` of a saved planning scenario
+    (the only place a scenario names a project). Accepts a dict or a JSON string; malformed values are skipped."""
+    if isinstance(changes, str):
+        try:
+            changes = json.loads(changes)
+        except ValueError:
+            return []
+    allocs = changes.get("allocations") if isinstance(changes, dict) else None
+    if not isinstance(allocs, list):
+        return []
+    return [
+        (i, a["project_id"])
+        for i, a in enumerate(allocs)
+        if isinstance(a, dict) and isinstance(a.get("project_id"), str) and a["project_id"]
+    ]
 
 
 class AllocationIn(v.CheckedBody):

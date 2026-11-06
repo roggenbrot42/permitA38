@@ -94,6 +94,7 @@ def _document_table(name: str) -> Table:
             Index(f"idx_{name}_status", ("status",)),
             Index(f"idx_{name}_customer", ("customer_id",)),
             Index(f"idx_{name}_number", ("number",)),
+            Index(f"idx_{name}_project", ("project_id",)),
         ),
     )
 
@@ -139,6 +140,7 @@ TABLES: dict[str, Table] = {
                 _BASE + "title:str customer_id:id project_id:id start:str end:str hours_per_week:float "
                 "total_hours:float rate:float status:str user_ids:json offer_id:id" + _EXTRA
             ),
+            (Index("idx_contracts_project", ("project_id",)),),
         ),
         Table(
             "absences",
@@ -190,6 +192,7 @@ TABLES: dict[str, Table] = {
             (
                 Index("idx_incoming_offers_supplier", ("supplier_id",)),
                 Index("idx_incoming_offers_status", ("status",)),
+                Index("idx_incoming_offers_project", ("project_id",)),
             ),
         ),
         # business trips (docs/specs/business-trips.md): the meal allowance and mileage are computed from these rows
@@ -200,7 +203,7 @@ TABLES: dict[str, Table] = {
                 "places:json meals_provided:json mileage:json not_needed:json cost_centre:str status:str allowance_total:float "
                 "mileage_km:float mileage_total:float rules_version:str days:json" + _EXTRA
             ),
-            (Index("idx_trips_user", ("user_id",)),),
+            (Index("idx_trips_user", ("user_id",)), Index("idx_trips_project", ("project_id",))),
         ),
         Table(
             "users",
@@ -242,6 +245,7 @@ TABLES: dict[str, Table] = {
         Table(
             "timers",
             _cols(_BASE + "running:bool started:int project_id:id task_id:id note:text" + _EXTRA),
+            (Index("idx_timers_project", ("project_id",)),),
         ),
         # document number counters: one row per document type (or 'shared') and period (see core/numbering.py)
         Table(
@@ -426,6 +430,7 @@ GUARD_KINDS = (
     "max_days",
     "range",
     "implies",
+    "reference",
 )
 
 # number of columns a guard of this kind names in `columns` (None = derived from its conditions)
@@ -440,6 +445,7 @@ _KIND_ARITY: dict[str, int | None] = {
     "max_days": 2,
     "range": 1,
     "implies": None,
+    "reference": 1,
 }
 
 
@@ -471,6 +477,7 @@ class Guard:
     days: int | None = None
     if_: Condition | None = None
     then: Condition | None = None
+    target: str | None = None  # reference: the table whose `id` the column points to
 
     def __post_init__(self) -> None:
         if self.kind not in GUARD_KINDS:
@@ -515,6 +522,13 @@ class Guard:
                     raise ValueError(
                         f"a range guard needs lo <= hi (and a non-empty range), got {self.lo!r}..{self.hi!r}"
                     )
+        if self.kind == "reference":
+            if self.target not in TABLES or TABLES[self.target].pk != "id":
+                raise ValueError(f"a reference guard needs a target table with pk id, got {self.target!r}")
+            if self.code != "ref.dangling":
+                raise ValueError(f"a reference guard's code must be 'ref.dangling', got {self.code!r}")
+            if self.table in TABLES and not TABLES[self.table].column(self.columns[0]):
+                raise ValueError(f"{self.table}.{self.columns[0]} does not exist")
         if self.kind == "implies":
             if self.code != f"state.implies:{self.name}":
                 raise ValueError(f"an implies guard's code must be 'state.implies:{self.name}', got {self.code!r}")
@@ -531,6 +545,7 @@ class Guard:
             "range": {"lo", "hi", "lo_exclusive"},
             "max_days": {"days"},
             "implies": {"if_", "then"},
+            "reference": {"target"},
         }
         defaults = {
             "values": (),
@@ -540,6 +555,7 @@ class Guard:
             "days": None,
             "if_": None,
             "then": None,
+            "target": None,
         }
         for param, default in defaults.items():
             if param not in used.get(self.kind, set()) and getattr(self, param) != default:
@@ -594,6 +610,21 @@ _NON_NEGATIVE_COLUMNS: dict[str, tuple[str, ...]] = {
     "suppliers": ("rate",),
     "expenses": ("net", "vat"),
 }
+# guarded references (docs/specs/db-guards-v2.md section 3): (table, column, target table)
+_REFERENCES: tuple[tuple[str, str, str], ...] = (
+    ("allocations", "project_id", "projects"),
+    ("allocations", "user_id", "users"),
+    ("allocations", "supplier_id", "suppliers"),
+    ("contracts", "project_id", "projects"),
+    ("entries", "project_id", "projects"),
+    ("offers", "project_id", "projects"),
+    ("invoices", "project_id", "projects"),
+    ("tasks", "project_id", "projects"),
+    ("expenses", "project_id", "projects"),
+    ("incoming_offers", "project_id", "projects"),
+    ("trips", "project_id", "projects"),
+    ("timers", "project_id", "projects"),
+)
 _ORDER_TABLES = ("absences", "contracts", "projects", "allocations", "trips")
 
 
@@ -617,7 +648,8 @@ def _build_guards() -> tuple[Guard, ...]:
         Guard(f"guard_{t}_service_order", t, "order", ("service_from", "service_to"), "state.period_reversed")
         for t in ("invoices", "offers")
     ]
-    out += _planning_guards()
+    out += [Guard(f"guard_{t}_{c}_ref", t, "reference", (c,), "ref.dangling", target=g) for t, c, g in _REFERENCES]
+    out += _planning_guards()  # migration 0018-project_planning, after 0017-reference_guards
     return tuple(out)
 
 

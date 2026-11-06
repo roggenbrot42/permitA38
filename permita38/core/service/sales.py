@@ -131,6 +131,8 @@ class SalesService:
     def offer_to_invoice(self, rid: str) -> dict:
         o = self._get("offers", rid)
         keys = ("customer_id", "project_id", "lines", "template_id", "vat_rate", "language", "title", "reference")
+        if o.get("project_id") and not self.store.get("projects", o["project_id"]):
+            raise ServiceError(422, "The offer's project no longer exists; set another project on the offer first.")
         inv = {k: o[k] for k in keys if o.get(k) is not None}
         inv.update(date=date.today().isoformat(), offer_id=rid)
         check_project_customer(self.store, inv, None)
