@@ -284,7 +284,9 @@ def _allocation_problem(a: dict) -> str | None:
     if days[1] < days[0]:
         return "end is before start"
     if user:
-        h = a.get("hours_per_week")
+        h, total = a.get("hours_per_week"), a.get("total_hours")
+        if h is None and total is not None:  # an employee allocation with only total_hours is valid
+            return None
         if isinstance(h, bool) or not isinstance(h, (int, float)) or not 0.25 <= h <= 80:
             return "hours_per_week must be between 0.25 and 80"
     return None
