@@ -64,6 +64,7 @@ def test_planned_and_booked_per_project(boss_client, store, boss_id, monkeypatch
         "booked_today": 1.0,
         "booked_week": 4.0,
         "left_week": 6.0,
+        "tasks": [],
     }
     beta = rows["Beta intern"]
     assert beta["kind"] == "internal"
@@ -107,3 +108,27 @@ def test_other_persons_dashboard(boss_client, store, boss_id, monkeypatch):
 
 def test_no_assignments(boss_client):
     assert boss_client.get("/api/dashboard").json()["projects"] == []
+
+
+def test_tasks_booked_this_week_per_project(boss_client, store, boss_id, monkeypatch):
+    at(monkeypatch, date(2026, 11, 4))  # week Mon 2 - Sun 8 November
+    p = store.save("projects", {"name": "Alpha", "kind": "customer"})
+    t1 = store.save("tasks", {"project_id": p["id"], "name": "Design"})
+    t2 = store.save("tasks", {"project_id": p["id"], "name": "Review"})
+    t3 = store.save("tasks", {"project_id": p["id"], "name": "Last week"})
+    for day, tid, minutes in (
+        ("2026-11-02", t1["id"], 90),
+        ("2026-11-03", t1["id"], 30),
+        ("2026-11-04", t2["id"], 45),
+        ("2026-10-30", t3["id"], 60),
+        ("2026-11-04", "gone", 15),
+        ("2026-11-04", None, 10),
+    ):
+        entry = {"user_id": boss_id, "project_id": p["id"], "date": day, "minutes": minutes, "task_id": tid}
+        store.save("entries", entry)
+    row = by_name(boss_client.get("/api/dashboard").json())["Alpha"]
+    assert row["tasks"] == [
+        {"task_id": t1["id"], "name": "Design", "booked_week": 2.0},
+        {"task_id": t2["id"], "name": "Review", "booked_week": 0.75},
+        {"task_id": "gone", "name": "(deleted task)", "booked_week": 0.25},
+    ]

@@ -1188,6 +1188,16 @@ class TimerStartIn(v.CheckedBody):
     note: v.Note = ""
 
 
+class TimerUpdateIn(v.CheckedBody):
+    """Change project, task or note of the running timer; only the given fields change, the start time is kept."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: v.OptProjectId = None
+    task_id: v.OptId = None
+    note: v.Note | None = None
+
+
 class TimerStopIn(v.CheckedBody):
     """Stop the running timer and save it as a time entry; the note is optional."""
 

@@ -37,6 +37,28 @@ class TimeService:
         self._write_timer(me["id"], t)
         return t
 
+    def update_timer(self, me: dict, changes: dict) -> dict:
+        cur = self.get_timer(me)
+        if not cur.get("running"):
+            raise ServiceError(409, "No timer is running")
+        project_id = changes["project_id"] if "project_id" in changes else cur.get("project_id")
+        task_id = changes["task_id"] if "task_id" in changes else cur.get("task_id")
+        if "project_id" in changes and "task_id" not in changes and project_id != cur.get("project_id"):
+            task_id = None  # the old task belongs to the old project
+        if project_id and not self.store.get("projects", project_id):
+            raise ServiceError(422, "Unknown project")
+        if task_id:
+            task = self.store.get("tasks", task_id)
+            if not task:
+                raise ServiceError(422, "Unknown task")
+            if task.get("project_id") != project_id:
+                raise ServiceError(422, "The task does not belong to the project")
+        t = {**cur, "project_id": project_id, "task_id": task_id}
+        if changes.get("note") is not None:
+            t["note"] = changes["note"]
+        self._write_timer(me["id"], t)
+        return self.get_timer(me)
+
     def stop_timer(self, me: dict, note: str | None) -> dict:
         cur = self.get_timer(me)
         if not cur.get("running"):
@@ -97,6 +119,7 @@ class TimeService:
         snap = planner_load.load(self.store, today)
         owner = next((o for o in snap.owners if o.id == user_id), None)
         rows: dict[str, dict] = {}
+        task_minutes: dict[str, dict[str | None, float]] = {}
 
         def row(pid: str) -> dict:
             return rows.setdefault(
@@ -123,19 +146,30 @@ class TimeService:
             r = row(pid)
             hours = calc.fnum(e.get("minutes")) / 60.0
             r["booked_week"] += hours
+            tid = e.get("task_id") or None
+            if tid:
+                per = task_minutes.setdefault(pid, {})
+                per[tid] = per.get(tid, 0.0) + hours
             if day == today:
                 r["booked_today"] += hours
         projects = {p["id"]: p for p in self.store.list("projects")}
+        task_names = {t["id"]: t.get("name") for t in self.store.list("tasks")}
         out = []
         for pid, r in rows.items():
             p = projects.get(pid) or {}
             vals = {k: round(v, 2) for k, v in r.items()}
+            tasks = [
+                {"task_id": tid, "name": task_names.get(tid) or "(deleted task)", "booked_week": round(h, 2)}
+                for tid, h in task_minutes.get(pid, {}).items()
+            ]
+            tasks.sort(key=lambda x: (-x["booked_week"], x["name"]))
             out.append(
                 {
                     "project_id": pid,
                     "name": p.get("name") or snap.names.get(pid) or pid,
                     "kind": "internal" if p.get("kind") == "internal" else "customer",
                     **vals,
+                    "tasks": tasks,
                     "left_week": round(max(0.0, r["planned_week"] - r["booked_week"]), 2),
                 }
             )

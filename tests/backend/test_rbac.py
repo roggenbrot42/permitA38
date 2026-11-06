@@ -144,6 +144,7 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("GET", "/api/calendars/suggestions"): ("planning", "write", True),
     ("GET", "/api/calendars/{source_id}/preview"): ("planning", "write", True),
     ("GET", "/api/timer"): ("timer", "read", False),
+    ("PATCH", "/api/timer"): ("timer", "write", False),
     ("POST", "/api/timer/start"): ("timer", "write", False),
     ("POST", "/api/timer/stop"): ("timer", "write", False),
     ("GET", "/api/dashboard"): ("timer", "read", False),
