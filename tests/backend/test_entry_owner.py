@@ -65,30 +65,12 @@ def test_boss_can_still_book_for_someone_else(boss_client, member_client):
     assert r.json()["user_id"] == member_client.user_id
 
 
-def test_employee_books_only_on_assigned_projects(boss_client, member_client, app):
+def test_employee_without_assignment_may_book_on_any_project(boss_client, member_client):
     proj = _project(boss_client)
     body = {"date": "2026-03-02", "minutes": 60, "project_id": proj["id"]}
     r = member_client.post("/api/entries", json=body)
-    assert r.status_code == 403 and r.json()["detail"] == "You are not assigned to this project"
-    alloc = _assign(boss_client, member_client, proj)
-    e = member_client.post("/api/entries", json=body)
-    assert e.status_code == 200, e.text
-    # a cancelled assignment still grants access
-    store = app.state.services.store
-    store.save(
-        "allocations", {**store.get("allocations", alloc["id"]), "status": "cancelled", "cancelled_from": "2026-03-15"}
-    )
-    assert member_client.post("/api/entries", json=body).status_code == 200
-
-
-def test_entry_stays_editable_after_access_is_lost(boss_client, member_client):
-    proj = _project(boss_client)
+    assert r.status_code == 200, r.text
+    assert r.json()["project_id"] == proj["id"]
     other = _project(boss_client)
-    alloc = _assign(boss_client, member_client, proj)
-    e = member_client.post("/api/entries", json={"date": "2026-03-02", "minutes": 60, "project_id": proj["id"]}).json()
-    assert boss_client.delete(f"/api/allocations/{alloc['id']}").status_code == 204
-    body = {k: v for k, v in e.items() if k not in ("created", "updated")} | {"minutes": 90}
-    r = member_client.put(f"/api/entries/{e['id']}", json=body)
-    assert r.status_code == 200 and r.json()["minutes"] == 90
-    r = member_client.put(f"/api/entries/{e['id']}", json=body | {"project_id": other["id"]})
-    assert r.status_code == 403
+    body = {k: v for k, v in r.json().items() if k not in ("created", "updated")} | {"project_id": other["id"]}
+    assert member_client.put(f"/api/entries/{r.json()['id']}", json=body).status_code == 200

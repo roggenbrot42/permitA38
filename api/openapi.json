@@ -16266,14 +16266,6 @@
             ],
             "title": "Notes"
           },
-          "member_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Member Ids",
-            "default": []
-          },
           "offer_id": {
             "anyOf": [
               {
@@ -22025,14 +22017,6 @@
               }
             ],
             "title": "Notes"
-          },
-          "member_ids": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Member Ids",
-            "default": []
           },
           "offer_id": {
             "anyOf": [

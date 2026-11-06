@@ -650,6 +650,7 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
     if "project_planning" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         raw.executescript(
             'ALTER TABLE "projects" DROP COLUMN "kind"; ALTER TABLE "projects" ADD COLUMN "personal" INTEGER;'
+            ' ALTER TABLE "projects" ADD COLUMN "member_ids" TEXT;'
         )
     raw.commit()
     raw.close()
@@ -738,25 +739,17 @@ def test_planning_warnings_only_for_roles_with_planning_access():
     assert _with_warnings(Stub, "projects", rec, {"role": "boss"})["planning_warnings"] == [{"kind": "x"}]
 
 
-def test_employee_sees_only_assigned_projects_and_their_tasks(boss_client, clients, app):
+def test_employee_without_assignment_sees_every_project_and_its_tasks(boss_client, clients):
     emp = clients["employee"]
     mine = boss_client.post("/api/projects", json={"name": "Mine", "member_ids": [emp.user_id]}).json()
     other = boss_client.post("/api/projects", json={"name": "Other"}).json()
     assert "member_ids" not in mine and "member_ids" not in boss_client.get(f"/api/projects/{mine['id']}").json()
-    assert emp.get("/api/projects").json() == []  # member_ids is ignored: no assignment, no access
     t_mine = boss_client.post("/api/tasks", json={"name": "T1", "project_id": mine["id"]}).json()
     t_other = boss_client.post("/api/tasks", json={"name": "T2", "project_id": other["id"]}).json()
-    alloc = {"user_id": emp.user_id, "start": "2026-03-02", "end": "2026-03-31", "hours_per_week": 8}
-    r = boss_client.post("/api/allocations", json={**alloc, "project_id": mine["id"]})
-    assert r.status_code == 201, r.text
-    store = app.state.services.store
-    store.save(
-        "allocations",
-        {**store.get("allocations", r.json()["id"]), "status": "cancelled", "cancelled_from": "2026-03-15"},
-    )
-    assert {p["id"] for p in boss_client.get("/api/projects").json()} >= {mine["id"], other["id"]}
-    assert emp.get(f"/api/projects/{other['id']}").status_code == 404
+    assert emp.get(f"/api/projects/{other['id']}").status_code == 200
     assert emp.get(f"/api/projects/{mine['id']}").status_code == 200
-    assert [p["id"] for p in emp.get("/api/projects").json()] == [mine["id"]]
-    assert emp.get(f"/api/tasks/{t_other['id']}").status_code == 404
-    assert [t["id"] for t in emp.get("/api/tasks").json()] == [t_mine["id"]]
+    listed = emp.get("/api/projects").json()
+    assert {mine["id"], other["id"]} <= {p["id"] for p in listed}
+    assert all("member_ids" not in p for p in listed)
+    assert emp.get(f"/api/tasks/{t_other['id']}").status_code == 200
+    assert {t_mine["id"], t_other["id"]} <= {t["id"] for t in emp.get("/api/tasks").json()}
