@@ -230,7 +230,7 @@ class FakeApi:
             row = {**body, "id": "ee000001"}
             self.expenses.append(row)
             return _json(route, 200, row)
-        if path.startswith("projects/") and path.endswith("/planning"):
+        if path.startswith("projects/") and path.endswith(("/planning", "/timesheet")):
             return _json(route, 404, {"detail": "Not found"})
         if path in ("customers", "absences", "offers", "tasks", "entries", "invoices", "trips"):
             return _json(route, 200, [])

@@ -47,12 +47,15 @@ def test_default_row_is_manual_with_description_project_task_and_add(pg, srv):
 
 
 def test_project_picker_lists_non_archived_projects_and_matches_typed_name(pg, srv):
-    api(srv, "POST", "projects", {"name": "Projekt Alpha", "rate": 95})
+    customer = api(srv, "POST", "customers", {"name": "Kunde Alpha"})
+    api(srv, "POST", "projects", {"name": "Projekt Alpha", "rate": 95, "customer_id": customer["id"]})
+    api(srv, "POST", "projects", {"name": "Projekt Intern", "rate": 95})  # no customer: internal, labelled as such
     api(srv, "POST", "projects", {"name": "Projekt Archiv", "status": "archived"})
     pg.reload()
     pg.wait_for_selector("#t_proj")
     options = pg.locator("#t_proj_list option").evaluate_all("els => els.map(e => e.value)")
     assert "Projekt Alpha" in options
+    assert "Projekt Intern (internal)" in options
     assert "Projekt Archiv" not in options
 
 
@@ -129,7 +132,7 @@ def test_running_timer_in_manual_mode_shows_clock_and_stops(pg, srv):
     assert pg.is_visible("#clock")
     assert pg.is_visible("[data-a=timerStop]")
     assert pg.locator("[data-a=timerStart]").count() == 0
-    assert pg.locator("#t_proj").input_value() == "Projekt Zeta"
+    assert pg.locator("#t_proj").input_value() == "Projekt Zeta (internal)"
     pg.click("[data-a=timerStop]")
     pg.wait_for_selector("[data-a=timerAdd]")
     assert api(srv, "GET", "timer")["running"] is False
@@ -196,7 +199,7 @@ def test_project_and_task_are_locked_while_a_timer_runs(pg, srv):
     pg.wait_for_selector("#t_proj")
     assert pg.is_disabled("#t_proj")
     assert pg.is_disabled("#t_task")
-    assert pg.input_value("#t_proj") == "Projekt Theta"
+    assert pg.input_value("#t_proj") == "Projekt Theta (internal)"
     pg.click("[data-a=timerStop]")
     pg.wait_for_selector("[data-a=timerAdd]")  # stopped: back to the manual form
     assert not pg.is_disabled("#t_proj")
