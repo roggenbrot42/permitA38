@@ -318,7 +318,8 @@ the shape `{code, severity, field, message, details, confirmable}` and **every m
 
 Query: `weeks` (1–52, default 12), `project_id` (a project id or `unassigned`; filters `projects`), `user_id`
 (filters `weeks` and `people`). Area `planning`, read. `people` and `projects[].supply` cover the same range as
-`weeks` (from the Monday of the current week to the last Sunday). The example is E1 with `weeks=7` (today, Sunday 08.11.2026, belongs to the week of 02.11.).
+`weeks` (from the Monday of the current week to the last Sunday). Supply starts tomorrow (D11), so the current week's `capacity`,
+`unassigned` and `over_assigned` (and `people`) count only its days after today. The example is E1 with `weeks=7` (today, Sunday 08.11.2026, belongs to the week of 02.11.).
 
 ```json
 {
@@ -789,7 +790,9 @@ def load(store: Repository, today: date, busy: BusyTimeProvider | None = None, c
   from the setting `work_limits.<user_id>` (P8; defaults when missing). Suppliers of kind `person-capacity` with
   `active` true become kind `subcontractor`, `weekly_hours` 0, their workdays and `unavailable` windows as
   `days_off` "unavailable".
-* Assignments: allocation rows with status `active`, and `cancelled` ones cut to the day before `cancelled_from`;
+* Assignments: allocation rows with status `active`, and `cancelled` ones (`Assignment.cut` = `cancelled_from`: the row
+  is spread over its original period as if active, then the days from `cut` on are dropped, so a cancellation never
+  raises the daily hours; `planned_net` of a cut row is the sum of its kept days);
   `project_kind` from the project. `booked` of a total assignment = the owner's entries on the project inside the
   period, dated <= today.
 * Items: contracts with status `confirmed`; offers with status `sent`, a plan with start and end, no contract made from
