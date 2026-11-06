@@ -395,10 +395,14 @@ def test_delete_side_triggers_are_back_and_the_delete_rolled_back_after_an_excep
     before = triggers(repo)
     used = repo.save("projects", {"name": "Demo"})
     repo.save("entries", {"project_id": used["id"], "date": "2026-03-02", "minutes": 30})
-    with pytest.raises(RuntimeError, match="boom"):
+    try:
         with repo.transaction(), repo.guards_suspended({"reference"}):
             deleted = repo.delete("projects", used["id"])
             assert deleted is True
             raise RuntimeError("boom")
+    except RuntimeError as err:
+        assert str(err) == "boom"
+    else:
+        pytest.fail("the block must raise")
     assert triggers(repo) == before
     assert repo.get("projects", used["id"]) is not None

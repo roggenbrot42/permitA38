@@ -383,7 +383,8 @@ class ApiSim:
         assert not released, "deleting an invoice must release its time entries"
         for e in self.boss.get("/entries"):
             if e.get("project_id") in (proj["id"], personal["id"]):
-                assert self.boss.http.delete(f"/entries/{e['id']}").status_code == 204
+                r = self.boss.http.delete(f"/entries/{e['id']}")
+                assert r.status_code == 204, (e["id"], r.status_code, r.text)
         for coll, rid in [
             ("tasks", task["id"]),
             ("projects", proj["id"]),
