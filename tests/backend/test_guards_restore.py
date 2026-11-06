@@ -223,3 +223,28 @@ def test_import_json_imports_a_valid_folder_with_warnings_and_keeps_the_guards(t
     assert [w["code"] for w in rep.warnings] == ["state.period_reversed"]
     assert "state.period_reversed" in caplog.text and "proj00000001" in caplog.text
     assert triggers(repo) == before
+
+
+def test_restore_warns_about_a_violated_required_guard_and_the_trigger_is_back(source, target, tmp_path, monkeypatch):
+    from permita38.core.repository import schema
+    from permita38.core.repository.schema import Guard
+
+    guard = Guard("guard_customers_name_required", "customers", "required", ("name",), "state.required")
+    monkeypatch.setattr(schema, "GUARDS", (*schema.GUARDS, guard))
+    _, src_client, _ = source
+    _, dst_client, dst = target
+    path = tmp_path / "req.zip"
+
+    files = zip_files(export_archive(src_client))
+    body = json.loads(files["data/customers.json"])
+    rec = _records(body)[0]
+    rec["name"] = ""
+    files["data/customers.json"] = json.dumps(body).encode()
+    path.write_bytes(build_zip(files, tmp_path / "req2.zip").read_bytes())
+    before = triggers(dst)
+    r = post_run(dst_client, path)
+    assert r.status_code == 200, r.text
+    warns = [w for w in r.json()["warnings"] if w["code"] == "state.required"]
+    assert len(warns) == 1
+    assert f"customers {rec['id']}: name:" in warns[0]["message"]
+    assert triggers(dst) == before
