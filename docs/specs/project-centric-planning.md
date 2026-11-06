@@ -163,9 +163,23 @@ M2. **Revenue** (decided, D1): no weekly revenue and no "assumed" revenue from c
 * A customer project needs a `customer_id` when it is created or changed (`ProjectIn`, 422). The database does not
   require it: legacy customer projects without a customer but with documents stay `customer` (migration rule), and
   deleting a customer does not touch `projects.customer_id` today (the reference guards of db-guards-v2 part B guard `projects` against deletion while referenced; `customer_id` stays unguarded).
-* A default internal project **"Administration"** with the fixed id `internaladmin` is inserted by the
+* ~~A default internal project "Administration"~~ **dropped (owner, 2026-11-06): no project is created by default.**
+  Earlier text: it was inserted by the
   migration when no row with that id exists (`INSERT ... WHERE NOT EXISTS`, idempotent). It can be renamed and
   archived, not deleted (409).
+
+### Who may see and book a project (owner decision 2026-11-06, replaces the "Team" field)
+
+* The project field `member_ids` ("Team, leave empty = everyone") is **removed** (table column, models, the web form).
+  Requests that still send it are accepted and the field is ignored (old clients); responses no longer carry it.
+* A user whose rights give them every project (the boss, and any role with scope `ALL` on `projects`) sees and books
+  every project. Everyone else (scope `LIMITED`) sees and may book time on a project **only if they have an
+  assignment to it** (an employee row in `allocations` with that `user_id` and `project_id`, any period, status
+  `active` or `cancelled`). This holds for customer and internal projects alike. Booking time on another project is a
+  403 "You are not assigned to this project". An existing time entry whose project is not changed stays editable.
+* Tasks and the project lists follow the same rule (a task is visible when its project is).
+* Migration: the column is dropped; existing team lists are not turned into assignments (an assignment needs hours).
+  The release notes say that employees need an assignment to see a project after the upgrade.
 
 ### Allocations (assignments)
 
@@ -205,17 +219,16 @@ rejects table (D6 and D7 decided this way, 2026-11-05).
 db-guards-v2 part B, PR #99, stacked on part A #97 with `0016-guards` = `e4b70dba`; if the chain on `main` differs at
 merge time, rebase `requires` onto the head). Part B already refuses deleting a project that allocations, entries,
 contracts, offers, invoices or a running timer still use (409 "This project is still used by …; archive it
-instead."); the planner's own rule that `internaladmin` is never deleted stays separate. Order inside the file:
+instead."). Order inside the file:
 
-1. Schema: `ALTER TABLE projects ADD COLUMN kind`, then `ALTER TABLE projects DROP COLUMN personal` (`DROP COLUMN`
-   keeps the other triggers and indexes; no guard reads `personal`).
+1. Schema: `ALTER TABLE projects ADD COLUMN kind`, then `ALTER TABLE projects DROP COLUMN personal` and
+   `DROP COLUMN member_ids` (`DROP COLUMN` keeps the other triggers and indexes; no guard reads either column).
 2. Data fixes (v1 guards stay active; none of these trips them):
    * `kind` = `customer` when `customer_id` is set **or** an offer, contract or invoice refers to the project, else
      `internal` (a `personal` project with a customer becomes `customer`). Backfill before the drop of `personal`.
    * contracts and allocations with both hour fields: `total_hours` = NULL (the planner already used `hours_per_week`).
    * `projects.status` NULL → `active`, `allocations.status` NULL → `active`, `contracts.status` NULL → `confirmed`.
-   * `INSERT ... SELECT ... WHERE NOT EXISTS` of the internal project **"Administration"** with the fixed id
-     `internaladmin` (matches `ID_PATTERN`).
+   * No project is inserted (the default "Administration" project was dropped on 2026-11-06).
 3. `CREATE TRIGGER` for the guard instances below, declared in `schema.GUARDS` with the kinds of v2 part A.
 
 | Table | Guard instances (kind: columns) |
@@ -260,15 +273,13 @@ write path, including import, transfer and procurement accept, comes before the 
   0 or above 100000 is a 422 ("The offer's hour lines must add up to more than 0 and at most 100000 h"). A legacy plan
   whose `hours_per_week` is 0 or missing falls back to its `total_hours`, then to the `h` lines. Until WP4, a capacity
   offer whose plan has no hours or both fields books the sum of its `h` lines as `total_hours` on accept (422 rules as
-  above, rate above 10000 is a 422); plans with only `hours_per_week` keep today's behaviour. A restore into a fresh
-  instance ignores `internaladmin` only while it is untouched (name "Administration", kind internal, status active, no
-  members, no budget, no notes). PostgreSQL/MariaDB: the guards are CHECKs that also validate existing rows, like
+  above, rate above 10000 is a 422); plans with only `hours_per_week` keep today's behaviour. (The `internaladmin` rules of
+  this bullet were dropped with the default project on 2026-11-06.) PostgreSQL/MariaDB: the guards are CHECKs that also validate existing rows, like
   0016; those dialects are prepared but not wired (db-constraints.md), so this is accepted until they are.
 
 **Data transfer:** an `UPGRADES` hook in `transfer/upgrades.py` maps `personal` to `kind` for archives of older heads
 (same rule as the data fix) and applies the hour-field fix. Restores suspend the guard kinds that v2 allows (never the
-number guard); the importer reports a row it cannot fix instead of writing it. A restore into a fresh instance ignores
-the untouched `internaladmin` project when it checks whether the target is empty (decided after WP1c). WP4 must
+number guard); the importer reports a row it cannot fix instead of writing it. The upgrade hook also drops `member_ids`. WP4 must
 update the transfer shape check `_allocation_problem` (`transfer/importer.py`) so employee allocations with only
 `total_hours` are restorable. db-guards-v2 part B (PR #99) guards every project link (allocations, tasks, entries,
 contracts, offers, invoices, expenses, incoming offers, trips, timers) and the project ids inside saved scenarios
@@ -429,7 +440,7 @@ Calendar: state BY. Between 09.11.2026 and 18.12.2026 there is no public holiday
 | E5c | Eve 40 h, assigned to Ash 10 h/week until Thu 19.11.2026. Week of 16.11.2026 (no holiday in BY) | 10 / 5 available days of the week = 2/day, on the 4 days inside the period | supply 8 h in that week. Until Thu 31.12.2026 instead: 01.01.2027 is a holiday, so the week of 28.12. has 4 available days, all inside the period: 10 h. Same for a subcontractor with 10 h/week: 8 h. **Week of 21.12.2026** (25.12. holiday): 10 / 4 = 2.5/day on 4 days = 10 h (today's subcontractor rule gives 2/day on 4 days = 8 h; at 90.00 that is 900.00 instead of 720.00 planned cost, see D14) |
 | E6 | Incoming offer from Sam: one line 24 h × 90.00 = 2,160.00 net; plan 09.11.–04.12. with `hours_per_week` 6 | Accept: total assignment 24 h, rate 90.00, `hours_per_week` ignored | Assignment total 24, planned net 2,160.00, no warning. Edit to 30 h: planned net 2,700.00, info `assignment.differs_from_offer`: "Planned 30 h / 2,700.00 € differ from the offer's 24 h / 2,160.00 € (6 h / 540.00 € more)." |
 | E7 | E1 plus offer O1 on Orchard, total 10 h 16.11.–04.12., win probability 50 % | Contracts first: K2 already took every leftover hour until 04.12. O1 covered 0 | O1 shortfall 10, `offer.shortfall`; Orchard shortfall_contracts 26, shortfall_worst_case 36, shortfall_expected 26 + 5 = 31, status `short` |
-| E8 | Migration: projects (a) `personal` 1, no customer; (b) `personal` 0, no customer, no documents; (c) `personal` 1 with customer; (d) `personal` 0, no customer, one contract; (e) status NULL. Contracts (f) both hour fields; (g) `total_hours` 0 (grandfathered). Allocation (h) employee with `incoming_offer_id` (grandfathered) | Data fixes and guards per the section above | (a) internal, (b) internal, (c) customer, (d) customer, (e) `active`; (f) `total_hours` NULL; (g) kept, re-saving it unchanged succeeds, changing its title succeeds, `check-db` reports `range.bounds`; (h) kept and reported by `check-db` (`state.implies:<guard>`). A new contract with `total_hours` 0 is refused by the API (422) and by the guard. `internaladmin` exists once after two runs; the `personal` column is gone |
+| E8 | Migration: projects (a) `personal` 1, no customer; (b) `personal` 0, no customer, no documents; (c) `personal` 1 with customer; (d) `personal` 0, no customer, one contract; (e) status NULL. Contracts (f) both hour fields; (g) `total_hours` 0 (grandfathered). Allocation (h) employee with `incoming_offer_id` (grandfathered) | Data fixes and guards per the section above | (a) internal, (b) internal, (c) customer, (d) customer, (e) `active`; (f) `total_hours` NULL; (g) kept, re-saving it unchanged succeeds, changing its title succeeds, `check-db` reports `range.bounds`; (h) kept and reported by `check-db` (`state.implies:<guard>`). A new contract with `total_hours` 0 is refused by the API (422) and by the guard. no project is inserted; the `personal` and `member_ids` columns are gone; a second run changes nothing |
 
 ## Module interfaces of WP2 and WP3 (binding)
 
