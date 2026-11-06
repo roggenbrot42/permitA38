@@ -346,25 +346,15 @@ def _stop_requests(pg):
     return sent
 
 
-def _fake_stop(pg):
-    def fake(route, req):
-        body = req.post_data_json
-        out = {"running": False} if body.get("discard") else {"running": False, "entry": {"minutes": 1}}
-        route.fulfill(status=200, content_type="application/json", body=json.dumps(out))
-
-    pg.route("**/api/timer/stop", fake)
-
-
 def test_stop_under_a_minute_asks_and_ok_discards(pg, srv):
     project = api(srv, "POST", "projects", {"name": "Projekt Omega"})
     api(srv, "POST", "timer/start", {"project_id": project["id"]})
     pg.reload()
     pg.wait_for_selector("[data-a=timerStop]")
     sent = _stop_requests(pg)
-    _fake_stop(pg)
     pg.answer["accept"] = True
     pg.click("[data-a=timerStop]")
-    pg.wait_for_selector("[data-a=timerStart]")
+    pg.wait_for_selector("[data-a=timerAdd]")
     assert pg.asked == ["Less than a minute tracked. Delete it instead of booking 1 min?"]
     assert sent[0].get("discard") is True
 
@@ -375,9 +365,8 @@ def test_stop_under_a_minute_cancel_stops_without_discard(pg, srv):
     pg.reload()
     pg.wait_for_selector("[data-a=timerStop]")
     sent = _stop_requests(pg)
-    _fake_stop(pg)
     pg.click("[data-a=timerStop]")
-    pg.wait_for_selector("[data-a=timerStart]")
+    pg.wait_for_selector("[data-a=timerAdd]")
     assert len(pg.asked) == 1
     assert "discard" not in sent[0]
 
@@ -389,7 +378,6 @@ def test_stop_from_a_minute_does_not_ask(pg, srv):
     pg.wait_for_selector("[data-a=timerStop]")
     pg.evaluate("() => { S.timer.started = Date.now() / 1000 - 61; }")
     sent = _stop_requests(pg)
-    _fake_stop(pg)
     pg.click("[data-a=timerStop]")
-    pg.wait_for_selector("[data-a=timerStart]")
+    pg.wait_for_selector("[data-a=timerAdd]")
     assert pg.asked == [] and "discard" not in sent[0]
