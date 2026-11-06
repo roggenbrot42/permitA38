@@ -172,14 +172,12 @@ M2. **Revenue** (decided, D1): no weekly revenue and no "assumed" revenue from c
 
 * The project field `member_ids` ("Team, leave empty = everyone") is **removed** (table column, models, the web form).
   Requests that still send it are accepted and the field is ignored (old clients); responses no longer carry it.
-* A user whose rights give them every project (the boss, and any role with scope `ALL` on `projects`) sees and books
-  every project. Everyone else (scope `LIMITED`) sees and may book time on a project **only if they have an
-  assignment to it** (an employee row in `allocations` with that `user_id` and `project_id`, any period, status
-  `active` or `cancelled`). This holds for customer and internal projects alike. Booking time on another project is a
-  403 "You are not assigned to this project". An existing time entry whose project is not changed stays editable.
-* Tasks and the project lists follow the same rule (a task is visible when its project is).
-* Migration: the column is dropped; existing team lists are not turned into assignments (an assignment needs hours).
-  The release notes say that employees need an assignment to see a project after the upgrade.
+* **Everyone may see and book time on every project** (owner, 2026-11-06, replacing the assignment-only rule of the
+  same day). Assignments plan hours; they do not restrict booking. What a role may see of a project (e.g. rates and
+  money fields for employees) stays governed by `core/rights.py` as before.
+* Tasks follow their project (every task is visible).
+* Migration: the column is dropped. The release notes say that project team lists are gone and every user sees every
+  project.
 
 ### Allocations (assignments)
 
