@@ -1,4 +1,4 @@
-"""Browser tests of suppliers, incoming offers, expense links, commitments and the planner's external numbers.
+"""Browser tests of suppliers, incoming offers, expense links, commitments and the assignments dialog.
 The API is intercepted with the browser context's routes; the answers are the worked examples of
 docs/contracts/subcontractors.md (extracted verbatim into tests/web/fixtures/subcontractors/), so these tests run
 without the backend. The UI never computes capacity, gaps or money: every number asserted here comes from a fixture."""
@@ -20,7 +20,6 @@ from tests.web.test_planner_per_project_ui import (  # noqa: E402
     PROJECTS,  # noqa: E402
     _json,
     _static,
-    legacy_week,
 )
 
 FIX = pathlib.Path(__file__).resolve().parent / "fixtures" / "subcontractors"
@@ -130,23 +129,6 @@ def offer_flat():
     return o
 
 
-def forecast():
-    f = {"weeks": [], "totals": copy.deepcopy(fixture("forecast_totals_w4")), "warnings": []}
-    f["weeks"] = [legacy_week(fixture("forecast_week_w4"), i) for i in range(4)]
-    f["totals"].update(free_worst_case=40.0)
-    return f
-
-
-def forecast_without_external():
-    f = forecast()
-    for w in f["weeks"]:
-        w.update(
-            external_capacity=0.0, external_assigned=0.0, external_gap=0.0, external_cost=0.0, external_by_project=[]
-        )
-    f["totals"].update(external_capacity=0.0, external_gap=0.0, external_cost=0.0, margin=20000.0)
-    return f
-
-
 class FakeApi:
     def __init__(self, me=None, suppliers=None, offers=None):
         self.me = me or BOSS
@@ -174,6 +156,17 @@ class FakeApi:
                 "status": "active",
             },
         ]
+
+    save_warnings: list = []
+
+    @staticmethod
+    def server_figures(body):
+        """Stand-in for the server's figures: 100 planned hours at the rate (the UI computes nothing itself)."""
+        sup = bool(body.get("supplier_id"))
+        out = {"kind": "external" if sup else "employee", "planned_hours": 100.0}
+        if sup:
+            out.update(supplier_name="Example Freelance Studio (Demo)", planned_net=100.0 * body["rate"])
+        return out
 
     def calls(self, method, path):
         return [r for r in self.requests if r[0] == method and r[1] == path]
@@ -240,16 +233,6 @@ class FakeApi:
             return _json(route, 200, {})
         if path == "plan/scenarios":
             return _json(route, 200, [])
-        if path == "forecast":
-            return _json(
-                route, 200, forecast() if query.get("include_external") != ["0"] else forecast_without_external()
-            )
-        if path == "plan/day-table":
-            return _json(route, 200, {"days": [], "scope_names": {}})
-        if path == "plan/simulate":
-            return _json(
-                route, 200, forecast() if (body or {}).get("include_external", True) else forecast_without_external()
-            )
         if path == "team/timeline":
             start = query["start"][0]
             ext = fixture(
@@ -375,6 +358,20 @@ class FakeApi:
             aid = path.split("/")[1]
             a = next(x for x in self.allocation_list if x["id"] == aid)
             return _json(route, 200, {**a, **fixture("allocation_days_w1")})
+        if path == "allocations" and m == "POST":
+            row = {**body, "id": "a1100001", "status": "active", **self.server_figures(body)}
+            self.allocation_list.append(row)
+            return _json(route, 200, {**row, "planning_warnings": self.save_warnings})
+        if path.startswith("allocations/") and m == "PUT":
+            aid = path.split("/")[1]
+            old = next(x for x in self.allocation_list if x["id"] == aid)
+            for k in ("hours_per_week", "total_hours", "rate"):
+                old.pop(k, None)
+            old.update(body, **self.server_figures(body))
+            return _json(route, 200, {**old, "planning_warnings": []})
+        if path.startswith("allocations/") and m == "DELETE":
+            self.allocation_list = [x for x in self.allocation_list if x["id"] != path.split("/")[1]]
+            return _json(route, 200, {"ok": True})
         if path == "allocations" and m == "GET":
             rows = self.allocation_list
             if query.get("status"):
@@ -1171,13 +1168,13 @@ def test_record_offer_posts_lines_and_plan(browser):
     pg.check("#off_plan_on")
     pg.fill("#off_ps", "2026-03-02")
     pg.fill("#off_pe", "2026-03-27")
-    pg.fill("#off_ph", "20")
+    assert pg.locator("#off_ph, #off_pm").count() == 0  # the hour lines are booked: the plan asks for the period only
     pg.select_option("#f_project_id", "a1b2c3d4")
     dlg.get_by_role("button", name="Save").click()
     pg.wait_for_selector("#modal-root .modal", state="detached")
     body = api.calls("POST", "incoming-offers")[0][3]
     assert body["lines"] == [{"description": "Frontend development", "quantity": 80, "unit": "h", "unit_price": 80}]
-    assert body["plan"] == {"start": "2026-03-02", "end": "2026-03-27", "hours_per_week": 20}
+    assert body["plan"] == {"start": "2026-03-02", "end": "2026-03-27"}
     assert body["project_id"] == "a1b2c3d4" and body["vat_mode"] is None and body["vat_rate"] is None
     assert not any(k in body for k in ("net_total", "vat", "gross_total", "status"))
     assert problems == []
@@ -1326,7 +1323,7 @@ def test_allocations_dialog_cancels_an_external_allocation_with_a_date(browser):
     dlg = pg.locator("#modal-root .modal")
     ext = dlg.locator("tr", has_text="Example Freelance Studio")
     expect(ext).to_contain_text("6.400,00")
-    assert ext.locator("[data-a=alEdit]").count() == 0  # read-only
+    expect(ext).to_contain_text("from offer ANG-2026-117")
     ext.locator("[data-a=alCancelAlloc]").click()
     pg.fill("#al_cfrom", "2026-03-13")
     pg.fill("#al_creason", "project paused")
@@ -1335,6 +1332,127 @@ def test_allocations_dialog_cancels_an_external_allocation_with_a_date(browser):
     assert api.cancelled == {"effective_from": "2026-03-13", "reason": "project paused"}
     expect(dlg.locator("tr", has_text="Example Freelance Studio")).to_contain_text("3.200,00")
     assert dlg.locator("tr", has_text="Demo Boss").locator("[data-a=alCancelAlloc]").count() == 0
+    assert problems == []
+    ctx.close()
+
+
+def open_dialog(browser, api, **kw):
+    ctx, pg, problems = open_app(browser, api, page="project/a1b2c3d4")
+    pg.locator("[data-a=allocations][data-project=a1b2c3d4]").click()
+    return ctx, pg, problems, pg.locator("#modal-root .modal")
+
+
+def test_allocations_dialog_creates_a_subcontractor_row_with_total_hours_and_rate(browser):
+    api = FakeApi()
+    ctx, pg, problems, dlg = open_dialog(browser, api)
+    dlg.locator("[data-a=alNew]").click()
+    expect(dlg.locator("#al_owner optgroup")).to_have_count(2)  # people, subcontractors
+    expect(dlg.locator("#al_ratebox")).to_be_hidden()  # an employee has no rate
+    pg.select_option("#al_owner", "s:5d1c0aa2")
+    expect(dlg.locator("#al_ratebox")).to_be_visible()
+    expect(dlg.locator("#al_rate")).to_have_value("80")  # the supplier's rate is the default
+    pg.fill("#al_start", "2026-03-02")
+    pg.fill("#al_end", "2026-03-27")
+    pg.select_option("#al_mode", "total")
+    pg.fill("#al_hours", "100")
+    pg.fill("#al_rate", "")
+    dlg.locator("[data-a=alSave]").click()
+    expect(dlg.locator("[role=alert]")).to_contain_text("rate")
+    assert api.calls("POST", "allocations") == []
+    pg.fill("#al_rate", "75.5")
+    dlg.locator("[data-a=alSave]").click()
+    body = api.calls("POST", "allocations")[0][3]
+    assert body == {
+        "project_id": "a1b2c3d4",
+        "start": "2026-03-02",
+        "end": "2026-03-27",
+        "supplier_id": "5d1c0aa2",
+        "total_hours": 100.0,
+        "rate": 75.5,
+    }
+    row = dlg.locator("tr", has_text="100 h in total")
+    expect(row).to_contain_text("7.550,00")  # planned net from the server
+    expect(row).to_contain_text("100 h")  # planned hours from the server
+    assert problems == []
+    ctx.close()
+
+
+def test_allocations_dialog_edits_a_subcontractor_row_and_shows_save_warnings(browser):
+    api = FakeApi()
+    ctx, pg, problems, dlg = open_dialog(browser, api)
+    dlg.locator("tr", has_text="Example Freelance Studio").locator("button[data-a=alEdit]").click()
+    expect(dlg.locator("#al_owner")).to_have_value("s:5d1c0aa2")
+    expect(dlg.locator("#al_mode")).to_have_value("week")
+    expect(dlg.locator("#al_hours")).to_have_value("20")
+    expect(dlg.locator("#al_rate")).to_have_value("80")
+    pg.select_option("#al_mode", "total")
+    pg.fill("#al_hours", "60")
+    pg.fill("#al_rate", "90")
+    dlg.locator("[data-a=alSave]").click()
+    call = api.calls("PUT", "allocations/c04d77e1")[0][3]
+    assert call["total_hours"] == 60.0 and "hours_per_week" not in call and call["rate"] == 90.0
+    assert call["supplier_id"] == "5d1c0aa2" and "user_id" not in call
+    expect(dlg.locator("tr", has_text="Example Freelance Studio")).to_contain_text("60 h in total")
+    assert problems == []
+    ctx.close()
+
+
+def test_allocations_dialog_shows_the_planning_warnings_after_a_save(browser):
+    api = FakeApi()
+    api.save_warnings = [fixture("warning_w11")]
+    ctx, pg, problems, dlg = open_dialog(browser, api)
+    dlg.locator("[data-a=alNew]").click()
+    dlg.locator("[data-a=alSave]").click()
+    expect(dlg.locator(".al-warn li[data-code='%s']" % fixture("warning_w11")["code"])).to_have_count(1)
+    body = api.calls("POST", "allocations")[0][3]
+    assert body["user_id"] == "u1b2c3d4" and body["hours_per_week"] == 10.0 and "rate" not in body
+    assert "total_hours" not in body and "supplier_id" not in body
+    assert problems == []
+    ctx.close()
+
+
+def test_allocations_dialog_has_no_delete_for_an_offer_linked_row(browser):
+    api = FakeApi()
+    api.allocation_list.append(
+        {**api.allocation_list[0], "id": "c04d77e2", "incoming_offer_id": None, "offer_reference": None}
+    )
+    ctx, pg, problems, dlg = open_dialog(browser, api)
+    dlg.locator("tr", has_text="from offer ANG-2026-117").locator("button[data-a=alEdit]").click()
+    expect(dlg.locator(".al-form .al-offer")).to_contain_text("ANG-2026-117")
+    assert dlg.locator("[data-a=alDelete]").count() == 0
+    dlg.locator("[data-a=alCancelEdit]").click()
+    dlg.locator("tr:not(:has(.al-offer))", has_text="Example Freelance Studio").locator("button[data-a=alEdit]").click()
+    assert dlg.locator("[data-a=alDelete]").count() == 1
+    dlg.locator("[data-a=alDelete]").click()
+    assert pg.confirms == ["Delete this assignment?"]
+    assert api.calls("DELETE", "allocations/c04d77e2")
+    assert problems == []
+    ctx.close()
+
+
+def test_allocations_dialog_prefill_opens_the_form_with_the_given_values(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api, page="project/a1b2c3d4")
+    pg.evaluate(
+        "() => openAllocations({projectId: 'a1b2c3d4', userId: 'u1b2c3d4', start: '2026-04-06', end: '2026-04-24', total_hours: 26})"
+    )
+    dlg = pg.locator("#modal-root .modal")
+    expect(dlg.locator("#al_owner")).to_have_value("u:u1b2c3d4")
+    expect(dlg.locator("#al_project")).to_have_value("a1b2c3d4")
+    expect(dlg.locator("#al_start")).to_have_value("2026-04-06")
+    expect(dlg.locator("#al_end")).to_have_value("2026-04-24")
+    expect(dlg.locator("#al_mode")).to_have_value("total")
+    expect(dlg.locator("#al_hours")).to_have_value("26")
+    dlg.locator("[data-a=alSave]").click()
+    body = api.calls("POST", "allocations")[0][3]
+    assert body == {
+        "project_id": "a1b2c3d4",
+        "start": "2026-04-06",
+        "end": "2026-04-24",
+        "user_id": "u1b2c3d4",
+        "total_hours": 26.0,
+    }
+    assert dlg.locator("[data-a=alBootstrap]").count() == 0
     assert problems == []
     ctx.close()
 
@@ -1376,96 +1494,6 @@ def test_customer_dominance_hint_is_dismissible(browser):
     pg.reload()
     pg.wait_for_selector("#proc-commitments")
     assert pg.locator(".proc-hint").count() == 0
-    assert problems == []
-    ctx.close()
-
-
-def test_forecast_draws_server_external_numbers_and_toggle(browser):
-    api = FakeApi()
-    ctx, pg, problems = open_app(browser, api, page="plan/forecast")
-    ext = pg.locator("#pp-ext")
-    expect(ext).to_contain_text("80 h")  # totals.external_capacity
-    expect(ext).to_contain_text("20 h")  # external gap
-    expect(ext).to_contain_text("6.400,00")  # external cost
-    expect(ext).to_contain_text("13.600,00")  # margin
-    first = pg.locator("table tr.pp-over").first
-    expect(first.locator(".pp-extcell")).to_contain_text("20 h")
-    expect(first.locator(".pp-extcell")).to_contain_text("gap 5 h")
-    expect(first.locator(".pp-extcell")).to_contain_text("1.600,00")
-    assert pg.locator("svg.chart rect.fc-ext").count() == 4
-    first.locator(".pp-toggle").click()
-    expect(pg.locator("tr.pp-detail .pp-extrow")).to_contain_text("external 25 h of 20 h")
-    assert "include_external" not in api.calls("GET", "forecast")[0][2]
-    pg.uncheck("#fc_ext")
-    pg.wait_for_function("() => localStorage.fcExternal === '0'")
-    pg.wait_for_selector("#pp-ext", state="detached")
-    assert api.calls("GET", "forecast")[-1][2]["include_external"] == ["0"]
-    assert pg.locator(".pp-extcell").count() == 0
-    assert problems == []
-    ctx.close()
-
-
-def test_plan_and_vacation_sends_include_external_false_when_off(browser):
-    api = FakeApi()
-    ctx, pg, problems = open_app(browser, api, page="plan/vacation", storage={"plnUser": ""})
-    pg.wait_for_selector("#plnExt")
-    assert "include_external" not in api.calls("POST", "plan/simulate")[0][3]
-    expect(pg.locator(".pln-extkpi").first).to_contain_text("External cost")
-    pg.uncheck("#plnExt")
-    pg.wait_for_function("() => localStorage.plnExternal === '0'")
-    pg.wait_for_function("() => !document.querySelector('.pln-extkpi')")
-    last = api.calls("POST", "plan/simulate")[-2:]
-    assert all(r[3]["include_external"] is False for r in last)
-    assert problems == []
-    ctx.close()
-
-
-def test_planner_hides_subcontractors_for_a_chosen_person_and_draws_cancelled_ones_short(browser):
-    api = FakeApi()
-    start = monday_for_test()
-    api.allocation_list.append(
-        {
-            "id": "c0ca0ce1",
-            "kind": "external",
-            "status": "cancelled",
-            "supplier_id": "5d1c0aa2",
-            "supplier_name": "Example Freelance Studio (Demo)",
-            "project_id": "a1b2c3d4",
-            "project_name": "Demo project P",
-            "start": start.isoformat(),
-            "end": (start + timedelta(days=27)).isoformat(),
-            "cancelled_from": (start + timedelta(days=7)).isoformat(),  # the first week is kept: 7 days
-            "hours_per_week": 20.0,
-            "planned_hours": 40.0,
-            "planned_net": 3200.0,
-            "open_net": 3200.0,
-        }
-    )
-    ctx, pg, problems = open_app(browser, api, page="plan/vacation", storage={"plnUser": "u1b2c3d4"})
-    pg.wait_for_selector("#plnWrap")
-    assert pg.locator(".pln-ext-row").count() == 0  # a chosen person: no subcontractor rows
-    pg.select_option("#plnWho", "")  # whole team
-    row = pg.locator(".pln-ext-row.cancelled")
-    expect(row).to_have_count(1)
-    expect(row).to_contain_text("cancelled from")
-    style = row.locator(".pln-bar.ext").get_attribute("style")
-    assert "width:82px" in style  # 7 days x 12 px - 2: the days before cancelled_from only
-    assert problems == []
-    ctx.close()
-
-
-def monday_for_test():
-    t = date.today()
-    return t - timedelta(days=t.weekday())
-
-
-def test_planner_shows_external_allocations_read_only(browser):
-    api = FakeApi()
-    ctx, pg, problems = open_app(browser, api, page="plan/vacation", storage={"plnUser": ""})
-    row = pg.locator(".pln-ext-row")
-    expect(row).to_have_count(1)
-    expect(row).to_contain_text("Example Freelance Studio")
-    assert row.locator("[data-kind]").count() == 0  # no drag handles
     assert problems == []
     ctx.close()
 
