@@ -61,9 +61,12 @@ class TimeService:
         self._write_timer(me["id"], t)
         return self.get_timer(me)
 
-    def stop_timer(self, me: dict, note: str | None) -> dict:
+    def stop_timer(self, me: dict, note: str | None, discard: bool = False) -> dict:
         cur = self.get_timer(me)
         if not cur.get("running"):
+            return {"running": False}
+        if discard:
+            self._write_timer(me["id"], dict(id=me["id"], running=False))
             return {"running": False}
         now = int(_time.time())
         minutes = max(1, round((now - cur["started"]) / 60))

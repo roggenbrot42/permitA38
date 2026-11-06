@@ -19690,11 +19690,17 @@
               }
             ],
             "title": "Note"
+          },
+          "discard": {
+            "type": "boolean",
+            "title": "Discard",
+            "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "TimerStopIn",
-        "description": "Stop the running timer and save it as a time entry; the note is optional."
+        "description": "Stop the running timer and save it as a time entry; the note is optional.\n\nWith discard=true the timer is reset and no entry is written."
       },
       "TimerUpdateIn": {
         "properties": {

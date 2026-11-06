@@ -111,3 +111,25 @@ def test_play_buttons_start_the_timer_on_project_and_task(pg, srv):
     pg.click("[aria-label='Start timer on Projekt Intern']")
     pg.wait_for_function("() => document.querySelector('#t_task').value === ''")
     assert sent[-1] == {"project_id": b["id"]}
+
+
+def test_today_entry_row_has_a_play_button(pg, srv):
+    me = api(srv, "GET", "auth/me")
+    a = api(srv, "POST", "projects", {"name": "Projekt <Beta>"})
+    task = api(srv, "POST", "tasks", {"project_id": a["id"], "name": "Aufgabe <Zwei>"})
+    entry = {"user_id": me["id"], "date": date.today().isoformat(), "minutes": 30, "project_id": a["id"]}
+    api(srv, "POST", "entries", {**entry, "task_id": task["id"]})
+    api(srv, "POST", "entries", {**entry, "project_id": None, "note": "ohne Projekt"})
+    pg.goto(srv.base + "/#/today")
+    pg.wait_for_selector("tr.click")
+    assert pg.locator("tr.click").count() == 2
+    assert pg.locator("tr.click [data-a=timerPlay]").count() == 1
+    sent = []
+    pg.on(
+        "request",
+        lambda r: sent.append(r.post_data_json) if r.method == "POST" and r.url.endswith("/api/timer/start") else None,
+    )
+    pg.click("tr.click [aria-label='Start timer on Projekt <Beta> / Aufgabe <Zwei>']")
+    pg.wait_for_selector("[data-a=timerStop]")
+    assert sent == [{"project_id": a["id"], "task_id": task["id"]}]
+    assert pg.locator("#modal-root [data-a], .modal").count() == 0 or not pg.is_visible("#m-del")

@@ -30,7 +30,19 @@ def pg(browser, srv):
     page = ctx.new_page()
     problems: list[str] = []
     page.on("pageerror", lambda e: problems.append("pageerror: " + str(e)))
-    page.on("dialog", lambda d: (problems.append("dialog: " + d.message), d.dismiss()))
+    asked: list[str] = []
+    answer = {"accept": False}
+
+    def on_dialog(d):
+        if d.message.startswith("Less than a minute tracked"):
+            asked.append(d.message)
+            d.accept() if answer["accept"] else d.dismiss()
+        else:
+            problems.append("dialog: " + d.message)
+            d.dismiss()
+
+    page.on("dialog", on_dialog)
+    page.asked, page.answer = asked, answer  # type: ignore[attr-defined]
     page.goto(srv.base + "/#/today")
     page.wait_for_selector("#t_proj")
     yield page
@@ -323,3 +335,61 @@ def test_duration_only_for_another_day_starts_at_nine(pg, srv):
     pg.dispatch_event("#t_dur", "change")
     assert pg.input_value("#t_start") == "09:00" and pg.input_value("#t_end") == "11:15"
     assert "err" not in (pg.get_attribute("#toast", "class") or "")
+
+
+def _stop_requests(pg):
+    sent = []
+    pg.on(
+        "request",
+        lambda r: sent.append(r.post_data_json) if r.method == "POST" and r.url.endswith("/timer/stop") else None,
+    )
+    return sent
+
+
+def _fake_stop(pg):
+    def fake(route, req):
+        body = req.post_data_json
+        out = {"running": False} if body.get("discard") else {"running": False, "entry": {"minutes": 1}}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(out))
+
+    pg.route("**/api/timer/stop", fake)
+
+
+def test_stop_under_a_minute_asks_and_ok_discards(pg, srv):
+    project = api(srv, "POST", "projects", {"name": "Projekt Omega"})
+    api(srv, "POST", "timer/start", {"project_id": project["id"]})
+    pg.reload()
+    pg.wait_for_selector("[data-a=timerStop]")
+    sent = _stop_requests(pg)
+    _fake_stop(pg)
+    pg.answer["accept"] = True
+    pg.click("[data-a=timerStop]")
+    pg.wait_for_selector("[data-a=timerStart]")
+    assert pg.asked == ["Less than a minute tracked. Delete it instead of booking 1 min?"]
+    assert sent[0].get("discard") is True
+
+
+def test_stop_under_a_minute_cancel_stops_without_discard(pg, srv):
+    project = api(srv, "POST", "projects", {"name": "Projekt Sigma"})
+    api(srv, "POST", "timer/start", {"project_id": project["id"]})
+    pg.reload()
+    pg.wait_for_selector("[data-a=timerStop]")
+    sent = _stop_requests(pg)
+    _fake_stop(pg)
+    pg.click("[data-a=timerStop]")
+    pg.wait_for_selector("[data-a=timerStart]")
+    assert len(pg.asked) == 1
+    assert "discard" not in sent[0]
+
+
+def test_stop_from_a_minute_does_not_ask(pg, srv):
+    project = api(srv, "POST", "projects", {"name": "Projekt Tau"})
+    api(srv, "POST", "timer/start", {"project_id": project["id"]})
+    pg.reload()
+    pg.wait_for_selector("[data-a=timerStop]")
+    pg.evaluate("() => { S.timer.started = Date.now() / 1000 - 61; }")
+    sent = _stop_requests(pg)
+    _fake_stop(pg)
+    pg.click("[data-a=timerStop]")
+    pg.wait_for_selector("[data-a=timerStart]")
+    assert pg.asked == [] and "discard" not in sent[0]

@@ -32,7 +32,7 @@ def update_timer(
 def stop_timer(
     body: TimerStopIn, user: Annotated[dict, Needs("timer", "write")], services: ServicesDep
 ) -> dict[str, Any]:
-    out = services.time.stop_timer(user, body.note)
+    out = services.time.stop_timer(user, body.note, body.discard)
     if out.get("entry"):
         out["sanity_warnings"] = services.sanity.check("entries", out["entry"])
     return out

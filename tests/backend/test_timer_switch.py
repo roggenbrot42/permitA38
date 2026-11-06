@@ -75,3 +75,32 @@ def test_member_patches_only_own_timer(boss_client, member_client, data):
     member_client.post("/api/timer/start", json={"project_id": a["id"]})
     assert member_client.patch("/api/timer", json={"project_id": b["id"]}).json()["project_id"] == b["id"]
     assert boss_client.get("/api/timer").json()["project_id"] == a["id"]
+
+
+def test_stop_with_discard_writes_no_entry(boss_client, store, data):
+    a, _, ta, _ = data
+    boss_client.post("/api/timer/start", json={"project_id": a["id"], "task_id": ta["id"]})
+    before = len(store.list("entries"))
+    r = boss_client.post("/api/timer/stop", json={"discard": True})
+    assert r.status_code == 200, r.text
+    assert r.json() == {"running": False}
+    assert len(store.list("entries")) == before
+    assert boss_client.get("/api/timer").json()["running"] is False
+
+
+def test_stop_without_discard_still_books(boss_client, store, data):
+    a, _, ta, _ = data
+    boss_client.post("/api/timer/start", json={"project_id": a["id"], "task_id": ta["id"]})
+    before = len(store.list("entries"))
+    r = boss_client.post("/api/timer/stop", json={"discard": False})
+    assert r.json()["running"] is False and "entry" in r.json()
+    assert len(store.list("entries")) == before + 1
+
+
+def test_discard_without_timer(boss_client):
+    r = boss_client.post("/api/timer/stop", json={"discard": True})
+    assert r.status_code == 200 and r.json() == {"running": False}
+
+
+def test_stop_unknown_field_is_422(boss_client):
+    assert boss_client.post("/api/timer/stop", json={"discard": True, "bogus": 1}).status_code == 422

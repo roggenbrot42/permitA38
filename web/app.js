@@ -343,21 +343,22 @@ PAGES.today = async () => {
     <div class="days">${dash.days.map(d => { const mx = Math.max(8, ...dash.days.map(x => Math.max(x.target, x.worked))); return `<div class="day ${d.date === now ? 'today' : ''} ${!d.target ? 'off' : ''}" title="${esc(d.holiday || d.absence || '')}"><div class="col"><div style="height:${d.worked / mx * 100}%"></div>${d.target ? `<span style="bottom:${d.target / mx * 100}%"></span>` : ''}</div><b>${dayName(d.date)}</b><br>${d.worked ? hm(d.worked) : d.holiday ? '🎌' : d.absence ? '🏖' : '–'}</div>`; }).join('')}</div></div>
   ${extras}
   ${projectsCard(dash.projects || [])}
-  <div class="card"><h2>Today · ${hm(dash.today_worked)} h</h2>${entries.length ? `<table>${entries.map(e => entryRow(e, projects)).join('')}</table>` : '<div class="empty">Nothing tracked yet today. Hit <b>Start</b> when you begin working.</div>'}</div>`;
+  <div class="card"><h2>Today · ${hm(dash.today_worked)} h</h2>${entries.length ? `<table>${entries.map(e => entryRow(e, projects, true)).join('')}</table>` : '<div class="empty">Nothing tracked yet today. Hit <b>Start</b> when you begin working.</div>'}</div>`;
 };
+/* ▶ cell: start the timer on a project (and task); used by the projects card and the Today entries */
+const play = (label, pid, tid) => `<td class="right"><button type="button" class="ghost" data-a="timerPlay" data-project="${esc(pid)}" data-task="${esc(tid || '')}" aria-label="Start timer on ${esc(label)}" title="Start timer on ${esc(label)}">▶</button></td>`;
 function projectsCard(list) {   // planned (assignments, rule S1) vs booked hours per project, Today page
   const h = n => num(n, 2), sum = k => list.reduce((t, p) => t + p[k], 0), left = list.reduce((t, p) => t + p.left_week, 0);
   const head = `<th class="right" title="Hours the plan gives you today">Today planned</th><th class="right" title="Hours you booked today">Today booked</th><th class="right" title="Hours your assignments give you in this week, including days already past">Week planned</th><th class="right" title="Hours you booked this week">Week booked</th><th class="right" title="Week planned minus week booked, never below 0">Left this week</th><th></th>`;
-  const play = (label, pid, tid) => `<td class="right"><button type="button" class="ghost" data-a="timerPlay" data-project="${esc(pid)}" data-task="${esc(tid || '')}" aria-label="Start timer on ${esc(label)}" title="Start timer on ${esc(label)}">▶</button></td>`;
   const taskRow = (p, t) => `<tr class="task-row"><td style="padding-left:28px" class="small">${esc(t.name)}</td><td></td><td></td><td></td><td class="right small">${h(t.booked_week)}</td><td></td>${play(p.name + ' / ' + t.name, p.project_id || p.id, t.task_id)}</tr>`;
   const row = p => `<tr><td title="${esc(p.kind === 'internal' ? 'Internal project' : 'Customer project')}"><b>${esc(p.name)}</b></td><td class="right">${h(p.planned_today)}</td><td class="right">${h(p.booked_today)}</td><td class="right">${h(p.planned_week)}</td><td class="right">${h(p.booked_week)}</td><td class="right" title="${esc(h(p.planned_week) + ' planned − ' + h(p.booked_week) + ' booked')}"><b>${h(p.left_week)}</b></td>${play(p.name, p.project_id || p.id)}</tr>${(p.tasks || []).map(t => taskRow(p, t)).join('')}`;
   return `<div class="card" id="proj-hours"><h2>Your projects this week</h2>${list.length ? `<table><tr><th>Project</th>${head}</tr>${list.map(row).join('')}<tr class="total"><td><b>Total</b></td><td class="right">${h(sum('planned_today'))}</td><td class="right">${h(sum('booked_today'))}</td><td class="right">${h(sum('planned_week'))}</td><td class="right">${h(sum('booked_week'))}</td><td class="right"><b>${h(left)}</b></td><td></td></tr></table>` : '<div class="empty">No assignments this week</div>'}</div>`;
 }
 const docTotal = d => Money.docGross(d, S.settings);
-function entryRow(e, projects) {
+function entryRow(e, projects, withPlay) {   // withPlay: Today card only (the timesheet rows stay without a ▶)
   const p = projects[e.project_id];
   return `<tr class="click" data-a="editEntry" data-id="${e.id}"><td>${p ? `<span class="dot" style="background:${esc(p.color || '#888')}"></span><b>${esc(p.name)}</b>` : '<span class="muted">no project</span>'}${e.task_id ? ' · ' + esc(nameOf('tasks', e.task_id)) : ''}<div class="small muted">${esc(e.note || '')}</div></td>
-    <td class="small muted nowrap">${e.start ? esc(e.start) + '–' + esc(e.end || '') : ''}</td><td class="num"><b>${hm(e.minutes / 60)}</b></td><td>${e.invoice_id ? '<span class="pill good">billed</span>' : e.billable === false ? '<span class="pill">non-billable</span>' : ''}</td></tr>`;
+    <td class="small muted nowrap">${e.start ? esc(e.start) + '–' + esc(e.end || '') : ''}</td><td class="num"><b>${hm(e.minutes / 60)}</b></td><td>${e.invoice_id ? '<span class="pill good">billed</span>' : e.billable === false ? '<span class="pill">non-billable</span>' : ''}</td>${withPlay ? (p ? play(p.name + (e.task_id ? ' / ' + nameOf('tasks', e.task_id) : ''), e.project_id, e.task_id) : '<td></td>') : ''}</tr>`;
 }
 A.addTime = () => entryForm({}, v => {   // show the new entry: Today lists only today's own entries, so jump to its week otherwise
   const to = !v || (v.date === todayISO() && v.user_id === S.me.id) ? null : `#/time/${mondayOf(v.date)}/${v.user_id}`;
@@ -475,7 +476,11 @@ A.timerAdd = timerOnce('add', async () => {
   await loadAll(['entries']);
   render();
 });
-A.timerStop = timerOnce('timer', async () => { const r = await api('POST', 'timer/stop', { note: $('#t_note').value }); S.timer = { running: false }; moneyView = false; toast('Saved ' + hm((r.entry?.minutes || 0) / 60) + ' h'); await loadAll(['entries']); render(); });
+A.timerStop = timerOnce('timer', async () => {
+  const secs = Date.now() / 1000 - S.timer?.started;   // under a minute would book 1 min: offer to drop it instead
+  const discard = secs < 60 && confirm('Less than a minute tracked. Delete it instead of booking 1 min?');
+  const r = await api('POST', 'timer/stop', { note: $('#t_note').value, ...(discard ? { discard: true } : {}) });
+  if (discard) { S.timer = { running: false }; moneyView = false; toast('Timer discarded'); await loadAll(['entries']); render(); return; } S.timer = { running: false }; moneyView = false; toast('Saved ' + hm((r.entry?.minutes || 0) / 60) + ' h'); await loadAll(['entries']); render(); });
 
 /* ================= TIMESHEET ================= */
 PAGES.time = async (week, uid) => {

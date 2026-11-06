@@ -749,6 +749,12 @@ Vanilla JS as today, numbers only from the server, every label with its derivati
      there is no question.
   6. **Play on today's entries**: every row of the "Today" entry list gets the same ▶ button (`timerPlay`) with the
      entry's project and task (no button for an entry without a project), so earlier work continues in one click.
+  7. **Manual while the timer runs** (owner, 2026-11-06): pressing ✎ Manual while a timer runs switches the card to
+     the manual form, pre-filled from the timer: date = the day of `started`, start = `started` (HH:MM), stop = now,
+     duration from both; description, project and task stay. The timer keeps running on the server until **Add**:
+     Add saves the entry (as manual mode does today) and then calls `POST /api/timer/stop` with `discard: true`, so
+     the time is booked once. Switching back to ⏱ without Add shows the running clock again. A timer started on an
+     earlier day gets stop = 23:59 of that day (an entry ends on its own day).
 
 ## WP4b: the planner behind the API (binding, 2026-11-06)
 

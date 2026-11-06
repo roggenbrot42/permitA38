@@ -1199,9 +1199,15 @@ class TimerUpdateIn(v.CheckedBody):
 
 
 class TimerStopIn(v.CheckedBody):
-    """Stop the running timer and save it as a time entry; the note is optional."""
+    """Stop the running timer and save it as a time entry; the note is optional.
+
+    With discard=true the timer is reset and no entry is written.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     note: v.Note | None = None
+    discard: bool = False
 
 
 class ScenarioIn(v.StrictRecord):
