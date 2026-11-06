@@ -19,9 +19,9 @@ from permita38.core.service.planner import supply
 from permita38.core.service.planner.model import Assignment, Holiday, Owner
 from permita38.core.service.planner.spread import planned_hours as spread_hours
 from permita38.core.service.planner.spread import planned_net as spread_net
+from permita38.core.service.planner.spread import spread as spread_days
 from permita38.core.settings import effective_settings
 
-from . import external_capacity as ext
 from . import planning_warnings as pw
 
 CLOSED_PROJECT = planner_load.CLOSED_PROJECT
@@ -106,15 +106,13 @@ class _Spreader:
             days_off=dict(self._days_off(oid)),
         )
 
-    def figures(self, row: dict) -> tuple[float, Decimal | None]:
-        """(planned hours over the whole period, planned net for a subcontractor row or None)."""
+    def assignment(self, row: dict) -> tuple[Owner, Assignment] | None:
         owner = self.owner(row)
         hours = planner_load._hours(row)
         s, e = calc.d(row.get("start")), calc.d(row.get("end"))
-        external = _is_external(row)
         if owner is None or hours is None or not s or not e:
-            return 0.0, ZERO if external else None
-        asg = Assignment(
+            return None
+        return owner, Assignment(
             id=row.get("id") or "",
             owner_id=owner.id,
             project_id=row.get("project_id") or "",
@@ -125,6 +123,19 @@ class _Spreader:
             total_hours=hours[1],
             cut=None if _active(row) else calc.d(row.get("cancelled_from")),
         )
+
+    def days(self, row: dict) -> dict[date, float]:
+        """Hours per available day of the whole period (a cancelled row is cut)."""
+        pair = self.assignment(row)
+        return spread_days(pair[0], pair[1], self.holiday, None) if pair else {}
+
+    def figures(self, row: dict) -> tuple[float, Decimal | None]:
+        """(planned hours over the whole period, planned net for a subcontractor row or None)."""
+        external = _is_external(row)
+        pair = self.assignment(row)
+        if pair is None:
+            return 0.0, ZERO if external else None
+        owner, asg = pair
         supplier = self.suppliers.get(owner.id) or {}
         rate = planner_load._rate(row.get("rate"), supplier.get("rate"))
         planned = spread_hours(owner, asg, self.holiday)
@@ -190,7 +201,7 @@ class AllocationService:
         if days:
             out["days"] = [
                 {"date": x.isoformat(), "hours": round(h, 6)}
-                for x, h in sorted(ext.allocation_days(supplier or {}, row, cap or self._context()[0]).items())
+                for x, h in sorted((spreader or self._spreader(suppliers=suppliers)).days(row).items())
             ]
         return out
 

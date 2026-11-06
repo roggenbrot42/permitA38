@@ -74,3 +74,12 @@ def planned_net(owner: Owner, a: Assignment, holiday: Holiday, rate: Decimal) ->
         return q2(dec(a.total_hours) * rate)
     exact = sum(spread(owner, a, holiday, None).values())
     return q2(dec(round(exact, 6)) * rate)
+
+
+def weekly_hours(days: dict[date, float]) -> dict[date, float]:
+    """Hours per Monday-Sunday week (keyed by the Monday)."""
+    out: dict[date, float] = {}
+    for d, h in days.items():
+        mon = _monday(d)
+        out[mon] = out.get(mon, 0.0) + h
+    return out

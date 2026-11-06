@@ -3,7 +3,7 @@ subcontractor hints (docs/contracts/subcontractors.md, "Incoming offers", "Finan
 
 Money is computed with ``core/money.py`` only. Planner engine functions are not changed here: the external hours of an
 allocation come from ``planner/spread.py`` (planned_hours, planned_net); the weekly sums over existing rows (which may be
-cancelled) still use ``external_capacity``.
+cancelled) use ``planner/spread.py``.
 """
 
 from __future__ import annotations
@@ -20,8 +20,8 @@ from permita38.core.money import ZERO, dec, q2
 from permita38.core.repository import ID_RE, Repository
 from permita38.core.rights import Scope
 
-from . import external_capacity as ext
 from . import planning_warnings as pw
+from .planner import load as planner_load
 from .planner import spread as sp
 from .planner.model import Assignment, Owner
 from .suppliers import CAPACITY_KIND, default_vat_mode
@@ -200,7 +200,7 @@ class ProcurementService:
             name=supplier.get("name") or supplier["id"],
             kind="subcontractor",
             weekly_hours=0.0,
-            workdays=tuple(ext.workdays(supplier)),
+            workdays=planner_load._workdays(supplier),
             days_off=days_off,
         )
 
@@ -219,7 +219,15 @@ class ProcurementService:
             end=end,
             hours_per_week=None if total else (hpw or None),
             total_hours=total or None,
+            cut=calc.d(row.get("cancelled_from")) if row.get("status") == "cancelled" else None,
         )
+
+    def _row_weeks(self, supplier: dict, row: dict, cap: calc.Capacity) -> dict[date, float]:
+        """Hours per Monday-Sunday week of one allocation row (spread rules S1/S2, cancelled rows cut)."""
+        a = self._assignment(supplier, row)
+        if a is None:
+            return {}
+        return sp.weekly_hours(sp.spread(self._owner(supplier), a, cap.holiday, None))
 
     def _planned_hours(self, plan: dict, supplier: dict) -> float:
         """Capacity suppliers: the hours the plan books (the spreading of the external allocation). Others: the
@@ -509,37 +517,15 @@ class ProcurementService:
         return project
 
     def _first_week_without_demand(self, alloc: dict, today: date) -> builtins.list[dict]:
-        """``allocation.no_demand`` for the first week of a new allocation whose project pool has capacity and no
-        demand (the planner decides; docs/contracts/subcontractors.md, W1 and W14)."""
-        from . import planning as eng  # local import: the planner is the heavy part of the engine
+        """``assignment.no_demand`` of the planner for the new allocation (nothing of the project needs its hours)."""
+        from .planner.service import PlannerService  # local import: the planner is the heavy part
 
-        week = eng.week_start(calc.d(alloc["start"]))
-        world = eng.load(self.store, today)
-        rows, _ = eng.weeks_detail(world, week, 1, None, alloc["project_id"])
-        for p in rows[0]["projects"] if rows else []:
-            if (
-                p["project_id"] == alloc["project_id"]
-                and p["external"]["capacity"] > 1e-9
-                and p["external"]["assigned"] <= 1e-9
-            ):
-                return [
-                    pw.warning(
-                        "allocation.no_demand",
-                        "info",
-                        "weeks",
-                        f"Week of {week.isoformat()}: {_h(p['external']['capacity'])} h are allocated to project "
-                        f"{p['name']} but nothing is planned there.",
-                        dict(
-                            allocation_id=alloc["id"],
-                            project_id=alloc["project_id"],
-                            project_name=p["name"],
-                            week=week.isoformat(),
-                            capacity=p["external"]["capacity"],
-                        ),
-                        confirmable=False,
-                    )
-                ]
-        return []
+        body = PlannerService(self.store).plan(weeks=1, project_id=alloc["project_id"], today=today)
+        return [
+            w
+            for w in body.get("warnings", [])
+            if w.get("code") == "assignment.no_demand" and (w.get("details") or {}).get("assignment_id") == alloc["id"]
+        ]
 
     def _accept_warnings(self, supplier: dict, row: dict, rec: dict) -> builtins.list[dict]:
         cap = self._cap()
@@ -627,9 +613,9 @@ class ProcurementService:
         ]
         totals: dict[date, float] = defaultdict(float)
         for r in [*rows, candidate]:
-            for w, h in ext.weekly_hours(ext.allocation_days(supplier, r, cap)).items():
+            for w, h in self._row_weeks(supplier, r, cap).items():
                 totals[w] += h
-        own = ext.weekly_hours(ext.allocation_days(supplier, candidate, cap))
+        own = self._row_weeks(supplier, candidate, cap)
         out = []
         for w in sorted(own):
             allocated = round(totals[w], 6)
@@ -669,7 +655,7 @@ class ProcurementService:
             rows.append(extra)
         weeks: dict[date, float] = defaultdict(float)
         for r in rows:
-            for w, h in ext.weekly_hours(ext.allocation_days(supplier, r, cap)).items():
+            for w, h in self._row_weeks(supplier, r, cap).items():
                 weeks[w] += h
         counting = sorted(w for w, h in weeks.items() if round(h, 6) >= threshold_h)
         best: builtins.list[date] = []
