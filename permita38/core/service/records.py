@@ -61,9 +61,11 @@ class RecordService:
         if coll in OWN_COLLECTIONS:
             rows = [r for r in rows if r.get("user_id") == me["id"]]
         elif coll == "projects":
-            rows = [_member_project_view(p) for p in rows if _project_visible(p, me)]
+            assigned = self._assigned_projects(me)
+            rows = [_member_project_view(p) for p in rows if _project_visible(p, me, assigned)]
         elif coll == "tasks":
-            visible = {p["id"] for p in self.store.list("projects") if _project_visible(p, me)}
+            assigned = self._assigned_projects(me)
+            visible = {p["id"] for p in self.store.list("projects") if _project_visible(p, me, assigned)}
             rows = [_member_task_view(t) for t in rows if t.get("project_id") in visible]
         return rows
 
@@ -81,13 +83,13 @@ class RecordService:
             if coll in OWN_COLLECTIONS and rec.get("user_id") != me["id"]:
                 raise ServiceError(403, "Forbidden")
             if coll == "projects":
-                if not _project_visible(rec, me):
+                if not _project_visible(rec, me, self._assigned_projects(me)):
                     raise ServiceError(404, "Not found")  # do not reveal that it exists
                 return _member_project_view(rec)
             if coll == "tasks":
                 pid = rec.get("project_id")
                 project = self.store.get("projects", pid) if isinstance(pid, str) and _valid_id(pid) else None
-                if not project or not _project_visible(project, me):
+                if not project or not _project_visible(project, me, self._assigned_projects(me)):
                     raise ServiceError(404, "Not found")
                 return _member_task_view(rec)
         return rec
@@ -181,12 +183,17 @@ class RecordService:
             data.pop("user_ids", None)  # contracts are not assigned to people; the project carries the team
         elif coll == "projects":
             data.pop("personal", None)  # replaced by ``kind``
+            data.pop("member_ids", None)  # replaced by allocations; old clients may still send it
             self._resolve_project_kind(data, old)
             # the extension history is server-managed: never taken from the request
             data.pop("extensions", None)
             if old and old.get("extensions") is not None:
                 data["extensions"] = old["extensions"]
         elif coll == "entries":
+            pid = data.get("project_id")
+            if not full and pid and not (old and old.get("project_id") == pid):
+                if pid not in self._assigned_projects(me):
+                    raise ServiceError(403, "You are not assigned to this project")
             data["minutes"] = int(round(float(data.get("minutes") or 0)))
             data.setdefault("billable", True)
             self._check_day_total(data, old)
@@ -198,6 +205,14 @@ class RecordService:
             data.pop("created", None)
         saved = self.store.save(coll, data)
         return _expense_view(saved) if coll == "expenses" else saved
+
+    def _assigned_projects(self, me: dict) -> set[str]:
+        """Projects the user has an employee allocation on (active or cancelled, any period)."""
+        return {
+            a["project_id"]
+            for a in self.store.list("allocations")
+            if a.get("user_id") == me["id"] and a.get("kind", "employee") == "employee" and a.get("project_id")
+        }
 
     def _resolve_project_kind(self, data: dict, old: dict | None) -> None:
         """``kind`` is derived from the customer only on create; an update that omits it keeps the stored kind."""
@@ -308,8 +323,6 @@ class RecordService:
             raise ServiceError(
                 409, "A numbered invoice cannot be deleted; cancel it instead (keeps the numbers gapless)"
             )
-        if coll == "projects" and rid == "internaladmin":
-            raise ServiceError(409, "The Administration project cannot be deleted; archive it instead")
         if coll == "projects" and any(a.get("project_id") == rid for a in self.store.list("allocations")):
             raise ServiceError(409, "This project has allocations; remove them first")
         sc = _scope(me, coll, "write")
@@ -340,7 +353,7 @@ class RecordService:
 
 
 _ENTRY_BILLING_FIELDS = ("rate", "invoice_id")
-_MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "kind", "member_ids")
+_MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "kind")
 
 
 def _scope(me: dict, coll: str, op: rights.Op) -> Scope:
@@ -355,8 +368,11 @@ def _expense_view(expense: dict) -> dict:
     return expense
 
 
-def _project_visible(project: dict, me: dict) -> bool:
-    return not project.get("member_ids") or me["id"] in project["member_ids"]
+def _project_visible(project: dict, me: dict, assigned: set[str] | None = None) -> bool:
+    """Full access on projects sees all; otherwise only projects the user has an employee allocation on."""
+    if _scope(me, "projects", "read") == Scope.ALL:
+        return True
+    return project.get("id") in (assigned or set())
 
 
 def _member_project_view(project: dict) -> dict:

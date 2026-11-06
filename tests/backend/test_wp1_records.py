@@ -40,6 +40,16 @@ def test_personal_is_refused(boss_client):
 
 def test_member_view_has_kind(boss_client, member_client):
     p = boss_client.post("/api/projects", json={"name": "Own", "kind": "internal"}).json()
+    boss_client.post(
+        "/api/allocations",
+        json={
+            "user_id": member_client.user_id,
+            "project_id": p["id"],
+            "start": "2026-03-02",
+            "end": "2026-03-31",
+            "hours_per_week": 8,
+        },
+    )
     view = {x["id"]: x for x in member_client.get("/api/projects").json()}
     assert view[p["id"]]["kind"] == "internal" and "personal" not in view[p["id"]]
 
@@ -68,15 +78,6 @@ def test_documents_on_internal_project_are_refused(boss_client):
         r = c.post(f"/api/{coll}", json=body)
         assert r.status_code == 409, (coll, r.text)
         assert r.json()["detail"] == "Internal projects cannot have offers, contracts or invoices"
-
-
-def test_administration_project_cannot_be_deleted(boss_client, app):
-    store = app.state.services.store
-    store.save("projects", {"id": "internaladmin", "name": "Administration", "kind": "internal"})
-    r = boss_client.delete("/api/projects/internaladmin")
-    assert r.status_code == 409
-    assert r.json()["detail"] == "The Administration project cannot be deleted; archive it instead"
-    assert store.get("projects", "internaladmin")
 
 
 def test_project_kind_fallback_for_rows_without_kind():

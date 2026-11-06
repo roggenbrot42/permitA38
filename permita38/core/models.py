@@ -57,7 +57,6 @@ class Project(Record):
     status: str = "active"
     color: str | None = None
     notes: str | None = None
-    member_ids: list[str] = []
     offer_id: str | None = None
     start: str | None = None
     end: str | None = None
