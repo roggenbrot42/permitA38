@@ -281,8 +281,8 @@ number guard); the importer reports a row it cannot fix instead of writing it. T
 update the transfer shape check `_allocation_problem` (`transfer/importer.py`) so employee allocations with only
 `total_hours` are restorable. db-guards-v2 part B (PR #99) guards every project link (allocations, tasks, entries,
 contracts, offers, invoices, expenses, incoming offers, trips, timers) and the project ids inside saved scenarios
-(`models.scenario_project_refs(changes)`); WP4's `changes.assignments` (alias of `changes.allocations`) must be added
-to that helper so the delete check and `check-db` keep seeing every project id.
+(`models.scenario_project_refs(changes)`). The scenario field stays `changes.allocations` (no `assignments` alias,
+decided 2026-11-06), so that helper needs no change.
 
 ### Project time sheet (owner, 2026-11-06: "a time sheet / overview for each project: who booked and how much")
 
@@ -368,8 +368,8 @@ Query: `weeks` (1–52, default 12), `project_id` (a project id or `unassigned`;
 
 ### `POST /api/plan/simulate`
 
-Body `{changes: {absences: [...], commitments: [...], assignments: [...]}, weeks, project_id, user_id}`;
-`changes.allocations` is accepted as an alias for one release. Returns the `GET /api/plan` body plus `delta:
+Body `{changes: {absences: [...], commitments: [...], allocations: [...]}, weeks, project_id, user_id}` (the
+existing `ScenarioChanges` shape). Returns the `GET /api/plan` body plus `delta:
 {projects: [{project_id, shortfall_before, shortfall_after, delta}], total}`. Writes nothing.
 
 ### `POST /api/plan/apply`, scenarios, suggestions
@@ -660,6 +660,105 @@ Explanation texts (literal templates; `{h}` via `_fmt`, dates `DD.MM.YYYY`):
   without a project is `"the team's unassigned time"`.
 * weekly: `"{hours_per_week} h per week from {start} to {end}: short {shortfall} h in {n} week|weeks ({weeks})."` (singular for one week) with
   the Mondays as `DD.MM.`, or `"{hours_per_week} h per week from {start} to {end}: covered every week."`.
+
+## WP4b: the planner behind the API (binding, 2026-11-06)
+
+WP4b and WP5 land together on branch `feat/planner-service`: the old endpoints and the old web planner are removed in
+the same merge, so main never has a planner page without its API.
+
+### `planner/load.py` (P1)
+
+```python
+@dataclass
+class Snapshot:
+    today: date
+    holiday: Holiday                      # public holidays of settings["state"] (core/holidays.py)
+    owners: list[Owner]                   # active users and active person-capacity suppliers
+    assignments: list[Assignment]
+    items: list[Item]                     # D1: confirmed contracts, open binding offers
+    bookings: list[Booking]               # all time entries per project and day, dated <= today
+    names: dict[str, str]                 # project id -> name ("(deleted project)" for a missing one)
+    internal: list[dict]                  # [{project_id, name, budget_hours, booked}] of active internal projects
+    invoiced: dict[str, Decimal]          # contract id -> net invoiced (rule below)
+    subcontractor_cost: dict[str, Decimal]  # project id -> sum of planned_net of its subcontractor assignments (M1)
+    skipped: list[dict]                   # damaged legacy rows that were left out: {coll, id, reason}
+
+def load(store: Repository, today: date, busy: BusyTimeProvider | None = None, changes: dict | None = None) -> Snapshot
+```
+* Owners: users with `active` true; kind `boss` for role boss, else `employee`; `days_off` from absences (kind
+  vacation -> "vacation", sick -> "sick", else "other"); `busy` from the provider in out-of-office mode (D10:
+  `BusyTimeProvider.busy_hours(..., ooo_only=True)` counts only out-of-office and all-day blocks); `limits` of a boss
+  from the setting `work_limits.<user_id>` (P8; defaults when missing). Suppliers of kind `person-capacity` with
+  `active` true become kind `subcontractor`, `weekly_hours` 0, their workdays and `unavailable` windows as
+  `days_off` "unavailable".
+* Assignments: allocation rows with status `active`, and `cancelled` ones cut to the day before `cancelled_from`;
+  `project_kind` from the project. `booked` of a total assignment = the owner's entries on the project inside the
+  period, dated <= today.
+* Items: contracts with status `confirmed`; offers with status `sent`, a plan with start and end, no contract made from
+  them and `valid_until` not passed. An offer plan without hours takes the sum of its `h` lines as `total_hours`
+  (like accepting). Rate: the contract's/plan's rate, else the project's, else the customer's, else `default_rate`.
+  `win` = plan `win_probability` / 100, else the setting `planning_default_win_probability` / 100.
+* Damaged rows (bad dates, end before start, no or both hour fields, an allocation without project or owner) are
+  skipped and listed in `skipped`, never raised.
+* `changes` (a `ScenarioChanges` dict) is applied in memory exactly like today's `apply_changes` /
+  `apply_allocation_changes`: absences added/changed/removed, commitment overrides of period and hours, allocation
+  rows added/changed/removed.
+* `invoiced`: net (`calc.invoice_amounts`) of the invoices of the contract's project that are not drafts or cancelled,
+  attributed to the contract whose period contains the invoice date (earliest end first); others are not counted.
+
+### `planner/service.py` (P2) and `planner/suggest.py` (P3)
+
+`PlannerService(store, busy)` replaces `PlanningService` (same method names where they exist):
+* `plan(weeks, user_id=None, project_id=None, today=None) -> dict`: the `GET /api/plan` body. The week rows cover
+  the Monday of today's week plus `weeks` weeks; the supply for `cover()` is built from today to
+  `max(end of those weeks, latest item end)` (no item is cut off). Warnings: `supply.warnings`, `verdict_warnings`,
+  `internal.over_budget`, and `assignment.no_demand` (a subcontractor assignment of a customer project whose items
+  need nothing in its period). Also returns `skipped` (damaged rows) for the boss's eyes.
+* `simulate(changes, weeks, user_id=None, project_id=None, today=None)`: the same body for the world with `changes`,
+  plus `delta` as in the API contract (shortfall_contracts per project before and after, and the total).
+* `apply`, `list_scenarios`, `get_scenario`, `save_scenario`, `delete_scenario`, `apply_scenario`, `entitlement`,
+  `extend_project`, `cover_plan`, `project_timeline`: ported from `plan_service.py` with unchanged behaviour (they do
+  not depend on the old engine except `entitlement`, which uses the snapshot's absences and holidays).
+* `check_offer(draft, exclude_id=None)`: `offer.shortfall` of the draft as an offer item next to the others, plus
+  `planning_warnings.document_warnings` as today. `warnings_for(coll, rec)`: as today, plus `contract.shortfall` for a
+  saved contract and `offer.shortfall` for a saved offer.
+* `planner/suggest.py`: `suggest_vacation(user_id, days, window_from, window_to, changes)` ranks windows of `days`
+  working days by the increase of the total contract shortfall, then by bridge days (as today);
+  `suggest_start(hours, deadline, earliest, project_id, changes)` = the first available start from which an offer of
+  `hours` total over start..deadline has no shortfall, or `null`; `what_must_move(plan)` = for an offer draft with a
+  shortfall, the smallest shift (in days) of one other open offer of the same project that removes it, else the
+  largest `total_hours` that fits. Each returns the body the current endpoint returns, without the `user_ids` input.
+
+### API (P4)
+
+* `GET /api/plan` (area `planning` read) and `POST /api/plan/simulate` as in "API contract"; the other `/api/plan/*`
+  paths keep their bodies (SuggestStartIn without `user_ids`); `GET /api/forecast` and `GET /api/plan/day-table` are
+  removed. `services.planner` replaces `services.planning` in deps.py, routers/planning.py, routers/sales.py and
+  routers/records.py; `sales.py` imports `cover_plan` from the new service.
+
+### Allocations API (P5), procurement (P6), work limits (P8)
+
+* P5: `AllocationIn` = `user_id` or `supplier_id`, `project_id`, `start`, `end`, `hours_per_week` (AllocHours) or
+  `total_hours` (PositiveTotalHours), `rate` (Rate; required for a supplier, refused for an employee). PUT/DELETE of
+  subcontractor rows under `procurement` write, employee rows under `planning` write (core/rights.py, the EXPECTED
+  table of tests/backend/test_rbac.py, docs/roles.md); a row with `incoming_offer_id` can be cancelled and edited but
+  not deleted. `planned_hours` / `planned_net` from `planner/spread.py`. Save warnings `assignment.over_capacity`
+  (from `supply.warnings` for that person and period), `assignment.overlap`, `assignment.differs_from_offer` (E6).
+  `POST /api/allocations/bootstrap` is removed.
+* P6: procurement accept of a capacity offer always books `total_hours` = the sum of its `h` lines (E6; 422 rules of
+  the step-0 decisions); its figures and `_planned_hours` use `planner/spread.py`; `transfer/importer.py`
+  `_allocation_problem` accepts employee rows with only `total_hours`.
+* P8: `GET/PUT /api/settings/work-limits` (any signed-in boss, for themself; model `WorkLimitsIn`, rules of S6),
+  stored in the setting `work_limits.<user_id>`; saving a user (employee) with `weekly_hours` above 48 returns the
+  warning `user.weekly_hours_above_law`.
+* P7 (last): delete `core/service/planning.py`, `plan_service.py`, `external_capacity.py`, the old functions of
+  `planning_warnings.py` (keep `warning`, `_fmt`, `document_warnings`, `project_warnings`, `budget_warning`,
+  `plan_hours`, `line_hours`), `calc.forecast`, and their tests (test_planning.py, test_planner_per_project.py,
+  test_planner_external.py, test_utilisation_allocated.py, test_planning_spread.py, test_external_capacity.py and the
+  four skipped user_ids tests); rewrite tests/backend/randomized/test_planning_invariants.py for the new engine.
+
+Order: P1, then P2 and P5/P6/P8 in parallel, then P3 and P4, then P7, then WP5 (web) and WP6 (docs). Review tier:
+Full (one review after P7 over the whole branch).
 
 ## Work packages (fresh Sonnet agents, one each; backend and web UI in parallel against the contract)
 
