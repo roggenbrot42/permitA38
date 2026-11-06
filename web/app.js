@@ -115,9 +115,10 @@ function parseDur(s) {            // "1:30", "1.5", "90m", "2h 15m" -> minutes
 // currentId is the stored project of a record: when it belongs to another customer (legacy data) it stays listed,
 // marked, so it is not silently lost; no other mismatching project is offered. billable = for an offer or invoice:
 // internal projects are never billed, so they are left out (a stored one is kept, marked, like a mismatch).
+const isInt = p => (p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal';
+const projIsInternal = id => { const p = id && (S.d.projects || []).find(x => x.id === id); return !!p && isInt(p); };
 const projectOptions = (withNone = true, customerId = undefined, currentId = null, billable = false) => {
   const live = (S.d.projects || []).filter(p => p.status !== 'archived');
-  const isInt = p => (p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal';
   const label = p => p.name + (isInt(p) ? ' (internal)' : '');
   const fits = p => (!billable || !isInt(p)) && (customerId === undefined || !p.customer_id || p.customer_id === customerId);
   const out = [...(withNone ? [['', '— no project —']] : []), ...live.filter(fits).map(p => [p.id, label(p)])];
@@ -161,6 +162,15 @@ function entryForm(e = {}, after) {
   });
   $('#f_project_id').onchange = () => { $('#f_task_id').innerHTML = taskOptions($('#f_project_id').value).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join(''); };
   if (vals.task_id) $('#f_task_id').value = vals.task_id;
+  // internal projects are never billable: the box is unticked and locked while one is chosen, ticked and free otherwise
+  const bill = $('#f_billable'), syncBill = (reset) => {
+    const internal = projIsInternal($('#f_project_id').value);
+    bill.disabled = internal; bill.title = internal ? 'Internal projects are never billable' : '';
+    if (internal) bill.checked = false; else if (reset) bill.checked = true;
+  };
+  const taskSync = $('#f_project_id').onchange;
+  $('#f_project_id').onchange = ev => { taskSync(ev); syncBill(true); };
+  syncBill(false);
 }
 
 /* ---------- layout + router ---------- */
@@ -460,7 +470,7 @@ A.timerAdd = timerOnce('add', async () => {
   if (s === null || e === null) throw new Error('Enter start and stop times');
   if (e <= s) throw new Error('Stop must be after start');
   // no guard() wrapper here: a failed save throws to the click handler, which toasts it, and the form keeps the typed values
-  await api.upsert('entries', { user_id: S.me.id, date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: true });
+  await api.upsert('entries', { user_id: S.me.id, date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: !projIsInternal(projIdOrThrow()) });
   toast('Saved');
   await loadAll(['entries']);
   render();
