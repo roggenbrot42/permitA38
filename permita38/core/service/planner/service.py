@@ -18,6 +18,7 @@ from permita38.core.models import scenario_project_refs
 from permita38.core.repository import Repository
 from permita38.core.service import planning_warnings as pw
 from permita38.core.service.busy import BusyTimeProvider, NullBusyProvider
+from permita38.core.service.planner import suggest as suggest_mod
 from permita38.core.service.planner import supply as supply_mod
 from permita38.core.service.planner.cover import ProjectVerdict, cover
 from permita38.core.service.planner.load import (
@@ -330,6 +331,45 @@ class PlannerService:
         out = pw.project_warnings(project, entries, plans, customer_linked=bool(cust))
         tracked = sum(calc.fnum(e.get("minutes")) for e in entries) / 60.0
         return out + pw.budget_warning(project, tracked)
+
+    # ------------------------------------------------------------------ suggestions
+    def suggest_vacation(
+        self,
+        user_id: str,
+        days: int,
+        window_from: date,
+        window_to: date,
+        changes: dict | None = None,
+        limit: int = 5,
+        today: date | None = None,
+    ) -> dict:
+        snap = load(self.store, today or date.today(), self.busy, changes)
+        return suggest_mod.suggest_vacation(snap, user_id, days, window_from, window_to, limit)
+
+    def suggest_start(
+        self,
+        hours: float,
+        deadline: date,
+        earliest: date | None = None,
+        project_id: str | None = None,
+        changes: dict | None = None,
+        today: date | None = None,
+    ) -> dict:
+        """First start of an offer of ``hours`` until ``deadline`` without shortfall (``project_id`` None or
+        ``"unassigned"``: the team's unassigned time)."""
+        scope = self._check_scope(project_id)
+        snap = load(self.store, today or date.today(), self.busy, changes)
+        settings = effective_settings(self.store.settings())
+        rate = _rate(None, self._reference_rate(scope if scope != UNASSIGNED else None, None, settings))
+        return suggest_mod.suggest_start(snap, hours, deadline, earliest, None if scope == UNASSIGNED else scope, rate)
+
+    def what_must_move(self, plan: dict, today: date | None = None) -> dict:
+        settings = effective_settings(self.store.settings())
+        item = self._draft_item({"plan": plan, "project_id": plan.get("project_id")}, suggest_mod.DRAFT_ID, settings)
+        if item is None:
+            raise ServiceError(422, "The plan needs a period and hours per week or total hours")
+        snap = load(self.store, today or date.today(), self.busy)
+        return suggest_mod.what_must_move(snap, item)
 
     # ------------------------------------------------------------------ entitlement
     def entitlement(self, user_id: str, year: int, today: date | None = None) -> dict:
