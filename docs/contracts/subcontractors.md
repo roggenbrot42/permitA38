@@ -1,3 +1,5 @@
+> Superseded by docs/specs/project-centric-planning.md (2026-11-06).
+
 # API contract: suppliers, subcontractors and incoming offers
 
 Source of truth for the backend, the web UI and the tests, so that they can be built in parallel. Behaviour, rules and

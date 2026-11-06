@@ -45,7 +45,7 @@ and on your own row.
 | `projects` | Projects and tasks | all / all | limited / none | all / none |
 | `customers` | Customers (and the Impressum lookup) | all / all | none / none | all / none |
 | `contracts` | Contracts | all / all | none / none | all / none |
-| `planning` | Planning: forecast, what-if scenarios, vacation planner | all / all | none / none | none / none |
+| `planning` | Planning: projects, weeks, warnings, what-if scenarios, vacation planner | all / all | none / none | none / none |
 | `offers` | Offers | all / all | none / none | all / none |
 | `invoices` | Invoices | all / all | none / none | all / none |
 | `expenses` | Expenses | all / all | none / none | all / all |

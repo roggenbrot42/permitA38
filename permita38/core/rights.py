@@ -38,7 +38,7 @@ AREAS: dict[str, str] = {
     "projects": "Projects and tasks",
     "customers": "Customers (and the Impressum lookup)",
     "contracts": "Contracts",
-    "planning": "Planning: forecast, what-if scenarios, vacation planner",
+    "planning": "Planning: projects, weeks, warnings, what-if scenarios, vacation planner",
     "offers": "Offers",
     "invoices": "Invoices",
     "expenses": "Expenses",
