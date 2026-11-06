@@ -26,7 +26,8 @@ def frozen_today(monkeypatch):
 
 @pytest.fixture
 def project(boss_client):
-    r = boss_client.post("/api/projects", json={"name": "Demo project P"})
+    cu = boss_client.post("/api/customers", json={"name": "Demo project P Client (Demo)"}).json()
+    r = boss_client.post("/api/projects", json={"name": "Demo project P", "customer_id": cu["id"]})
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -127,20 +128,20 @@ def test_w1_offer_figures_and_accept_creates_the_external_allocation(boss_client
             "2026-03-26",
         ]
     ]
-    # W1: exactly the one info warning of the contract (the plan books the 80 h, so no hours mismatch)
+    # W1: exactly the one info warning of the planner (the plan books the 80 h, so no hours mismatch)
     assert body["planning_warnings"] == [
         {
-            "code": "allocation.no_demand",
+            "code": "assignment.no_demand",
             "severity": "info",
-            "field": "weeks",
+            "field": None,
             "confirmable": False,
-            "message": "Week of 2026-03-02: 20 h are allocated to project Demo project P but nothing is planned there.",
+            "message": "Example Freelance Studio (Demo) is assigned 80 h to Demo project P from 02.03.2026 to "
+            "27.03.2026, but no contract or offer of the project needs hours in that period.",
             "details": {
-                "allocation_id": alloc["id"],
+                "assignment_id": alloc["id"],
                 "project_id": project["id"],
-                "project_name": "Demo project P",
-                "week": "2026-03-02",
-                "capacity": 20.0,
+                "supplier_id": alloc["supplier_id"],
+                "planned_hours": 80.0,
             },
         }
     ]

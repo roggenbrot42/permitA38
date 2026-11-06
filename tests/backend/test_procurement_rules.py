@@ -7,7 +7,7 @@ from datetime import date
 import pytest
 
 import permita38.api.routers.incoming_offers as offers_router
-import permita38.core.service.plan_service as plan_module
+import permita38.core.service.planner.service as plan_module
 import permita38.core.service.procurement as procurement_module
 
 from .test_api_tokens import bearer, new_token
@@ -121,7 +121,7 @@ def test_unaccept_never_deletes_an_employee_allocation(boss_client, store):
     offer = post(
         boss_client,
         "/api/incoming-offers",
-        w1_offer(s["id"], p["id"], plan={"start": "2026-03-09", "end": "2026-03-27", "hours_per_week": 20.0}),
+        w1_offer(s["id"], p["id"], plan={"start": "2026-03-02", "end": "2026-03-27", "hours_per_week": 20.0}),
         201,
     ).json()
     acc = post(boss_client, f"/api/incoming-offers/{offer['id']}/accept", {}, 200).json()

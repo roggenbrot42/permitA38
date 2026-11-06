@@ -522,7 +522,7 @@ class ProcurementService:
 
         body = PlannerService(self.store).plan(weeks=1, project_id=alloc["project_id"], today=today)
         return [
-            w
+            {**w, "confirmable": False}
             for w in body.get("warnings", [])
             if w.get("code") == "assignment.no_demand" and (w.get("details") or {}).get("assignment_id") == alloc["id"]
         ]
