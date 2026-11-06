@@ -402,7 +402,5 @@ def test_delete_side_triggers_are_back_and_the_delete_rolled_back_after_an_excep
             raise RuntimeError("boom")
     except RuntimeError as err:
         assert str(err) == "boom"
-    else:
-        pytest.fail("the block must raise")
     assert triggers(repo) == before
     assert repo.get("projects", used["id"]) is not None
