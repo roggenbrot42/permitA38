@@ -704,6 +704,9 @@ class ApiMachine(RuleBasedStateMachine):
         if (g := self.gate(s)) is not None:
             assert r.status_code == g
             return
+        if self.unknown_project(body):
+            self.assert_unknown_project(r)
+            return
         assert r.status_code == 200 and r.json()["running"] is True and r.json()["note"] == body["note"]
         uid = s.user_id
         if self.timers.get(uid):  # starting while running stops the old one and books it
@@ -769,6 +772,30 @@ class ApiMachine(RuleBasedStateMachine):
         proj = self.m["projects"].get(pid)
         return bool(proj and proj.get("customer_id") and proj["customer_id"] != cid)
 
+    def unknown_project(self, body, old=None) -> bool:
+        """Mirror of the reference check: a project_id that is new or changed vs the stored record must name a live
+        project (422 "Unknown project"); an unchanged id is not re-checked, null keeps the stored value."""
+        pid = body.get("project_id")
+        if pid is None or (old and old.get("project_id") == pid):
+            return False
+        return pid not in self.m["projects"]
+
+    def assert_unknown_project(self, r):
+        assert r.status_code == 422 and r.json() == {"detail": "Unknown project"}, r.text
+
+    def project_users(self, pid) -> bool:
+        """Does anything in the model still reference the project (so that deleting it is refused)?"""
+        return (
+            any(
+                r.get("project_id") == pid
+                for c in ("entries", "contracts", "offers", "invoices", "tasks", "expenses")
+                for r in self.m[c].values()
+            )
+            or any(o.get("project_id") == pid for o in self.inc.values())
+            or any(a["project_id"] == pid for a in self.allocs.values())
+            or any(t and t.get("project_id") == pid for t in self.timers.values())
+        )
+
     def assert_refused_by_rule(self, r):
         assert r.status_code == 422 and r.json() == {"detail": "Project belongs to another customer"}, r.text
 
@@ -788,6 +815,9 @@ class ApiMachine(RuleBasedStateMachine):
         r = self.call("POST", f"/{coll}", s, json=body)
         if (g := self.gate(s, boss_only=coll not in MEMBER_OWN)) is not None:
             assert r.status_code == g, (coll, r.status_code, r.text)
+            return
+        if coll in ("entries", "contracts", "tasks", "expenses") and self.unknown_project(body):
+            self.assert_unknown_project(r)
             return
         if self.mismatch(coll, body):
             self.assert_refused_by_rule(r)
@@ -824,6 +854,9 @@ class ApiMachine(RuleBasedStateMachine):
         if coll == "entries" and old.get("invoice_id") and me["role"] != "boss":
             assert r.status_code == 403
             return
+        if coll in ("entries", "contracts", "tasks", "expenses") and self.unknown_project(body, old):
+            self.assert_unknown_project(r)
+            return
         if self.mismatch(coll, body, old):
             self.assert_refused_by_rule(r)
             return
@@ -856,8 +889,10 @@ class ApiMachine(RuleBasedStateMachine):
             if not own:
                 assert r.status_code == 403
                 return
-        if coll == "projects" and old is not None and any(a["project_id"] == rid for a in self.allocs.values()):
-            assert r.status_code == 409  # a project with allocations cannot be deleted
+        if coll == "projects" and old is not None and self.project_users(rid):
+            # a project still used by entries, contracts, offers, invoices, tasks, expenses, incoming offers, allocations or a
+            # timer cannot be deleted (the machine never creates trips, saved scenarios or legacy timers)
+            assert r.status_code == 409 and "archive it instead" in r.text, r.text
             return
         assert r.status_code == 204
         if old is None:
@@ -919,6 +954,9 @@ class ApiMachine(RuleBasedStateMachine):
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
             return
+        if self.unknown_project(body):
+            self.assert_unknown_project(r)
+            return
         if self.mismatch(coll, body):
             self.assert_refused_by_rule(r)
             return
@@ -958,6 +996,9 @@ class ApiMachine(RuleBasedStateMachine):
         days.add(date.today().isoformat())
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
+            return
+        if self.unknown_project(body, self.m[coll][rid]):
+            self.assert_unknown_project(r)
             return
         if self.mismatch(coll, body, self.m[coll][rid]):
             self.assert_refused_by_rule(r)
@@ -1179,6 +1220,9 @@ class ApiMachine(RuleBasedStateMachine):
             if k in o
         }
         body.update(date=TODAY.isoformat(), offer_id=rid)  # sent, but the server ignores it and stamps its own date
+        if self.unknown_project(body):  # the offer's project vanished
+            self.assert_unknown_project(r)
+            return
         if self.mismatch("invoices", body):  # a legacy offer whose project moved to another customer
             self.assert_refused_by_rule(r)
             return
@@ -1604,7 +1648,9 @@ class ApiMachine(RuleBasedStateMachine):
                     assert r.status_code == 422 and r.json() == {"detail": "A capacity offer needs a project"}
                     return
                 if project is None:  # the project was deleted after the offer named it
-                    assert r.status_code == 422 and r.json() == {"detail": "Unknown project"}
+                    assert r.status_code == 422 and r.json() == {
+                        "detail": "The offer's project no longer exists; set another project on the offer first."
+                    }
                     return
                 if old["hours"] == 0:
                     assert r.status_code == 422 and r.json() == {"detail": "A capacity offer needs an hour line"}
@@ -1621,7 +1667,9 @@ class ApiMachine(RuleBasedStateMachine):
                 pid = old["project_id"]
                 project = self.m["projects"].get(pid) if pid else None
                 if pid and project is None:  # a named project must still exist (a flat offer may name none)
-                    assert r.status_code == 422 and r.json() == {"detail": "Unknown project"}
+                    assert r.status_code == 422 and r.json() == {
+                        "detail": "The offer's project no longer exists; set another project on the offer first."
+                    }
                     return
                 if project is not None and project["status"] in ("done", "archived"):
                     assert r.status_code == 409 and r.json() == {"detail": "The project is closed"}

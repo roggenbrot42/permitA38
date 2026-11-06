@@ -96,14 +96,17 @@ Notes:
 - **Services check first; the trigger is the backstop.** Step-0 (2026-11-05) found:
   - `RecordService.delete` of a project checks only allocations (`records.py:288`). It must also check entries,
     contracts, offers and invoices (and a running timer, see below) and refuse with one 409 that names what still uses
-    the project ("This project has 12 time entries and 1 invoice; archive it instead"). **Behaviour change:** today such a
+    the project ("This project is still used by <counts>; archive it instead.", counts in the order allocations, time entries, contracts, offers, invoices, running timer, e.g. "12 time entries and 1 invoice"). **Behaviour change:** today such a
     delete succeeds and leaves those rows pointing at nothing. Archiving (`status: archived`) is the way out. Confirmed by the maintainer 2026-11-05 ("I love database consistency").
   - `auth.delete_user` and `suppliers.delete` already check allocations (suppliers more); nothing to add.
   - `records._write` has no existence check for `project_id` on entries, contracts, offers and invoices
     (`check_project_customer` passes when the project is missing). Add a 422 "Unknown project" when the value is new or
     changed and the project does not exist, mirroring the trigger (an unchanged legacy value is not re-checked).
   - Timers: `start_timer` validates the project (422 "Unknown project"); deleting a project that a running timer uses
-    is refused by the project delete check, so `stop_timer` cannot hit the guard.
+    is refused by the project delete check. A timer from before this version may still point at a project deleted
+    back then: `stop_timer` (also run by `start_timer`) then saves the entry without `project_id` (and without
+    `task_id` when the task belonged to that project or is gone), keeping the tracked time, and logs one INFO line
+    (ids only), so the guard cannot fire.
   - `offer_to_invoice` copies the offer's `project_id`; when that project is gone, refuse with a 422 that says so,
     before the insert.
 - **Import undo:** a batch holds only customers, invoices, offers and expenses (no projects, users, suppliers, no
@@ -112,11 +115,32 @@ Notes:
 - **Restore** (transfer import, `import-json`): add the kind `reference` to `RESTORE_SUSPENDED`; suspending it drops the
   insert-side **and** the delete-side triggers. Write order: the transfer import writes `users` before the collections
   (today users come last, after allocations); `import-json` order is already fine. After writing, `check-db`'s `ref.*`
-  findings become import warnings, as v1 does for dates. The number guard stays unsuspendable.
+  findings become import warnings, as v1 does for dates; for `ref.dangling` only the guarded (table, column)
+  pairs above count (exact code match, so `ref.dangling_audit` and unguarded columns such as `invoices.customer_id`
+  are not reported as restore warnings). The number guard stays unsuspendable.
 - **Indexes:** add `idx_contracts_project`, `idx_offers_project`, `idx_invoices_project` (the delete trigger looks up
   referencing rows; allocations and entries are indexed already).
 - `"unassigned"` (planner scope) is never stored in `allocations.project_id`; if it can be, the guard excludes it
   explicitly and the step-0 list says where.
+
+
+### Every link to a project (maintainer decision 2026-11-06)
+
+"No inconsistent projects, rather archive if deleting with dangling references isn't possible." So **no cascades**:
+a project can be deleted only when nothing points at it; otherwise the delete is refused and the user archives it.
+
+- Reference guards (same migration 0017, still unreleased) also on `tasks.project_id`, `expenses.project_id`,
+  `incoming_offers.project_id`, `trips.project_id`, `timers.project_id`; lookup indexes
+  `idx_incoming_offers_project`, `idx_trips_project`, `idx_timers_project` (tasks and expenses are indexed already).
+- `records._write`: "Unknown project" 422 also for tasks and expenses (new or changed value only). Trips and incoming
+  offers keep their existing check on every write (stricter; a legacy dangling trip must get a valid project first).
+- Project delete counts, in this order: allocations, tasks, time entries, contracts, offers, invoices, expenses,
+  incoming offers, trips, saved planning scenarios, running timer. Planning scenarios store project ids in the JSON
+  `plan_scenarios.changes` (no trigger can see them): the service counts them, and `check-db` reports a scenario whose
+  project is gone (`ref.dangling`, warning).
+- Stopped timers normally carry no project (stop rewrites the row). A legacy stopped timer that still has one does not
+  block the delete: the delete clears that timer's `project_id`/`task_id` in the same transaction (the row has no
+  meaning; this is not a cascade of data).
 
 ## 4. Notes for the planner's migration (part C)
 

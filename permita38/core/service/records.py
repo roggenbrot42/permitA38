@@ -4,6 +4,7 @@ from decimal import Decimal
 
 from permita38.core import calc, rights
 from permita38.core.errors import ServiceError
+from permita38.core.models import scenario_project_refs
 from permita38.core.money import dec
 from permita38.core.repository import COLLECTIONS, ID_RE, Repository
 from permita38.core.rights import Scope
@@ -135,6 +136,8 @@ class RecordService:
             # time always belongs to a person: without one it would count for the project and as unbilled work but
             # appear in nobody's timesheet, Today list or weekly hours (an update without user_id keeps the owner)
             data["user_id"] = (old or {}).get("user_id") or me["id"]
+        if coll in _PROJECT_REF_COLLECTIONS:
+            self._check_project_exists(data, old)
         if coll in PROJECT_CUSTOMER_COLLECTIONS:
             check_project_customer(self.store, data, old)
         if coll in ("offers", "invoices"):
@@ -270,6 +273,51 @@ class RecordService:
         calc.doc_totals(doc, st)  # fills line amounts
         return {k: v for k, v in doc.items() if v is not None}
 
+    def _check_project_exists(self, data: dict, old: dict | None) -> None:
+        """A new or changed project reference must point to an existing project; an unchanged (legacy) one is left."""
+        if "project_id" not in data:
+            return
+        pid = data["project_id"]
+        if not pid or (old is not None and old.get("project_id") == pid):
+            return
+        if not _valid_id(pid) or not self.store.get("projects", pid):
+            raise ServiceError(422, "Unknown project")
+
+    def _project_usage(self, rid: str) -> list[tuple[int, str, str]]:
+        """What still uses a project: (count, singular, plural) in the order of the refusal message."""
+        find = self.store.find
+
+        def count(coll: str) -> int:
+            return len(find(coll, project_id=rid))
+
+        scenarios = sum(
+            1
+            for sc in self.store.list("plan_scenarios")
+            if any(pid == rid for _, pid in scenario_project_refs(sc.get("changes")))
+        )
+        running = [t for t in find("timers", project_id=rid) if t.get("running")]
+        found = [
+            (count("allocations"), "allocation", "allocations"),
+            (count("tasks"), "task", "tasks"),
+            (count("entries"), "time entry", "time entries"),
+            (count("contracts"), "contract", "contracts"),
+            (count("offers"), "offer", "offers"),
+            (count("invoices"), "invoice", "invoices"),
+            (count("expenses"), "expense", "expenses"),
+            (count("incoming_offers"), "incoming offer", "incoming offers"),
+            (count("trips"), "trip", "trips"),
+            (scenarios, "planning scenario", "planning scenarios"),
+            (len(running), "running timer", "running timers"),
+        ]
+        return [f for f in found if f[0]]
+
+    def _refuse_used_project(self, rid: str) -> None:
+        used = self._project_usage(rid)
+        if used:
+            parts = [f"{n} {one if n == 1 else many}" for n, one, many in used]
+            names = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+            raise ServiceError(409, f"This project is still used by {names}; archive it instead.")
+
     def delete(self, me: dict, coll: str, rid: str):
         self._check(coll)
         old = self.store.get(coll, rid) if _valid_id(rid) else None
@@ -279,8 +327,6 @@ class RecordService:
             raise ServiceError(
                 409, "A numbered invoice cannot be deleted; cancel it instead (keeps the numbers gapless)"
             )
-        if coll == "projects" and any(a.get("project_id") == rid for a in self.store.list("allocations")):
-            raise ServiceError(409, "This project has allocations; remove them first")
         sc = _scope(me, coll, "write")
         if sc != Scope.ALL:
             own = (
@@ -292,6 +338,12 @@ class RecordService:
             if not own:
                 raise ServiceError(403, "Forbidden")
         with self.store.transaction():
+            if coll == "projects":
+                self._refuse_used_project(rid)
+                for t in self.store.find("timers", project_id=rid):  # legacy stopped timers: the row has no meaning
+                    t.pop("project_id", None)
+                    t.pop("task_id", None)
+                    self.store.save("timers", t)
             if coll == "invoices":  # release billed time entries
                 for e in self.store.list("entries"):
                     if e.get("invoice_id") == rid:
@@ -308,6 +360,7 @@ class RecordService:
         return [{"id": u["id"], "name": u.get("name"), "role": rights.normalize_role(u.get("role"))} for u in users]
 
 
+_PROJECT_REF_COLLECTIONS = frozenset({"entries", "contracts", "offers", "invoices", "tasks", "expenses"})
 _ENTRY_BILLING_FIELDS = ("rate", "invoice_id")
 _MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
 

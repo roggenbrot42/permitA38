@@ -26,6 +26,7 @@ RESTORE_SUSPENDED = {
     "max_days",
     "range",
     "implies",
+    "reference",
 }
 _BASE_FINDING_CODES = ("format.date", "range.negative", "state.period_reversed")
 
@@ -48,6 +49,16 @@ class _RestoreFindingCodes(Sequence):
 
 
 RESTORE_FINDING_CODES = _RestoreFindingCodes()
+
+
+def restore_findings(findings: Iterable[Any]) -> list[Any]:
+    """The check-db findings a restore reports as warnings. ``ref.dangling`` counts only for the (collection, field)
+    pairs of reference guards in ``schema.GUARDS`` (read each time); the code is matched exactly, so
+    ``ref.dangling_audit`` and unguarded columns (e.g. invoices.customer_id) are never included."""
+    guarded = {(g.table, g.columns[0]) for g in _schema.GUARDS if g.kind == "reference"}
+    return [f for f in findings if f.code != "ref.dangling" or (f.collection, f.field) in guarded]
+
+
 NUMBERED = ("invoices", "offers")
 
 _FILE_RE = re.compile(r"^[0-9a-z]{6,32}\.json$")
@@ -193,7 +204,7 @@ def import_json(repo: Repository, old_dir: Path) -> ImportReport:
                 report.imported[coll], report.skipped[coll] = imported, skipped
         from permita38.core.service.integrity import IntegrityService
 
-        for finding in IntegrityService(repo).run(only=RESTORE_FINDING_CODES):
+        for finding in restore_findings(IntegrityService(repo).run(only=RESTORE_FINDING_CODES)):
             report.warnings.append(finding.as_dict())
     if report.warnings:
         log.warning(

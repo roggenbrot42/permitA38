@@ -355,7 +355,9 @@ def _row_in(table):
     def fill(store):
         row = {"name": "x"}
         if table == "allocations":
-            row = {"user_id": "boss0001", "project_id": "proj0001"}  # the table needs exactly one owner
+            # the table needs exactly one owner; the references point at rows that exist (reference guards)
+            project = store.save("projects", {"name": "Demo project"})
+            row = {"user_id": store.list("users")[0]["id"], "project_id": project["id"]}
         store.save(table, row)
         return f"{table}: 1"
 
