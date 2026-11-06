@@ -2,6 +2,7 @@
 
 import logging
 import time as _time
+from datetime import date, timedelta
 
 from permita38.core import calc, rights
 from permita38.core.errors import ServiceError
@@ -81,7 +82,65 @@ class TimeService:
             if not found:
                 raise ServiceError(404, "User not found")
             target = found
-        return calc.dashboard(self.store, target)
+        today = date.today()
+        out = calc.dashboard(self.store, target, today)
+        out["projects"] = self._project_hours(target["id"], today)
+        return out
+
+    def _project_hours(self, user_id: str, today: date) -> list[dict]:
+        """Planned (S1, whole period) and booked hours of one person per project, today and in the ISO week."""
+        from permita38.core.service.planner import load as planner_load
+        from permita38.core.service.planner.spread import spread
+
+        monday = today - timedelta(days=today.weekday())
+        sunday = monday + timedelta(days=6)
+        snap = planner_load.load(self.store, today)
+        owner = next((o for o in snap.owners if o.id == user_id), None)
+        rows: dict[str, dict] = {}
+
+        def row(pid: str) -> dict:
+            return rows.setdefault(
+                pid, {"planned_today": 0.0, "planned_week": 0.0, "booked_today": 0.0, "booked_week": 0.0}
+            )
+
+        if owner is not None:
+            for a in snap.assignments:
+                if a.owner_id != user_id:
+                    continue
+                last = a.end if a.cut is None else min(a.end, a.cut - timedelta(days=1))
+                if a.start > sunday or last < monday:
+                    continue
+                r = row(a.project_id)
+                for day, h in spread(owner, a, snap.holiday, None).items():
+                    if monday <= day <= sunday:
+                        r["planned_week"] += h
+                    if day == today:
+                        r["planned_today"] += h
+        for e in self.store.list("entries"):
+            pid, day = e.get("project_id"), calc.d(e.get("date"))
+            if e.get("user_id") != user_id or not pid or day is None or not monday <= day <= sunday:
+                continue
+            r = row(pid)
+            hours = calc.fnum(e.get("minutes")) / 60.0
+            r["booked_week"] += hours
+            if day == today:
+                r["booked_today"] += hours
+        projects = {p["id"]: p for p in self.store.list("projects")}
+        out = []
+        for pid, r in rows.items():
+            p = projects.get(pid) or {}
+            vals = {k: round(v, 2) for k, v in r.items()}
+            out.append(
+                {
+                    "project_id": pid,
+                    "name": p.get("name") or snap.names.get(pid) or pid,
+                    "kind": "internal" if p.get("kind") == "internal" else "customer",
+                    **vals,
+                    "left_week": round(max(0.0, r["planned_week"] - r["booked_week"]), 2),
+                }
+            )
+        out.sort(key=lambda x: (-x["left_week"], x["name"]))
+        return out
 
     def holidays(self, year: int, state: str) -> dict:
         from permita38.core.holidays import holidays

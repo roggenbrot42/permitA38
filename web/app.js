@@ -332,8 +332,15 @@ PAGES.today = async () => {
     <div class="bar ${pct >= 100 ? 'good' : ''}" style="margin:12px 0"><div style="width:${pct}%"></div></div>
     <div class="days">${dash.days.map(d => { const mx = Math.max(8, ...dash.days.map(x => Math.max(x.target, x.worked))); return `<div class="day ${d.date === now ? 'today' : ''} ${!d.target ? 'off' : ''}" title="${esc(d.holiday || d.absence || '')}"><div class="col"><div style="height:${d.worked / mx * 100}%"></div>${d.target ? `<span style="bottom:${d.target / mx * 100}%"></span>` : ''}</div><b>${dayName(d.date)}</b><br>${d.worked ? hm(d.worked) : d.holiday ? '🎌' : d.absence ? '🏖' : '–'}</div>`; }).join('')}</div></div>
   ${extras}
+  ${projectsCard(dash.projects || [])}
   <div class="card"><h2>Today · ${hm(dash.today_worked)} h</h2>${entries.length ? `<table>${entries.map(e => entryRow(e, projects)).join('')}</table>` : '<div class="empty">Nothing tracked yet today. Hit <b>Start</b> when you begin working.</div>'}</div>`;
 };
+function projectsCard(list) {   // planned (assignments, rule S1) vs booked hours per project, Today page
+  const h = n => num(n, 2), sum = k => list.reduce((t, p) => t + p[k], 0), left = list.reduce((t, p) => t + p.left_week, 0);
+  const head = `<th class="right" title="Hours the plan gives you today">Today planned</th><th class="right" title="Hours you booked today">Today booked</th><th class="right" title="Hours your assignments give you in this week, including days already past">Week planned</th><th class="right" title="Hours you booked this week">Week booked</th><th class="right" title="Week planned minus week booked, never below 0">Left this week</th>`;
+  const row = p => `<tr><td title="${esc(p.kind === 'internal' ? 'Internal project' : 'Customer project')}"><b>${esc(p.name)}</b></td><td class="right">${h(p.planned_today)}</td><td class="right">${h(p.booked_today)}</td><td class="right">${h(p.planned_week)}</td><td class="right">${h(p.booked_week)}</td><td class="right" title="${esc(h(p.planned_week) + ' planned − ' + h(p.booked_week) + ' booked')}"><b>${h(p.left_week)}</b></td></tr>`;
+  return `<div class="card" id="proj-hours"><h2>Your projects this week</h2>${list.length ? `<table><tr><th>Project</th>${head}</tr>${list.map(row).join('')}<tr class="total"><td><b>Total</b></td><td class="right">${h(sum('planned_today'))}</td><td class="right">${h(sum('booked_today'))}</td><td class="right">${h(sum('planned_week'))}</td><td class="right">${h(sum('booked_week'))}</td><td class="right"><b>${h(left)}</b></td></tr></table>` : '<div class="empty">No assignments this week</div>'}</div>`;
+}
 const docTotal = d => Money.docGross(d, S.settings);
 function entryRow(e, projects) {
   const p = projects[e.project_id];
