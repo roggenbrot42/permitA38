@@ -159,6 +159,13 @@ class ApiSim:
         )
         return self.DAY_LIMIT - used
 
+    def entry_billable(self, b: dict) -> bool:
+        """Entries on an internal project (no customer or kind internal) are always stored billable false."""
+        proj = self.model["projects"].get(b.get("project_id") or "")
+        if proj and (not proj.get("customer_id") or proj.get("kind") == "internal"):
+            return False
+        return bool(b.get("billable", True))
+
     def op_create(self):
         coll = self.rng.choice([c for c in COLLS if self.can(c)])
         b = self.body(coll)
@@ -168,7 +175,7 @@ class ApiSim:
         assert rec["id"] and rec["created"] and rec["updated"]
         expect = {k: v for k, v in b.items() if v is not None}
         if coll == "entries":
-            expect.setdefault("billable", True)
+            expect["billable"] = self.entry_billable(b)
         self.model[coll][rec["id"]] = expect
         self.say(f"create {coll} {rec['id']}")
         self.check(coll)
@@ -187,7 +194,7 @@ class ApiSim:
         assert r.json()["id"] == rid
         expect = {k: v for k, v in b.items() if v is not None}
         if coll == "entries":
-            expect.setdefault("billable", True)
+            expect["billable"] = self.entry_billable(b)
         self.model[coll][rid] = expect
         self.say(f"update {coll} {rid}")
         self.check(coll)

@@ -345,11 +345,13 @@ class Journey:
             day = ws + timedelta(days=self.rng.randint(0, (self.today - ws).days))
         else:
             day = ws - timedelta(days=self.rng.randint(1, 7))
-        billable = self.rng.random() < 0.85
+        billable = self.rng.random() < 0.85 and not proj.internal  # the box is locked and unticked on internal projects
         tag = self._new_tag()
         self.nav("#/time")
         self.page.click("[data-a=addTime]")
-        vals = {"date": day.isoformat(), "project_id": proj.id, "note": f"{tag} manual", "billable": billable}
+        vals = {"date": day.isoformat(), "project_id": proj.id, "note": f"{tag} manual"}
+        if not proj.internal:
+            vals["billable"] = billable
         if text:
             vals["dur"] = text
         else:
@@ -388,7 +390,7 @@ class Journey:
             self.click_render("[data-a=timerStop]")
         finally:
             self.watch.accept_confirm = accepted
-        self.m.entries.append(MEntry(tag, 1, self.today, proj, True))
+        self.m.entries.append(MEntry(tag, 1, self.today, proj, not proj.internal))
         self.say(f"timer {tag} on {proj.name!r} -> 1min")
         self.check_week_ui()
 
@@ -756,7 +758,11 @@ class Journey:
         assert len(api.get("/absences")) == len(m.absences)
         assert len(api.get("/contracts")) == m.contracts
         if m.allocs:
-            rows = {(a["project_id"], a["hours_per_week"], a["start"], a["end"]) for a in api.get("/allocations") if a["hours_per_week"] is not None}
+            rows = {
+                (a["project_id"], a["hours_per_week"], a["start"], a["end"])
+                for a in api.get("/allocations")
+                if a["hours_per_week"] is not None
+            }
             assert rows == set(m.allocs), (rows, m.allocs)
         fin = api.get("/finance", year=self.year)["totals"]
         revenue = sum((d.totals()[0] for d in m.paid_invoices()), Decimal(0))
