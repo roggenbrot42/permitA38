@@ -166,7 +166,6 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("GET", "/api/plan/day-table"): ("planning", "read", False),
     ("GET", "/api/allocations"): ("planning", "read", False),
     ("POST", "/api/allocations"): ("planning", "write", False),
-    ("POST", "/api/allocations/bootstrap"): ("planning", "write", False),
     ("PUT", "/api/allocations/{allocation_id}"): ("planning", "write", False),
     ("DELETE", "/api/allocations/{allocation_id}"): ("planning", "write", False),
     ("GET", "/api/finance"): ("finance", "read", False),

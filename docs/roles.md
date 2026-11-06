@@ -69,7 +69,7 @@ Notes
   reject, reopen, unaccept or cancel (`procurement` write is boss only). `GET /api/suppliers/vendor-suggestions` is
   declared `suppliers` write although it is a GET (it exposes expense vendors). `GET /api/suppliers/{supplier_id}/dependency`,
   `/api/incoming-offers*`, `GET /api/allocations/{allocation_id}`, `POST /api/allocations/{allocation_id}/cancel` and
-  `GET /api/finance/commitments` are `procurement`. The routes `/api/allocations` (list, create, change) stay `planning`.
+  `GET /api/finance/commitments` are `procurement`. The routes `/api/allocations` (list, create, change, delete) are declared `planning`; creating, changing or deleting a subcontractor row (`supplier_id`) additionally needs `procurement` write, employee rows only `planning` write. A row created from an incoming offer cannot be deleted, only cancelled.
 * The accountant can download PDFs of offers and invoices (read access) but not change their status.
 * Account-level endpoints (own password, own two-factor authentication, bootstrap, holidays) are open to every
   signed-in person; resetting someone else's two-factor authentication needs `team` write access.

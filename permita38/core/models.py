@@ -1078,27 +1078,34 @@ def scenario_project_refs(changes: Any) -> list[tuple[int, str]]:
 
 
 class AllocationIn(v.CheckedBody):
-    """An employee allocation: hours per week of one person given to one project for a period."""
+    """An assignment: hours of one person (``user_id``) or subcontractor (``supplier_id``) given to one project for a
+    period, as ``hours_per_week`` or as ``total_hours`` over the whole period. A subcontractor row needs a ``rate``."""
 
     model_config = ConfigDict(extra="forbid")
-    user_id: v.Id
+    user_id: v.OptId = None
+    supplier_id: v.OptId = None
     project_id: v.Id  # never "unassigned": that scope is implicit
     start: v.ISODate
     end: v.ISODate  # end < start is a 409 of the service; a period beyond 1830 days is a 422
-    hours_per_week: v.AllocHours
+    hours_per_week: v.AllocHours | None = None
+    total_hours: v.PositiveTotalHours | None = None
+    rate: v.Rate | None = None
 
     @model_validator(mode="after")
     def _rules(self):
+        if bool(self.user_id) == bool(self.supplier_id):
+            raise ValueError("give exactly one of user_id and supplier_id")
+        if (self.hours_per_week is None) == (self.total_hours is None):
+            raise ValueError("give exactly one of hours_per_week and total_hours")
+        if self.supplier_id and self.rate is None:
+            raise ValueError("a subcontractor assignment needs a rate")
+        if self.user_id and self.rate is not None:
+            raise ValueError("an employee assignment has no rate")
         if self.project_id == v.UNASSIGNED:
             raise ValueError("project_id must be a project")
         if self.end >= self.start:
             _check_alloc_period(self.start, self.end)
         return self
-
-
-class AllocationBootstrapIn(v.CheckedBody):
-    model_config = ConfigDict(extra="forbid")
-    confirm: bool = False
 
 
 class Allocation(BaseModel):

@@ -118,6 +118,11 @@ COLLECTION_AREA = {
 }
 
 
+def allocation_area(supplier: bool) -> str:
+    """The area whose write right changes an assignment: subcontractor rows ``procurement``, employee rows ``planning``."""
+    return "procurement" if supplier else "planning"
+
+
 def normalize_role(role: object) -> str:
     """Canonical role name; ``member`` (older versions) is ``employee``. Unknown values stay as they are and have
     no permissions at all."""
