@@ -755,6 +755,9 @@ Vanilla JS as today, numbers only from the server, every label with its derivati
      Add saves the entry (as manual mode does today) and then calls `POST /api/timer/stop` with `discard: true`, so
      the time is booked once. Switching back to ⏱ without Add shows the running clock again. A timer started on an
      earlier day gets stop = 23:59 of that day (an entry ends on its own day).
+  8. **A timer that runs past midnight** (review of PR #104): `POST /api/timer/stop` books the entry on the start
+     day and ends it at 23:59 of that day at the latest (`minutes` = from start to that end, at least 1); the time
+     after midnight is not booked. The response is unchanged; the Today card shows the saved entry.
 
 ## WP4b: the planner behind the API (binding, 2026-11-06)
 
