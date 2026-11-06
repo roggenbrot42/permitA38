@@ -302,7 +302,7 @@ Only time entries of that project count. Response:
   without `invoice_id`. Periods are ISO-week Mondays or the first of the month. People sorted by name; a person whose
   user row is gone is shown as "(deleted user)".
 * Who sees what: a user whose scope on `time` is `ALL` (the boss) gets every person; a `LIMITED` user gets only their
-  own row (and the total of their own hours). No money fields (rates stay governed by `core/rights.py`).
+  own row (and the total of their own hours); confirmed by the owner 2026-11-06. No money fields (rates stay governed by `core/rights.py`).
 * Web: the project page gets a card "Time sheet" with the week/month switch and the date range; each person's name
   links to the time entries list filtered by project and person (existing filters). CSV download of the same table.
 * Work package WP7 (independent of the planner, Standard review tier); tests with literal hours.
