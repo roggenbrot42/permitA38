@@ -284,8 +284,12 @@ def _damage(app, plant):
         {"title": "bad", "start": "nope", "end": "2026-12-31", "hours_per_week": 5},
         ("format.date", "state.period_reversed"),
     )
-    # text in a numeric hours field is no longer storable (the planner guards refuse it): keep a text title only
-    store.save("contracts", {"title": "text", "start": "2026-01-01", "end": "2026-12-31", "hours_per_week": 5})
+    plant(
+        store,
+        "contracts",
+        {"title": "text", "start": "2026-01-01", "end": "2026-12-31", "hours_per_week": "lots"},
+        ("range.bounds", "state.exactly_one"),
+    )
     store.save(
         "contracts",
         {

@@ -678,17 +678,22 @@ def test_bootstrap_warnings_are_bounded_to_ten_weeks(w):
 
 
 # ------------------------------------------------------------------------------- damaged rows never break a view
-# (rows without a period or project, or with numbers as dates, are refused by state.required and cannot be planted)
 @pytest.mark.parametrize(
     "row, code",
     [
+        (dict(user_id="u1", project_id="p1", status="active"), "state.required"),  # no period
         (
             dict(user_id="u1", project_id="p1", start="garbage", end="2026-03-27", status="active"),
             ("format.date", "state.period_reversed"),  # "garbage" sorts after the end date
         ),
+        (dict(user_id="u1", start="2026-03-02", end="2026-03-27", status="active"), "state.required"),  # no project
         (
             dict(user_id="u1", project_id="p1", start="2026-03-27", end="2026-03-02", status="active"),
             "state.period_reversed",
+        ),
+        (
+            dict(user_id="u1", project_id="p1", start=5, end=6, status="active"),  # numbers: kept in extra
+            "state.required",
         ),
     ],
 )

@@ -623,14 +623,16 @@ def test_put_changes_person_and_project_and_keeps_unknown_fields(boss_client, bo
 
 
 # ------------------------------------------------------------------ damaged rows never give a 500
-# (rows without period or project, or with non-date values, are refused by state.required and cannot be planted)
 @pytest.mark.parametrize(
     "row, code",
     [
+        ({"project_id": "{p}"}, "state.required"),
         (
             {"project_id": "{p}", "start": "garbage", "end": "2026-03-01"},
             ("format.date", "state.period_reversed"),  # "garbage" sorts after the end date
         ),
+        ({"start": "2026-03-01", "end": "2026-03-05"}, "state.required"),
+        ({"project_id": "{p}", "start": 5, "end": [1]}, "state.required"),  # not dates: kept in extra
     ],
 )
 def test_damaged_allocation_rows_do_not_break_the_views(boss_client, boss_id, project, store, row, code, unguarded):

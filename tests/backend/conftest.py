@@ -126,7 +126,27 @@ def unguarded():
     from permita38.core.repository.dialect import DIALECTS
 
     dialect = DIALECTS["sqlite"]
-    kinds = {"format.date": "date", "range.negative": "non_negative", "state.period_reversed": "order"}
+    fixed = {
+        "format.date": "date",
+        "range.negative": "non_negative",
+        "state.period_reversed": "order",
+        "vocab.unknown": "one_of",
+        "state.exactly_one": "exactly_one",
+        "state.required": "required",
+        "range.too_long": "max_days",
+        "range.bounds": "range",
+    }
+
+    class _Kinds:
+        """code -> guard kind a restore may suspend (never the unique number guard)."""
+
+        def __contains__(self, code):
+            return code in fixed or code.startswith("state.implies:")
+
+        def __getitem__(self, code):
+            return "implies" if code.startswith("state.implies:") else fixed[code]
+
+    kinds = _Kinds()
 
     def guard_names(store):
         with store.lock:
