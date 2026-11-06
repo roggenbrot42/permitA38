@@ -69,8 +69,14 @@ class TimeService:
             self._write_timer(me["id"], dict(id=me["id"], running=False))
             return {"running": False}
         now = int(_time.time())
-        minutes = max(1, round((now - cur["started"]) / 60))
         start = _time.localtime(cur["started"])
+        end_text = _time.strftime("%H:%M")
+        if date.fromtimestamp(now) > date(start.tm_year, start.tm_mon, start.tm_mday):
+            # past midnight: the entry ends at 23:59 of its start day (a 24 h day cannot be exceeded)
+            end_text = "23:59"
+            minutes = max(1, (23 * 60 + 59) - (start.tm_hour * 60 + start.tm_min))
+        else:
+            minutes = max(1, round((now - cur["started"]) / 60))
         project_id, task_id = cur.get("project_id"), cur.get("task_id")
         if project_id and not self.store.get("projects", project_id):
             # a timer from before the reference guards may point at a project deleted back then: keep the time
@@ -95,7 +101,7 @@ class TimeService:
                 note=note if note is not None else cur.get("note", ""),
                 minutes=minutes,
                 start=_time.strftime("%H:%M", start),
-                end=_time.strftime("%H:%M"),
+                end=end_text,
                 billable=not internal,
             ),
         )
@@ -146,9 +152,9 @@ class TimeService:
                         r["planned_week"] += h
                     if day == today:
                         r["planned_today"] += h
-        for e in self.store.list("entries"):
+        for e in self.store.find("entries", user_id=user_id):
             pid, day = e.get("project_id"), calc.d(e.get("date"))
-            if e.get("user_id") != user_id or not pid or day is None or not monday <= day <= sunday:
+            if not pid or day is None or not monday <= day <= sunday:
                 continue
             r = row(pid)
             hours = calc.fnum(e.get("minutes")) / 60.0
@@ -159,11 +165,12 @@ class TimeService:
                 per[tid] = per.get(tid, 0.0) + hours
             if day == today:
                 r["booked_today"] += hours
-        projects = {p["id"]: p for p in self.store.list("projects")}
-        task_names = {t["id"]: t.get("name") for t in self.store.list("tasks")}
+        projects = {pid: self.store.get("projects", pid) or {} for pid in rows}
+        task_ids = {tid for per in task_minutes.values() for tid in per if tid}
+        task_names = {tid: (self.store.get("tasks", tid) or {}).get("name") for tid in task_ids}
         out = []
         for pid, r in rows.items():
-            p = projects.get(pid) or {}
+            p = projects[pid]
             vals = {k: round(v, 2) for k, v in r.items()}
             tasks: list[dict] = [
                 {"task_id": tid, "name": task_names.get(tid) or "(deleted task)", "booked_week": round(h, 2)}

@@ -1,5 +1,7 @@
 """PATCH /api/timer: switch project / task / note of the running timer (invented data)."""
 
+from datetime import datetime, timedelta
+
 import pytest
 
 
@@ -104,3 +106,35 @@ def test_discard_without_timer(boss_client):
 
 def test_stop_unknown_field_is_422(boss_client):
     assert boss_client.post("/api/timer/stop", json={"discard": True, "bogus": 1}).status_code == 422
+
+
+def _stop_past_midnight(boss_client, monkeypatch, a, started: datetime, stopped: datetime):
+    from permita38.core.service import time as time_module
+
+    clock = {"now": started.timestamp()}
+    monkeypatch.setattr(time_module._time, "time", lambda: clock["now"])
+    boss_client.post("/api/timer/start", json={"project_id": a["id"]})
+    clock["now"] = stopped.timestamp()
+    return boss_client.post("/api/timer/stop", json={}).json()["entry"]
+
+
+def test_timer_past_midnight_ends_at_2359_of_its_start_day(boss_client, data, monkeypatch):
+    a = data[0]
+    entry = _stop_past_midnight(
+        boss_client, monkeypatch, a, datetime(2026, 11, 3, 22, 30), datetime(2026, 11, 4, 1, 10)
+    )
+    assert (entry["date"], entry["start"], entry["end"], entry["minutes"]) == ("2026-11-03", "22:30", "23:59", 89)
+
+
+def test_timer_three_days_old_still_ends_on_its_day(boss_client, data, monkeypatch):
+    a = data[0]
+    entry = _stop_past_midnight(boss_client, monkeypatch, a, datetime(2026, 11, 3, 9, 0), datetime(2026, 11, 6, 9, 0))
+    assert (entry["date"], entry["start"], entry["end"], entry["minutes"]) == ("2026-11-03", "09:00", "23:59", 899)
+    assert entry["minutes"] <= 24 * 60
+
+
+def test_timer_started_at_2359_books_one_minute(boss_client, data, monkeypatch):
+    a = data[0]
+    start = datetime(2026, 11, 3, 23, 59)
+    entry = _stop_past_midnight(boss_client, monkeypatch, a, start, start + timedelta(minutes=5))
+    assert (entry["date"], entry["end"], entry["minutes"]) == ("2026-11-03", "23:59", 1)
