@@ -706,6 +706,20 @@ Vanilla JS as today, numbers only from the server, every label with its derivati
 * Web tests: each package rewrites the browser tests of its page (fake API answers built from E1/E7 numbers);
   tests of removed features (forecast fields, day table, bootstrap, per-day pools) are deleted.
 
+### Today page: what I need to do (owner, 2026-11-06: "the today page should show how much of what I need to do")
+
+* `GET /api/dashboard` (existing, same rights) gains `projects: [{project_id, name, kind, planned_today,
+  planned_week, booked_today, booked_week, left_week}]` for the dashboard's person: every project with an active
+  employee assignment of that person in the current ISO week, plus every project the person booked time on this week.
+  `planned_*` = the hours of the person's assignments on today / on every day of this week, from
+  `planner/spread.py` with `today=None` (the whole period, so days already past this week count as planned);
+  `booked_*` = the person's time entries; `left_week` = max(0, planned_week − booked_week). Hours rounded to 2;
+  sorted by left_week descending, then name. Computed in the time service (not in calc.py, which the planner imports).
+* Web (Today page): a card "Your projects this week" with columns Today planned / Today booked / Week planned / Week
+  booked / Left this week, a total row, tooltips with the derivation, and a line "No assignments this week" when the
+  list is empty. Clicking a project name starts the timer on it if the existing timer control allows that, else
+  links to the project.
+
 ## WP4b: the planner behind the API (binding, 2026-11-06)
 
 WP4b and WP5 land together on branch `feat/planner-service`: the old endpoints and the old web planner are removed in
