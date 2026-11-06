@@ -284,6 +284,29 @@ contracts, offers, invoices, expenses, incoming offers, trips, timers) and the p
 (`models.scenario_project_refs(changes)`); WP4's `changes.assignments` (alias of `changes.allocations`) must be added
 to that helper so the delete check and `check-db` keep seeing every project id.
 
+### Project time sheet (owner, 2026-11-06: "a time sheet / overview for each project: who booked and how much")
+
+`GET /api/projects/{id}/timesheet?from=&to=&group=week|month` (area `time`, read; `from`/`to` optional ISO dates,
+default the project period or, without one, the first to the last entry; at most 400 days; `group` default `week`).
+Only time entries of that project count. Response:
+
+```json
+{"project_id": "p1", "name": "Orchard", "from": "2026-11-09", "to": "2026-11-22", "group": "week",
+ "periods": ["2026-11-09", "2026-11-16"],
+ "people": [{"user_id": "u1", "name": "Ada", "hours": 12.5, "billable_hours": 10.0, "unbilled_hours": 4.0,
+             "by_period": [8.0, 4.5]}],
+ "total": {"hours": 12.5, "billable_hours": 10.0, "unbilled_hours": 4.0, "by_period": [8.0, 4.5]}}
+```
+
+* Hours = minutes / 60, rounded to 2 in the response (sums from the exact minutes). `unbilled_hours` = billable hours
+  without `invoice_id`. Periods are ISO-week Mondays or the first of the month. People sorted by name; a person whose
+  user row is gone is shown as "(deleted user)".
+* Who sees what: a user whose scope on `time` is `ALL` (the boss) gets every person; a `LIMITED` user gets only their
+  own row (and the total of their own hours). No money fields (rates stay governed by `core/rights.py`).
+* Web: the project page gets a card "Time sheet" with the week/month switch and the date range; each person's name
+  links to the time entries list filtered by project and person (existing filters). CSV download of the same table.
+* Work package WP7 (independent of the planner, Standard review tier); tests with literal hours.
+
 ## API contract (binding; backend and web UI are built against it in parallel)
 
 All hours are floats rounded to 2 decimals in responses; money as today (floats of exact cents). Every warning keeps
