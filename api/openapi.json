@@ -989,13 +989,13 @@
         }
       }
     },
-    "/api/forecast": {
+    "/api/plan": {
       "get": {
         "tags": [
           "planning"
         ],
-        "summary": "week-by-week capacity vs. commitments, with revenue basis",
-        "operationId": "forecast_api_forecast_get",
+        "summary": "weeks, people and per-project verdicts of the planner",
+        "operationId": "plan_api_plan_get",
         "security": [
           {
             "HTTPBearer": []
@@ -1011,39 +1011,13 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 156,
+              "maximum": 52,
               "minimum": 1,
-              "default": 26,
+              "default": 12,
               "title": "Weeks"
             }
           },
           {
-            "name": "user_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "User Id"
-            }
-          },
-          {
-            "name": "offers",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 1,
-              "title": "Offers"
-            }
-          },
-          {
             "name": "project_id",
             "in": "query",
             "required": false,
@@ -1063,91 +1037,6 @@
             "description": "a project id or 'unassigned'; empty = no filter"
           },
           {
-            "name": "by_project",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 1,
-              "minimum": 0,
-              "default": 1,
-              "title": "By Project"
-            }
-          },
-          {
-            "name": "include_external",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 1,
-              "minimum": 0,
-              "default": 1,
-              "title": "Include External"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Forecast Api Forecast Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/plan/day-table": {
-      "get": {
-        "tags": [
-          "planning"
-        ],
-        "summary": "capacity and demand per day, per project and pool",
-        "operationId": "day_table_api_plan_day_table_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          },
-          {
-            "ApiToken": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "from",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "From"
-            }
-          },
-          {
-            "name": "to",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "To"
-            }
-          },
-          {
             "name": "user_id",
             "in": "query",
             "required": false,
@@ -1163,37 +1052,6 @@
               ],
               "title": "User Id"
             }
-          },
-          {
-            "name": "project_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^(?:[0-9a-z]{6,32})?$"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "a project id or 'unassigned'; empty = no filter",
-              "title": "Project Id"
-            },
-            "description": "a project id or 'unassigned'; empty = no filter"
-          },
-          {
-            "name": "include_external",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 1,
-              "minimum": 0,
-              "default": 1,
-              "title": "Include External"
-            }
           }
         ],
         "responses": {
@@ -1204,7 +1062,7 @@
                 "schema": {
                   "type": "object",
                   "additionalProperties": true,
-                  "title": "Response Day Table Api Plan Day Table Get"
+                  "title": "Response Plan Api Plan Get"
                 }
               }
             }
@@ -17993,21 +17851,10 @@
           },
           "weeks": {
             "type": "integer",
-            "maximum": 156.0,
+            "maximum": 52.0,
             "minimum": 1.0,
             "title": "Weeks",
-            "default": 26
-          },
-          "first": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "First"
+            "default": 12
           },
           "user_id": {
             "anyOf": [
@@ -18032,11 +17879,6 @@
               }
             ],
             "title": "Project Id"
-          },
-          "include_external": {
-            "type": "boolean",
-            "title": "Include External",
-            "default": true
           }
         },
         "type": "object",
@@ -18064,16 +17906,6 @@
               }
             ],
             "title": "Earliest"
-          },
-          "user_ids": {
-            "items": {
-              "type": "string",
-              "pattern": "^[0-9a-z]{6,32}$"
-            },
-            "type": "array",
-            "maxItems": 200,
-            "title": "User Ids",
-            "default": []
           },
           "project_id": {
             "anyOf": [

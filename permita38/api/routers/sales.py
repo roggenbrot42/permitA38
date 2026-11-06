@@ -22,7 +22,7 @@ class DocumentResult(Document):
 def _doc(services, coll: str, doc: dict, finalize: bool = False) -> dict:
     return {
         **doc,
-        "planning_warnings": services.planning.warnings_for(coll, doc),
+        "planning_warnings": services.planner.warnings_for(coll, doc),
         "sanity_warnings": services.sanity.check(coll, doc, None, finalize=finalize),
     }
 
@@ -74,9 +74,9 @@ def offer_pdf(rid: str, _: Annotated[dict, Needs("offers")], services: ServicesD
 @router.post("/offers/{rid}/accept", summary="mark accepted; creates or extends a project and, if planned, a contract")
 def accept_offer(rid: str, _: Annotated[dict, Needs("offers", "write")], services: ServicesDep) -> dict[str, Any]:
     out = services.sales.accept_offer(rid)
-    out["planning_warnings"] = services.planning.warnings_for("projects", out["project"])
+    out["planning_warnings"] = services.planner.warnings_for("projects", out["project"])
     if out.get("contract"):
-        out["planning_warnings"] += services.planning.warnings_for("contracts", out["contract"])
+        out["planning_warnings"] += services.planner.warnings_for("contracts", out["contract"])
     return out
 
 
