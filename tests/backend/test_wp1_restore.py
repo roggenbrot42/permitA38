@@ -132,6 +132,17 @@ def test_row_that_still_violates_a_guard_is_restored_with_a_warning(source, targ
     assert warned and "cont0002" in json.dumps(warned)
 
 
+def test_untouched_default_project_is_not_data_but_a_renamed_one_is(target):
+    from permita38.core.service.transfer.importer import instance_state
+
+    _, _, store = target
+    assert instance_state(store, allow_no_users=True) is None
+    row = store.get("projects", "internaladmin")
+    store.save("projects", {**row, "name": "Administration (renamed)"})
+    reason = instance_state(store, allow_no_users=True)
+    assert reason and reason.startswith("This instance already contains data (") and "projects: 1" in reason
+
+
 def write_legacy(folder, coll, rec):
     (folder / coll).mkdir(parents=True, exist_ok=True)
     (folder / coll / f"{rec['id']}.json").write_text(json.dumps(rec), encoding="utf-8")

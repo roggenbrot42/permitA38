@@ -392,6 +392,14 @@ class ProcurementService:
         h_net = sum((q2(dec(ln["quantity"]) * dec(ln["unit_price"])) for ln in hour_lines), ZERO)
         h_qty = sum((dec(ln["quantity"]) for ln in hour_lines), ZERO)
         row["rate"] = _rate_of(h_net, h_qty)
+        if bool(plan.get("total_hours")) == bool(plan.get("hours_per_week")):  # no hour field, or both
+            lines_total = q2(h_qty)
+            if lines_total <= 0 or lines_total > 100000:
+                raise ServiceError(422, "The offer's hour lines must add up to more than 0 and at most 100000 h")
+            if row["rate"] > 10000:
+                raise ServiceError(422, "The hourly rate of the offer is above 10000")
+            row["total_hours"] = float(lines_total)
+            row.pop("hours_per_week", None)
         warnings = self._accept_warnings(supplier, row, rec)
         blocking = list(
             dict.fromkeys(

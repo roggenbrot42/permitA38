@@ -597,7 +597,7 @@ A.editContract = el => {
   openForm({
     title: c.id ? 'Edit contract' : 'New contract', vals: c,
     fields: [{ k: 'title', l: 'Title' }, { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '—'], ...S.d.customers.map(x => [x.id, x.name])] },
-      { k: 'project_id', l: 'Project', t: 'select', o: c.id && !c.project_id ? projectOptions() : projectOptions(false) },
+      { k: 'project_id', l: 'Project', t: 'select', o: projectOptions(c.id && !c.project_id, undefined, c.project_id || null, true) },
       { k: 'start', l: 'Start', t: 'date', row: 1 }, { k: 'end', l: 'End', t: 'date', row: 1 },
       { k: 'hours_per_week', l: 'Hours per week', t: 'number', row: 2, h: 'Either this… (entering one clears the other)' }, { k: 'total_hours', l: 'Total hours', t: 'number', row: 2, h: '…or this (spread over the period)' }, { k: 'rate', l: 'Hourly rate (€)', t: 'number', row: 2 },
       { k: 'status', l: 'Status', t: 'select', o: ['confirmed', 'done'] }],
