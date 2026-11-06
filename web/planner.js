@@ -18,6 +18,10 @@
   const pct = x => x == null ? '–' : Math.round(x) + ' %';
   const h1 = x => num(x, 1) + ' h';
   const userId = () => (P.user === null ? (S.me && S.me.id) || '' : P.user);
+  const userName = id => (S.d.users.find(u => u.id === id) || {}).name || '';
+  const whoTag = id => (userId() ? '' : (userName(id) ? ' (' + userName(id) + ')' : ''));   // team view: say whose time off it is
+  // Person for a new time-off draft: the person filter when one is chosen, else the "Person" select of the vacation form.
+  const vacPerson = () => userId() || (document.getElementById('plnVacWho') || {}).value || P.vacUser || (S.me && S.me.id) || '';
   const monday0 = () => mondayOf(todayISO());
   const dayIdx = s => Math.round((parseD(s) - parseD(monday0())) / 864e5);
   const dayAt = i => addDays(monday0(), i);
@@ -149,11 +153,11 @@
       if (P.abs[key] && P.abs[key].delete) continue;
       const cur = P.abs[key] || a;
       drawn.add(key);
-      out += bar(cur.start, cur.end || cur.start, `abs ${cur.kind || 'vacation'}${P.abs[key] ? ' draft' : ''}`, `${KINDS[cur.kind] || cur.kind}: ${fmtDate(cur.start)}${cur.end && cur.end !== cur.start ? ' – ' + fmtDate(cur.end) : ''}`, { kind: 'abs', key, id: a.id });
+      out += bar(cur.start, cur.end || cur.start, `abs ${cur.kind || 'vacation'}${P.abs[key] ? ' draft' : ''}`, `${KINDS[cur.kind] || cur.kind}${whoTag(a.user_id)}: ${fmtDate(cur.start)}${cur.end && cur.end !== cur.start ? ' – ' + fmtDate(cur.end) : ''}`, { kind: 'abs', key, id: a.id });
     }
     for (const [key, a] of Object.entries(P.abs)) {
       if (drawn.has(key) || key.startsWith('r:')) continue;
-      out += bar(a.start, a.end, 'abs draft', `New ${KINDS[a.kind] || a.kind}: ${fmtDate(a.start)} – ${fmtDate(a.end)}`, { kind: 'abs', key, id: key });
+      out += bar(a.start, a.end, 'abs draft', `New ${KINDS[a.kind] || a.kind}${whoTag(a.user_id)}: ${fmtDate(a.start)} – ${fmtDate(a.end)}`, { kind: 'abs', key, id: key });
     }
     return out;
   }
@@ -285,7 +289,7 @@
   function draftList() {
     const items = [];
     for (const [key, a] of Object.entries(P.abs)) {
-      const what = a.delete ? `Remove time off ${fmtDate(a.start || (realAbs(a.id) || {}).start)}` : key.startsWith('n:') ? `New ${KINDS[a.kind] || a.kind}: ${fmtDate(a.start)} – ${fmtDate(a.end)}` : `Move ${KINDS[a.kind] || a.kind}: ${fmtDate(a.start)} – ${fmtDate(a.end)}`;
+      const what = a.delete ? `Remove time off${whoTag(a.user_id)} ${fmtDate(a.start || (realAbs(a.id) || {}).start)}` : key.startsWith('n:') ? `New ${KINDS[a.kind] || a.kind}${whoTag(a.user_id)}: ${fmtDate(a.start)} – ${fmtDate(a.end)}` : `Move ${KINDS[a.kind] || a.kind}${whoTag(a.user_id)}: ${fmtDate(a.start)} – ${fmtDate(a.end)}`;
       items.push({ store: 'abs', key, what });
     }
     for (const [key, c] of Object.entries(P.com)) {
@@ -339,7 +343,7 @@
     <div class="pln-drag" id="plnDrag" hidden></div>
     <div class="grid g2 pln-panels">
       <div class="card"><h2>Vacation</h2>
-        <form class="pln-form" data-submit="plnAddVac"><div class="row"><div class="auto"><label for="plnFrom">From</label><input id="plnFrom" type="date" value="${todayISO()}"></div><div class="auto"><label for="plnTo">To (inclusive)</label><input id="plnTo" type="date" value="${addDays(todayISO(), 6)}"></div><div class="auto"><button type="button" class="primary" data-a="plnAddVac">Add vacation</button></div></div></form>
+        <form class="pln-form" data-submit="plnAddVac"><div class="row"><div class="auto"><label for="plnFrom">From</label><input id="plnFrom" type="date" value="${todayISO()}"></div><div class="auto"><label for="plnTo">To (inclusive)</label><input id="plnTo" type="date" value="${addDays(todayISO(), 6)}"></div><div class="auto"><label for="plnVacWho">Person</label><select id="plnVacWho" data-change="plnVacWho" ${userId() ? 'disabled' : ''}>${users.map(u => `<option value="${esc(u.id)}" ${u.id === (userId() || P.vacUser || (S.me && S.me.id)) ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div><div class="auto"><button type="button" class="primary" data-a="plnAddVac">Add vacation</button></div></div></form>
         <form class="pln-form" data-submit="plnSuggest"><h3>Find a time</h3><div class="row"><div class="auto"><label for="plnDays">Working days</label><input id="plnDays" type="number" min="1" max="60" value="5"></div><div class="auto"><label for="plnWFrom">Window from</label><input id="plnWFrom" type="date" value="${todayISO()}"></div><div class="auto"><label for="plnWTo">Window to</label><input id="plnWTo" type="date" value="${addDays(todayISO(), 90)}"></div><div class="auto"><button type="button" data-a="plnSuggest">Suggest</button></div></div></form>
         <form class="pln-form" data-submit="plnStart"><h3>Earliest start for an offer</h3><div class="row"><div class="auto"><label for="plnHrs">Hours</label><input id="plnHrs" type="number" min="0" step="0.5" value="40"></div><div class="auto"><label for="plnDead">Deadline</label><input id="plnDead" type="date" value="${addDays(todayISO(), 120)}"></div><div class="auto"><button type="button" data-a="plnStart">Find start</button></div></div></form>
         <div id="plnSugg">${suggBox()}</div>
@@ -474,7 +478,8 @@
       if (!d) return;
       const [s, t] = cur.startDay <= d ? [cur.startDay, d] : [d, cur.startDay];
       const k = 'n:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      P.abs[k] = { user_id: userId(), kind: 'vacation', start: s, end: t };
+      const who = vacPerson(); if (!who) return toast('Choose a person for the time off', true);
+      P.abs[k] = { user_id: who, kind: 'vacation', start: s, end: t };
       schedule();
       return;
     }
@@ -549,11 +554,13 @@
     const s = document.getElementById('plnFrom').value, t = document.getElementById('plnTo').value;
     if (!s || !t) return toast('Choose both dates', true);
     if (t < s) return toast('The end is before the start', true);
-    P.abs['n:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)] = { user_id: userId(), kind: 'vacation', start: s, end: t };
+    const who = vacPerson(); if (!who) return toast('Choose a person for the time off', true);
+    P.abs['n:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)] = { user_id: who, kind: 'vacation', start: s, end: t };
     schedule();
   };
   A.plnApply = guard(async () => {
     const body = payload();
+    if (body.absences.some(a => !a.delete && !a.user_id)) return toast('Choose a person for the time off', true);
     const count = body.absences.length + body.commitments.length + (body.allocations || []).length;
     if (!window.confirm(`Write ${count} change(s) to your real data? This cannot be undone with one click.`)) return;
     const r = await api('POST', 'plan/apply', { changes: body, confirm: true });
@@ -575,7 +582,8 @@
   A.plnUseOption = el => {
     const o = P.sugg && P.sugg.options[+el.dataset.i];
     if (!o) return;
-    P.abs['n:' + Date.now().toString(36)] = { user_id: userId(), kind: 'vacation', start: o.start, end: o.end };
+    const who = vacPerson(); if (!who) return toast('Choose a person for the time off', true);
+    P.abs['n:' + Date.now().toString(36)] = { user_id: who, kind: 'vacation', start: o.start, end: o.end };
     schedule();
   };
   A.plnStart = guard(async () => {
@@ -660,6 +668,7 @@
     schedule();
   };
   // data-change handlers used by the toolbar (the app's delegated change listener calls A[name])
+  A.plnVacWho = el => { P.vacUser = el.value; };
   A.plnWho = el => { P.user = el.value; localStorage.plnUser = P.user; P.sel = null; loadEntitlement().then(schedule); };
   A.plnHorizon = el => { P.weeks = +el.value; localStorage.plnWeeks = P.weeks; loadHolidays().then(schedule); };
   A.plnHours = el => A.plnHoursSet(el);
