@@ -167,7 +167,9 @@ class TimeService:
                 r["booked_today"] += hours
         projects = {pid: self.store.get("projects", pid) or {} for pid in rows}
         task_ids = {tid for per in task_minutes.values() for tid in per if tid}
-        task_names = {tid: (self.store.get("tasks", tid) or {}).get("name") for tid in task_ids}
+        task_names: dict[str | None, str | None] = {
+            tid: (self.store.get("tasks", tid) or {}).get("name") for tid in task_ids
+        }
         out = []
         for pid, r in rows.items():
             p = projects[pid]
