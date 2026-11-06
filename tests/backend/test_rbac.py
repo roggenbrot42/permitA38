@@ -654,6 +654,9 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
             raw.execute(f'DROP TRIGGER "{trigger}"')
         raw.executescript(
             'DROP INDEX "idx_contracts_project"; DROP INDEX "idx_offers_project"; DROP INDEX "idx_invoices_project";'
+            # the incoming_offers and trips tables (and their indexes) were dropped above already
+            ' DROP INDEX IF EXISTS "idx_incoming_offers_project"; DROP INDEX IF EXISTS "idx_trips_project";'
+            ' DROP INDEX IF EXISTS "idx_timers_project";'
         )
     raw.commit()
     raw.close()

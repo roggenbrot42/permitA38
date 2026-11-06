@@ -1,6 +1,8 @@
 """Generic CRUD with role-based permissions (the scopes come from `core/rights.py`)."""
 
+import json
 from decimal import Decimal
+from typing import Any
 
 from permita38.core import calc, rights
 from permita38.core.errors import ServiceError
@@ -284,14 +286,25 @@ class RecordService:
 
     def _project_usage(self, rid: str) -> list[tuple[int, str, str]]:
         """What still uses a project: (count, singular, plural) in the order of the refusal message."""
-        timer = [t for t in self.store.list("timers") if t.get("running") and t.get("project_id") == rid]
+        find = self.store.find
+
+        def count(coll: str) -> int:
+            return len(find(coll, project_id=rid))
+
+        scenarios = sum(1 for sc in self.store.list("plan_scenarios") if rid in scenario_project_ids(sc.get("changes")))
+        running = [t for t in find("timers", project_id=rid) if t.get("running")]
         found = [
-            (sum(1 for a in self.store.list("allocations") if a.get("project_id") == rid), "allocation", "allocations"),
-            (sum(1 for e in self.store.list("entries") if e.get("project_id") == rid), "time entry", "time entries"),
-            (sum(1 for c in self.store.list("contracts") if c.get("project_id") == rid), "contract", "contracts"),
-            (sum(1 for o in self.store.list("offers") if o.get("project_id") == rid), "offer", "offers"),
-            (sum(1 for i in self.store.list("invoices") if i.get("project_id") == rid), "invoice", "invoices"),
-            (len(timer), "running timer", "running timers"),
+            (count("allocations"), "allocation", "allocations"),
+            (count("tasks"), "task", "tasks"),
+            (count("entries"), "time entry", "time entries"),
+            (count("contracts"), "contract", "contracts"),
+            (count("offers"), "offer", "offers"),
+            (count("invoices"), "invoice", "invoices"),
+            (count("expenses"), "expense", "expenses"),
+            (count("incoming_offers"), "incoming offer", "incoming offers"),
+            (count("trips"), "trip", "trips"),
+            (scenarios, "planning scenario", "planning scenarios"),
+            (len(running), "running timer", "running timers"),
         ]
         return [f for f in found if f[0]]
 
@@ -324,6 +337,10 @@ class RecordService:
         with self.store.transaction():
             if coll == "projects":
                 self._refuse_used_project(rid)
+                for t in self.store.find("timers", project_id=rid):  # legacy stopped timers: the row has no meaning
+                    t.pop("project_id", None)
+                    t.pop("task_id", None)
+                    self.store.save("timers", t)
             if coll == "invoices":  # release billed time entries
                 for e in self.store.list("entries"):
                     if e.get("invoice_id") == rid:
@@ -340,7 +357,20 @@ class RecordService:
         return [{"id": u["id"], "name": u.get("name"), "role": rights.normalize_role(u.get("role"))} for u in users]
 
 
-_PROJECT_REF_COLLECTIONS = frozenset({"entries", "contracts", "offers", "invoices"})
+def scenario_project_ids(changes: Any) -> set[str]:
+    """Every project id a saved planning scenario refers to (only ``allocations[].project_id`` carries one)."""
+    if isinstance(changes, str):
+        try:
+            changes = json.loads(changes)
+        except ValueError:
+            return set()
+    allocs = changes.get("allocations") if isinstance(changes, dict) else None
+    if not isinstance(allocs, list):
+        return set()
+    return {a["project_id"] for a in allocs if isinstance(a, dict) and isinstance(a.get("project_id"), str)}
+
+
+_PROJECT_REF_COLLECTIONS = frozenset({"entries", "contracts", "offers", "invoices", "tasks", "expenses"})
 _ENTRY_BILLING_FIELDS = ("rate", "invoice_id")
 _MEMBER_PROJECT_KEYS = ("id", "name", "color", "status", "customer_id", "personal", "member_ids")
 

@@ -88,20 +88,113 @@ def test_delete_refused_singular_contract_offer(boss_client):
 
 def test_delete_refused_all_kinds_in_order(boss_client, app):
     c = boss_client
+    store = app.state.services.store
     p = _project(c)
-    app.state.services.store.save("allocations", {"project_id": p["id"], "user_id": _uid(c)})
+    store.save("allocations", {"project_id": p["id"], "user_id": _uid(c)})
+    store.save("tasks", {"project_id": p["id"], "name": "Wire up"})
     _entry(c, p["id"])
     _contract(c, p["id"])
     _offer(c, p["id"])
     _offer(c, p["id"])
     _invoice(c, p["id"])
+    store.save("expenses", {"project_id": p["id"], "date": TODAY})
+    store.save("incoming_offers", {"project_id": p["id"]})
+    store.save("trips", {"project_id": p["id"]})
+    store.save("plan_scenarios", {"name": "What if", "user_id": _uid(c), "changes": _scenario_changes(p["id"])})
     assert c.post("/api/timer/start", json={"project_id": p["id"]}).status_code == 200
     _refused(
         c,
         p["id"],
-        "This project is still used by 1 allocation, 1 time entry, 1 contract, 2 offers, 1 invoice"
-        " and 1 running timer; archive it instead.",
+        "This project is still used by 1 allocation, 1 task, 1 time entry, 1 contract, 2 offers, 1 invoice,"
+        " 1 expense, 1 incoming offer, 1 trip, 1 planning scenario and 1 running timer; archive it instead.",
     )
+
+
+def _scenario_changes(pid):
+    return {"allocations": [{"user_id": "u0000001", "project_id": pid, "start": "2026-03-02", "end": "2026-03-20"}]}
+
+
+def test_delete_refused_task(boss_client, app):
+    c = boss_client
+    p = _project(c)
+    app.state.services.store.save("tasks", {"project_id": p["id"], "name": "Wire up"})
+    _refused(c, p["id"], "This project is still used by 1 task; archive it instead.")
+
+
+def test_delete_refused_expenses_plural(boss_client):
+    c = boss_client
+    p = _project(c)
+    for _ in range(2):
+        r = c.post("/api/expenses", json={"date": TODAY, "net": 10, "project_id": p["id"]})
+        assert r.status_code == 200, r.text
+    _refused(c, p["id"], "This project is still used by 2 expenses; archive it instead.")
+
+
+def test_delete_refused_incoming_offer_and_trip(boss_client, app):
+    c = boss_client
+    store = app.state.services.store
+    p = _project(c)
+    store.save("incoming_offers", {"project_id": p["id"]})
+    _refused(c, p["id"], "This project is still used by 1 incoming offer; archive it instead.")
+    store.save("trips", {"project_id": p["id"]})
+    _refused(c, p["id"], "This project is still used by 1 incoming offer and 1 trip; archive it instead.")
+
+
+def test_delete_refused_planning_scenario(boss_client, app):
+    c = boss_client
+    p = _project(c)
+    other = _project(c, "Other")
+    store = app.state.services.store
+    store.save("plan_scenarios", {"name": "On other", "user_id": _uid(c), "changes": _scenario_changes(other["id"])})
+    assert c.delete(f"/api/projects/{p['id']}").status_code == 204  # a scenario on ANOTHER project does not block
+    p = _project(c)
+    store.save("plan_scenarios", {"name": "What if", "user_id": _uid(c), "changes": _scenario_changes(p["id"])})
+    _refused(c, p["id"], "This project is still used by 1 planning scenario; archive it instead.")
+
+
+def test_delete_clears_a_legacy_stopped_timer_but_a_running_one_blocks(boss_client, app):
+    c = boss_client
+    store = app.state.services.store
+    p = _project(c)
+    store.save("timers", {"id": _uid(c), "running": False, "project_id": p["id"], "task_id": "task0001"})
+    assert c.delete(f"/api/projects/{p['id']}").status_code == 204
+    timer = store.get("timers", _uid(c))
+    assert timer["running"] is False and "project_id" not in timer and "task_id" not in timer
+    p2 = _project(c, "Second")
+    store.save("timers", {"id": _uid(c), "running": True, "started": 1, "project_id": p2["id"]})
+    _refused(c, p2["id"], "This project is still used by 1 running timer; archive it instead.")
+    assert store.get("timers", _uid(c))["project_id"] == p2["id"]
+
+
+def test_task_and_expense_with_unknown_project_are_refused(boss_client):
+    c = boss_client
+    p = _project(c)
+    body = {"date": TODAY, "net": 10}
+    r = c.post("/api/expenses", json={**body, "project_id": GHOST})
+    assert (r.status_code, r.json()["detail"]) == (422, "Unknown project")
+    ok = c.post("/api/expenses", json={**body, "project_id": p["id"]})
+    assert ok.status_code == 200, ok.text
+    r = c.put(f"/api/expenses/{ok.json()['id']}", json={**body, "project_id": GHOST})
+    assert (r.status_code, r.json()["detail"]) == (422, "Unknown project")
+    assert c.get(f"/api/expenses/{ok.json()['id']}").json()["project_id"] == p["id"]
+    r = c.post("/api/tasks", json={"name": "Wire up", "project_id": GHOST})
+    assert (r.status_code, r.json()["detail"]) == (422, "Unknown project")
+    t = c.post("/api/tasks", json={"name": "Wire up", "project_id": p["id"]})
+    assert t.status_code == 200, t.text
+    r = c.put(f"/api/tasks/{t.json()['id']}", json={"name": "Wire up", "project_id": GHOST})
+    assert (r.status_code, r.json()["detail"]) == (422, "Unknown project")
+    assert c.get("/api/tasks").json()[0]["project_id"] == p["id"]
+
+
+def test_adopt_and_scan_booking_go_through_the_project_check(boss_client, app):
+    from permita38.core.errors import ServiceError
+
+    svc = app.state.services
+    me = svc.store.get("users", _uid(boss_client))
+    with pytest.raises(ServiceError) as err:
+        svc.records.create_scanned(me, {"date": TODAY, "net": 10, "project_id": GHOST}, "scan0001")
+    assert (err.value.status, err.value.message) == (422, "Unknown project")
+    assert svc.store.list("expenses") == []
 
 
 def test_delete_refused_running_timer_only(boss_client):
@@ -240,17 +333,18 @@ def test_offer_to_invoice_with_existing_or_no_project_works(boss_client):
 
 
 # ------------------------------------------------------------------ legacy timer without its project
-def _plant_timer(app, c, project_id):
+def _plant_timer(app, c, project_id, unguarded):
     import time
 
     store = app.state.services.store
     assert store.get("projects", project_id) is None
-    store.save("timers", {"id": _uid(c), "running": True, "started": int(time.time()) - 600, "project_id": project_id})
+    row = {"id": _uid(c), "running": True, "started": int(time.time()) - 600, "project_id": project_id}
+    unguarded(store, "timers", row, "ref.dangling")
 
 
-def test_stop_timer_of_a_deleted_project_books_the_time_without_it(boss_client, app):
+def test_stop_timer_of_a_deleted_project_books_the_time_without_it(boss_client, app, unguarded):
     c = boss_client
-    _plant_timer(app, c, GHOST)
+    _plant_timer(app, c, GHOST, unguarded)
     r = c.post("/api/timer/stop", json={})
     assert r.status_code == 200, r.text
     entries = c.get("/api/entries").json()
@@ -260,10 +354,10 @@ def test_stop_timer_of_a_deleted_project_books_the_time_without_it(boss_client, 
     assert c.get("/api/timer").json()["running"] is False
 
 
-def test_start_timer_books_the_old_timer_of_a_deleted_project_without_it(boss_client, app):
+def test_start_timer_books_the_old_timer_of_a_deleted_project_without_it(boss_client, app, unguarded):
     c = boss_client
     p = _project(c)
-    _plant_timer(app, c, GHOST)
+    _plant_timer(app, c, GHOST, unguarded)
     r = c.post("/api/timer/start", json={"project_id": p["id"]})
     assert r.status_code == 200, r.text
     assert r.json()["running"] is True and r.json()["project_id"] == p["id"]

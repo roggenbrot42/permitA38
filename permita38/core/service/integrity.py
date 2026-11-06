@@ -7,6 +7,7 @@ and field names only (never names, amounts, addresses or document text). Spec: d
 from __future__ import annotations
 
 import copy
+import json
 import math
 import re
 from collections.abc import Callable, Iterable, Sequence
@@ -197,6 +198,31 @@ def rule_ref_dangling(ctx: Ctx) -> Iterable[Finding]:
                         yield Finding(
                             "ref.dangling", WARNING, coll, rec.get("id"), col, f"points to a missing {target} record"
                         )
+
+
+def rule_ref_scenario_project(ctx: Ctx) -> Iterable[Finding]:
+    """Saved planning scenarios keep project ids in JSON; no trigger sees them."""
+    for rec in ctx.rows("plan_scenarios"):
+        changes = rec.get("changes")
+        if isinstance(changes, str):
+            try:
+                changes = json.loads(changes)
+            except ValueError:
+                continue
+        allocs = changes.get("allocations") if isinstance(changes, dict) else None
+        if not isinstance(allocs, list):
+            continue
+        for i, a in enumerate(allocs):
+            pid = a.get("project_id") if isinstance(a, dict) else None
+            if isinstance(pid, str) and pid and pid not in ctx.ids["projects"]:
+                yield Finding(
+                    "ref.dangling",
+                    WARNING,
+                    "plan_scenarios",
+                    rec.get("id"),
+                    f"changes.allocations[{i}].project_id",
+                    "points to a missing projects record",
+                )
 
 
 def rule_ref_project_customer(ctx: Ctx) -> Iterable[Finding]:
@@ -664,6 +690,7 @@ RULES: list[Callable[[Ctx], Iterable[Finding]]] = [
     rule_model_invalid,
     rule_model_date_format,
     rule_ref_dangling,
+    rule_ref_scenario_project,
     rule_ref_project_customer,
     rule_numbering_duplicates,
     rule_numbering_state,

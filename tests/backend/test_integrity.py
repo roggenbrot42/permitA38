@@ -197,8 +197,8 @@ def test_dangling_errors(store):
     }
 
 
-def test_dangling_warnings_lists_and_templates(store):
-    store.save("tasks", {"id": "task01", "project_id": "proj99", "name": "T"})
+def test_dangling_warnings_lists_and_templates(store, unguarded):
+    unguarded(store, "tasks", {"id": "task01", "project_id": "proj99", "name": "T"}, "ref.dangling")
     store.save("projects", {"id": "proj01", "name": "P", "member_ids": ["boss01", "ghost01"]})
     store.save("invoices", doc("invoices", "inv001", customer_id=None, template_id="tpl99999"))
     store.save("invoices", doc("invoices", "inv002", customer_id=None, template_id="classic"))  # built-in id
@@ -209,6 +209,18 @@ def test_dangling_warnings_lists_and_templates(store):
         ("ref.dangling", "warning", "projects", "proj01", "member_ids"),
         ("ref.dangling", "warning", "invoices", "inv001", "template_id"),
     }
+
+
+def test_scenario_project_ids_are_checked_inside_the_json(store):
+    store.save("projects", {"id": "proj01", "name": "P"})
+    alloc = {"user_id": "boss01", "start": "2026-03-02", "end": "2026-03-20"}
+    changes = {"allocations": [{**alloc, "project_id": "proj01"}, {**alloc, "project_id": "proj99"}, {"id": "al1"}]}
+    store.save("plan_scenarios", {"id": "scen01", "name": "A", "user_id": "boss01", "changes": changes})
+    store.save("plan_scenarios", {"id": "scen02", "name": "B", "user_id": "boss01", "changes": {"absences": []}})
+    store.save("plan_scenarios", {"id": "scen03", "name": "C", "user_id": "boss01", "changes": "not json"})
+    store.save("plan_scenarios", {"id": "scen04", "name": "D", "user_id": "boss01", "changes": {"allocations": "x"}})
+    got = [(f.code, f.severity, f.collection, f.id, f.field) for f in IntegrityService(store).run(["ref."])]
+    assert got == [("ref.dangling", "warning", "plan_scenarios", "scen01", "changes.allocations[1].project_id")]
 
 
 def test_dangling_audit_is_info(store):
@@ -507,14 +519,15 @@ V2_GUARDS = (
 def test_row_local_guard_kinds_are_reported_with_code_collection_id_and_field(store, monkeypatch):
     monkeypatch.setattr(schema, "GUARDS", V2_GUARDS)  # no trigger exists for these, so the bad rows can be planted
     save = store.save
+    save("projects", {"id": "proj001", "name": "Real"})  # an expense may only point at a project that exists
     save(
         "absences", {"id": "abs001", "user_id": "boss01", "kind": "holiday", "start": "2026-01-01", "end": "2026-01-02"}
     )
     save("absences", {"id": "abs002", "user_id": "boss01", "kind": "sick", "start": "2026-01-01", "end": "2026-01-02"})
     save("absences", {"id": "abs003", "user_id": "boss01", "kind": "sick", "start": "2026-01-01", "end": "2026-01-16"})
     save("absences", {"id": "abs004", "user_id": "boss01", "kind": "sick", "start": "2026-01-01", "end": "2026-01-15"})
-    save("expenses", {"id": "exp001", "project_id": "p1", "trip_id": "t1"})
-    save("expenses", {"id": "exp002", "project_id": "p1", "trip_id": ""})
+    save("expenses", {"id": "exp001", "project_id": "proj001", "trip_id": "t1"})
+    save("expenses", {"id": "exp002", "project_id": "proj001", "trip_id": ""})
     save("expenses", {"id": "exp003"})
     save("customers", {"id": "cus001", "name": "  ", "rate": 0})
     save("customers", {"id": "cus002", "name": "Demo Client", "rate": 0.01})
