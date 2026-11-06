@@ -3,7 +3,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Query
 
 from permita38.api.deps import Needs, ServicesDep
-from permita38.core.models import TimerStartIn, TimerStopIn, Timesheet
+from permita38.core.models import TimerStartIn, TimerStopIn, TimerUpdateIn, Timesheet
 
 router = APIRouter(tags=["time"])
 routers = [router]
@@ -21,11 +21,18 @@ def start_timer(
     return services.time.start_timer(user, body.project_id, body.task_id, body.note)
 
 
+@router.patch("/timer", summary="change project, task or note of the running timer (the start time is kept)")
+def update_timer(
+    body: TimerUpdateIn, user: Annotated[dict, Needs("timer", "write")], services: ServicesDep
+) -> dict[str, Any]:
+    return services.time.update_timer(user, body.model_dump(exclude_unset=True))
+
+
 @router.post("/timer/stop", summary="stop the timer and save the time entry")
 def stop_timer(
     body: TimerStopIn, user: Annotated[dict, Needs("timer", "write")], services: ServicesDep
 ) -> dict[str, Any]:
-    out = services.time.stop_timer(user, body.note)
+    out = services.time.stop_timer(user, body.note, body.discard)
     if out.get("entry"):
         out["sanity_warnings"] = services.sanity.check("entries", out["entry"])
     return out

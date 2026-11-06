@@ -337,16 +337,16 @@ def _damage(app, plant):
 def test_damaged_stored_records_never_break_aggregate_endpoints(app, boss_client, unguarded):
     uid = _damage(app, unguarded)
     c = boss_client
-    assert c.get("/api/forecast").status_code == 200
-    assert c.get("/api/forecast", params={"weeks": 156}).status_code == 200
+    assert c.get("/api/plan").status_code == 200
+    assert c.get("/api/plan", params={"weeks": 52}).status_code == 200
     assert c.get("/api/finance", params={"year": TODAY.year}).status_code == 200
     assert c.get("/api/project-report").status_code == 200
     dash = c.get("/api/dashboard", params={"user_id": uid})
     assert dash.status_code == 200
     # the valid entry (90 min) still counts; the damaged ones are ignored
     assert dash.json()["worked"] == 1.5
-    fc = c.get("/api/forecast").json()
-    assert any(w["confirmed"] > 0 for w in fc["weeks"]), "the valid contract is still planned"
+    plan = c.get("/api/plan").json()
+    assert any(p.get("items") for p in plan["projects"]), "the valid contract is still planned"
 
 
 def test_damaged_stored_records_do_not_break_the_odd_users_dashboard(app, boss_client, unguarded):

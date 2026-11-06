@@ -44,9 +44,6 @@
 .pln-form { margin: 0 0 12px; }
 .pln-form h3 { margin-top: 10px; }
 .pln-page .pln-panels { margin-top: 16px; }
-.basis-contract { background: var(--good-soft); color: var(--good); }
-.basis-offer-binding { background: var(--warn-soft); color: var(--warn); }
-.basis-intended { background: var(--bg); color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .pln-bar { transition: none; } }
 @media (max-width: 720px) {
   .pln-toolbar .pln-kpis { margin-left: 0; }
@@ -66,8 +63,13 @@
 .pln-delta { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; margin-bottom: 8px; }
 .pln-delta .worse, td .worse { color: var(--bad); font-weight: 600; }
 .pln-delta .better, td .better { color: var(--good); font-weight: 600; }
-.pln-day { margin-top: 12px; }
 
 .pln-bar.ext.cancelled { opacity: .55; }
 .pln-bar.ext { background: repeating-linear-gradient(45deg, var(--good) 0 6px, var(--good-soft) 6px 9px); color: var(--ink); cursor: default; }
 .pln-extkpi b { color: var(--accent); }
+.pln-bar.short { background: var(--bad); color: var(--accent-ink); }
+.pln-bar.offer.short { background: repeating-linear-gradient(45deg, var(--bad-soft) 0 6px, var(--bad) 6px 8px); color: var(--ink); }
+.pln-short { color: var(--bad); font-weight: 600; }
+.pln-why { min-height: 0; margin: 0 0 8px; }
+.pln-why:not(:empty) { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+.pln-bar.alloc.fixed { cursor: default; }

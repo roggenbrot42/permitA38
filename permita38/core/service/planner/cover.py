@@ -72,6 +72,9 @@ class _State:
     got_total: float = 0.0
     remaining_weeks: dict[date, float] = field(default_factory=dict)  # weekly: weeks still to check
     short_weeks: dict[date, WeekShortfall] = field(default_factory=dict)
+    week_supply: dict[date, float] = field(
+        default_factory=dict
+    )  # weekly: leftover of the week before the group took any
     remaining: float = 0.0
     shortfall: float = 0.0
     left: float = 0.0  # total: leftover of the window just before the item took any
@@ -124,22 +127,24 @@ def _attribute(states: list[_State], bookings: list[Booking]) -> float:
             continue  # history outside every item period
         rest = by_day[day]
         mon = _monday(day)
-        for s in weekly:
-            if rest <= _EPS:
-                break
-            if s.item.start <= day <= s.item.end:
-                take = min(rest, max(0.0, s.demand.get(mon, 0.0) - s.got.get(mon, 0.0)))
-                if take > 0:
-                    s.got[mon] = s.got.get(mon, 0.0) + take
-                    rest -= take
-        for s in totals:
-            if rest <= _EPS:
-                break
-            if s.item.start <= day <= s.item.end:
-                take = min(rest, max(0.0, (s.item.total_hours or 0.0) - s.got_total))
-                if take > 0:
-                    s.got_total += take
-                    rest -= take
+        # must before could: all contracts (weekly, then total) before any offer (weekly, then total)
+        for kind in ("contract", "offer"):
+            for s in weekly:
+                if rest <= _EPS:
+                    break
+                if s.item.kind == kind and s.item.start <= day <= s.item.end:
+                    take = min(rest, max(0.0, s.demand.get(mon, 0.0) - s.got.get(mon, 0.0)))
+                    if take > 0:
+                        s.got[mon] = s.got.get(mon, 0.0) + take
+                        rest -= take
+            for s in totals:
+                if rest <= _EPS:
+                    break
+                if s.item.kind == kind and s.item.start <= day <= s.item.end:
+                    take = min(rest, max(0.0, (s.item.total_hours or 0.0) - s.got_total))
+                    if take > 0:
+                        s.got_total += take
+                        rest -= take
         if rest > _EPS:
             unattributed += rest
     return unattributed
@@ -161,6 +166,7 @@ def _cover_weekly(group: list[_State], leftover: dict[date, float]) -> None:
                     leftover[d] = max(0.0, leftover[d] * factor)
         short = max(0.0, demand - supply)
         for s, r in members:
+            s.week_supply[w] = supply
             sh = short * r / demand
             s.shortfall += sh
             if _pos(sh):
@@ -218,7 +224,14 @@ def _explain(s: _State, project_name: str, today: date) -> str:
         if not s.short_weeks:
             return f"{head} covered every week."
         weeks = ", ".join(w.strftime("%d.%m.") for w in sorted(s.short_weeks))
-        return f"{head} short {_h(s.shortfall)} h in {len(s.short_weeks)} {'week' if len(s.short_weeks) == 1 else 'weeks'} ({weeks})."
+        text = f"{head} short {_h(s.shortfall)} h in {len(s.short_weeks)} {'week' if len(s.short_weeks) == 1 else 'weeks'} ({weeks})."
+        this_week = _monday(today)
+        if this_week in s.short_weeks:
+            text += (
+                f" This week {_h(s.got.get(this_week, 0.0))} of {_h(it.hours_per_week or 0.0)} h are booked "
+                f"and {_h(s.week_supply.get(this_week, 0.0))} h of assigned time is left after today."
+            )
+        return text
     promised, after = ("promised", "its weekly contracts") if it.kind == "contract" else ("offered", "its contracts")
     if _pos(s.shortfall) and not _window(it, today):
         return (

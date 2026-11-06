@@ -89,8 +89,8 @@ BODIES = [
     (
         "POST",
         "/api/plan/simulate",
-        {"changes": {"absences": [], "commitments": []}, "weeks": 4, "first": None, "user_id": None},
-        [("first",), ("user_id",)],
+        {"changes": {"absences": [], "commitments": []}, "weeks": 4, "user_id": None},
+        [("user_id",)],
     ),
     (
         "POST",
@@ -107,8 +107,8 @@ BODIES = [
     (
         "POST",
         "/api/plan/suggest-start",
-        {"hours": 10, "deadline": "2026-12-31", "earliest": None, "user_ids": [ID]},
-        [("deadline",), ("earliest",), ("user_ids", 0)],
+        {"hours": 10, "deadline": "2026-12-31", "earliest": None},
+        [("deadline",), ("earliest",)],
     ),
     (
         "POST",

@@ -1,9 +1,58 @@
 """Accepting a capacity offer whose plan names no hour field or both: the booked total comes from the hour lines.
 Literal numbers; invented data only."""
 
+from datetime import date
+
 import pytest
 
-from .test_planner_external import _Frozen, boss_id, frozen_today, new_project, supplier  # noqa: F401
+import permita38.api.routers.incoming_offers as offers_router
+import permita38.core.service.planner.service as planner_module
+import permita38.core.service.procurement as procurement_module
+
+TODAY = date(2026, 3, 2)
+
+
+class _Frozen(date):
+    @classmethod
+    def today(cls):
+        return TODAY
+
+
+@pytest.fixture(autouse=True)
+def frozen_today(monkeypatch):
+    for mod in (planner_module, offers_router, procurement_module):
+        if hasattr(mod, "date"):
+            monkeypatch.setattr(mod, "date", _Frozen)
+
+
+@pytest.fixture
+def boss_id(app):
+    return next(u["id"] for u in app.state.services.store.list("users") if u["role"] == "boss")
+
+
+def new_project(c, name):
+    cu = c.post("/api/customers", json={"name": f"{name} Client (Demo)"})
+    assert cu.status_code == 200, cu.text
+    r = c.post("/api/projects", json={"name": name, "customer_id": cu.json()["id"]})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def supplier(c):
+    r = c.post(
+        "/api/suppliers",
+        json={
+            "name": "Example Freelance Studio (Demo)",
+            "kind": "person-capacity",
+            "workdays": [0, 1, 2, 3],
+            "weekly_hours": 24,
+            "rate": 80.0,
+            "country": "DE",
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
 
 SUM_MSG = "The offer's hour lines must add up to more than 0 and at most 100000 h"
 
@@ -47,20 +96,28 @@ def test_both_fields_take_the_total_from_the_lines(boss_client):
     assert alloc["total_hours"] == 50 and not alloc.get("hours_per_week")
 
 
-def test_hours_per_week_only_is_unchanged(boss_client):
+def test_hours_per_week_only_books_the_hour_lines(boss_client):
     sid, pid = setup(boss_client)
     a = offer(boss_client, sid, pid, [hours(80)], {"hours_per_week": 20})
     assert a.status_code == 200, a.text
     alloc = a.json()["allocation"]
-    assert alloc["hours_per_week"] == 20 and not alloc.get("total_hours")
+    assert alloc["total_hours"] == 80 and not alloc.get("hours_per_week")
 
 
-def test_total_hours_only_is_unchanged(boss_client):
+def test_total_hours_only_books_the_hour_lines(boss_client):
     sid, pid = setup(boss_client)
     a = offer(boss_client, sid, pid, [hours(80)], {"total_hours": 40})
     assert a.status_code == 200, a.text
     alloc = a.json()["allocation"]
-    assert alloc["total_hours"] == 40 and not alloc.get("hours_per_week")
+    assert alloc["total_hours"] == 80 and not alloc.get("hours_per_week")
+
+
+def test_e6_24_hours_at_90_book_a_total_of_24_and_planned_net_2160(boss_client):
+    sid, pid = setup(boss_client)
+    a = offer(boss_client, sid, pid, [hours(24, 90.0)], {"hours_per_week": 8})
+    assert a.status_code == 200, a.text
+    alloc = a.json()["allocation"]
+    assert alloc["total_hours"] == 24 and alloc["planned_net"] == 2160.00
 
 
 @pytest.mark.parametrize(

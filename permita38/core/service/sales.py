@@ -10,7 +10,7 @@ from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
 from .numbering import NumberingService
-from .plan_service import PlanningService
+from .planner.service import PlannerService
 from .project_customer import check_billable_project, check_project_customer, project_kind
 from .records import RecordService
 
@@ -92,7 +92,7 @@ class SalesService:
                     raise ServiceError(422, "The offer's hour lines must add up to more than 0 and at most 100000 h")
                 hours["total_hours"] = to_float(total)
         if existing:  # the offer belongs to a project: widen its period to cover the plan (recorded)
-            proj = self.store.save("projects", PlanningService.cover_plan(existing, plan, rid))
+            proj = self.store.save("projects", PlannerService.cover_plan(existing, plan, rid))
         else:
             proj = self.store.save(
                 "projects",

@@ -7,9 +7,8 @@
   const P = {
     weeks: +(localStorage.plnWeeks || 26),
     user: localStorage.plnUser ?? null,            // null = not chosen yet (default: me); '' = whole team
-    ext: lsGet('plnExternal', '1') !== '0',   // include subcontractors (server default); off = the world without suppliers
     project: lsGet('plnProject'),        // '' = all projects, 'unassigned', or a project id
-    alloc: {}, allocs: [], dayWeek: null, day: null,   // draft allocation changes ("r:<id>" / "n:<token>"), stored allocations, day detail
+    alloc: {}, allocs: [], why: null,   // draft allocation changes ("r:<id>" / "n:<token>"), stored allocations, the "why" text under the draft bar
     abs: {},                                       // draft absences: key -> change
     com: {},                                       // draft commitments: "contract:<id>" | "offer:<id>" -> change
     sim: null, base: null, ent: null, hol: {}, scenarios: [], compare: null, sugg: null, sel: null,
@@ -19,12 +18,18 @@
   const pct = x => x == null ? '–' : Math.round(x) + ' %';
   const h1 = x => num(x, 1) + ' h';
   const userId = () => (P.user === null ? (S.me && S.me.id) || '' : P.user);
+  const userName = id => (S.d.users.find(u => u.id === id) || {}).name || '';
+  const whoTag = id => (userId() ? '' : (userName(id) ? ' (' + userName(id) + ')' : ''));   // team view: say whose time off it is
+  // Person for a new time-off draft: the person filter when one is chosen, else the "Person" select of the vacation form.
+  const vacPerson = () => userId() || (document.getElementById('plnVacWho') || {}).value || P.vacUser || (S.me && S.me.id) || '';
   const monday0 = () => mondayOf(todayISO());
   const dayIdx = s => Math.round((parseD(s) - parseD(monday0())) / 864e5);
   const dayAt = i => addDays(monday0(), i);
   const horizon = () => P.weeks * 7;
   const dirty = () => Object.keys(P.abs).length + Object.keys(P.com).length + Object.keys(P.alloc).length;
-  const projName = id => (id ? (S.d.projects.find(p => p.id === id) || {}).name || '(deleted project)' : 'Unassigned');
+  // the server writes hours with a decimal point; the app shows the decimal comma (dates DD.MM.YYYY stay as they are)
+  const loc = t => String(t == null ? '' : t).replace(/(\d)\.(\d+)(?= h\b)/g, '$1,$2');
+  const projName = id => (id && id !== 'unassigned' ? (S.d.projects.find(p => p.id === id) || {}).name || '(deleted project)' : 'Unassigned');
 
   /* ---------- draft ---------- */
   function realAbs(id) { return S.d.absences.find(a => a.id === id); }
@@ -48,9 +53,11 @@
     P.abs[key] = { ...cur, ...patch };
   }
   function realAlloc(id) { return P.allocs.find(a => a.id === id); }
+  const allocHours = a => (a.hours_per_week != null ? { hours_per_week: a.hours_per_week } : { total_hours: a.total_hours });   // exactly the field the row has
+  const allocBase = a => ({ id: a.id, user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, ...allocHours(a) });
   function editAlloc(key, patch) {
     const orig = key.startsWith('r:') ? realAlloc(key.slice(2)) : null;
-    const cur = P.alloc[key] || (orig ? { id: orig.id, user_id: orig.user_id, project_id: orig.project_id, start: orig.start, end: orig.end, hours_per_week: orig.hours_per_week } : null);
+    const cur = P.alloc[key] || (orig ? allocBase(orig) : null);
     if (!cur) return;
     P.alloc[key] = { ...cur, ...patch };
   }
@@ -64,7 +71,7 @@
     const commitments = Object.values(P.com).map(c => ({ kind: c.kind, id: c.id, start: c.start, end: c.end, ...(c.hours_per_week != null ? { hours_per_week: c.hours_per_week } : { total_hours: c.total_hours ?? null }) }));
     const allocations = Object.entries(P.alloc).map(([k, a]) => {
       if (a.delete) return { id: a.id, delete: true };
-      const out = { user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, hours_per_week: a.hours_per_week };
+      const out = { user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, ...allocHours(a) };
       if (k.startsWith('r:')) out.id = k.slice(2);
       return out;
     });
@@ -73,10 +80,9 @@
   function schedule() { clearTimeout(P.timer); P.timer = setTimeout(simulate, 120); }
   async function simulate(retry = true) {
     try {
-      const scope = { ...(P.project ? { project_id: P.project } : {}), ...(P.ext ? {} : { include_external: false }) };
-      const body = { changes: payload(), weeks: P.weeks, first: monday0(), user_id: userId() || null, ...scope };
-      P.sim = await api('POST', 'plan/simulate', body);
-      P.base = await api('POST', 'plan/simulate', { changes: { absences: [], commitments: [] }, weeks: P.weeks, first: monday0(), user_id: userId() || null, ...scope });
+      const scope = P.project ? { project_id: P.project } : {};
+      P.sim = await api('POST', 'plan/simulate', { changes: payload(), weeks: P.weeks, user_id: userId() || null, ...scope });
+      P.base = await api('POST', 'plan/simulate', { changes: { absences: [], commitments: [] }, weeks: P.weeks, user_id: userId() || null, ...scope });
     } catch (e) {
       if (e.status === 404 && P.project && retry) { P.project = ''; lsSet('plnProject', ''); return simulate(false); }   // the remembered project is gone
       toast(e.message, true);
@@ -98,21 +104,29 @@
   }
 
   /* ---------- drawing ---------- */
-  const statusClass = s => (s === 'over' ? 'over' : s === 'tight' ? 'tight' : 'ok');
   function weekRows() { return (P.sim && P.sim.weeks) || []; }
+  const assignedOf = w => (w.assigned_customer || 0) + (w.assigned_internal || 0);
   function explain(w) {
-    const parts = [`Capacity ${h1(w.capacity)}`];
-    if (w.allocated > w.capacity) parts.push(`allocated ${h1(w.allocated)} of ${h1(w.capacity)} capacity: projects are scaled down to ${pct(w.capacity / w.allocated * 100)}`);
-    else if (w.allocated > 0) parts.push(`allocated ${h1(w.allocated)}`);
-    parts.push(`committed ${h1(w.confirmed)} (contracts)`, `open offers ${h1(w.binding_offers)} (worst case)`);
-    if (w.vacation_hours) parts.push(`time off ${h1(w.vacation_hours)}`);
+    const parts = [`Capacity ${h1(w.capacity)} (workday hours minus holidays, time off and busy time)`,
+      `assigned ${h1(assignedOf(w))} (customer projects ${h1(w.assigned_customer)}, internal ${h1(w.assigned_internal)})`,
+      `unassigned ${h1(w.unassigned)}`];
+    if (w.over_assigned > 0) parts.push(`over-assigned ${h1(w.over_assigned)} (per day, assigned above capacity)`);
     if (w.holiday_hours) parts.push(`public holidays ${h1(w.holiday_hours)}`);
-    if (w.external_capacity > 0) parts.push(`of which subcontractors ${h1(w.external_capacity)}`);
-    if (w.external_cost > 0) parts.push(`planned external cost ${eur(w.external_cost)}`);
-    if (w.external_gap > 0) parts.push(`subcontractor gap ${h1(w.external_gap)}`);
-    if (w.gap > 0) parts.push(`not covered by allocations ${h1(w.gap)}`);
-    else if (w.status === 'over') parts.push(`over by ${h1(-w.free_worst_case)}`);
-    return parts.join('; ') + '. Basis: ' + w.basis + '.';
+    if (w.vacation_hours) parts.push(`time off ${h1(w.vacation_hours)}`);
+    if (w.absence_hours) parts.push(`absence ${h1(w.absence_hours)}`);
+    if (w.busy_hours) parts.push(`calendar busy ${h1(w.busy_hours)}`);
+    if (w.subcontractor_hours) parts.push(`subcontractors ${h1(w.subcontractor_hours)} (not part of capacity)`);
+    return parts.join('; ') + '.';
+  }
+  // item verdicts of the last simulation, by "kind:id"
+  function verdicts() {
+    const m = {};
+    for (const p of (P.sim && P.sim.projects) || []) for (const it of p.items || []) m[`${it.kind}:${it.id}`] = it;
+    return m;
+  }
+  function whyText(key) {
+    const v = verdicts()[key];
+    return v ? { title: v.title, text: v.explanation } : null;
   }
   function barStyle(from, to) {
     const s = dayIdx(from), e = dayIdx(to);
@@ -141,11 +155,11 @@
       if (P.abs[key] && P.abs[key].delete) continue;
       const cur = P.abs[key] || a;
       drawn.add(key);
-      out += bar(cur.start, cur.end || cur.start, `abs ${cur.kind || 'vacation'}${P.abs[key] ? ' draft' : ''}`, `${KINDS[cur.kind] || cur.kind}: ${fmtDate(cur.start)}${cur.end && cur.end !== cur.start ? ' – ' + fmtDate(cur.end) : ''}`, { kind: 'abs', key, id: a.id });
+      out += bar(cur.start, cur.end || cur.start, `abs ${cur.kind || 'vacation'}${P.abs[key] ? ' draft' : ''}`, `${KINDS[cur.kind] || cur.kind}${whoTag(a.user_id)}: ${fmtDate(cur.start)}${cur.end && cur.end !== cur.start ? ' – ' + fmtDate(cur.end) : ''}`, { kind: 'abs', key, id: a.id });
     }
     for (const [key, a] of Object.entries(P.abs)) {
       if (drawn.has(key) || key.startsWith('r:')) continue;
-      out += bar(a.start, a.end, 'abs draft', `New ${KINDS[a.kind] || a.kind}: ${fmtDate(a.start)} – ${fmtDate(a.end)}`, { kind: 'abs', key, id: key });
+      out += bar(a.start, a.end, 'abs draft', `New ${KINDS[a.kind] || a.kind}${whoTag(a.user_id)}: ${fmtDate(a.start)} – ${fmtDate(a.end)}`, { kind: 'abs', key, id: key });
     }
     return out;
   }
@@ -168,8 +182,11 @@
       const otherProject = P.project && (P.project === 'unassigned' ? !!it.project_id : it.project_id !== P.project);
       const dim = !otherProject ? '' : ' dim';
       const hours = c.hours_per_week ? `${num(c.hours_per_week, 2)} h/week` : `${num(c.total_hours || 0, 2)} h total`;
-      const row = `<div class="pln-row${dim}"><div class="pln-label"><button type="button" class="pln-pick${sel}" data-a="plnSelect" data-key="${esc(key)}">${esc(it.title)}</button><div class="small muted">${esc(hours)}</div></div>
-        <div class="pln-lane" data-lane="com" style="width:${horizon() * DW}px">${cells()}${bar(c.start, c.end, `${it.sub}${P.com[key] ? ' draft' : ''}${sel}`, `${it.title}: ${fmtDate(c.start)} – ${fmtDate(c.end)}, ${hours}`, { kind: 'com', key, id: key })}</div></div>`;
+      const v = verdicts()[key];
+      const short = v && v.shortfall > 0;
+      const tip = `${it.title}: ${fmtDate(c.start)} – ${fmtDate(c.end)}, ${hours}${v ? '. ' + loc(v.explanation) : ''}`;
+      const row = `<div class="pln-row${dim}"><div class="pln-label"><button type="button" class="pln-pick${sel}" data-a="plnSelect" data-key="${esc(key)}">${esc(it.title)}</button><div class="small muted">${esc(hours)}${short ? ` · <span class="pln-short">short ${esc(h1(v.shortfall))}</span>` : ''}</div></div>
+        <div class="pln-lane" data-lane="com" style="width:${horizon() * DW}px">${cells()}${bar(c.start, c.end, `${it.sub}${short ? ' short' : ''}${P.com[key] ? ' draft' : ''}${sel}`, tip, { kind: 'com', key, id: key })}</div></div>`;
       html += row;
     }
     return html || '<div class="empty small">No contracts or open offers in this period.</div>';
@@ -179,11 +196,14 @@
     const match = a => (!uid || a.user_id === uid) && (!P.project || a.project_id === P.project);
     const rows = [];
     const row = (key, a, draft) => {
-      const label = `${projName(a.project_id)}: ${num(a.hours_per_week, 2)} h/week, ${fmtDate(a.start)} – ${fmtDate(a.end)}`;
+      const perWeek = a.hours_per_week != null;
+      const amount = perWeek ? `${num(a.hours_per_week, 2)} h/week` : `${num(a.total_hours, 2)} h total`;
+      const ended = !!a.id && a.end < todayISO();   // a saved assignment that ended before today is history
+      const label = `${projName(a.project_id)}: ${amount}, ${fmtDate(a.start)} – ${fmtDate(a.end)}${ended ? ' (ended)' : ''}`;
       const who = (S.d.users.find(u => u.id === a.user_id) || {}).name || '';
       const dim = P.project && a.project_id !== P.project ? ' dim' : '';
-      rows.push(`<div class="pln-row${dim}"><div class="pln-label"><span>${esc(projName(a.project_id))}</span><div class="small muted">${uid ? '' : esc(who) + ' · '}<input type="number" class="pln-hrs" min="0.25" max="80" step="0.25" value="${esc(a.hours_per_week)}" data-change="plnAllocHours" data-key="${esc(key)}" aria-label="Hours per week of ${esc(label)}"> h/week</div></div>
-        <div class="pln-lane" data-lane="alloc" style="width:${horizon() * DW}px">${cells()}${bar(a.start, a.end, `alloc${draft ? ' draft' : ''}`, label, { kind: 'alloc', key, id: a.id || key })}</div></div>`);
+      rows.push(`<div class="pln-row${dim}"><div class="pln-label"><span>${esc(projName(a.project_id))}</span><div class="small muted">${uid ? '' : esc(who) + ' · '}${ended ? esc(amount) : perWeek ? `<input type="number" class="pln-hrs" min="0.25" max="80" step="0.25" value="${esc(a.hours_per_week)}" data-change="plnAllocHours" data-key="${esc(key)}" aria-label="Hours per week of ${esc(label)}"> h/week` : `<input type="number" class="pln-hrs" min="0.25" max="100000" step="0.25" value="${esc(a.total_hours)}" data-change="plnAllocHours" data-key="${esc(key)}" aria-label="Total hours of ${esc(label)}"> h total`}</div></div>
+        <div class="pln-lane" data-lane="alloc" style="width:${horizon() * DW}px">${cells()}${bar(a.start, a.end, `alloc${draft ? ' draft' : ''}${perWeek ? '' : ' fixed'}${ended ? ' ended' : ''}`, label, !ended ? { kind: 'alloc', key, id: a.id || key } : {})}</div></div>`);
     };
     for (const a of P.allocs) {
       if (a.kind && a.kind !== 'employee') continue;
@@ -193,11 +213,11 @@
       if (match(cur)) row(key, cur, !!d);
     }
     for (const [key, a] of Object.entries(P.alloc)) if (key.startsWith('n:') && match(a)) row(key, a, true);
-    return `<div class="pln-row pln-group"><div class="pln-label"><b>Allocations</b></div></div>${rows.join('') || '<div class="empty small">No allocations in this selection. Add a draft below, or use "Allocate my capacity" on the forecast tab.</div>'}`;
+    return `<div class="pln-row pln-group"><div class="pln-label"><b>Allocations</b></div></div>${rows.join('') || '<div class="empty small">No allocations in this selection. Add a draft below, or assign people on the Overview tab.</div>'}`;
   }
   /* subcontractor allocations (read-only: they are created by accepting an incoming offer) */
   function externalRows() {
-    if (!P.ext || userId()) return '';   // subcontractors are not a person's hours: a chosen person hides them
+    if (userId()) return '';   // subcontractors are not a person's hours: a chosen person hides them
     const list = [...P.allocs.filter(a => a.kind === 'external' && a.status !== 'cancelled'), ...(P.extCancelled || [])]
       .filter(a => !P.project || a.project_id === P.project);
     const rows = list.map(a => {
@@ -207,16 +227,18 @@
       if (cancelled && (!a.cancelled_from || end < a.start)) return '';
       const label = `${a.supplier_name || 'Subcontractor'}: ${projName(a.project_id)}, ${a.hours_per_week != null ? num(a.hours_per_week, 2) + ' h/week' : num(a.total_hours, 2) + ' h total'}, ${fmtDate(a.start)} – ${fmtDate(a.end)}${cancelled ? `, cancelled from ${fmtDate(a.cancelled_from)}` : ''}`;
       return `<div class="pln-row pln-ext-row${cancelled ? ' cancelled' : ''}" data-ext="${esc(a.id)}"><div class="pln-label"><span>${esc(a.supplier_name || 'Subcontractor')}</span><div class="small muted">${esc(projName(a.project_id))}${cancelled ? `, cancelled from ${esc(fmtDate(a.cancelled_from))}` : ''}</div></div>
-        <div class="pln-lane" style="width:${horizon() * DW}px">${cells()}<div class="pln-bar ext${cancelled ? ' cancelled' : ''}" style="${barStyle(a.start, end)}" tabindex="0" role="group" aria-label="${esc(label)}" title="${esc(label)}"><span class="pln-bar-t">${esc(a.supplier_name || 'External')}</span></div></div></div>`;
+        <div class="pln-lane" style="width:${horizon() * DW}px">${cells()}<div class="pln-bar ext${cancelled ? ' cancelled' : ''}" style="${barStyle(a.start, end)}" tabindex="0" role="group" aria-label="${esc(label)}" title="${esc(label + ' (edit in Assignments)')}"><span class="pln-bar-t">${esc(a.supplier_name || 'External')}</span></div></div></div>`;
     }).join('');
     return rows ? `<div class="pln-row pln-group"><div class="pln-label"><b>External</b></div></div>${rows}` : '';
   }
   function weekRowsHtml() {
     const W = weekRows(); if (!W.length) return '';
-    const cap = `<div class="pln-row"><div class="pln-label">Capacity</div><div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => `<span class="pln-week" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px" title="Week of ${esc(fmtDate(w.week))}">${num(w.capacity, 0)} h</span>`).join('')}</div></div>`;
-    const util = `<div class="pln-row"><div class="pln-label" title="Utilisation of capacity, including allocated hours">Utilisation</div><div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => `<button type="button" class="pln-week util ${statusClass(w.status)}${w.delta > 0 ? ' worse' : w.delta < 0 ? ' better' : ''}" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px" data-a="plnWhy" data-i="${i}" aria-label="Week of ${esc(fmtDate(w.week))}: ${pct(w.utilisation)}, ${esc(w.status)}">${pct(w.utilisation)}</button>`).join('')}</div></div>`;
-    const busy = W.some(w => w.busy_hours) ? `<div class="pln-row"><div class="pln-label">Calendar busy</div><div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => `<span class="pln-week" style="left:${i * 7 * DW}px;width:${7 * DW - 2}px">${w.busy_hours ? num(w.busy_hours, 1) + ' h' : ''}</span>`).join('')}</div></div>` : '';
-    return cap + util + busy;
+    const lane = f => `<div class="pln-lane pln-weeks" style="width:${horizon() * DW}px">${W.map((w, i) => f(w, `left:${i * 7 * DW}px;width:${7 * DW - 2}px`, i)).join('')}</div>`;
+    const cap = `<div class="pln-row"><div class="pln-label" title="Workday hours minus public holidays, time off and busy time">Capacity</div>${lane((w, st) => `<span class="pln-week" style="${st}" title="${esc(explain(w))}">${esc(num(w.capacity, 0))} h</span>`)}</div>`;
+    const asg = `<div class="pln-row"><div class="pln-label" title="Hours assigned to customer and internal projects; red when assigned above capacity on a day">Assigned</div>${lane((w, st, i) => `<button type="button" class="pln-week util ${w.over_assigned > 0 ? 'over' : 'ok'}" style="${st}" data-a="plnWhy" data-i="${i}" aria-label="${esc(`Week of ${fmtDate(w.week)}: assigned ${h1(assignedOf(w))} of ${h1(w.capacity)}${w.over_assigned > 0 ? `, over-assigned ${h1(w.over_assigned)}` : ''}`)}">${esc(num(assignedOf(w), 0))} h</button>`)}</div>`;
+    const un = `<div class="pln-row"><div class="pln-label" title="Per day capacity minus assigned hours (never below 0), summed">Unassigned</div>${lane((w, st) => `<span class="pln-week" style="${st}">${esc(num(w.unassigned, 0))} h</span>`)}</div>`;
+    const busy = W.some(w => w.busy_hours) ? `<div class="pln-row"><div class="pln-label">Calendar busy</div>${lane((w, st) => `<span class="pln-week" style="${st}">${w.busy_hours ? esc(num(w.busy_hours, 1)) + ' h' : ''}</span>`)}</div>` : '';
+    return cap + asg + un + busy;
   }
   function headerRow() {
     const W = weekRows();
@@ -231,13 +253,17 @@
   }
   function compareBox() {
     if (!P.compare || !P.sim) return '';
-    const t = (x) => x ? x.totals : {};
-    const row = (label, f) => `<tr><th>${label}</th><td class="num">${f(t(P.base))}</td><td class="num">${f(t(P.sim))}</td><td class="num">${f(t(P.compare))}</td></tr>`;
+    const t = x => ({
+      short: (x.projects || []).reduce((n, p) => n + (p.shortfall_contracts || 0), 0),
+      over: (x.weeks || []).filter(w => w.over_assigned > 0).length,
+      unassigned: (x.weeks || []).reduce((n, w) => n + (w.unassigned || 0), 0),
+    });
+    const [b, d, c] = [P.base || P.sim, P.sim, P.compare.body].map(t);
+    const row = (label, f) => `<tr><th>${label}</th><td class="num">${f(b)}</td><td class="num">${f(d)}</td><td class="num">${f(c)}</td></tr>`;
     return `<div class="card"><h2>Compare scenarios</h2><table><tr><th></th><th class="num">Current base</th><th class="num">Draft</th><th class="num">${esc(P.compare.name)}</th></tr>
-      ${row('Free hours (worst case)', x => num(x.free_worst_case, 1) + ' h')}
-      ${row('Over-capacity weeks', x => String(x.over_weeks))}
-      ${row('Revenue (basis rule)', x => eur(x.revenue))}
-      ${row('Contracted revenue', x => eur(x.contracted_revenue))}</table></div>`;
+      ${row('Contract shortfall', x => num(x.short, 1) + ' h')}
+      ${row('Over-assigned weeks', x => String(x.over))}
+      ${row('Unassigned hours', x => num(x.unassigned, 1) + ' h')}</table></div>`;
   }
   function suggBox() {
     const s = P.sugg;
@@ -266,14 +292,14 @@
   function draftList() {
     const items = [];
     for (const [key, a] of Object.entries(P.abs)) {
-      const what = a.delete ? `Remove time off ${fmtDate(a.start || (realAbs(a.id) || {}).start)}` : key.startsWith('n:') ? `New ${KINDS[a.kind] || a.kind}: ${fmtDate(a.start)} – ${fmtDate(a.end)}` : `Move ${KINDS[a.kind] || a.kind}: ${fmtDate(a.start)} – ${fmtDate(a.end)}`;
+      const what = a.delete ? `Remove time off${whoTag(a.user_id)} ${fmtDate(a.start || (realAbs(a.id) || {}).start)}` : key.startsWith('n:') ? `New ${KINDS[a.kind] || a.kind}${whoTag(a.user_id)}: ${fmtDate(a.start)} – ${fmtDate(a.end)}` : `Move ${KINDS[a.kind] || a.kind}${whoTag(a.user_id)}: ${fmtDate(a.start)} – ${fmtDate(a.end)}`;
       items.push({ store: 'abs', key, what });
     }
     for (const [key, c] of Object.entries(P.com)) {
       items.push({ store: 'com', key, what: `${key.startsWith('offer') ? 'Offer' : 'Contract'}: ${fmtDate(c.start)} – ${fmtDate(c.end)}` });
     }
     for (const [key, a] of Object.entries(P.alloc)) {
-      items.push({ store: 'alloc', key, what: a.delete ? `Remove allocation to ${projName((realAlloc(a.id) || {}).project_id)}` : `${key.startsWith('n:') ? 'New allocation' : 'Allocation'} to ${projName(a.project_id)}: ${num(a.hours_per_week, 2)} h/week, ${fmtDate(a.start)} – ${fmtDate(a.end)}` });
+      items.push({ store: 'alloc', key, what: a.delete ? `Remove allocation to ${projName((realAlloc(a.id) || {}).project_id)}` : `${key.startsWith('n:') ? 'New allocation' : 'Allocation'} to ${projName(a.project_id)}: ${a.hours_per_week != null ? num(a.hours_per_week, 2) + ' h/week' : num(a.total_hours, 2) + ' h total'}, ${fmtDate(a.start)} – ${fmtDate(a.end)}` });
     }
     if (!items.length) return '';
     return `${deltaBox()}<ul class="pln-draftlist">${items.map(i => `<li><span>${esc(i.what)}</span> <button type="button" class="ghost sm" data-a="plnDiscardOne" data-store="${i.store}" data-key="${esc(i.key)}">Discard</button></li>`).join('')}</ul>`;
@@ -281,25 +307,22 @@
   function deltaBox() {
     const d = P.sim && P.sim.delta;
     if (!d || !d.projects || !d.projects.length) return '';
-    return `<div class="pln-delta small" role="status"><b>Effect of the draft on the gap:</b> ${d.projects.map(p => `<span class="${p.delta > 0 ? 'worse' : p.delta < 0 ? 'better' : ''}">${esc(p.name)} ${esc(h1(p.base_gap))} → ${esc(h1(p.gap))} (${p.delta > 0 ? '+' : ''}${esc(num(p.delta, 1))} h)</span>`).join('; ')}</div>`;
+    const nameOf = id => { const p = ((P.sim && P.sim.projects) || []).find(x => x.project_id === id); return p ? p.name : projName(id); };
+    return `<div class="pln-delta small" role="status"><b>Effect of the draft on the shortfall:</b> ${d.projects.map(p => `<span class="${p.delta > 0 ? 'worse' : p.delta < 0 ? 'better' : ''}">${esc(nameOf(p.project_id))}: short ${esc(num(p.shortfall_before, 1))} h -&gt; ${esc(num(p.shortfall_after, 1))} h</span>`).join('; ')}</div>`;
   }
-  function dayBox() {
-    if (!P.day || !P.dayWeek) return '';
-    const names = P.day.scope_names || {};
-    const pool = (b, k) => b && b[k] && (b[k].cap || b[k].assigned) ? `${k} ${num(b[k].assigned, 2)}/${num(b[k].cap, 2)}${b[k].gap > 0 ? ` (gap ${num(b[k].gap, 2)})` : ''}` : '';
-    return `<div class="card pln-day"><h2>Days of the week of ${esc(fmtDate(P.dayWeek))} (without draft)</h2><table><tr><th>Day</th><th class="num">Capacity</th><th>Per project (planned / capacity)</th></tr>${P.day.days.map(d => `<tr><td class="nowrap">${esc(dayName(d.date))} ${esc(fmtDate(d.date).slice(0, 5))}</td><td class="num">${num(d.cap, 2)}</td><td class="small">${Object.entries(d.scopes || {}).map(([k, sc]) => `<span class="nowrap">${esc(names[k] || k)}: ${esc([pool(sc, 'internal'), pool(sc, 'external')].filter(Boolean).join(', '))}</span>`).join(' · ')}</td></tr>`).join('')}</table></div>`;
-  }
+  function whyInner() { return P.why ? `<b>${esc(P.why.title)}:</b> ${esc(loc(P.why.text))}` : ''; }
   function view() {
     const W = weekRows();
-    const tot = (P.sim && P.sim.totals) || {};
+    const shortTotal = ((P.sim && P.sim.projects) || []).reduce((n, p) => n + (p.shortfall_contracts || 0), 0);
+    const overWeeks = W.filter(w => w.over_assigned > 0).length;
+    const unassigned = W.reduce((n, w) => n + (w.unassigned || 0), 0);
     const users = S.d.users.filter(u => u.active !== false);
     const n = dirty();
     return `<div class="pln-toolbar">
       <div class="auto"><label for="plnWho">Who</label><select id="plnWho" data-change="plnWho"><option value="">Whole team</option>${users.map(u => `<option value="${esc(u.id)}" ${u.id === userId() ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
       <div class="auto"><label for="plnProj">Project</label><select id="plnProj" data-change="plnProject"><option value="">All projects</option>${S.d.projects.filter(p => p.status !== 'archived' || p.id === P.project).map(p => `<option value="${esc(p.id)}" ${p.id === P.project ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}<option value="unassigned" ${P.project === 'unassigned' ? 'selected' : ''}>Unassigned</option></select></div>
       <div class="auto"><label for="plnHor">Horizon</label><select id="plnHor" data-change="plnHorizon">${[13, 26, 52].map(x => `<option value="${x}" ${x === P.weeks ? 'selected' : ''}>${x} weeks</option>`).join('')}</select></div>
-      <div class="auto"><label class="pp-check"><input type="checkbox" id="plnExt" data-change="plnExternal" ${P.ext ? 'checked' : ''}> include subcontractors</label></div>
-      <div class="pln-kpis small"><span>Free (worst case): <b>${num(tot.free_worst_case || 0, 0)} h</b></span><span>Over-capacity weeks: <b>${tot.over_weeks || 0}</b></span><span>Not covered: <b>${num(tot.gap || 0, 0)} h</b></span><span>Revenue: <b>${eur(tot.revenue || 0)}</b></span>${tot.external_cost ? `<span class="pln-extkpi">External cost: <b>${eur(tot.external_cost)}</b></span><span class="pln-extkpi">Margin: <b>${eur(tot.margin || 0)}</b></span>` : ''}</div>
+      <div class="pln-kpis small"><span title="Sum of the contract shortfalls of the shown projects">Contract shortfall: <b>${esc(num(shortTotal, 0))} h</b></span><span>Over-assigned weeks: <b>${overWeeks}</b></span><span>Unassigned: <b>${esc(num(unassigned, 0))} h</b></span></div>
     </div>
     ${entBox()}
     <div class="pln-draftbar ${n ? 'on' : ''}" role="region" aria-label="Draft changes">
@@ -307,6 +330,7 @@
       <span class="right auto"><button type="button" class="ghost" data-a="plnDiscard" ${n ? '' : 'disabled'}>Discard</button> <button type="button" class="primary" data-a="plnApply" ${n ? '' : 'disabled'}>Apply</button></span>
     </div>
     ${draftList()}
+    <div class="pln-why small" id="plnWhy" role="status">${whyInner()}</div>
     <div class="pln-help small muted">Keyboard: click or Tab to a bar, then ←/→ moves it one day (PageUp/PageDown: one week); Shift+←/→ changes its end, Ctrl+←/→ its start; Esc discards this item's change; Delete or Backspace removes a time-off entry. Touch: drag bars and the time-off row.</div>
     <div class="pln-wrap" id="plnWrap" aria-label="Timeline">
       <div class="pln-grid">
@@ -319,11 +343,10 @@
         ${comBars()}
       </div>
     </div>
-    ${dayBox()}
     <div class="pln-drag" id="plnDrag" hidden></div>
     <div class="grid g2 pln-panels">
       <div class="card"><h2>Vacation</h2>
-        <form class="pln-form" data-submit="plnAddVac"><div class="row"><div class="auto"><label for="plnFrom">From</label><input id="plnFrom" type="date" value="${todayISO()}"></div><div class="auto"><label for="plnTo">To (inclusive)</label><input id="plnTo" type="date" value="${addDays(todayISO(), 6)}"></div><div class="auto"><button type="button" class="primary" data-a="plnAddVac">Add vacation</button></div></div></form>
+        <form class="pln-form" data-submit="plnAddVac"><div class="row"><div class="auto"><label for="plnFrom">From</label><input id="plnFrom" type="date" value="${todayISO()}"></div><div class="auto"><label for="plnTo">To (inclusive)</label><input id="plnTo" type="date" value="${addDays(todayISO(), 6)}"></div><div class="auto"><label for="plnVacWho">Person</label><select id="plnVacWho" data-change="plnVacWho" ${userId() ? 'disabled' : ''}>${users.map(u => `<option value="${esc(u.id)}" ${u.id === (userId() || P.vacUser || (S.me && S.me.id)) ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div><div class="auto"><button type="button" class="primary" data-a="plnAddVac">Add vacation</button></div></div></form>
         <form class="pln-form" data-submit="plnSuggest"><h3>Find a time</h3><div class="row"><div class="auto"><label for="plnDays">Working days</label><input id="plnDays" type="number" min="1" max="60" value="5"></div><div class="auto"><label for="plnWFrom">Window from</label><input id="plnWFrom" type="date" value="${todayISO()}"></div><div class="auto"><label for="plnWTo">Window to</label><input id="plnWTo" type="date" value="${addDays(todayISO(), 90)}"></div><div class="auto"><button type="button" data-a="plnSuggest">Suggest</button></div></div></form>
         <form class="pln-form" data-submit="plnStart"><h3>Earliest start for an offer</h3><div class="row"><div class="auto"><label for="plnHrs">Hours</label><input id="plnHrs" type="number" min="0" step="0.5" value="40"></div><div class="auto"><label for="plnDead">Deadline</label><input id="plnDead" type="date" value="${addDays(todayISO(), 120)}"></div><div class="auto"><button type="button" data-a="plnStart">Find start</button></div></div></form>
         <div id="plnSugg">${suggBox()}</div>
@@ -342,10 +365,9 @@
         ${compareBox()}
       </div>
     </div>
-    <div class="card"><h2>Week by week</h2><table><tr><th>Week of</th><th class="num">Capacity</th><th class="num">Allocated</th><th class="num">Contracts</th><th class="num">Offers</th><th class="num">Free</th><th class="num">Util.</th><th class="num">Gap</th><th>Basis</th><th class="num">Revenue</th><th>Notes</th></tr>
-      ${W.map(w => `<tr title="${esc(explain(w))}"><td class="nowrap">${esc(fmtDate(w.week))}</td><td class="num">${num(w.capacity, 1)}</td><td class="num ${w.allocated > w.capacity ? 'free-bad' : ''}">${num(w.allocated, 1)}</td><td class="num">${num(w.confirmed, 1)}</td><td class="num muted">${w.binding_offers ? num(w.binding_offers, 1) : ''}</td><td class="num ${w.free_worst_case < 0 ? 'free-bad' : 'free-good'}">${num(w.free_worst_case, 1)}</td><td class="num ${statusClass(w.status)}">${pct(w.utilisation)}</td><td class="num">${w.gap > 0 ? `<span class="pp-gap">${num(w.gap, 1)}</span>` : ''}${w.delta ? ` <span class="small ${w.delta > 0 ? 'worse' : 'better'}">${w.delta > 0 ? '+' : ''}${num(w.delta, 1)}</span>` : ''}</td><td><span class="pill basis-${w.basis}">${esc(BASIS_LABEL[w.basis] || w.basis)}</span></td><td class="num">${eur(w.revenue)}</td><td class="small muted">${w.events.map(esc).join(', ')}</td></tr>`).join('')}</table></div>`;
+    <div class="card"><h2>Week by week</h2><table><tr><th>Week of</th><th class="num" title="Workday hours minus holidays, time off and busy time">Capacity</th><th class="num">Customer projects</th><th class="num">Internal</th><th class="num">Unassigned</th><th class="num">Over-assigned</th><th class="num" title="Customer hours / capacity">Billable share</th><th class="num">Subcontractors</th><th>Notes</th></tr>
+      ${W.map(w => `<tr title="${esc(explain(w))}"><td class="nowrap">${esc(fmtDate(w.week))}</td><td class="num">${num(w.capacity, 1)}</td><td class="num">${num(w.assigned_customer, 1)}</td><td class="num">${num(w.assigned_internal, 1)}</td><td class="num">${num(w.unassigned, 1)}</td><td class="num ${w.over_assigned > 0 ? 'free-bad' : ''}">${num(w.over_assigned, 1)}</td><td class="num">${pct(w.billable_share)}</td><td class="num">${num(w.subcontractor_hours, 1)}</td><td class="small muted">${esc([w.holiday_hours ? `holiday ${num(w.holiday_hours, 1)} h` : '', w.vacation_hours ? `time off ${num(w.vacation_hours, 1)} h` : '', w.absence_hours ? `absence ${num(w.absence_hours, 1)} h` : '', w.busy_hours ? `busy ${num(w.busy_hours, 1)} h` : ''].filter(Boolean).join(', '))}</td></tr>`).join('')}</table></div>`;
   }
-  const BASIS_LABEL = { contract: 'contracted', 'offer-binding': 'open offers', intended: 'assumed' };
 
   /* ---------- pointer and keyboard ---------- */
   let drag = null;
@@ -366,7 +388,7 @@
       if (end < start) return;
       editAbs(key, { start, end });
     } else if (kind === 'alloc') {
-      const cur = P.alloc[key] || (key.startsWith('r:') ? (() => { const a = realAlloc(id); return a && { id, user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, hours_per_week: a.hours_per_week }; })() : null);
+      const cur = P.alloc[key] || (key.startsWith('r:') ? (() => { const a = realAlloc(id); return a && allocBase(a); })() : null);
       if (!cur) return;
       let { start, end } = cur;
       if (mode === 'start') start = addDays(start, days);
@@ -390,11 +412,13 @@
     P.sel = bar.dataset.key;
     document.querySelectorAll('#pln .pln-bar.sel').forEach(b => b.classList.remove('sel'));
     bar.classList.add('sel');
+    if (bar.dataset.kind === 'com') { P.why = whyText(P.sel); const w = document.getElementById('plnWhy'); if (w) w.innerHTML = whyInner(); }
     bar.focus({ preventScroll: true });
   }
   function onDown(e) {
     const bar = e.target.closest('.pln-bar');
     const lane = e.target.closest('[data-lane="time"]');
+    if (bar && !bar.dataset.kind) return;   // read-only bars (subcontractors, assignments that ended before today)
     if (bar && e.button === 0) {
       const mode = (e.target.dataset && e.target.dataset.mode) || 'move';
       drag = { kind: bar.dataset.kind, key: bar.dataset.key, id: bar.dataset.id, mode, x0: e.clientX, el: bar, delta: 0,
@@ -457,7 +481,8 @@
       if (!d) return;
       const [s, t] = cur.startDay <= d ? [cur.startDay, d] : [d, cur.startDay];
       const k = 'n:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      P.abs[k] = { user_id: userId(), kind: 'vacation', start: s, end: t };
+      const who = vacPerson(); if (!who) return toast('Choose a person for the time off', true);
+      P.abs[k] = { user_id: who, kind: 'vacation', start: s, end: t };
       schedule();
       return;
     }
@@ -503,24 +528,27 @@
   }
 
   /* ---------- actions ---------- */
-  A.plnSelect = el => { P.sel = el.dataset.key; paint(); };
-  A.plnWhy = guard(async el => {
+  A.plnSelect = el => { P.sel = el.dataset.key; P.why = whyText(P.sel); paint(); };
+  A.plnWhy = el => {
     const w = weekRows()[+el.dataset.i];
-    toast(explain(w));
     if (!w) return;
-    const uid = userId();
-    P.day = await api('GET', `plan/day-table?from=${w.week}&to=${addDays(w.week, 6)}${uid ? '&user_id=' + uid : ''}${P.project ? '&project_id=' + encodeURIComponent(P.project) : ''}`);
-    P.dayWeek = w.week;
+    P.why = { title: `Week of ${fmtDate(w.week)}`, text: explain(w) };
     paint();
-  });
+  };
   A.plnDiscardOne = el => { delete ({ abs: P.abs, alloc: P.alloc }[el.dataset.store] || P.com)[el.dataset.key]; schedule(); };
   A.plnDiscard = () => { P.abs = {}; P.com = {}; P.alloc = {}; P.sugg = null; schedule(); };
-  A.plnExternal = el => { P.ext = el.checked; lsSet('plnExternal', P.ext ? '1' : '0'); P.day = null; P.dayWeek = null; schedule(); };
-  A.plnProject = el => { P.project = el.value; lsSet('plnProject', P.project); P.day = null; P.dayWeek = null; schedule(); };
+  A.plnProject = el => { P.project = el.value; lsSet('plnProject', P.project); P.why = null; schedule(); };
   A.plnAllocHours = el => {
-    const v = +el.value;
-    if (!(v >= 0.25 && v <= 80)) { toast(`Hours per week must be between ${num(0.25, 2)} and ${num(80, 0)}`, true); return paint(); }
-    editAlloc(el.dataset.key, { hours_per_week: v });
+    const v = +el.value, key = el.dataset.key;
+    const row = P.alloc[key] || (key.startsWith('r:') ? realAlloc(key.slice(2)) : null);
+    if (!row) return;
+    if (row.hours_per_week == null) {
+      if (!(v >= 0.25 && v <= 100000)) { toast(`Total hours must be between ${num(0.25, 2)} and ${num(100000, 0)}`, true); return paint(); }
+      editAlloc(key, { total_hours: v });
+    } else {
+      if (!(v >= 0.25 && v <= 80)) { toast(`Hours per week must be between ${num(0.25, 2)} and ${num(80, 0)}`, true); return paint(); }
+      editAlloc(key, { hours_per_week: v });
+    }
     schedule();
   };
   A.plnAddAlloc = () => {
@@ -536,11 +564,13 @@
     const s = document.getElementById('plnFrom').value, t = document.getElementById('plnTo').value;
     if (!s || !t) return toast('Choose both dates', true);
     if (t < s) return toast('The end is before the start', true);
-    P.abs['n:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)] = { user_id: userId(), kind: 'vacation', start: s, end: t };
+    const who = vacPerson(); if (!who) return toast('Choose a person for the time off', true);
+    P.abs['n:' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)] = { user_id: who, kind: 'vacation', start: s, end: t };
     schedule();
   };
   A.plnApply = guard(async () => {
     const body = payload();
+    if (body.absences.some(a => !a.delete && !a.user_id)) return toast('Choose a person for the time off', true);
     const count = body.absences.length + body.commitments.length + (body.allocations || []).length;
     if (!window.confirm(`Write ${count} change(s) to your real data? This cannot be undone with one click.`)) return;
     const r = await api('POST', 'plan/apply', { changes: body, confirm: true });
@@ -562,7 +592,8 @@
   A.plnUseOption = el => {
     const o = P.sugg && P.sugg.options[+el.dataset.i];
     if (!o) return;
-    P.abs['n:' + Date.now().toString(36)] = { user_id: userId(), kind: 'vacation', start: o.start, end: o.end };
+    const who = vacPerson(); if (!who) return toast('Choose a person for the time off', true);
+    P.abs['n:' + Date.now().toString(36)] = { user_id: who, kind: 'vacation', start: o.start, end: o.end };
     schedule();
   };
   A.plnStart = guard(async () => {
@@ -604,8 +635,8 @@
     if (!s) return;
     P.abs = {}; P.com = {}; P.alloc = {};
     for (const a of s.changes.allocations || []) {
-      if (a.id) P.alloc['r:' + a.id] = a.delete ? { id: a.id, delete: true } : { id: a.id, user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, hours_per_week: a.hours_per_week };
-      else P.alloc['n:' + Math.random().toString(36).slice(2, 8)] = { user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, hours_per_week: a.hours_per_week };
+      if (a.id) P.alloc['r:' + a.id] = a.delete ? { id: a.id, delete: true } : allocBase(a);
+      else P.alloc['n:' + Math.random().toString(36).slice(2, 8)] = { user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, ...allocHours(a) };
     }
     for (const a of s.changes.absences || []) {
       if (a.id) { if (a.delete) P.abs['r:' + a.id] = { id: a.id, delete: true, user_id: a.user_id }; else P.abs['r:' + a.id] = { id: a.id, user_id: a.user_id, kind: a.kind || 'vacation', start: a.start, end: a.end }; }
@@ -617,8 +648,8 @@
   A.plnCompare = guard(async el => {
     const s = P.scenarios.find(x => x.id === el.value);
     if (!s) { P.compare = null; return paint(); }
-    const r = await api('POST', 'plan/simulate', { changes: s.changes, weeks: P.weeks, first: monday0(), user_id: userId() || null, ...(P.project ? { project_id: P.project } : {}) });
-    P.compare = { name: s.name, totals: r.totals };
+    const r = await api('POST', 'plan/simulate', { changes: s.changes, weeks: P.weeks, user_id: userId() || null, ...(P.project ? { project_id: P.project } : {}) });
+    P.compare = { name: s.name, body: r };
     paint();
   });
   A.plnDeleteScenario = guard(async el => {
@@ -647,6 +678,7 @@
     schedule();
   };
   // data-change handlers used by the toolbar (the app's delegated change listener calls A[name])
+  A.plnVacWho = el => { P.vacUser = el.value; };
   A.plnWho = el => { P.user = el.value; localStorage.plnUser = P.user; P.sel = null; loadEntitlement().then(schedule); };
   A.plnHorizon = el => { P.weeks = +el.value; localStorage.plnWeeks = P.weeks; loadHolidays().then(schedule); };
   A.plnHours = el => A.plnHoursSet(el);

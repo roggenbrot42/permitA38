@@ -1,7 +1,7 @@
 """Project time sheet (docs/specs/project-centric-planning.md, "Project time sheet"). Invented data; every expected
 number is written out by hand.
 
-Fixture (project "Orchard", internal, no period; 2026-11-09 and 2026-11-16 are Mondays):
+Fixture (project "Orchard", a customer project, no period; 2026-11-09 and 2026-11-16 are Mondays):
   Ada  2026-11-09  90 min  billable, not invoiced      Bob  2026-11-12  60 min  billable, not invoiced
   Ada  2026-11-10  30 min  billable, invoiced          Bob  2026-12-02 120 min  billable, not invoiced
   Ada  2026-11-17  45 min  not billable                (and 500 min of Ada on another project: never counted)
@@ -20,7 +20,9 @@ def world(app, boss_client):
         r = boss.post("/api/users", json={"username": username, "name": name, "role": "employee", "password": PASSWORD})
         assert r.status_code == 200, r.text
         ids[key] = r.json()["id"]
-    ids["p"] = boss.post("/api/projects", json={"name": "Orchard", "kind": "internal"}).json()["id"]
+    ids["cust"] = boss.post("/api/customers", json={"name": "Demo Kunde GmbH"}).json()["id"]
+    # a customer project: entries on internal projects are never billable (spec, "Today page", owner item 4)
+    ids["p"] = boss.post("/api/projects", json={"name": "Orchard", "customer_id": ids["cust"]}).json()["id"]
     ids["other"] = boss.post("/api/projects", json={"name": "Other", "kind": "internal"}).json()["id"]
 
     def entry(user, day, minutes, project="p", **extra):
@@ -91,7 +93,7 @@ def test_group_by_month(world):
 
 def test_default_range_is_the_project_period(world):
     boss = world["boss"]
-    body = {"name": "Orchard", "kind": "internal", "start": "2026-11-01", "end": "2026-11-30"}
+    body = {"name": "Orchard", "customer_id": world["ids"]["cust"], "start": "2026-11-01", "end": "2026-11-30"}
     assert boss.put(f"/api/projects/{world['ids']['p']}", json=body).status_code == 200
     b = boss.get(url(world, group="month")).json()
     assert (b["from"], b["to"]) == ("2026-11-01", "2026-11-30")

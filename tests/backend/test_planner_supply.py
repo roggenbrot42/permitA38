@@ -490,3 +490,24 @@ def test_day_off_holiday_counts_as_holiday():
     sup = supply.build([emp], [], no_holiday, date(2026, 11, 8), MON, FRI)
     row = sup.people["p"][MON]
     assert row.holiday == 8.0 and row.absence == 0.0
+
+
+def _asg(**kw) -> Assignment:
+    base = dict(id="a", owner_id="p", project_id="x", project_kind="customer", hours_per_week=None, total_hours=None)
+    base.update(kw)
+    return Assignment(**base)  # type: ignore[arg-type]
+
+
+def test_cancelled_total_keeps_hours_before_cut():
+    # 10 working days (Mon 2026-03-02 .. Fri 2026-03-13), 20 h, cut on day 5: 4 days x 2 h = 8 h kept (not 20)
+    a = _asg(start=date(2026, 3, 2), end=date(2026, 3, 13), total_hours=20.0, cut=date(2026, 3, 6))
+    o = person()
+    assert planned_hours(o, a, no_holiday) == 8.0
+    assert planned_net(o, a, no_holiday, Decimal("50")) == Decimal("400.00")
+    assert max(spread(o, a, no_holiday, None).values()) == 2.0
+
+
+def test_cancelled_weekly_keeps_days_before_cut():
+    a = _asg(start=date(2026, 3, 2), end=date(2026, 3, 13), hours_per_week=10.0, cut=date(2026, 3, 4))
+    # Mon, Tue at 2 h
+    assert planned_hours(person(), a, no_holiday) == 4.0

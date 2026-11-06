@@ -29,7 +29,7 @@ class CalendarBusyProvider:
     Rules: only the part of an event inside the person's working time counts (work_start..work_end on their
     workdays, in their time zone); overlapping events are merged; the result is capped at the person's daily target
     (weekly_hours / number of workdays); all-day events count as the whole working day only when the source has
-    ``all_day_blocks``; sources with ``busy_default`` false are ignored. ``start`` and ``end`` are both included.
+    ``all_day_blocks``; sources with ``busy_default`` false are ignored. ``start`` and ``end`` are both included. With ``ooo_only`` only events flagged ``ooo`` and all-day blocks count.
 
     ``on_request`` is called first (non-blocking) so a stale subscription can refresh in the background.
     """
@@ -38,7 +38,7 @@ class CalendarBusyProvider:
         self.store = store
         self.on_request = on_request
 
-    def busy_hours(self, user_id: str, start: date, end: date) -> dict[date, float]:
+    def busy_hours(self, user_id: str, start: date, end: date, *, ooo_only: bool = False) -> dict[date, float]:
         """Busy hours per day. Long ranges (the planner asks for up to 156 weeks) are answered in chunks; days beyond
         the stored calendar horizon simply have no events, i.e. no busy time."""
         if end < start or (end - start).days > MAX_TOTAL_DAYS:
@@ -47,11 +47,11 @@ class CalendarBusyProvider:
         chunk_start = start
         while chunk_start <= end:
             chunk_end = min(end, chunk_start + timedelta(days=MAX_SPAN_DAYS))
-            out.update(self._busy_range(user_id, chunk_start, chunk_end))
+            out.update(self._busy_range(user_id, chunk_start, chunk_end, ooo_only))
             chunk_start = chunk_end + timedelta(days=1)
         return out
 
-    def _busy_range(self, user_id: str, start: date, end: date) -> dict[date, float]:
+    def _busy_range(self, user_id: str, start: date, end: date, ooo_only: bool = False) -> dict[date, float]:
         sources = {
             s["id"]: s for s in self.store.find("calendar_sources", user_id=user_id) if s.get("busy_default", True)
         }
@@ -90,6 +90,8 @@ class CalendarBusyProvider:
                 for day in _days(first, last):
                     if day.weekday() in workdays:
                         intervals[day].append(window(day))
+                continue
+            if ooo_only and not ev.get("ooo"):
                 continue
             s, e = (b.timestamp() for b in event_bounds(ev))
             if e <= s:

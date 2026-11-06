@@ -11,7 +11,7 @@ specification exists but no code, **research** = needs investigation before it c
 
 ### v0.4.0-alpha.1 (2026-10-22)
 
-Time tracking, planning/forecast, customers/projects, offers/invoices + PDF, expenses, simple tax estimates; SQLite
+Time tracking, planning, customers/projects, offers/invoices + PDF, expenses, simple tax estimates; SQLite
 storage, migrations, backup command; username/password login and **TOTP two-factor authentication**; Docker image;
 release engineering (signed annotated tags, reproducible bundles, SBOM, attestations); customer data extraction from a
 website's *Impressum*.
@@ -22,7 +22,7 @@ website's *Impressum*.
 |---|---|
 | **Roles and rights** (boss / employee / accountant, per-area permissions) | fixed roles; custom roles and per-user overrides not planned yet, see [`roles.md`](roles.md) |
 | **Validation and sanity-check layer** incl. ArbZG warnings | [`sanity-checks.md`](sanity-checks.md) |
-| **Interactive vacation and capacity planner** with what-if scenarios, binding offers, revenue forecast basis, project start/end, "numbers don't add up" warnings | [`planning.md`](planning.md) |
+| **Interactive vacation and capacity planner** with what-if scenarios, project start/end, "numbers don't add up" warnings | [`planning.md`](planning.md) |
 | **Calendars**: ICS link or file import, meetings reduce capacity | [`calendar.md`](calendar.md) |
 | **Adjustable document numbering** and the adopter checklist | [`numbering.md`](numbering.md), [`adopting.md`](adopting.md) |
 | **Import of existing documents** (CSV/XLSX/JSON, dry run, undo) | [`import.md`](import.md) |
@@ -46,8 +46,8 @@ Order follows the maintainer's priorities: MCP and AI first, then supplier/subco
 |---|---|
 | **MCP server** with scoped, audited tools on top of the API tokens (read direct, changes only through the proposal queue) | spec: [`specs/mcp-server.md`](specs/mcp-server.md); Full review tier |
 | **AI provider and proposal queue** (local / OpenAI-compatible model, suggestions never booked without approval) | spec: [`specs/ai-provider-and-proposals.md`](specs/ai-provider-and-proposals.md) |
-| **Suppliers and subcontractors** (suppliers as a collection, external people you allocate time to, incoming offers, capacity ring-fenced to projects) | done on `main` (unreleased): suppliers, incoming offers with accept/unaccept, external allocations in the planner and forecast, commitments; spec [`specs/subcontractors.md`](specs/subcontractors.md), contract [`contracts/subcontractors.md`](contracts/subcontractors.md) |
-| **Planner per project** (capacity allocated to projects, ring fence, per-project gaps, "Allocate my capacity" bootstrap) | done on `main`, see [`specs/planner-per-project.md`](specs/planner-per-project.md) and [`planning.md`](planning.md); unreleased |
+| **Suppliers and subcontractors** (suppliers as a collection, external people you allocate time to, incoming offers, capacity ring-fenced to projects) | done on `main` (unreleased): suppliers, incoming offers with accept/unaccept, assignments of subcontractors in the planner, commitments; spec [`specs/subcontractors.md`](specs/subcontractors.md), contract [`contracts/subcontractors.md`](contracts/subcontractors.md) |
+| **Project-centric planning** (people and subcontractors are assigned to projects with hours; contracts and offers show promised, booked, remaining, covered and shortfall; internal projects; boss work limits; project time sheet) | done on `main`, see [`specs/project-centric-planning.md`](specs/project-centric-planning.md) and [`planning.md`](planning.md); unreleased. Replaces the earlier planner per project ([`specs/planner-per-project.md`](specs/planner-per-project.md), superseded) |
 | **Business trips**: import the real BMF country table for 2026 and 2027 | planned; blocks use of trips abroad |
 | **Merge-import** into an instance that already has data (id remapping, conflict policy) | planned; v1 import needs an empty instance |
 | **Automatic receipt scan** from PDF/image and e-invoice XML (clean bills are booked, ambiguous ones flagged, duplicates refused) | user guide [`receipt-scan.md`](receipt-scan.md), spec [`specs/receipt-scan.md`](specs/receipt-scan.md); local, no AI provider needed; OCR on Windows is a download on request (package built by a manual workflow, pending its first run); Full review tier; in progress on a feature branch |
@@ -145,7 +145,7 @@ release; `proposed` means not yet scheduled.
 | **SEPA direct-debit file export** | Optional collection of recurring payments | beta |
 | **Working-time law checks** (ArbZG breaks, rest, 10 h) as sanity warnings; absence entitlement (BUrlG) | Teams with employees | warnings released in alpha.2; entitlement (BUrlG) beta |
 | **ArbZG averages for booked time**: §3 average of 8 h per working day over the rolling 24 weeks, 60 h week; for the boss own limits from "My settings" (`work_limits`, shared with the planner, defaults: more than 10 h a day info, more than 12 h warning, more than 16 h warning "more than your maximum"; long weeks and a high average info), never a refused booking and no law wording, no break, rest or Sunday messages; never for subcontractors; **automatic breaks for employees** as a business setting (`auto_break_employees`, default on: the missing 30/45 minutes of §4 deducted on booking, shown on the entry and replaceable by real break times), never for the boss | Teams with employees | after the planner rework |
-| **Scheinselbständigkeit hint** (one customer dominates the forecast) | Informational risk hint for freelancers | beta |
+| **Scheinselbständigkeit hint** (one customer dominates your income) | Informational risk hint for freelancers | beta |
 | **One-Stop-Shop (OSS)** support | EU sales to private customers | later |
 | **Security baseline self-assessment (OWASP ASVS L2)** and **CRA readiness** review | Trust, regulatory outlook | beta |
 | **Accessibility audit (WCAG 2.2 AA)** | Usability, legal outlook | beta (PWA work starts it) |

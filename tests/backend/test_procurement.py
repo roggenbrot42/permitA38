@@ -26,7 +26,8 @@ def frozen_today(monkeypatch):
 
 @pytest.fixture
 def project(boss_client):
-    r = boss_client.post("/api/projects", json={"name": "Demo project P"})
+    cu = boss_client.post("/api/customers", json={"name": "Demo project P Client (Demo)"}).json()
+    r = boss_client.post("/api/projects", json={"name": "Demo project P", "customer_id": cu["id"]})
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -127,20 +128,20 @@ def test_w1_offer_figures_and_accept_creates_the_external_allocation(boss_client
             "2026-03-26",
         ]
     ]
-    # W1: exactly the one info warning of the contract (the plan books the 80 h, so no hours mismatch)
+    # W1: exactly the one info warning of the planner (the plan books the 80 h, so no hours mismatch)
     assert body["planning_warnings"] == [
         {
-            "code": "allocation.no_demand",
+            "code": "assignment.no_demand",
             "severity": "info",
-            "field": "weeks",
+            "field": None,
             "confirmable": False,
-            "message": "Week of 2026-03-02: 20 h are allocated to project Demo project P but nothing is planned there.",
+            "message": "Example Freelance Studio (Demo) is assigned 80 h to Demo project P from 02.03.2026 to "
+            "27.03.2026, but no contract or offer of the project needs hours in that period.",
             "details": {
-                "allocation_id": alloc["id"],
+                "assignment_id": alloc["id"],
                 "project_id": project["id"],
-                "project_name": "Demo project P",
-                "week": "2026-03-02",
-                "capacity": 20.0,
+                "supplier_id": alloc["supplier_id"],
+                "planned_hours": 80.0,
             },
         }
     ]
@@ -352,13 +353,14 @@ def test_w11_second_allocation_over_the_weekly_hours_needs_confirmation(boss_cli
 # ----------------------------------------------------------------------------- W12: dependency hint
 def _booked_supplier(c, project, hpw, start, end, weeks_name):
     s = capacity_supplier(c, workdays=[0, 1, 2, 3, 4], weekly_hours=40, rate=80.0, name=weeks_name)
+    weeks = ((date.fromisoformat(end) - date.fromisoformat(start)).days + 3) // 7
     offer = post_offer(
         c,
         offer_w1(
             s["id"],
             project["id"],
             plan={"start": start, "end": end, "hours_per_week": hpw},
-            lines=[{"quantity": 1, "unit": "h", "unit_price": 80.0}],
+            lines=[{"quantity": round(hpw * weeks, 2), "unit": "h", "unit_price": 80.0}],  # accept books these hours
         ),
     )
     return s, offer
@@ -488,7 +490,12 @@ def test_unaccept_rules_for_a_capacity_allocation(boss_client, project):
     s = capacity_supplier(boss_client)
     future = post_offer(
         boss_client,
-        offer_w1(s["id"], project["id"], plan={"start": "2026-03-09", "end": "2026-03-27", "hours_per_week": 20.0}),
+        offer_w1(
+            s["id"],
+            project["id"],
+            plan={"start": "2026-03-09", "end": "2026-03-27", "hours_per_week": 20.0},
+            lines=[{"quantity": 60, "unit": "h", "unit_price": 80.0}],  # 3 weeks x 20 h: within the weekly limit
+        ),
     )
     acc = accept(boss_client, future["id"]).json()
     reply = boss_client.post(f"/api/incoming-offers/{future['id']}/unaccept")

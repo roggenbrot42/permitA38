@@ -3,7 +3,7 @@
 Skipped while the server has no suppliers route (the backend of docs/contracts/subcontractors.md is built in parallel).
 Every number the UI shows is compared with what the server returned, never with a value computed here."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 
 import httpx
 import pytest
@@ -12,7 +12,11 @@ pytest.importorskip("playwright.sync_api")
 from playwright.sync_api import expect  # noqa: E402
 
 from tests.web.test_impressum_prefill import PASSWORD, Server  # noqa: E402  (shared harness)
-from tests.web.test_planner_per_project_live import monday  # noqa: E402
+
+
+def monday() -> date:
+    d = date.today()
+    return d - timedelta(days=d.weekday())
 
 
 def auth(token):

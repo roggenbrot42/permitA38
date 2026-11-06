@@ -40,7 +40,7 @@ That's it. Everything else is planning and billing, which you do when you need t
 
 - **Customers → + New customer.** Company, address, tax number/VAT ID, point of contact, notes and an optional default hourly rate.
 - **Save typing: prefill from the Impressum.** At the top of the form, enter the customer's website (e.g. `www.example.com`) and press **Look up**. permitA38 reads their legal notice and fills the empty fields (marked *from Impressum* – hover to see where each value came from). Check everything, change what is wrong, then **Save**. Fields you typed yourself are never overwritten unless you click **Use**. Note that the app requests the web page you entered; the switch is `features.impressum_lookup` in the config.
-- **Projects → + New project.** Choose the customer (or tick *Personal project* for things like learning or admin – never billed). Optionally set a project rate and an hour budget.
+- **Projects → + New project.** Choose the kind: a *customer* project (with its customer) or an *internal* project for things like administration or learning – internal time is never billable. Optionally set a project rate and an hour budget.
 - **A project belongs to one customer.** An offer, invoice, trip or contract can only use a project of its own customer (or a project without a customer); the project list next to the customer shows only those, and a project of another customer is refused when saved. A record that already has such a project (legacy data) must be corrected before it can be accepted (when it has a plan) or converted.
 - **Contracts** – the project page lists the contracts of this project; **+ New contract** there prefills the project and its customer.
 - **Tasks (optional)** – open a project and add tasks when different work has a different price, e.g. *Consulting 130 €/h* vs *Development 95 €/h*.
@@ -50,10 +50,10 @@ That's it. Everything else is planning and billing, which you do when you need t
 ## 5. From offer to invoice
 
 1. **Offers & Invoices → + Offer** (or press **+ Offer** on a customer page). Choose the customer, add items (description, quantity, unit, price) and a template.
-2. Under **Planning (optional)** enter when the work should happen: start, end and hours per week (or total hours). While the offer is open, it shows up as *tentative* load in your forecast.
+2. Under **Planning (optional)** enter when the work should happen: start, end and hours per week (or total hours). While the offer is open, it is checked as a possible commitment on the **Planning → Overview** page.
 3. **Finalize & number** → the offer gets its number (e.g. `AN-2026-0001`). **Preview PDF** and send it to your customer.
-4. The customer says yes → **✓ Accepted → create project**. permitA38 creates the project *and* a contract so your forecast is now firm.
-5. Track your time as usual. When it's time to bill, go to **Offers & Invoices → Invoice tracked time…**, choose the customer – permitA38 groups that customer's unbilled hours by project, task and rate into a draft invoice (one customer per invoice; personal projects are never billed). Or use **→ Invoice** on the offer to copy its items.
+4. The customer says yes → **✓ Accepted → create project**. permitA38 creates the project *and* a contract, so the Overview now checks it as a promise.
+5. Track your time as usual. When it's time to bill, go to **Offers & Invoices → Invoice tracked time…**, choose the customer – permitA38 groups that customer's unbilled hours by project, task and rate into a draft invoice (one customer per invoice; internal projects are never billed). Or use **→ Invoice** on the offer to copy its items.
 6. **Finalize & number**, send the PDF, and when the money arrives set the status to **Paid**. Only *paid* invoices count as revenue (EÜR).
 
 Don't like the look? **Settings → Document templates** has three starting points you can copy and customise, and you can upload your logo (JPEG).
@@ -62,8 +62,9 @@ Don't like the look? **Settings → Document templates** has three starting poin
 
 Open **Planning**:
 
-- **Forecast** – bars show hours booked per week (solid = contracts, light = open offers); the green line is your capacity after holidays and time off. The table below lists free hours and expected revenue per week.
-- **Contracts** – add work you've agreed outside of permitA38, too.
+- **Overview** – per project, every contract and open offer with promised, booked, remaining, covered and shortfall hours and a sentence that explains it; below, a week-by-week table of your capacity and how it is divided. **Assignments** on a project give people (and subcontractors) hours on it. See [planning](planning.md).
+- **Plan & vacation** – drag vacation and try what-if changes before you apply them.
+- **Contracts** – add work you've agreed outside of permitA38, too (each contract belongs to a project).
 - **Time off & holidays** – add vacation or personal days. See at a glance whether there is room for a new project.
 
 ## 7. Use it on all your devices
@@ -86,7 +87,7 @@ Open **Planning**:
 
 ## 9. Working with a team
 
-Under **Team → + Add person** create employees (or an accountant: read access to the money side, can enter expenses; see [roles](roles.md)). Give each person a username and an initial password; they sign in on the login screen, can change the password from the account menu, track their own time, and book their own time off. You see everyone's week at a glance and can plan with their capacity in the forecast. Set a **cost rate** per person to see real project margins.
+Under **Team → + Add person** create employees (or an accountant: read access to the money side, can enter expenses; see [roles](roles.md)). Give each person a username and an initial password; they sign in on the login screen, can change the password from the account menu, track their own time, and book their own time off. You see everyone's week at a glance and can be assigned to projects in the planner. Set a **cost rate** per person to see real project margins.
 
 ### Turn on two-factor authentication
 
@@ -98,7 +99,7 @@ Open the account menu (bottom left) → **Two-factor authentication**. Enter you
 |---|---|
 | Start/stop the clock | **Today** |
 | Fix or add time | **Timesheet** |
-| See free capacity | **Planning → Forecast** |
+| See free capacity | **Planning → Overview** |
 | Add vacation | **Planning → Time off** |
 | Send an offer | **Offers & Invoices → + Offer** |
 | Bill my tracked hours | **Offers & Invoices → Invoice tracked time** |

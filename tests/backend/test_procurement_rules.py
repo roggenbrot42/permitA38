@@ -7,7 +7,7 @@ from datetime import date
 import pytest
 
 import permita38.api.routers.incoming_offers as offers_router
-import permita38.core.service.plan_service as plan_module
+import permita38.core.service.planner.service as plan_module
 import permita38.core.service.procurement as procurement_module
 
 from .test_api_tokens import bearer, new_token
@@ -121,7 +121,7 @@ def test_unaccept_never_deletes_an_employee_allocation(boss_client, store):
     offer = post(
         boss_client,
         "/api/incoming-offers",
-        w1_offer(s["id"], p["id"], plan={"start": "2026-03-09", "end": "2026-03-27", "hours_per_week": 20.0}),
+        w1_offer(s["id"], p["id"], plan={"start": "2026-03-02", "end": "2026-03-27", "hours_per_week": 20.0}),
         201,
     ).json()
     acc = post(boss_client, f"/api/incoming-offers/{offer['id']}/accept", {}, 200).json()
@@ -280,7 +280,7 @@ def test_w13_just_below_the_boundary_has_no_hint(boss_client, store):
 def test_w6_offers_in_open_or_rejected_states_leave_forecast_and_commitments_unchanged(boss_client):
     s = capacity_supplier(boss_client)
     p = project(boss_client, "Demo project P")
-    base = boss_client.get("/api/forecast?weeks=4").json()
+    base = boss_client.get("/api/plan?weeks=4").json()
     base_com = boss_client.get("/api/finance/commitments").json()
     received = post(boss_client, "/api/incoming-offers", w1_offer(s["id"], p["id"]), 201).json()
     under = post(boss_client, "/api/incoming-offers", w1_offer(s["id"], p["id"], reference="B"), 201).json()
@@ -291,7 +291,8 @@ def test_w6_offers_in_open_or_rejected_states_leave_forecast_and_commitments_unc
         boss_client, "/api/incoming-offers", w1_offer(s["id"], p["id"], reference="D", valid_until="2026-03-01"), 201
     ).json()
     assert expired["effective_status"] == "expired" and received["effective_status"] == "received"
-    assert boss_client.get("/api/forecast?weeks=4").json() == base
+    after = boss_client.get("/api/plan?weeks=4").json()
+    assert after["projects"] == base["projects"] and after["weeks"] == base["weeks"]
     com = boss_client.get("/api/finance/commitments").json()
     assert com["items"] == base_com["items"] and com["totals"] == base_com["totals"]
 
@@ -360,34 +361,6 @@ def test_read_only_token_reads_the_new_routes(app, boss_client, url):
 
 
 # ----------------------------------------------------------------------------- T8: contract assignees that are suppliers
-@pytest.mark.skip(
-    reason="contract user_ids no longer assign people (docs/specs/project-centric-planning.md); the old planner and this test go in WP4"
-)
-def test_contract_user_ids_accept_active_subcontractors_only(boss_client, store):
-    p = project(boss_client, "Demo project P")
-    boss_id = next(u["id"] for u in store.list("users") if u["role"] == "boss")
-    company = post(boss_client, "/api/suppliers", {"name": "Demo Print Shop GmbH", "kind": "company"}, 201).json()
-    active = capacity_supplier(boss_client)
-    inactive = capacity_supplier(boss_client, name="Archived Studio")
-    store.save("suppliers", {**store.get("suppliers", inactive["id"]), "active": False})
-    contract = {
-        "title": "C_P",
-        "project_id": p["id"],
-        "start": "2026-03-02",
-        "end": "2026-03-27",
-        "hours_per_week": 10.0,
-        "rate": 100.0,
-    }
-    refused = post(boss_client, "/api/contracts", {**contract, "user_ids": [company["id"]]})
-    assert refused.status_code == 422, refused.text
-    reply = post(boss_client, "/api/contracts", {**contract, "user_ids": [inactive["id"]]})
-    assert reply.status_code == 422
-    kept = post(boss_client, "/api/contracts", {**contract, "user_ids": [boss_id, active["id"]]}, 200).json()
-    assert kept["user_ids"] == [boss_id, active["id"]]
-    unknown = post(boss_client, "/api/contracts", {**contract, "user_ids": ["5d1c0aa2zz"]}, 200)
-    assert unknown.status_code == 200  # unknown ids keep today's behaviour
-
-
 # ----------------------------------------------------------------------------- update and delete after an accept
 def test_update_and_delete_after_accept_keep_the_allocation(boss_client, store):
     s = capacity_supplier(boss_client)

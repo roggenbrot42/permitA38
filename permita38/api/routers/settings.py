@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.core import rights
-from permita38.core.models import PersonalTax, PersonalTaxIn, Settings, SettingsIn
+from permita38.core.models import PersonalTax, PersonalTaxIn, Settings, SettingsIn, WorkLimits, WorkLimitsIn
 
 router = APIRouter(tags=["settings"])
 routers = [router]
@@ -64,3 +64,25 @@ def put_personal_tax(
 ):
     data = body.model_dump(exclude={"stored", "warnings"})
     return services.personal_tax.update(data)
+
+
+@router.get(
+    "/settings/work-limits",
+    response_model=WorkLimits,
+    summary="the signed-in boss's own planning limits (defaults when not stored)",
+    dependencies=[SessionOnly],
+)
+def get_work_limits(user: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep):
+    return services.settings.get_work_limits(user["id"])
+
+
+@router.put(
+    "/settings/work-limits",
+    response_model=WorkLimits,
+    summary="replace the signed-in boss's own planning limits",
+    dependencies=[SessionOnly],
+)
+def put_work_limits(
+    body: WorkLimitsIn, user: Annotated[dict, Needs("settings", "write", full=True)], services: ServicesDep
+):
+    return services.settings.put_work_limits(user["id"], body.model_dump())

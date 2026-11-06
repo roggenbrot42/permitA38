@@ -110,7 +110,7 @@
     const locked = o.status === 'accepted';
     const p = o.plan || null;
     const vals = { received_on: todayISO(), supplier_id: presetSupplier, vat_mode: '', vat_rate: '', ...o,
-      plan_on: !!p, plan_start: p?.start || '', plan_end: p?.end || '', plan_mode: p && p.total_hours != null ? 'total' : 'week', plan_hours: p ? (p.total_hours ?? p.hours_per_week) : '', project_id: o.project_id || '', contract_id: o.contract_id || '' };
+      plan_on: !!p, plan_start: p?.start || '', plan_end: p?.end || '', project_id: o.project_id || '', contract_id: o.contract_id || '' };
     // the VAT treatment the server reports is derived from the supplier: preselect it only when it differs from the supplier's setting
     // (otherwise saving would pin the current treatment; '' keeps the supplier's setting)
     const supMode = window.SUP.byId(vals.supplier_id)?.vat_mode ?? null;
@@ -129,8 +129,7 @@
       <div><label for="f_vat_rate">VAT rate</label><select id="f_vat_rate"><option value="">Default</option>${[0, 5, 7, 16, 19].map(r => `<option value="${r}" ${String(r) === String(vals.vat_rate) ? 'selected' : ''}>${r} %</option>`).join('')}</select></div></div>
       <div class="field"><label><input type="checkbox" id="off_plan_on" ${vals.plan_on ? 'checked' : ''}> This offer has a capacity plan (hours of a subcontractor over a period)</label></div>
       <fieldset id="off_plan" class="sup-cap" ${vals.plan_on ? '' : 'hidden'}><legend>Plan</legend><div class="row"><div><label for="off_ps">From</label><input id="off_ps" type="date" value="${esc(vals.plan_start)}"></div><div><label for="off_pe">To</label><input id="off_pe" type="date" value="${esc(vals.plan_end)}"></div>
-        <div><label for="off_pm">Hours</label><select id="off_pm"><option value="week" ${vals.plan_mode === 'week' ? 'selected' : ''}>per week</option><option value="total" ${vals.plan_mode === 'total' ? 'selected' : ''}>in total</option></select></div>
-        <div><label for="off_ph">Amount of hours</label><input id="off_ph" type="number" step="any" min="0" value="${esc(vals.plan_hours)}"></div></div></fieldset>
+        </div><div class="small muted">Only the period: the hours are those of the offer lines.</div></fieldset>
       <div class="row"><div><label for="f_project_id">Project</label><select id="f_project_id">${projectChoices(vals.project_id).map(([v, l]) => `<option value="${esc(v)}" ${v === vals.project_id ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
       <div><label for="f_contract_id">Contract</label><select id="f_contract_id">${contractOptions(vals.project_id).map(([v, l]) => `<option value="${esc(v)}" ${v === vals.contract_id ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div></div>
       <div class="field"><label for="off_file">Attach the offer (PDF)</label><input type="file" id="off_file" accept=".pdf,.png,.jpg,.jpeg">${o.attachment ? `<div class="small"><a href="${api.url('attachments/' + encodeURIComponent(o.attachment))}" target="_blank" rel="noopener">Current attachment</a></div>` : ''}</div>
@@ -155,10 +154,8 @@
             vat_mode: $('#f_vat_mode').value || null, vat_rate: $('#f_vat_rate').value === '' ? null : Number($('#f_vat_rate').value),
             project_id: $('#f_project_id').value || null, contract_id: $('#f_contract_id').value || null, notes: strOrNull($('#f_notes').value) });
           if ($('#off_plan_on').checked) {
-            const hrs = numOrNull($('#off_ph').value), mode = $('#off_pm').value;
             if (!$('#off_ps').value || !$('#off_pe').value) throw new Error('Enter both plan dates');
-            if (!(hrs > 0)) throw new Error('Enter the hours of the plan');
-            body.plan = { start: $('#off_ps').value, end: $('#off_pe').value, [mode === 'total' ? 'total_hours' : 'hours_per_week']: hrs };
+            body.plan = { start: $('#off_ps').value, end: $('#off_pe').value };
           } else body.plan = null;
           const f = $('#off_file').files[0];
           if (f) body.attachment = (await api.upload(f)).name;

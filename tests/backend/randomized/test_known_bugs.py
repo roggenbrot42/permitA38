@@ -60,7 +60,7 @@ def test_one_invalid_absence_must_not_break_everybody_elses_dashboard(api):
     bad = member.post("/api/absences", json={"start": "garbage"})  # a member can do this to the whole team
     assert bad.status_code in (400, 422), "invalid date must be rejected"
     assert api.get("/api/dashboard", params={"user_id": boss["id"]}).status_code == 200
-    assert api.get("/api/forecast").status_code == 200
+    assert api.get("/api/plan").status_code == 200
 
 
 def test_absence_without_user_id_must_not_break_the_dashboard(api):
@@ -76,11 +76,11 @@ def test_invalid_expense_date_must_not_break_finance(api):
     assert api.get("/api/finance").status_code == 200
 
 
-def test_invalid_contract_date_must_not_break_forecast(api):
+def test_invalid_contract_date_must_not_break_plan(api):
     _boss(api)
     r = api.post("/api/contracts", json={"title": "x", "start": "nope", "end": "2026-12-31", "hours_per_week": 5})
     assert r.status_code in (400, 422), "invalid date must be rejected"
-    assert api.get("/api/forecast").status_code == 200
+    assert api.get("/api/plan").status_code == 200
 
 
 def test_absurd_minutes_value_is_a_client_error(api):

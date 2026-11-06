@@ -247,3 +247,8 @@ tr.pp-detail > td { background: var(--bg); padding: 8px 12px; }
 .ds-zone { border: 2px dashed var(--line); text-align: center; padding: 10px; }
 .ds-fields { min-width: 0; }
 #ds_totals td.num, #ds_totals th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ov-project td { background: var(--bg); }
+.ov-expl td { padding-top: 0; }
+.ov-explanation { margin-bottom: 4px; }
+.ov-calendar { font-weight: normal; }
+.ov-skipped { margin: 12px 0; }

@@ -38,7 +38,7 @@ AREAS: dict[str, str] = {
     "projects": "Projects and tasks",
     "customers": "Customers (and the Impressum lookup)",
     "contracts": "Contracts",
-    "planning": "Planning: forecast, what-if scenarios, vacation planner",
+    "planning": "Planning: projects, weeks, warnings, what-if scenarios, vacation planner",
     "offers": "Offers",
     "invoices": "Invoices",
     "expenses": "Expenses",
@@ -116,6 +116,11 @@ COLLECTION_AREA = {
     "expenses": "expenses",
     "templates": "templates",
 }
+
+
+def allocation_area(supplier: bool) -> str:
+    """The area whose write right changes an assignment: subcontractor rows ``procurement``, employee rows ``planning``."""
+    return "procurement" if supplier else "planning"
 
 
 def normalize_role(role: object) -> str:

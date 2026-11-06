@@ -1,5 +1,6 @@
 """Employee allocations and the planner-per-project routes over HTTP (docs/contracts/planner-per-project.md):
-CRUD, validation bounds, rights, error codes, bootstrap, day table, forecast/simulate parameters, apply."""
+CRUD, validation bounds, rights, error codes, simulate/apply parameters. (The forecast, the day table and the
+bootstrap were removed by the planner rework; ``GET /api/plan`` is covered by test_plan_api.py.)"""
 
 from datetime import date, timedelta
 
@@ -7,9 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import permita38.core.service.allocations as allocations_module
-import permita38.core.service.plan_service as plan_module
+import permita38.core.service.planner.service as plan_module
 from permita38.core.holidays import holidays as de_holidays
-from permita38.core.service.plan_service import MAX_DAY_TABLE_DAYS
 
 # The hand numbers of this file are for a fixed calendar: the first Monday after ANCHOR from which eight weeks hold no
 # national holiday. The anchor is a fixed date, so the file gives the same answers on every weekday.
@@ -118,7 +118,10 @@ def test_create_list_update_delete(boss_client, boss_id, project, store):
 def test_planned_hours_skip_holidays_and_absence_days(boss_client, boss_id, project, store):
     store.save("absences", {"user_id": boss_id, "kind": "vacation", "start": day(2), "end": day(2)})
     r = boss_client.post("/api/allocations", json=body(boss_id, project))
-    assert r.json()["planned_hours"] == 95.0  # 19 available days x 5 h; the vacation day carries no hours
+    # S1: a week's hours are spread over its available days, so a vacation day moves hours, it does not remove them
+    assert r.json()["planned_hours"] == 100.0
+    r = boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=None, total_hours=38.0))
+    assert r.json()["planned_hours"] == 38.0 and r.json()["total_hours"] == 38.0 and "hours_per_week" not in r.json()
 
 
 def test_list_filters_and_order(boss_client, boss_id, project):
@@ -142,20 +145,20 @@ def test_warnings_come_with_the_saved_row(boss_client, boss_id, project):
     assert r.status_code == 201
     codes = [(w["code"], w["details"]["week"]) for w in r.json()["planning_warnings"]]
     assert codes == [
-        ("allocation.employee_over_allocated", day(0)),
-        ("allocation.employee_over_allocated", day(7)),
-        ("allocation.overlap_same_project", day(0)),
-        ("allocation.overlap_same_project", day(7)),
+        ("assignment.over_capacity", day(0)),
+        ("assignment.over_capacity", day(7)),
+        ("assignment.overlap", day(0)),
+        ("assignment.overlap", day(7)),
     ]
     over = r.json()["planning_warnings"][0]
-    assert over["details"]["allocated"] == 50.0 and over["details"]["over_by"] == 10.0 and over["confirmable"] is True
+    assert over["details"]["assigned"] == 50.0 and over["details"]["over_by"] == 10.0 and over["confirmable"] is True
     assert len(r.json()["planning_warnings"][2]["details"]["allocation_ids"]) == 2
 
 
 def test_warnings_are_capped_at_ten_weeks(boss_client, boss_id, project):
     boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=40.0, end=day(77)))  # 11 weeks
     r = boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=10.0, end=day(77)))
-    over = [w for w in r.json()["planning_warnings"] if w["code"] == "allocation.employee_over_allocated"]
+    over = [w for w in r.json()["planning_warnings"] if w["code"] == "assignment.over_capacity"]
     assert len(over) == 10 and over[0]["details"]["week"] == day(0)
 
 
@@ -188,29 +191,6 @@ def test_closed_project_allocations_can_still_be_deleted(boss_client, boss_id, p
     assert deleted.status_code == 204
 
 
-def test_external_rows_cannot_be_changed_here(boss_client, boss_id, project, store):
-    store.save("suppliers", {"id": "supp0001", "name": "Demo Supplier"})
-    ext = store.save(
-        "allocations",
-        {
-            "supplier_id": "supp0001",
-            "project_id": project["id"],
-            "start": START,
-            "end": END,
-            "hours_per_week": 5,
-            "rate": 80,
-            "status": "active",
-        },
-    )
-    r = boss_client.put(f"/api/allocations/{ext['id']}", json=body(boss_id, project))
-    assert r.status_code == 409 and r.json() == {"detail": "This allocation cannot be changed here"}
-    deleted = boss_client.delete(f"/api/allocations/{ext['id']}")
-    assert deleted.status_code == 409
-    listed = boss_client.get("/api/allocations").json()  # the boss has `procurement`: external rows are listed
-    assert [(r["id"], r["kind"]) for r in listed] == [(ext["id"], "external")]
-    assert store.get("allocations", ext["id"]) is not None
-
-
 @pytest.mark.parametrize(
     "patch",
     [
@@ -218,7 +198,13 @@ def test_external_rows_cannot_be_changed_here(boss_client, boss_id, project, sto
         {"hours_per_week": 80.01},
         {"hours_per_week": -1},
         {"hours_per_week": "many"},
-        {"hours_per_week": None},
+        {"hours_per_week": None},  # neither hour field
+        {"total_hours": 10},  # both hour fields
+        {"hours_per_week": None, "total_hours": 0},
+        {"hours_per_week": None, "total_hours": 100001},
+        {"rate": 80},  # an employee row has no rate
+        {"supplier_id": "abcdef12"},  # both owners
+        {"user_id": None},  # no owner
         {"start": "02.03.2026"},
         {"end": "2026-02-30"},
         {"user_id": "x"},
@@ -259,8 +245,7 @@ ROUTES = [
     ("POST", "/api/allocations", "body"),
     ("PUT", "/api/allocations/abcdef12", "body"),
     ("DELETE", "/api/allocations/abcdef12", None),
-    ("POST", "/api/allocations/bootstrap", {"confirm": False}),
-    ("GET", "/api/plan/day-table?from=2026-03-02&to=2026-03-03", None),
+    ("GET", "/api/plan", None),
 ]
 
 
@@ -275,21 +260,18 @@ def test_employee_and_anonymous_get_nothing(client, member_client, boss_id, proj
 def test_read_only_token_reads_but_never_writes(app, boss_client, boss_id, project):
     ro = read_only_client(app, boss_client)
     assert ro.get("/api/allocations").status_code == 200
-    assert ro.get("/api/plan/day-table", params={"from": START, "to": START}).status_code == 200
-    assert ro.get("/api/forecast").status_code == 200
+    assert ro.get("/api/plan").status_code == 200
     assert ro.post("/api/plan/simulate", json={}).status_code == 403  # read-write tokens only (fail closed)
     row = boss_client.post("/api/allocations", json=body(boss_id, project)).json()
     for method, path, payload in [
         ("POST", "/api/allocations", body(boss_id, project)),
         ("PUT", f"/api/allocations/{row['id']}", body(boss_id, project)),
         ("DELETE", f"/api/allocations/{row['id']}", None),
-        ("POST", "/api/allocations/bootstrap", {"confirm": True}),
     ]:
         assert ro.request(method, path, json=payload).status_code == 403, (method, path)
     assert len(boss_client.get("/api/allocations").json()) == 1
 
 
-# ------------------------------------------------------------------ bootstrap
 def add_contract(store, boss_id, project, hpw, **kw):
     return store.save(
         "contracts",
@@ -307,143 +289,22 @@ def add_contract(store, boss_id, project, hpw, **kw):
     )
 
 
-def test_bootstrap_preview_equals_the_write_and_a_second_run_creates_nothing(boss_client, boss_id, project, store):
-    add_contract(store, boss_id, project, 30)
-    add_contract(store, boss_id, None, 8, title="N")
-    pre = boss_client.post("/api/allocations/bootstrap", json={}).json()
-    assert pre["confirm"] is False and pre["created"] is False and pre["skipped"] == [] and pre["warnings"] == []
-    assert len(pre["allocations"]) == 1 and pre["allocations"][0]["hours_per_week"] == 30.0
-    assert store.list("allocations") == []
-    done = boss_client.post("/api/allocations/bootstrap", json={"confirm": True})
-    assert done.status_code == 200
-    made = done.json()
-    assert made["created"] is True and made["confirm"] is True
-    assert [{k: v for k, v in a.items() if k not in ("id", "kind")} for a in made["allocations"]] == pre["allocations"]
-    assert made["allocations"][0]["kind"] == "employee"
-    row = store.get("allocations", made["allocations"][0]["id"])
-    assert row["hours_per_week"] == 30.0 and row["start"] == START and "contract_id" not in row
-    again = boss_client.post("/api/allocations/bootstrap", json={"confirm": True}).json()
-    assert again["allocations"] == [] and [s["reason"] for s in again["skipped"]] == ["already_allocated"]
-    assert len(store.list("allocations")) == 1
-    assert boss_client.post("/api/allocations/bootstrap", json={"confirm": "yes please"}).status_code == 422
-    assert boss_client.post("/api/allocations/bootstrap", json={"other": 1}).status_code == 422
-
-
-def test_bootstrap_skips_closed_projects_done_contracts_and_long_periods(boss_client, boss_id, project, store):
-    closed = store.save("projects", {"name": "Old", "status": "archived", "kind": "internal"})
-    add_contract(store, boss_id, closed, 10)
-    add_contract(store, boss_id, project, 10, status="done")
-    add_contract(store, boss_id, project, 10, end=day(1831), title="Long")  # longer than 1830 days
-    res = boss_client.post("/api/allocations/bootstrap", json={"confirm": True}).json()
-    assert res["allocations"] == []
-    assert [s["reason"] for s in res["skipped"]] == ["period_too_long"]
-    assert store.list("allocations") == []
-
-
-def test_bootstrap_over_500_proposals_is_a_409_and_writes_nothing(boss_client, boss_id, project, store):
-    for _ in range(501):
-        add_contract(store, boss_id, project, 1)
-    r = boss_client.post("/api/allocations/bootstrap", json={"confirm": True})
-    assert r.status_code == 409 and r.json() == {"detail": "Too many allocations to create at once (max 500)"}
-    assert store.list("allocations") == []
-
-
 # ------------------------------------------------------------------ planner routes
-def test_forecast_parameters_and_the_e1_numbers_over_http(boss_client, boss_id, project, store):
-    """E1 of the spec (two projects, one person, no netting) in the four weeks from the next clean Monday."""
-    other = boss_client.post("/api/projects", json={"name": "Demo project Q"}).json()
-    boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=25.0))
-    boss_client.post("/api/allocations", json=body(boss_id, other, hours_per_week=15.0))
-    add_contract(store, boss_id, project, 30)
-    add_contract(store, boss_id, other, 10, title="Q")
-    out = boss_client.get("/api/forecast", params={"weeks": 8}).json()
-    rows = {w["week"]: w for w in out["weeks"]}
-    for k in range(4):
-        w = rows[day(7 * k)]
-        assert (w["capacity"], w["confirmed"], w["gap"], w["status"], w["utilisation"]) == (
-            40.0,
-            40.0,
-            5.0,
-            "over",
-            112.5,  # decision D4: P max(30, 25) + Q max(10, 15) = 45 of 40 capacity
-        )
-        by = {p["name"]: p for p in w["projects"]}
-        assert (by["Demo project P"]["capacity"], by["Demo project P"]["gap"], by["Demo project P"]["utilisation"]) == (
-            25.0,
-            5.0,
-            120.0,
-        )
-        assert (by["Demo project Q"]["free_worst_case"], by["Demo project Q"]["gap"]) == (5.0, 0.0)
-    assert out["totals"]["gap"] == 20.0
-    assert out["totals"]["gap_by_project"] == [{"project_id": project["id"], "name": "Demo project P", "gap": 20.0}]
-    assert {c["project_id"] for c in out["contracts"]} == {project["id"], other["id"]}
-    assert len([x for x in out["warnings"] if x["code"] == "capacity.gap"]) == 4
-    flat = boss_client.get("/api/forecast", params={"weeks": 8, "by_project": 0}).json()
-    assert all("projects" not in w for w in flat["weeks"]) and "gap_by_project" not in flat["totals"]
-    assert flat["totals"]["gap"] == 20.0
-    one = boss_client.get("/api/forecast", params={"weeks": 8, "project_id": project["id"]}).json()
-    assert [p["project_id"] for p in one["weeks"][0]["projects"]] == [project["id"]]
-    assert one["totals"]["gap"] == 20.0 and {x["details"]["project_id"] for x in one["warnings"]} == {project["id"]}
-    assert boss_client.get("/api/forecast", params={"project_id": "unassigned"}).status_code == 200
-    # an empty project_id is no filter, like an empty user_id
-    assert (
-        boss_client.get("/api/forecast", params={"weeks": 8, "project_id": "", "user_id": ""}).json()["totals"]
-        == out["totals"]
-    )
-    r = boss_client.get("/api/forecast", params={"project_id": "nothing0001"})
-    assert r.status_code == 404 and r.json() == {"detail": "Project not found"}
-    assert boss_client.get("/api/forecast", params={"by_project": 2}).status_code == 422
-    assert boss_client.get("/api/forecast", params={"project_id": "Bad Id"}).status_code == 422
-
-
-def test_day_table_route(boss_client, boss_id, project):
-    boss_client.post("/api/allocations", json=body(boss_id, project))
-    r = boss_client.get("/api/plan/day-table", params={"from": day(0), "to": day(6)})
-    assert r.status_code == 200, r.text
-    out = r.json()
-    assert out["from"] == day(0) and out["to"] == day(6) and len(out["days"]) == 7
-    mon, sat = out["days"][0], out["days"][5]
-    assert mon["cap"] == 8.0 and mon["scopes"][project["id"]]["internal"]["cap"] == 5.0
-    assert mon["scopes"]["unassigned"]["internal"]["cap"] == 3.0
-    assert out["scope_names"] == {project["id"]: "Demo project P", "unassigned": "Unassigned"}
-    assert sat["cap"] == 0.0 and sat["scopes"] == {}
-    only = boss_client.get(
-        "/api/plan/day-table", params={"from": day(0), "to": day(0), "project_id": "unassigned"}
-    ).json()
-    assert list(only["days"][0]["scopes"]) == ["unassigned"]
-    user = boss_client.get("/api/plan/day-table", params={"from": day(0), "to": day(0), "user_id": boss_id})
-    assert user.status_code == 200
-
-
-def test_day_table_errors(boss_client):
-    def get(**p):
-        return boss_client.get("/api/plan/day-table", params=p)
-
-    assert get(**{"from": day(0)}).status_code == 422
-    assert get(**{"from": "2026-13-02", "to": day(1)}).status_code == 422
-    r = get(**{"from": day(3), "to": day(0)})
-    assert r.status_code == 400 and r.json() == {"detail": "'to' is before 'from'"}
-    assert get(**{"from": "2026-01-01", "to": "2026-07-09"}).status_code == 200  # exactly 190 days
-    r = get(**{"from": "2026-01-01", "to": "2026-07-10"})
-    assert r.status_code == 400 and r.json() == {"detail": f"The range may cover at most {MAX_DAY_TABLE_DAYS} days"}
-    assert get(**{"from": day(0), "to": day(1), "user_id": "nobody0001"}).json() == {"detail": "User not found"}
-    assert get(**{"from": day(0), "to": day(1), "project_id": "nobody0001"}).json() == {"detail": "Project not found"}
-
-
 def test_simulate_with_allocation_changes_and_delta(boss_client, boss_id, project, store):
     add_contract(store, boss_id, project, 30)
     a = boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=20.0)).json()
-    base = {"weeks": 4, "first": START}
+    base = {"weeks": 4}
     sim = boss_client.post(
         "/api/plan/simulate", json={**base, "changes": {"allocations": [{"id": a["id"], "hours_per_week": 30.0}]}}
     )
     assert sim.status_code == 200, sim.text
     out = sim.json()
-    assert out["delta"]["gap"] == -40.0  # gap 10 h/week for 4 weeks -> 0
+    # today is the anchor Monday and not supplied: 20 h/week gives 16 + 3 x 20 = 76 of the 120 h (short 44),
+    # 30 h/week gives 24 + 3 x 30 = 114 h (short 6)
+    assert out["delta"]["total"] == {"shortfall_before": 44.0, "shortfall_after": 6.0, "delta": -38.0}
     assert out["delta"]["projects"] == [
-        {"project_id": project["id"], "name": "Demo project P", "base_gap": 40.0, "gap": 0.0, "delta": -40.0}
+        {"project_id": project["id"], "shortfall_before": 44.0, "shortfall_after": 6.0, "delta": -38.0}
     ]
-    assert out["weeks"][0]["delta"] == -10.0 and out["weeks"][0]["projects"][0]["delta"] == -10.0
     new = {"user_id": boss_id, "project_id": project["id"], "start": START, "end": END, "hours_per_week": 5.0}
     assert boss_client.post("/api/plan/simulate", json={**base, "changes": {"allocations": [new]}}).status_code == 200
     assert len(store.list("allocations")) == 1  # simulate writes nothing
@@ -513,28 +374,15 @@ def test_scenarios_keep_allocation_changes(boss_client, boss_id, project):
     assert ap.status_code == 200 and len(boss_client.get("/api/allocations").json()) == 1
 
 
-def test_check_offer_with_a_project_reports_the_project_gap(boss_client, boss_id, project):
-    plan = {"start": START, "end": END, "hours_per_week": 10, "user_ids": [boss_id]}
-    r = boss_client.post("/api/plan/check-offer", json={"project_id": project["id"], "plan": plan, "lines": []})
-    assert r.status_code == 200, r.text
-    gaps = [w for w in r.json() if w["code"] == "offer.project_gap"]
-    assert len(gaps) == 4 and gaps[0]["details"]["capacity"] == 0.0 and gaps[0]["details"]["gap"] == 10.0
-    boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=10.0))
-    r = boss_client.post("/api/plan/check-offer", json={"project_id": project["id"], "plan": plan, "lines": []})
-    assert [w for w in r.json() if w["code"] in ("offer.project_gap", "capacity.offer_over")] == []
-    r = boss_client.post("/api/plan/check-offer", json={"plan": plan, "lines": []})
-    assert [w["code"] for w in r.json() if w["code"].startswith(("offer.", "capacity."))] == []  # unassigned: 30 h free
-
-
 def test_suggest_start_per_project(boss_client, boss_id, project):
     payload = {"hours": 40, "deadline": day(25), "earliest": day(0), "user_ids": [boss_id]}
     free = boss_client.post("/api/plan/suggest-start", json=payload).json()
-    assert free["feasible"] is True and free["start"] == day(0)
+    assert free["feasible"] is True and free["start"] == day(1)  # the day after today (the anchor Monday)
     proj = boss_client.post("/api/plan/suggest-start", json={**payload, "project_id": project["id"]}).json()
     assert proj["feasible"] is False  # the project has no allocation: unassigned hours are not its hours
     boss_client.post("/api/allocations", json=body(boss_id, project, hours_per_week=20.0))
     proj = boss_client.post("/api/plan/suggest-start", json={**payload, "project_id": project["id"]}).json()
-    assert proj["feasible"] is True and proj["start"] == day(0)
+    assert proj["feasible"] is True and proj["start"] == day(1)
     assert boss_client.post("/api/plan/suggest-start", json={**payload, "project_id": "nothing0001"}).status_code == 404
 
 
@@ -577,18 +425,17 @@ def test_deactivating_a_user_keeps_allocations_but_blocks_editing(boss_client, b
 
 
 def test_simulate_scopes_its_base_by_project(boss_client, boss_id, project, store):
-    other = boss_client.post("/api/projects", json={"name": "Demo project Q"}).json()
+    customer = boss_client.post("/api/customers", json={"name": "Demo Customer"}).json()
+    other = boss_client.post("/api/projects", json={"name": "Demo project Q", "customer_id": customer["id"]}).json()
     add_contract(store, boss_id, project, 30)
     add_contract(store, boss_id, other, 10, title="Q")
-    out = boss_client.post("/api/plan/simulate", json={"weeks": 1, "first": START, "project_id": other["id"]}).json()
-    assert [p["project_id"] for p in out["weeks"][0]["projects"]] == [other["id"]]
-    assert out["weeks"][0]["gap"] == 10.0 and out["weeks"][0]["delta"] == 0.0
-    assert out["delta"] == {
-        "gap": 0.0,
-        "projects": [
-            {"project_id": other["id"], "name": "Demo project Q", "base_gap": 10.0, "gap": 10.0, "delta": 0.0}
-        ],
-    }
+    out = boss_client.post("/api/plan/simulate", json={"weeks": 4, "project_id": other["id"]}).json()
+    assert [p["project_id"] for p in out["projects"]] == [other["id"]]
+    assert out["projects"][0]["shortfall_contracts"] == 40.0  # 4 weeks x 10 h, nobody assigned
+    assert out["delta"]["total"] == {"shortfall_before": 40.0, "shortfall_after": 40.0, "delta": 0.0}
+    assert out["delta"]["projects"] == [
+        {"project_id": other["id"], "shortfall_before": 40.0, "shortfall_after": 40.0, "delta": 0.0}
+    ]
 
 
 # ------------------------------------------------------------------ PUT keeps what it does not replace
@@ -605,16 +452,13 @@ def test_put_changes_person_and_project_and_keeps_unknown_fields(boss_client, bo
     r = boss_client.put(f"/api/allocations/{row['id']}", json=body(emp["id"], other, hours_per_week=12.0))
     assert r.status_code == 200, r.text
     got = r.json()
-    assert (got["user_id"], got["project_id"], got["customer_id"], got["hours_per_week"]) == (
-        emp["id"],
-        other["id"],
-        customer["id"],
-        12.0,
-    )
+    assert (got["user_id"], got["project_id"], got["hours_per_week"]) == (emp["id"], other["id"], 12.0)
+    assert "customer_id" not in got  # no longer written
     assert got["x_future"] == {"a": [1]} and got["user_name"] == "Eva" and got["project_name"] == "Demo project Q"
-    # back to a project without a customer: the customer follows the project
-    r = boss_client.put(f"/api/allocations/{row['id']}", json=body(boss_id, project))
-    assert "customer_id" not in r.json() and "customer_id" not in store.get("allocations", row["id"])
+    r = boss_client.put(
+        f"/api/allocations/{row['id']}", json=body(boss_id, project, hours_per_week=None, total_hours=9)
+    )
+    assert r.json()["total_hours"] == 9 and "hours_per_week" not in store.get("allocations", row["id"])
     assert (
         boss_client.put(
             f"/api/allocations/{row['id']}", json={**body(boss_id, project), "status": "cancelled"}
@@ -646,19 +490,16 @@ def test_damaged_allocation_rows_do_not_break_the_views(boss_client, boss_id, pr
         store.save("allocations", planted)  # damaged, but no guard refuses it
     add_contract(store, boss_id, project, 10)
     assert boss_client.get("/api/allocations").status_code == 200
-    assert boss_client.get("/api/forecast", params={"weeks": 4}).status_code == 200
+    assert boss_client.get("/api/plan", params={"weeks": 4}).status_code == 200
     assert boss_client.post("/api/plan/simulate", json={"weeks": 2}).status_code == 200
-    assert boss_client.get("/api/plan/day-table", params={"from": START, "to": day(6)}).status_code == 200
-    assert boss_client.post("/api/allocations/bootstrap", json={}).status_code == 200
+    assert boss_client.post("/api/allocations/bootstrap", json={}).status_code in (404, 405)  # removed
 
 
 # ------------------------------------------------------------------ empty filters, simulate rules over HTTP
 def test_empty_project_and_user_filters_mean_no_filter(boss_client, boss_id, project):
     boss_client.post("/api/allocations", json=body(boss_id, project))
-    a = boss_client.get("/api/plan/day-table", params={"from": START, "to": START}).json()
-    b = boss_client.get(
-        "/api/plan/day-table", params={"from": START, "to": START, "project_id": "", "user_id": ""}
-    ).json()
+    a = boss_client.get("/api/plan").json()
+    b = boss_client.get("/api/plan", params={"project_id": "", "user_id": ""}).json()
     assert a == b
 
 
@@ -684,3 +525,196 @@ def test_simulate_refuses_what_apply_would_refuse(boss_client, boss_id, project,
         ).status_code
         == 422
     )
+
+
+# ------------------------------------------------------------------ subcontractor rows (P5, E6)
+E6_START, E6_END = "2026-11-09", "2026-12-04"
+
+
+@pytest.fixture
+def sam(store):
+    """A person-capacity subcontractor (invented), Monday to Thursday."""
+    return store.save(
+        "suppliers",
+        {"name": "Sam Example (Demo)", "kind": "person-capacity", "workdays": [0, 1, 2, 3], "rate": 70, "active": True},
+    )
+
+
+def sup_body(sam, project, **kw):
+    return {
+        "supplier_id": sam["id"],
+        "project_id": project["id"],
+        "start": E6_START,
+        "end": E6_END,
+        "total_hours": 24.0,
+        "rate": 90.0,
+        **kw,
+    }
+
+
+@pytest.fixture
+def offer_row(store, sam, project):
+    """E6: an incoming offer of 24 h x 90.00 = 2,160.00 net and the assignment accepting it books."""
+    offer = store.save(
+        "incoming_offers",
+        {
+            "supplier_id": sam["id"],
+            "project_id": project["id"],
+            "status": "accepted",
+            "hours": 24.0,
+            "net_total": 2160.0,
+        },
+    )
+    row = store.save(
+        "allocations",
+        {
+            "supplier_id": sam["id"],
+            "project_id": project["id"],
+            "incoming_offer_id": offer["id"],
+            "start": E6_START,
+            "end": E6_END,
+            "total_hours": 24.0,
+            "rate": 90.0,
+            "status": "active",
+        },
+    )
+    return offer, row
+
+
+def test_subcontractor_row_roundtrip_with_planned_figures(boss_client, sam, project, store):
+    r = boss_client.post("/api/allocations", json=sup_body(sam, project))
+    assert r.status_code == 201, r.text
+    row = r.json()
+    assert row["kind"] == "external" and row["supplier_name"] == "Sam Example (Demo)"
+    assert row["planned_hours"] == 24.0 and row["planned_net"] == 2160.0 and row["planning_warnings"] == []
+    assert "user_id" not in store.get("allocations", row["id"])
+    r = boss_client.put(
+        f"/api/allocations/{row['id']}", json=sup_body(sam, project, total_hours=None, hours_per_week=8)
+    )
+    assert r.status_code == 200, r.text
+    # 4 weeks (09.11.-04.12.) x 8 h at 90.00
+    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (32.0, 2880.0)
+    assert "total_hours" not in store.get("allocations", row["id"])
+    r = boss_client.delete(f"/api/allocations/{row['id']}")
+    assert r.status_code == 204
+
+
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"rate": None},
+        {"rate": -1},
+        {"rate": 10001},
+        {"user_id": "abcdef12"},
+        {"total_hours": None},
+        {"hours_per_week": 5},
+    ],
+)
+def test_subcontractor_body_validation(boss_client, sam, project, patch):
+    r = boss_client.post("/api/allocations", json={**sup_body(sam, project), **patch})
+    assert r.status_code == 422, r.text
+
+
+def test_subcontractor_owner_errors_and_no_change_of_kind(boss_client, boss_id, sam, project, store):
+    assert boss_client.post("/api/allocations", json=sup_body({"id": "nobody000001"}, project)).status_code == 404
+    store.save("suppliers", {**sam, "active": False})
+    r = boss_client.post("/api/allocations", json=sup_body(sam, project))
+    assert r.status_code == 409 and r.json() == {"detail": "The supplier is not active"}
+    store.save("suppliers", {**sam, "active": True})
+    row = boss_client.post("/api/allocations", json=sup_body(sam, project)).json()
+    r = boss_client.put(f"/api/allocations/{row['id']}", json=body(boss_id, project))
+    assert r.status_code == 409
+
+
+def test_e6_edit_to_30_hours_warns_with_the_literal_text(boss_client, sam, project, offer_row):
+    offer, row = offer_row
+    r = boss_client.put(f"/api/allocations/{row['id']}", json=sup_body(sam, project))  # 24 h x 90.00 as booked
+    assert r.status_code == 200, r.text
+    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (24.0, 2160.0)
+    assert r.json()["planning_warnings"] == []
+    r = boss_client.put(f"/api/allocations/{row['id']}", json=sup_body(sam, project, total_hours=30.0))
+    assert r.status_code == 200, r.text
+    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (30.0, 2700.0)
+    assert r.json()["incoming_offer_id"] == offer["id"]
+    (w,) = r.json()["planning_warnings"]
+    assert w["code"] == "assignment.differs_from_offer" and w["severity"] == "info"
+    assert w["message"] == "Planned 30 h / 2,700.00 € differ from the offer's 24 h / 2,160.00 € (6 h / 540.00 € more)."
+    r = boss_client.put(f"/api/allocations/{row['id']}", json=sup_body(sam, project, total_hours=20.0))
+    assert r.json()["planning_warnings"][0]["message"] == (
+        "Planned 20 h / 1,800.00 € differ from the offer's 24 h / 2,160.00 € (4 h / 360.00 € less)."
+    )
+
+
+def test_offer_linked_rows_can_be_cancelled_but_not_deleted(boss_client, offer_row, store):
+    _, row = offer_row
+    r = boss_client.delete(f"/api/allocations/{row['id']}")
+    assert r.status_code == 409 and "cancel it instead" in r.json()["detail"]
+    assert store.get("allocations", row["id"]) is not None
+    r = boss_client.post(f"/api/allocations/{row['id']}/cancel", json={"effective_from": "2026-11-23"})
+    assert r.status_code == 200 and r.json()["status"] == "cancelled"
+    # 24 h over 16 days (Mon-Thu, 4 weeks) = 1.5 h a day; 8 lie before 23.11. -> 12 h, 12 x 90.00 = 1,080.00
+    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (12.0, 1080.0)
+    r = boss_client.delete(f"/api/allocations/{row['id']}")
+    assert r.status_code == 409  # cancelled rows stay
+
+
+def test_overlap_warning_for_a_subcontractor(boss_client, sam, project):
+    boss_client.post("/api/allocations", json=sup_body(sam, project))
+    r = boss_client.post("/api/allocations", json=sup_body(sam, project, total_hours=8.0, end="2026-11-13"))
+    (w,) = r.json()["planning_warnings"]
+    assert w["code"] == "assignment.overlap" and w["details"]["week"] == E6_START and w["severity"] == "info"
+
+
+@pytest.fixture
+def accountant_client(app, boss_client):
+    pw = "correct horse battery"
+    r = boss_client.post(
+        "/api/users", json={"username": "acc", "name": "Alex Accountant", "role": "accountant", "password": pw}
+    )
+    assert r.status_code == 200, r.text
+    c = TestClient(app)
+    token = c.post("/api/auth/login", json={"username": "acc", "password": pw}).json()["token"]
+    c.headers["Authorization"] = "Bearer " + token
+    return c
+
+
+def test_rights_follow_the_kind_of_the_row(
+    monkeypatch, accountant_client, boss_client, boss_id, sam, project, offer_row
+):
+    from permita38.core import rights
+
+    emp_row = boss_client.post("/api/allocations", json=body(boss_id, project)).json()
+    sup_row = boss_client.post("/api/allocations", json=sup_body(sam, project)).json()
+    # the accountant has neither right: both kinds are refused
+    for payload in (body(boss_id, project), sup_body(sam, project)):
+        assert accountant_client.post("/api/allocations", json=payload).status_code == 403
+    # planning write only: employee rows yes, subcontractor rows no
+    monkeypatch.setitem(rights.MATRIX["accountant"], "planning", (rights.Scope.ALL, rights.Scope.ALL))
+    assert accountant_client.put(f"/api/allocations/{emp_row['id']}", json=body(boss_id, project)).status_code == 200
+    assert accountant_client.post("/api/allocations", json=body(boss_id, project, end=day(6))).status_code == 201
+    assert accountant_client.post("/api/allocations", json=sup_body(sam, project)).status_code == 403
+    assert accountant_client.put(f"/api/allocations/{sup_row['id']}", json=sup_body(sam, project)).status_code == 403
+    r = accountant_client.delete(f"/api/allocations/{sup_row['id']}")
+    assert r.status_code == 403
+    r = accountant_client.delete(f"/api/allocations/{emp_row['id']}")
+    assert r.status_code == 204
+    # procurement write as well: subcontractor rows yes
+    monkeypatch.setitem(rights.MATRIX["accountant"], "procurement", (rights.Scope.ALL, rights.Scope.ALL))
+    assert accountant_client.put(f"/api/allocations/{sup_row['id']}", json=sup_body(sam, project)).status_code == 200
+    assert accountant_client.post("/api/allocations", json=sup_body(sam, project, end="2026-11-13")).status_code == 201
+    r = accountant_client.delete(f"/api/allocations/{sup_row['id']}")
+    assert r.status_code == 204
+    _, linked = offer_row
+    r = accountant_client.delete(f"/api/allocations/{linked['id']}")
+    assert r.status_code == 409
+
+
+def test_apply_change_keeps_total_hours_rows_working(boss_client, boss_id, project, store):
+    row = boss_client.post(
+        "/api/allocations", json=body(boss_id, project, hours_per_week=None, total_hours=20.0)
+    ).json()
+    changes = {"allocations": [{"id": row["id"], "end": day(11)}]}
+    r = boss_client.post("/api/plan/apply", json={"changes": changes, "confirm": True})
+    assert r.status_code == 200, r.text
+    stored = store.get("allocations", row["id"])
+    assert stored["total_hours"] == 20.0 and stored["end"] == day(11) and "hours_per_week" not in stored

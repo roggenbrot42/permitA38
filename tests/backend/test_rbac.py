@@ -144,15 +144,16 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("GET", "/api/calendars/suggestions"): ("planning", "write", True),
     ("GET", "/api/calendars/{source_id}/preview"): ("planning", "write", True),
     ("GET", "/api/timer"): ("timer", "read", False),
+    ("PATCH", "/api/timer"): ("timer", "write", False),
     ("POST", "/api/timer/start"): ("timer", "write", False),
     ("POST", "/api/timer/stop"): ("timer", "write", False),
     ("GET", "/api/dashboard"): ("timer", "read", False),
-    ("GET", "/api/forecast"): ("planning", "read", False),
     ("POST", "/api/plan/simulate"): ("planning", "read", False),
     ("POST", "/api/plan/check-offer"): ("planning", "read", False),
     ("POST", "/api/plan/what-must-move"): ("planning", "read", False),
     ("POST", "/api/plan/suggest-vacation"): ("planning", "read", False),
     ("POST", "/api/plan/suggest-start"): ("planning", "read", False),
+    ("GET", "/api/plan"): ("planning", "read", False),
     ("GET", "/api/plan/vacation"): ("planning", "read", False),
     ("POST", "/api/plan/apply"): ("planning", "write", False),
     ("GET", "/api/plan/scenarios"): ("planning", "read", False),
@@ -163,10 +164,8 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("POST", "/api/projects/{rid}/extend"): ("planning", "write", False),
     ("GET", "/api/projects/{rid}/planning"): ("planning", "read", False),
     # planner per project (docs/contracts/planner-per-project.md): boss only through the `planning` area
-    ("GET", "/api/plan/day-table"): ("planning", "read", False),
     ("GET", "/api/allocations"): ("planning", "read", False),
     ("POST", "/api/allocations"): ("planning", "write", False),
-    ("POST", "/api/allocations/bootstrap"): ("planning", "write", False),
     ("PUT", "/api/allocations/{allocation_id}"): ("planning", "write", False),
     ("DELETE", "/api/allocations/{allocation_id}"): ("planning", "write", False),
     ("GET", "/api/finance"): ("finance", "read", False),
@@ -177,6 +176,8 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("PUT", "/api/settings"): ("settings", "write", False),
     ("GET", "/api/settings/personal-tax"): ("settings", "write", True),
     ("PUT", "/api/settings/personal-tax"): ("settings", "write", True),
+    ("GET", "/api/settings/work-limits"): ("settings", "write", True),
+    ("PUT", "/api/settings/work-limits"): ("settings", "write", True),
     # numbering and import management is boss-only: settings write at full scope
     ("GET", "/api/numbering/preview"): ("settings", "write", True),
     ("GET", "/api/numbering/status"): ("settings", "write", True),
@@ -366,6 +367,8 @@ def test_every_route_is_denied_exactly_where_the_matrix_says(app, clients):
 SESSION_ONLY = {
     ("GET", "/api/settings/personal-tax"),
     ("PUT", "/api/settings/personal-tax"),
+    ("GET", "/api/settings/work-limits"),
+    ("PUT", "/api/settings/work-limits"),
     ("POST", "/api/auth/change-password"),
     ("GET", "/api/auth/totp/status"),
     ("POST", "/api/auth/totp/setup"),
@@ -477,7 +480,7 @@ def test_accountant_reads_money_and_books_expenses_but_changes_nothing_else(boss
     assert reply.status_code == 403
     assert acc.get("/api/dashboard").status_code == 403
     assert acc.get("/api/absences").status_code == 403
-    assert acc.get("/api/forecast").status_code == 403
+    assert acc.get("/api/plan").status_code == 403
     reply = acc.put("/api/settings", json={"company_name": "Hacked"})
     assert reply.status_code == 403
     assert (
@@ -500,7 +503,7 @@ def test_accountant_sees_names_only_in_the_team_list_and_no_server_path(clients)
 
 def test_employee_is_unchanged(boss_client, clients):
     emp = clients["employee"]
-    for path in ("/api/invoices", "/api/finance", "/api/customers", "/api/settings", "/api/forecast", "/api/templates"):
+    for path in ("/api/invoices", "/api/finance", "/api/customers", "/api/settings", "/api/plan", "/api/templates"):
         assert emp.get(path).status_code == 403, path
     assert emp.get("/api/projects").status_code == 200
     assert emp.get("/api/dashboard").status_code == 200
@@ -740,7 +743,7 @@ def test_planning_warnings_only_for_roles_with_planning_access():
     from permita38.api.routers.records import _with_warnings
 
     class Stub:
-        class planning:  # noqa: N801
+        class planner:  # noqa: N801
             @staticmethod
             def warnings_for(coll, rec):
                 return [{"kind": "x"}]

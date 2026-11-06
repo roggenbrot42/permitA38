@@ -1,5 +1,7 @@
 # Specification: the planner per project (ring-fenced capacity)
 
+> **Superseded by [project-centric-planning.md](project-centric-planning.md)** (2026-11). Kept as history.
+
 Status: **proposed**. Author: architect (Sonnet 5.5). Builds on `docs/planning.md` and on the ring-fence rules of
 `docs/specs/subcontractors.md` (branch `docs/spec-subcontractors`, not merged when this was written; where this
 document says "the subcontractor spec" it means that file, section "Product owner decisions" and "Planner

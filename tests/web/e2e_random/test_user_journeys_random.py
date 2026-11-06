@@ -345,11 +345,13 @@ class Journey:
             day = ws + timedelta(days=self.rng.randint(0, (self.today - ws).days))
         else:
             day = ws - timedelta(days=self.rng.randint(1, 7))
-        billable = self.rng.random() < 0.85
+        billable = self.rng.random() < 0.85 and not proj.internal  # the box is locked and unticked on internal projects
         tag = self._new_tag()
         self.nav("#/time")
         self.page.click("[data-a=addTime]")
-        vals = {"date": day.isoformat(), "project_id": proj.id, "note": f"{tag} manual", "billable": billable}
+        vals = {"date": day.isoformat(), "project_id": proj.id, "note": f"{tag} manual"}
+        if not proj.internal:
+            vals["billable"] = billable
         if text:
             vals["dur"] = text
         else:
@@ -382,8 +384,13 @@ class Journey:
             self.page.wait_for_function("() => document.querySelector('#clock').innerText !== '00:00:00'", timeout=5000)
         except Exception:
             pytest.fail("the running timer does not tick")
-        self.click_render("[data-a=timerStop]")
-        self.m.entries.append(MEntry(tag, 1, self.today, proj, True))
+        # under a minute the app asks whether to drop the timer; always decline so it books 1 min as modelled
+        accepted, self.watch.accept_confirm = self.watch.accept_confirm, 0.0
+        try:
+            self.click_render("[data-a=timerStop]")
+        finally:
+            self.watch.accept_confirm = accepted
+        self.m.entries.append(MEntry(tag, 1, self.today, proj, not proj.internal))
         self.say(f"timer {tag} on {proj.name!r} -> 1min")
         self.check_week_ui()
 
@@ -751,7 +758,11 @@ class Journey:
         assert len(api.get("/absences")) == len(m.absences)
         assert len(api.get("/contracts")) == m.contracts
         if m.allocs:
-            rows = {(a["project_id"], a["hours_per_week"], a["start"], a["end"]) for a in api.get("/allocations")}
+            rows = {
+                (a["project_id"], a["hours_per_week"], a["start"], a["end"])
+                for a in api.get("/allocations")
+                if a["hours_per_week"] is not None
+            }
             assert rows == set(m.allocs), (rows, m.allocs)
         fin = api.get("/finance", year=self.year)["totals"]
         revenue = sum((d.totals()[0] for d in m.paid_invoices()), Decimal(0))
@@ -764,8 +775,8 @@ class Journey:
         assert abs(money(fin["vat_out"]) - vat_out) <= Decimal("0.01") * groups, (fin, vat_out)
         assert money(fin["expenses"]) == expenses and money(fin["profit"]) == revenue - expenses
         assert money(fin["vat_in"]) == sum((e.vat for e in m.expenses), Decimal(0))
-        fc = api.get("/forecast", weeks=2)["weeks"][0]
-        target = week_target_minutes(self.today, m.weekly_hours, m.absent_days())
+        fc = api.get("/plan", weeks=2)["weeks"][1]  # the plan counts only days after today: use the next week
+        target = week_target_minutes(self.today + timedelta(days=7), m.weekly_hours, m.absent_days())
         assert round(fc["capacity"] * 60) == pytest.approx(target, abs=4), (fc, target)
 
     # ---- driver

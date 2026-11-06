@@ -1,5 +1,7 @@
 # Specification: capacity and demand meet at the project
 
+> **Superseded by [project-centric-planning.md](project-centric-planning.md)** (2026-11). Kept as history.
+
 Status: **proposed, draft**. Author: drafted by a Haiku session from the maintainer's domain rule; **architect sign-off
 pending** (Sonnet 5.5, `AGENTS.md` "Division of labour"). Do not implement before sign-off. Review tier: **Full** (changes
 the planner's capacity and gap numbers, the revenue and margin rows, and which person is counted on a contract).

@@ -23,7 +23,7 @@ from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.integrity import Ctx, rule_numbering_duplicates
 from permita38.core.service.personal_tax import PersonalTaxService
-from permita38.core.service.plan_service import PlanningService
+from permita38.core.service.planner.service import PlannerService
 from permita38.core.service.procurement import ProcurementService
 from permita38.core.service.receipts import ReceiptService
 from permita38.core.service.records import RecordService
@@ -62,7 +62,7 @@ class Services:
     imports: ImportService
     calendar: CalendarService
     busy: BusyTimeProvider
-    planning: PlanningService
+    planner: PlannerService
     allocations: AllocationService
     suppliers: SupplierService
     procurement: ProcurementService
@@ -85,7 +85,7 @@ class Services:
         sanity = SanityService(store)
         return cls(
             busy=busy,
-            planning=PlanningService(store, busy),
+            planner=PlannerService(store, busy),
             allocations=AllocationService(store),
             suppliers=SupplierService(store),
             procurement=ProcurementService(store),

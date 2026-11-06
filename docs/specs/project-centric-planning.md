@@ -117,9 +117,11 @@ D2. A weekly item (`hours_per_week`) demands, per ISO week, `hours_per_week × w
     its period / 5`. Holidays and vacation do **not** reduce the promise (they reduce the supply).
 D3. A total item demands `total_hours` over its period.
 D4. **Booked attribution** (decided, D5). Time entries (billable or not) on the project, dated
-    inside an item's period and up to `today`, are attributed week by week: first to that week's weekly items (up to
-    their weekly demand, contracts before offers), the rest to total items whose period contains the entry date,
-    earliest end first, up to their `total_hours`. Hours left over are reported as `booked_unattributed` (info).
+    inside an item's period and up to `today`, are attributed day by day, **all contracts before any offer** (changed
+    2026-11-06, so adding an offer never changes a contract's verdict): first that week's weekly contracts (up to their
+    weekly demand), then the total contracts whose period contains the entry date (earliest end first, up to their
+    `total_hours`), then the weekly offers, then the total offers in the same way. Hours left over are reported as
+    `booked_unattributed` (info).
 D5. Remaining of a weekly item: for the current week `max(0, demand − booked attributed in this week)`, for every
     later week its demand. Past weeks are history and are not checked.
 D6. Remaining of a total item: `max(0, total_hours − booked attributed)`.
@@ -281,8 +283,8 @@ number guard); the importer reports a row it cannot fix instead of writing it. T
 update the transfer shape check `_allocation_problem` (`transfer/importer.py`) so employee allocations with only
 `total_hours` are restorable. db-guards-v2 part B (PR #99) guards every project link (allocations, tasks, entries,
 contracts, offers, invoices, expenses, incoming offers, trips, timers) and the project ids inside saved scenarios
-(`models.scenario_project_refs(changes)`); WP4's `changes.assignments` (alias of `changes.allocations`) must be added
-to that helper so the delete check and `check-db` keep seeing every project id.
+(`models.scenario_project_refs(changes)`). The scenario field stays `changes.allocations` (no `assignments` alias,
+decided 2026-11-06), so that helper needs no change.
 
 ### Project time sheet (owner, 2026-11-06: "a time sheet / overview for each project: who booked and how much")
 
@@ -316,7 +318,8 @@ the shape `{code, severity, field, message, details, confirmable}` and **every m
 
 Query: `weeks` (1–52, default 12), `project_id` (a project id or `unassigned`; filters `projects`), `user_id`
 (filters `weeks` and `people`). Area `planning`, read. `people` and `projects[].supply` cover the same range as
-`weeks` (from the Monday of the current week to the last Sunday). The example is E1 with `weeks=6`.
+`weeks` (from the Monday of the current week to the last Sunday). Supply starts tomorrow (D11), so the current week's `capacity`,
+`unassigned` and `over_assigned` (and `people`) count only its days after today. The example is E1 with `weeks=7` (today, Sunday 08.11.2026, belongs to the week of 02.11.).
 
 ```json
 {
@@ -368,8 +371,8 @@ Query: `weeks` (1–52, default 12), `project_id` (a project id or `unassigned`;
 
 ### `POST /api/plan/simulate`
 
-Body `{changes: {absences: [...], commitments: [...], assignments: [...]}, weeks, project_id, user_id}`;
-`changes.allocations` is accepted as an alias for one release. Returns the `GET /api/plan` body plus `delta:
+Body `{changes: {absences: [...], commitments: [...], allocations: [...]}, weeks, project_id, user_id}` (the
+existing `ScenarioChanges` shape). Returns the `GET /api/plan` body plus `delta:
 {projects: [{project_id, shortfall_before, shortfall_after, delta}], total}`. Writes nothing.
 
 ### `POST /api/plan/apply`, scenarios, suggestions
@@ -660,6 +663,207 @@ Explanation texts (literal templates; `{h}` via `_fmt`, dates `DD.MM.YYYY`):
   without a project is `"the team's unassigned time"`.
 * weekly: `"{hours_per_week} h per week from {start} to {end}: short {shortfall} h in {n} week|weeks ({weeks})."` (singular for one week) with
   the Mondays as `DD.MM.`, or `"{hours_per_week} h per week from {start} to {end}: covered every week."`.
+  When the current ISO week (the week of today) is one of the short weeks, the sentence gets a second one
+  (owner, 2026-11-06, option (a): the rule stays, the message says why): `" This week {booked} of {hours_per_week} h
+  are booked and {left} h of assigned time is left after today."` with `booked` = the hours booked on the item in the
+  current week (`got` of that week), `left` = the project's leftover supply of the days after today in that week before
+  the weekly group took any (the local `supply` in `_cover_weekly`, kept per item and week; `WeekShortfall.supply`
+  stays the covered hours). Example: 6 h per week,
+  Friday, nothing booked, no assignment on Saturday/Sunday -> `"... short 6 h in 1 week (02.11.). This week 0 of
+  6 h are booked and 0 h of assigned time is left after today."`. Past weeks are never judged (unchanged).
+
+## WP5: the planner UI (binding, 2026-11-06)
+
+Vanilla JS as today, numbers only from the server, every label with its derivation as a `title` tooltip (texts of the
+"API contract"). German number format as the rest of the app (one decimal separator, see test_planner_number_format).
+
+* **W1 Overview tab** (`web/app.js`, PAGES.plan, replaces the "Forecast" tab; label "Overview"): filters weeks
+  (4/12/26/52), person, project (incl. "Unassigned"). From `GET /api/plan`:
+  1. a project list, customer projects first (status pill `ok` / `at risk` / `short`), each opens to its items: one
+     row per contract and offer with promised / booked / remaining / covered / shortfall, the explanation sentence in
+     full, value / invoiced / open (offers: net and expected net), and for a shortfall the suggestions as buttons
+     "Assign <name> (<h> h)" that open the assignment dialog pre-filled (project, person, period = the suggestion's
+     from..to, total_hours = the suggested hours); internal projects below with assigned / booked / budget;
+  2. a week table (team, or the chosen person): capacity, customer, internal, unassigned, over-assigned, billable
+     share, subcontractors, holiday / vacation / absence / busy as a small grey line; over-assigned in red;
+  3. the warnings as one list (severity colours as today), and, for the boss only, a collapsed "N damaged records
+     were skipped" line from `skipped`.
+  4. (owner, 2026-11-06: "I can only edit the allocations if there is an Assign button") **every** project row, also
+     internal ones and ones without a shortfall, has a button "Assignments (n)" (n = its assignment rows) that opens
+     the dialog filtered to that project, with "Add assignment" in it; every person of the `people` list has
+     "Assignments (n)" filtered to that person. Shown to users with planning write; read-only users see the count.
+* **W2 Plan & vacation tab** (`web/planner.js`, `web/planner.css`): keeps the timeline and its draft editing
+  (absences, contract/offer moves and hours, assignments) and the scenarios; recomputes with `POST
+  /api/plan/simulate` (no `first`, no `include_external`); the week header shows capacity and assigned of the chosen
+  person or team (red when over-assigned); a contract/offer bar is red when its item has a shortfall in the draft,
+  and its tooltip / "why" panel shows the item's explanation (the day-table call is gone); the draft bar shows the
+  `delta` per project ("Orchard: short 26 h -> 2 h"). Suggest-start without user_ids.
+* **W3 Assignments** (`web/allocations.js`, `web/procurement.js`): the dialog lists and edits employee AND
+  subcontractor rows: owner select (people and active capacity suppliers), project, period, "hours per week" or
+  "total hours" (exactly one), rate (subcontractors only, required), planned hours and planned net from the server;
+  offer-linked rows show the offer, can be edited and cancelled, not deleted; every other writable row has "Edit"
+  and "Delete" (with a confirmation) directly in the list row, not only inside the edit form; "Add assignment" in the
+  dialog of a project proposes what is missing (owner, 2026-11-06): total hours = the project's `shortfall_contracts`,
+  else `shortfall_worst_case`, read from `GET /api/plan?project_id=<id>&weeks=52`; period = from the later of tomorrow
+  and the earliest start of a short item to the latest end of a short item; nothing missing = empty field as before;
+  the bootstrap button and its preview are
+  removed; the save warnings are shown as today. Procurement: the capacity-offer form no longer asks for hours per
+  week (the hour lines are booked), it shows the period only.
+* **W4 My settings** (`web/app2.js` or the file that renders the "me" page): for a boss a card "Work limits" with the
+  five fields and their defaults (GET/PUT `/api/settings/work-limits`), explained in one sentence each; not shown to
+  other roles.
+* Web tests: each package rewrites the browser tests of its page (fake API answers built from E1/E7 numbers);
+  tests of removed features (forecast fields, day table, bootstrap, per-day pools) are deleted.
+
+### Today page: what I need to do (owner, 2026-11-06: "the today page should show how much of what I need to do")
+
+* `GET /api/dashboard` (existing, same rights) gains `projects: [{project_id, name, kind, planned_today,
+  planned_week, booked_today, booked_week, left_week}]` for the dashboard's person: every project with an active
+  employee assignment of that person in the current ISO week, plus every project the person booked time on this week.
+  `planned_*` = the hours of the person's assignments on today / on every day of this week, from
+  `planner/spread.py` with `today=None` (the whole period, so days already past this week count as planned);
+  `booked_*` = the person's time entries; `left_week` = max(0, planned_week − booked_week). Hours rounded to 2;
+  sorted by left_week descending, then name. Computed in the time service (not in calc.py, which the planner imports).
+* Web (Today page): a card "Your projects this week" with columns Today planned / Today booked / Week planned / Week
+  booked / Left this week, a total row, tooltips with the derivation, and a line "No assignments this week" when the
+  list is empty. Clicking a project name starts the timer on it if the existing timer control allows that, else
+  links to the project.
+* Owner, 2026-11-06 (Today page):
+  1. **Change project and task while the timer runs**: `PATCH /api/timer` (area `timer` write) with `project_id`,
+     `task_id`, `note` (each optional; a task must belong to the project, a project must exist and not be internal-
+     incompatible with the rules of time entries; 409 without a running timer); `started` is kept. The timer card shows
+     project and task selects while running and sends the change at once.
+  2. **Play buttons**: every row of "Your projects this week" and, below each project, one row per task the person
+     booked on this week (`projects[].tasks: [{task_id, name, booked_week}]` in the dashboard) gets a play button that
+     calls `POST /api/timer/start` with that project/task; a running timer is stopped and saved first (existing
+     behaviour of start), so switching never loses time.
+  3. **Manual time without a start**: in the timer card's manual mode a duration alone is enough: for today the entry
+     ends now and starts at now − duration (not before 00:00; then it starts at 00:00 and ends at 00:00 + duration);
+     for another day it starts at 09:00. Start and end stay editable; entering them keeps today's behaviour.
+  4. **Internal projects are never billable** (owner, 2026-11-06): the time-entry dialog unticks and disables
+     "billable" when an internal project is chosen (and enables it again for a customer project); the server stores
+     `billable: false` for every entry created or changed onto an internal project, also via the timer and the API.
+  5. **A timer stopped within the first minute** (owner, 2026-11-06): `POST /api/timer/stop` takes an optional
+     `discard: bool = false`; with `true` the timer is reset and no entry is written (`{"running": false}`, no
+     `entry`). The web asks when Stop is pressed less than 60 s after `started`: confirm "Less than a minute tracked.
+     Delete it instead of booking 1 min?" -> OK sends `discard: true`, Cancel books as today (1 min). From 60 s on
+     there is no question.
+  6. **Play on today's entries**: every row of the "Today" entry list gets the same ▶ button (`timerPlay`) with the
+     entry's project and task (no button for an entry without a project), so earlier work continues in one click.
+  7. **Manual while the timer runs** (owner, 2026-11-06): pressing ✎ Manual while a timer runs switches the card to
+     the manual form, pre-filled from the timer: date = the day of `started`, start = `started` (HH:MM), stop = now,
+     duration from both; description, project and task stay. The timer keeps running on the server until **Add**:
+     Add saves the entry (as manual mode does today) and then calls `POST /api/timer/stop` with `discard: true`, so
+     the time is booked once. Switching back to ⏱ without Add shows the running clock again. A timer started on an
+     earlier day gets stop = 23:59 of that day (an entry ends on its own day).
+  8. **A timer that runs past midnight** (review of PR #104): `POST /api/timer/stop` books the entry on the start
+     day and ends it at 23:59 of that day at the latest (`minutes` = from start to that end, at least 1); the time
+     after midnight is not booked. The response is unchanged; the Today card shows the saved entry.
+
+## WP4b: the planner behind the API (binding, 2026-11-06)
+
+WP4b and WP5 land together on branch `feat/planner-service`: the old endpoints and the old web planner are removed in
+the same merge, so main never has a planner page without its API.
+
+### `planner/load.py` (P1)
+
+```python
+@dataclass
+class Snapshot:
+    today: date
+    holiday: Holiday                      # public holidays of settings["state"] (core/holidays.py)
+    owners: list[Owner]                   # active users and active person-capacity suppliers
+    assignments: list[Assignment]
+    items: list[Item]                     # D1: confirmed contracts, open binding offers
+    bookings: list[Booking]               # all time entries per project and day, dated <= today
+    names: dict[str, str]                 # project id -> name ("(deleted project)" for a missing one)
+    internal: list[dict]                  # [{project_id, name, budget_hours, booked}] of active internal projects
+    invoiced: dict[str, Decimal]          # contract id -> net invoiced (rule below)
+    subcontractor_cost: dict[str, Decimal]  # project id -> sum of planned_net of its subcontractor assignments (M1)
+    skipped: list[dict]                   # damaged legacy rows that were left out: {coll, id, reason}
+
+def load(store: Repository, today: date, busy: BusyTimeProvider | None = None, changes: dict | None = None) -> Snapshot
+```
+* Owners: users with `active` true; kind `boss` for role boss, else `employee`; `days_off` from absences (kind
+  vacation -> "vacation", sick -> "sick", else "other"); `busy` from the provider in out-of-office mode (D10:
+  `BusyTimeProvider.busy_hours(..., ooo_only=True)` counts only out-of-office and all-day blocks); `limits` of a boss
+  from the setting `work_limits.<user_id>` (P8; defaults when missing). Suppliers of kind `person-capacity` with
+  `active` true become kind `subcontractor`, `weekly_hours` 0, their workdays and `unavailable` windows as
+  `days_off` "unavailable".
+* Assignments: allocation rows with status `active`, and `cancelled` ones (`Assignment.cut` = `cancelled_from`: the row
+  is spread over its original period as if active, then the days from `cut` on are dropped, so a cancellation never
+  raises the daily hours; `planned_net` of a cut row is the sum of its kept days);
+  `project_kind` from the project. `booked` of a total assignment = the owner's entries on the project inside the
+  period, dated <= today.
+* Items: contracts with status `confirmed`; offers with status `sent`, a plan with start and end, no contract made from
+  them and `valid_until` not passed. An offer plan without hours takes the sum of its `h` lines as `total_hours`
+  (like accepting). Rate: the contract's/plan's rate, else the project's, else the customer's, else `default_rate`.
+  `win` = plan `win_probability` / 100, else the setting `planning_default_win_probability` / 100.
+* Damaged rows (bad dates, end before start, no or both hour fields, an allocation without project or owner) are
+  skipped and listed in `skipped`, never raised.
+* `changes` (a `ScenarioChanges` dict) is applied in memory exactly like today's `apply_changes` /
+  `apply_allocation_changes`: absences added/changed/removed, commitment overrides of period and hours, allocation
+  rows added/changed/removed.
+* `invoiced`: net (`calc.invoice_amounts`) of the invoices of the contract's project that are not drafts or cancelled,
+  attributed to the contract whose period contains the invoice date (earliest end first); others are not counted.
+
+### `planner/service.py` (P2) and `planner/suggest.py` (P3)
+
+`PlannerService(store, busy)` replaces `PlanningService` (same method names where they exist):
+* `plan(weeks, user_id=None, project_id=None, today=None) -> dict`: the `GET /api/plan` body. The week rows cover
+  the Monday of today's week plus `weeks` weeks; the supply for `cover()` is built from today to
+  `max(end of those weeks, latest item end)` (no item is cut off). Warnings: `supply.warnings`, `verdict_warnings`,
+  `internal.over_budget`, and `assignment.no_demand` (a subcontractor assignment of a customer project whose items
+  need nothing in its period). Also returns `skipped` (damaged rows) for the boss's eyes.
+* `simulate(changes, weeks, user_id=None, project_id=None, today=None)`: the same body for the world with `changes`,
+  plus `delta` as in the API contract (shortfall_contracts per project before and after, and the total).
+* `apply`, `list_scenarios`, `get_scenario`, `save_scenario`, `delete_scenario`, `apply_scenario`, `entitlement`,
+  `extend_project`, `cover_plan`, `project_timeline`: ported from `plan_service.py` with unchanged behaviour (they do
+  not depend on the old engine except `entitlement`, which uses the snapshot's absences and holidays).
+* `check_offer(draft, exclude_id=None)`: `offer.shortfall` of the draft as an offer item next to the others, plus
+  `planning_warnings.document_warnings` as today. `warnings_for(coll, rec)`: as today, plus `contract.shortfall` for a
+  saved contract and `offer.shortfall` for a saved offer.
+* `planner/suggest.py`: `suggest_vacation(user_id, days, window_from, window_to, changes)` ranks windows of `days`
+  working days by the increase of the total contract shortfall, then by bridge days (as today);
+  `suggest_start(hours, deadline, earliest, project_id, changes)` = the first available start from which an offer of
+  `hours` total over start..deadline has no shortfall, or `null`; `what_must_move(plan)` = for an offer draft with a
+  shortfall, the smallest shift (in days) of one other open offer of the same project that removes it, else the
+  largest `total_hours` that fits. Each returns the body the current endpoint returns, without the `user_ids` input.
+
+### API (P4)
+
+* `GET /api/plan` (area `planning` read) and `POST /api/plan/simulate` as in "API contract"; the other `/api/plan/*`
+  paths keep their bodies (SuggestStartIn without `user_ids`); `GET /api/forecast` and `GET /api/plan/day-table` are
+  removed. `services.planner` replaces `services.planning` in deps.py, routers/planning.py, routers/sales.py and
+  routers/records.py; `sales.py` imports `cover_plan` from the new service.
+
+### Allocations API (P5), procurement (P6), work limits (P8)
+
+* P5: `AllocationIn` = `user_id` or `supplier_id`, `project_id`, `start`, `end`, `hours_per_week` (AllocHours) or
+  `total_hours` (PositiveTotalHours), `rate` (Rate; required for a supplier, refused for an employee). PUT/DELETE of
+  subcontractor rows under `procurement` write, employee rows under `planning` write (core/rights.py, the EXPECTED
+  table of tests/backend/test_rbac.py, docs/roles.md); a row with `incoming_offer_id` can be cancelled and edited but
+  not deleted. `planned_hours` / `planned_net` from `planner/spread.py`. Save warnings `assignment.over_capacity`
+  (from `supply.warnings` for that person and period), `assignment.overlap`, `assignment.differs_from_offer` (E6).
+  `POST /api/allocations/bootstrap` is removed.
+* P6: procurement accept of a capacity offer always books `total_hours` = the sum of its `h` lines (E6; 422 rules of
+  the step-0 decisions); its figures and `_planned_hours` use `planner/spread.py`; `transfer/importer.py`
+  `_allocation_problem` accepts employee rows with only `total_hours`.
+* P8: `GET/PUT /api/settings/work-limits` (any signed-in boss, for themself; model `WorkLimitsIn`, rules of S6),
+  stored in the setting `work_limits.<user_id>`; saving a user (employee) with `weekly_hours` above 48 returns the
+  warning `user.weekly_hours_above_law`.
+* P7 (last): delete `core/service/planning.py`, `plan_service.py`, `external_capacity.py`, the old functions of
+  `planning_warnings.py` (keep `warning`, `_fmt`, `document_warnings`, `project_warnings`, `budget_warning`,
+  `plan_hours`, `line_hours`), `calc.forecast`, and their tests (test_planning.py, test_planner_per_project.py,
+  test_planner_external.py, test_utilisation_allocated.py, test_planning_spread.py, test_external_capacity.py and the
+  four skipped user_ids tests); rewrite tests/backend/randomized/test_planning_invariants.py for the new engine.
+  Before deleting: `procurement.py` still uses `external_capacity` (`_weekly`, the dependency hint, `effective_end` of
+  cancelled rows; move `effective_end` into `planner/spread.py` or `load.py`) and the old engine in
+  `_first_week_without_demand` (replace it with `assignment.no_demand` of `PlannerService.plan`);
+  `AllocationService.present_external` / `commitments()` must use `planner/spread.py`.
+
+Order: P1, then P2 and P5/P6/P8 in parallel, then P3 and P4, then P7, then WP5 (web) and WP6 (docs). Review tier:
+Full (one review after P7 over the whole branch).
 
 ## Work packages (fresh Sonnet agents, one each; backend and web UI in parallel against the contract)
 

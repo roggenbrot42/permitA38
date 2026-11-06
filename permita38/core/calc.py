@@ -207,14 +207,6 @@ def dashboard(store, user, today=None):
     )
 
 
-# -- forecast ----------------------------------------------------------------
-def forecast(store, weeks=26, user_id=None, include_offers=True, today=None):
-    """Week-by-week capacity against commitments. The rules live in :mod:`permita38.core.service.planning`."""
-    from .service.plan_service import PlanningService  # lazy: the planning engine builds on this module
-
-    return PlanningService(store).forecast(weeks, user_id, include_offers, today)
-
-
 # -- finance -----------------------------------------------------------------
 def invoice_amounts(inv, settings):
     t = doc_totals(dict(inv), settings)

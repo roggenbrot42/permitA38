@@ -63,7 +63,7 @@ def test_unknown_document_shows_not_found(make_page, live_server, api):
 @pytest.mark.parametrize(
     "coll, body, breaks",
     [
-        ("contracts", {"title": "x", "start": "💥", "end": "2026-12-01", "hours_per_week": 5}, "/forecast"),
+        ("contracts", {"title": "x", "start": "💥", "end": "2026-12-01", "hours_per_week": 5}, "/plan"),
         ("absences", {"start": "not-a-date"}, "/dashboard"),
         ("expenses", {"date": "💥", "net": 5}, "/finance"),
     ],

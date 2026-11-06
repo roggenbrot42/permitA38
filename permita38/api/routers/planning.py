@@ -16,11 +16,9 @@ routers = [router]
 
 class SimulateIn(v.CheckedBody):
     changes: ScenarioChanges = ScenarioChanges()
-    weeks: int = Field(26, ge=1, le=156)
-    first: v.OptDate = None
+    weeks: int = Field(12, ge=1, le=52)
     user_id: v.OptId = None
     project_id: v.ScopeId | None = None
-    include_external: bool = True  # subcontractors' hours (False = the world without any supplier)
 
 
 class MoveCheckIn(v.CheckedBody):
@@ -38,7 +36,6 @@ class SuggestStartIn(v.CheckedBody):
     hours: v.TotalHours
     deadline: v.ISODate
     earliest: v.OptDate = None
-    user_ids: v.IdList = []
     project_id: v.OptId = None
     changes: ScenarioChanges = ScenarioChanges()  # the what-if draft of the planner counts too
 
@@ -62,91 +59,51 @@ def _need_confirm(flag: bool) -> None:
         raise ServiceError(400, "Confirm the change (confirm: true) before anything is written")
 
 
-@router.get("/forecast", summary="week-by-week capacity vs. commitments, with revenue basis")
-def forecast(
+@router.get("/plan", summary="weeks, people and per-project verdicts of the planner")
+def plan(
     _: Annotated[dict, Needs("planning")],
     services: ServicesDep,
-    weeks: int = Query(26, ge=1, le=156),
-    user_id: str | None = None,
-    offers: int = 1,
+    weeks: Annotated[int, Query(ge=1, le=52)] = 12,
     project_id: Annotated[
         str | None, Query(pattern=OPT_ID_PATTERN, description="a project id or 'unassigned'; empty = no filter")
     ] = None,
-    by_project: Annotated[int, Query(ge=0, le=1)] = 1,
-    include_external: Annotated[int, Query(ge=0, le=1)] = 1,
-) -> dict[str, Any]:
-    return services.planning.forecast(
-        weeks,
-        user_id or None,
-        bool(offers),
-        project_id=project_id or None,
-        by_project=bool(by_project),
-        include_external=bool(include_external),
-    )
-
-
-@router.get("/plan/day-table", summary="capacity and demand per day, per project and pool")
-def day_table(
-    _: Annotated[dict, Needs("planning")],
-    services: ServicesDep,
-    from_: Annotated[v.ISODate, Query(alias="from")],
-    to: v.ISODate,
     user_id: Annotated[str | None, Query(pattern=OPT_ID_PATTERN)] = None,
-    project_id: Annotated[
-        str | None, Query(pattern=OPT_ID_PATTERN, description="a project id or 'unassigned'; empty = no filter")
-    ] = None,
-    include_external: Annotated[int, Query(ge=0, le=1)] = 1,
 ) -> dict[str, Any]:
-    return services.planning.day_table(
-        date.fromisoformat(from_),
-        date.fromisoformat(to),
-        user_id or None,
-        project_id or None,
-        include_external=bool(include_external),
-    )
+    return services.planner.plan(weeks, user_id or None, project_id or None)
 
 
 @router.post("/plan/simulate", summary="what-if: recompute the weeks for a change set (writes nothing)")
 def simulate(body: SimulateIn, _: Annotated[dict, Needs("planning")], services: ServicesDep) -> dict[str, Any]:
-    first = date.fromisoformat(body.first) if body.first else None
-    return services.planning.simulate(
-        body.changes.model_dump(),
-        body.weeks,
-        first,
-        body.user_id,
-        project_id=body.project_id,
-        include_external=body.include_external,
-    )
+    return services.planner.simulate(body.changes.model_dump(), body.weeks, body.user_id, body.project_id)
 
 
 @router.post("/plan/check-offer", summary="feasibility and consistency warnings for an offer draft")
 def check_offer(
     body: DocumentIn, _: Annotated[dict, Needs("planning")], services: ServicesDep, offer_id: v.OptId = None
 ) -> list[dict]:
-    return services.planning.check_offer(body.model_dump(exclude_none=True), offer_id)
+    return services.planner.check_offer(body.model_dump(exclude_none=True), offer_id)
 
 
 @router.post("/plan/what-must-move", summary="smallest moves or trims that make a plan fit")
 def what_must_move(body: MoveCheckIn, _: Annotated[dict, Needs("planning")], services: ServicesDep) -> dict[str, Any]:
-    return services.planning.what_must_move(body.plan.model_dump(exclude_none=True))
+    return services.planner.what_must_move(body.plan.model_dump(exclude_none=True))
 
 
 @router.post("/plan/suggest-vacation", summary="best windows for N working days of vacation")
 def suggest_vacation(
     body: SuggestVacationIn, _: Annotated[dict, Needs("planning")], services: ServicesDep
 ) -> dict[str, Any]:
-    return services.planning.suggest_vacation(
+    return services.planner.suggest_vacation(
         body.user_id, body.days, date.fromisoformat(body.window_from), date.fromisoformat(body.window_to)
     )
 
 
 @router.post("/plan/suggest-start", summary="earliest feasible start for an offer of N hours")
 def suggest_start(body: SuggestStartIn, _: Annotated[dict, Needs("planning")], services: ServicesDep) -> dict[str, Any]:
-    return services.planning.suggest_start(
+    return services.planner.suggest_start(
         body.hours,
         date.fromisoformat(body.deadline),
         date.fromisoformat(body.earliest) if body.earliest else None,
-        body.user_ids or None,
         project_id=body.project_id,
         changes=body.changes.model_dump(),
     )
@@ -156,35 +113,35 @@ def suggest_start(body: SuggestStartIn, _: Annotated[dict, Needs("planning")], s
 def vacation(
     _: Annotated[dict, Needs("planning")], services: ServicesDep, user_id: str, year: int = Query(..., ge=2000, le=2100)
 ) -> dict:
-    return services.planning.entitlement(user_id, year)
+    return services.planner.entitlement(user_id, year)
 
 
 @router.post("/plan/apply", summary="write a change set (needs confirm: true)")
 def apply(body: ApplyIn, _: Annotated[dict, Needs("planning", "write")], services: ServicesDep) -> dict[str, Any]:
     _need_confirm(body.confirm)
-    return services.planning.apply(body.changes.model_dump())
+    return services.planner.apply(body.changes.model_dump())
 
 
 @router.get("/plan/scenarios", summary="your saved what-if scenarios")
 def list_scenarios(user: Annotated[dict, Needs("planning")], services: ServicesDep) -> list[dict]:
-    return services.planning.list_scenarios(user)
+    return services.planner.list_scenarios(user)
 
 
 @router.post("/plan/scenarios", summary="save a named scenario")
 def create_scenario(body: ScenarioIn, user: Annotated[dict, Needs("planning", "write")], services: ServicesDep) -> dict:
-    return services.planning.save_scenario(user, None, body.name, body.changes.model_dump())
+    return services.planner.save_scenario(user, None, body.name, body.changes.model_dump())
 
 
 @router.put("/plan/scenarios/{rid}")
 def update_scenario(
     rid: str, body: ScenarioIn, user: Annotated[dict, Needs("planning", "write")], services: ServicesDep
 ) -> dict:
-    return services.planning.save_scenario(user, rid, body.name, body.changes.model_dump())
+    return services.planner.save_scenario(user, rid, body.name, body.changes.model_dump())
 
 
 @router.delete("/plan/scenarios/{rid}", status_code=204)
 def delete_scenario(rid: str, user: Annotated[dict, Needs("planning", "write")], services: ServicesDep) -> None:
-    services.planning.delete_scenario(user, rid)
+    services.planner.delete_scenario(user, rid)
 
 
 @router.post("/plan/scenarios/{rid}/apply", summary="apply a saved scenario (needs confirm: true)")
@@ -192,20 +149,20 @@ def apply_scenario(
     rid: str, body: ConfirmIn, user: Annotated[dict, Needs("planning", "write")], services: ServicesDep
 ) -> dict[str, Any]:
     _need_confirm(body.confirm)
-    return services.planning.apply_scenario(user, rid)
+    return services.planner.apply_scenario(user, rid)
 
 
 @router.post("/projects/{rid}/extend", summary="extend the end of a project period")
 def extend_project(
     rid: str, body: ExtendIn, user: Annotated[dict, Needs("planning", "write")], services: ServicesDep
 ) -> dict[str, Any]:
-    proj = services.planning.extend_project(rid, body.new_end, body.reason, user)
-    return {"project": proj, "planning_warnings": services.planning.warnings_for("projects", proj)}
+    proj = services.planner.extend_project(rid, body.new_end, body.reason, user)
+    return {"project": proj, "planning_warnings": services.planner.warnings_for("projects", proj)}
 
 
 @router.get("/projects/{rid}/planning", summary="project timeline, extensions and period warnings")
 def project_planning(rid: str, _: Annotated[dict, Needs("planning")], services: ServicesDep) -> dict[str, Any]:
-    return services.planning.project_timeline(rid)
+    return services.planner.project_timeline(rid)
 
 
 @router.get("/holidays", summary="public holidays of the configured federal state")

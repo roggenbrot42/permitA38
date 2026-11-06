@@ -282,3 +282,54 @@ def test_total_items_earliest_end_not_earliest_start():
     t2 = _item("contract", "T2", "orchard", D(2026, 11, 12), D(2026, 11, 13), total=4.0)
     _, items = _one(10.0, [t1, t2], [], D(2026, 11, 8))
     assert (items["T1"].shortfall, items["T2"].shortfall) == (0, 0)
+
+
+# ---------------------------------------------------- why the current week is short (owner option (a), 2026-11-06)
+
+_SHORT = "6 h per week from 09.11.2026 to 13.11.2026: short {s} h in 1 week (09.11.)."
+
+
+def test_short_current_week_says_booked_and_left_nothing_booked():
+    it = _item("contract", "W", "orchard", *WK, hpw=6.0)
+    _, items = _one(2.5, [it], [], D(2026, 11, 13))  # Friday: no day after today in the week
+    assert items["W"].explanation == (
+        _SHORT.format(s=6) + " This week 0 of 6 h are booked and 0 h of assigned time is left after today."
+    )
+
+
+def test_short_current_week_with_booked_hours_and_left_supply():
+    it = _item("contract", "W", "orchard", *WK, hpw=6.0)
+    bookings = [Booking("orchard", D(2026, 11, 9), 2.0)]
+    _, items = _one(2.5, [it], bookings, D(2026, 11, 11))  # Wednesday: Thu+Fri = 2/5 x 2.5 h = 1 h
+    assert items["W"].shortfall == 3
+    assert items["W"].explanation == (
+        _SHORT.format(s=3) + " This week 2 of 6 h are booked and 1 h of assigned time is left after today."
+    )
+
+
+def test_short_future_week_only_has_no_second_sentence():
+    it = _item("contract", "W", "orchard", D(2026, 11, 16), D(2026, 11, 20), hpw=6.0)
+    _, items = _one(2.5, [it], [], D(2026, 11, 11))
+    assert items["W"].explanation == ("6 h per week from 16.11.2026 to 20.11.2026: short 3.5 h in 1 week (16.11.).")
+
+
+def test_covered_current_week_and_short_later_week_has_no_second_sentence():
+    it = _item("contract", "W", "orchard", D(2026, 11, 9), D(2026, 11, 20), hpw=2.5)
+    bookings = [Booking("orchard", D(2026, 11, 9), 2.5)]
+    owners = [_ada()]
+    asg = [_asg("a", "ada", "orchard", "customer", START, D(2026, 11, 20), hpw=1.0)]
+    today = D(2026, 11, 11)
+    supply = build(owners, asg, _no_holiday, today, today, D(2026, 12, 31))
+    (v,) = cover([it], bookings, supply, owners, today, NAMES)
+    assert v.items[0].explanation == "2.5 h per week from 09.11.2026 to 20.11.2026: short 1.5 h in 1 week (16.11.)."
+
+
+def test_booked_hours_go_to_all_contracts_before_any_offer():
+    """D4 (2026-11-06): a weekly contract and an overlapping weekly offer of one project, plus a total contract.
+    6 h booked on Monday: the weekly contract takes 4 (its weekly demand), the total contract the other 2, and the
+    offer nothing, although a weekly offer used to come before a total contract."""
+    contract_w = _item("contract", "CW", "orchard", *WK, hpw=4.0)
+    offer_w = _item("offer", "OW", "orchard", *WK, hpw=6.0)
+    contract_t = _item("contract", "CT", "orchard", *WK, total=10.0)
+    _, items = _one(20.0, [contract_w, offer_w, contract_t], [Booking("orchard", WK[0], 6.0)], D(2026, 11, 15))
+    assert (items["CW"].booked, items["CT"].booked, items["OW"].booked) == (4, 2, 0)

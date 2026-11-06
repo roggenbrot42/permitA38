@@ -28,11 +28,60 @@ async function mySettingsTaxCard() {
     <p class="small muted">Used for the income tax estimate on Money &amp; Taxes. Only the boss can see it.</p>${body}</div>`;
 }
 
+/* ---- Work limits (boss only), GET/PUT settings/work-limits; bounds mirror WorkLimitsIn. Infos and warnings only. ---- */
+const WL_DEFAULTS = { info_day: 10, warn_day: 12, max_day: 16, info_week: 60, info_average: 48 };
+const WL_FIELDS = [
+  ['info_day', 'Info above (h/day)', 24, 'A day with more planned hours than this gets an info in the planner.'],
+  ['warn_day', 'Warning above (h/day)', 24, 'A day with more planned hours than this gets a warning.'],
+  ['max_day', 'Maximum (h/day)', 24, 'The most hours one person can be planned on a single day; more is flagged as too long.'],
+  ['info_week', 'Long week above (h/week)', 168, 'A week with more planned hours than this gets an info.'],
+  ['info_average', 'Average above (h/week, over 24 weeks)', 168, 'An average per week over 24 weeks above this gets an info.'],
+];
+
+function workLimitsHTML(w, err) {
+  const v = k => (w && w[k] !== undefined && w[k] !== null ? w[k] : WL_DEFAULTS[k]);
+  return `<div class="card" id="work-limits"><h2>Work limits</h2>
+    <p class="small muted">Limits for your own planning. They only produce infos and warnings, nothing is refused.</p>
+    <div id="wl-error">${err ? `<div class="banner" role="alert">${esc(err)}</div>` : ''}</div>
+    <div class="grid g2">${WL_FIELDS.map(([k, label, max, hint]) => `<div class="field"><label for="wl_${k}">${esc(label)}</label><input type="number" id="wl_${k}" data-wl="${k}" step="0.5" min="1" max="${max}" value="${esc(String(v(k)))}" placeholder="${esc(String(WL_DEFAULTS[k]))}"><div class="small muted">${esc(hint)} Default ${WL_DEFAULTS[k]}.</div></div>`).join('')}</div>
+    <div class="actions"><button class="primary" data-a="wlSave" id="wl-save">Save</button> <button data-a="wlReset" id="wl-reset">Reset to defaults</button></div></div>`;
+}
+
+async function workLimitsCard() {
+  try { return workLimitsHTML(await api.get('settings/work-limits')); }
+  catch (e) { return `<div class="card" id="work-limits"><h2>Work limits</h2><div class="banner" role="alert">${esc(e.message)}</div></div>`; }
+}
+
+async function wlSend(body) {
+  try {
+    const res = await api('PUT', 'settings/work-limits', body);
+    $('#work-limits').outerHTML = workLimitsHTML(res);
+    toast('Work limits saved');
+  } catch (e) {
+    const box = $('#wl-error');
+    if (box) box.innerHTML = `<div class="banner" role="alert">${esc(e.message)}</div>`;
+    toast(e.message, true);
+  }
+}
+A.wlSave = async () => {
+  const body = {};
+  for (const [k, label, max] of WL_FIELDS) {
+    const raw = $('#wl_' + k).value.trim();
+    if (raw === '') { body[k] = WL_DEFAULTS[k]; continue; }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 1 || n > max) { toast(`${label}: enter a number from 1 to ${max}.`, true); return; }
+    body[k] = n;
+  }
+  await wlSend(body);
+};
+A.wlReset = async () => { await wlSend({ ...WL_DEFAULTS }); };
+
 async function mySettingsPage() {
   const cal = can('planning', 'write') && scopeOf('planning') === 'all' ? await calendarsCard() : '';
   return `<div class="head"><div><h1>My settings</h1><div class="muted">Your profile, sign-in and personal connections.</div></div></div>
   ${await mySettingsProfileCard()}
   ${isBoss() ? await mySettingsTaxCard() : ''}
+  ${isBoss() ? await workLimitsCard() : ''}
   ${cal}
   ${await tokensCard()}`;
 }

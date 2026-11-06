@@ -597,7 +597,7 @@ def _run_monkey(seed, make_page, live_server, api, steps, member=False):
         ):
             api.get(f"/{coll}")
         api.get("/finance")
-        api.get("/forecast")
+        api.get("/plan")
     except Exception as exc:
         detail = report_failure("monkey", seed, monkey.log)
         try:

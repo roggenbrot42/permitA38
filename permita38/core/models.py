@@ -244,6 +244,7 @@ class UserOut(Record):
     work_start: str | None = None
     work_end: str | None = None
     timezone: str | None = None
+    planning_warnings: list[dict] | None = Field(None, description="POST/PUT only: advisory, never stored")
     auth: AuthInfo | None = Field(
         None, description="how this request was authenticated (GET /auth/me only): a session or an API token"
     )
@@ -277,6 +278,38 @@ class UserIn(v.CheckedBody):
         if any(d < 0 or d > 6 for d in days) or len(set(days)) != len(days):
             raise ValueError("must be unique weekday numbers 0 (Monday) to 6 (Sunday)")
         return sorted(days)
+
+
+# ---------------------------------------------------------------- boss work limits (setting key work_limits.<user_id>)
+_DayHours = Annotated[float, Field(ge=1, le=24, allow_inf_nan=False)]
+_WeekHours = Annotated[float, Field(ge=1, le=168, allow_inf_nan=False)]
+
+
+class WorkLimitsIn(v.CheckedBody):
+    """The boss's own planning limits (S6); defaults as in the spec. Infos and warnings only, nothing is refused."""
+
+    model_config = ConfigDict(extra="forbid")
+    info_day: _DayHours = 10
+    warn_day: _DayHours = 12
+    max_day: _DayHours = 16
+    info_week: _WeekHours = 60
+    info_average: _WeekHours = 48
+
+    @model_validator(mode="after")
+    def _ordered(self):
+        if not self.info_day <= self.warn_day <= self.max_day:
+            raise ValueError("must satisfy info_day <= warn_day <= max_day")
+        return self
+
+
+class WorkLimits(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    info_day: float = 10
+    warn_day: float = 12
+    max_day: float = 16
+    info_week: float = 60
+    info_average: float = 48
+    stored: bool = False
 
 
 #: tax inputs that moved into the personal tax profile; no longer settings
@@ -1035,18 +1068,21 @@ class AllocationChange(v.CheckedBody):
     start: v.OptDate = None
     end: v.OptDate = None
     hours_per_week: v.AllocHours | None = None
+    total_hours: v.PositiveTotalHours | None = None
 
     @model_validator(mode="after")
     def _rules(self):
         _check_alloc_period(self.start, self.end)
+        if self.hours_per_week is not None and self.total_hours is not None:
+            raise ValueError("give at most one of hours_per_week and total_hours")
         if self.project_id == v.UNASSIGNED:
             raise ValueError("project_id must be a project")
         if self.delete and not self.id:
             raise ValueError("delete needs an id")
         if not self.id and not self.delete:
-            missing = [
-                k for k in ("user_id", "project_id", "start", "end", "hours_per_week") if getattr(self, k) is None
-            ]
+            missing = [k for k in ("user_id", "project_id", "start", "end") if getattr(self, k) is None]
+            if self.hours_per_week is None and self.total_hours is None:
+                missing.append("hours_per_week or total_hours")
             if missing:
                 raise ValueError("a new allocation needs " + ", ".join(missing))
         return self
@@ -1078,27 +1114,34 @@ def scenario_project_refs(changes: Any) -> list[tuple[int, str]]:
 
 
 class AllocationIn(v.CheckedBody):
-    """An employee allocation: hours per week of one person given to one project for a period."""
+    """An assignment: hours of one person (``user_id``) or subcontractor (``supplier_id``) given to one project for a
+    period, as ``hours_per_week`` or as ``total_hours`` over the whole period. A subcontractor row needs a ``rate``."""
 
     model_config = ConfigDict(extra="forbid")
-    user_id: v.Id
+    user_id: v.OptId = None
+    supplier_id: v.OptId = None
     project_id: v.Id  # never "unassigned": that scope is implicit
     start: v.ISODate
     end: v.ISODate  # end < start is a 409 of the service; a period beyond 1830 days is a 422
-    hours_per_week: v.AllocHours
+    hours_per_week: v.AllocHours | None = None
+    total_hours: v.PositiveTotalHours | None = None
+    rate: v.Rate | None = None
 
     @model_validator(mode="after")
     def _rules(self):
+        if bool(self.user_id) == bool(self.supplier_id):
+            raise ValueError("give exactly one of user_id and supplier_id")
+        if (self.hours_per_week is None) == (self.total_hours is None):
+            raise ValueError("give exactly one of hours_per_week and total_hours")
+        if self.supplier_id and self.rate is None:
+            raise ValueError("a subcontractor assignment needs a rate")
+        if self.user_id and self.rate is not None:
+            raise ValueError("an employee assignment has no rate")
         if self.project_id == v.UNASSIGNED:
             raise ValueError("project_id must be a project")
         if self.end >= self.start:
             _check_alloc_period(self.start, self.end)
         return self
-
-
-class AllocationBootstrapIn(v.CheckedBody):
-    model_config = ConfigDict(extra="forbid")
-    confirm: bool = False
 
 
 class Allocation(BaseModel):
@@ -1145,10 +1188,26 @@ class TimerStartIn(v.CheckedBody):
     note: v.Note = ""
 
 
+class TimerUpdateIn(v.CheckedBody):
+    """Change project, task or note of the running timer; only the given fields change, the start time is kept."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: v.OptProjectId = None
+    task_id: v.OptId = None
+    note: v.Note | None = None
+
+
 class TimerStopIn(v.CheckedBody):
-    """Stop the running timer and save it as a time entry; the note is optional."""
+    """Stop the running timer and save it as a time entry; the note is optional.
+
+    With discard=true the timer is reset and no entry is written.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     note: v.Note | None = None
+    discard: bool = False
 
 
 class ScenarioIn(v.StrictRecord):

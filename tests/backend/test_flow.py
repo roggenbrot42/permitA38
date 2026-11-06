@@ -45,12 +45,12 @@ def test_full_business_flow(boss_client):
         },
     ).json()
     assert c.post(f"/api/offers/{off['id']}/finalize").json()["status"] == "sent"
-    fc = c.get("/api/forecast", params={"weeks": 4}).json()
-    assert fc["weeks"][1]["tentative"] > 0 and fc["weeks"][1]["confirmed"] == 0
+    kinds = [i["kind"] for p in c.get("/api/plan", params={"weeks": 4}).json()["projects"] for i in p["items"]]
+    assert kinds == ["offer"]
     accepted = c.post(f"/api/offers/{off['id']}/accept").json()
     assert accepted["project"]["id"] and accepted["contract"]["id"]
-    fc = c.get("/api/forecast", params={"weeks": 4}).json()
-    assert fc["weeks"][1]["confirmed"] > 0 and fc["weeks"][1]["tentative"] == 0
+    kinds = [i["kind"] for p in c.get("/api/plan", params={"weeks": 4}).json()["projects"] for i in p["items"]]
+    assert kinds == ["contract"]
     assert c.get(f"/api/offers/{off['id']}/pdf").status_code == 200
     back = c.post(f"/api/offers/{off['id']}/to-invoice").json()
     assert back["status"] == "draft" and back["lines"][0]["description"] == "Dev"
@@ -106,7 +106,7 @@ def test_absence_reduces_capacity(boss_client):
     me = c.get("/api/auth/me").json()
     monday = date.today() - timedelta(days=date.today().weekday())
     nxt = monday + timedelta(weeks=1)
-    base = c.get("/api/forecast", params={"weeks": 3}).json()["weeks"][1]["capacity"]
+    base = c.get("/api/plan", params={"weeks": 3}).json()["weeks"][1]["capacity"]
     c.post(
         "/api/absences",
         json={
@@ -116,7 +116,7 @@ def test_absence_reduces_capacity(boss_client):
             "end": (nxt + timedelta(days=4)).isoformat(),
         },
     )
-    off = c.get("/api/forecast", params={"weeks": 3}).json()["weeks"][1]["capacity"]
+    off = c.get("/api/plan", params={"weeks": 3}).json()["weeks"][1]["capacity"]
     assert off < base
 
 

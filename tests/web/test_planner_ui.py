@@ -23,7 +23,7 @@ def srv(tmp_path):
 
 @pytest.fixture
 def seeded(srv):
-    """A boss with 40 h/week, and a contract that books the whole week after next (week 2 of the horizon)."""
+    """A boss with 40 h/week, a 40 h/week contract for the two weeks after next and a 40 h assignment in the first of them."""
     import httpx
 
     h = {"Authorization": "Bearer " + srv.token}
@@ -45,6 +45,19 @@ def seeded(srv):
             "hours_per_week": 40,
             "rate": 90,
             "status": "confirmed",
+        },
+    )
+    assert r.status_code < 300, r.text
+    # the boss works the whole week after next on the project: a vacation there leaves the assignment over capacity
+    r = httpx.post(
+        srv.base + "/api/allocations",
+        headers=h,
+        json={
+            "user_id": me["id"],
+            "project_id": proj["id"],
+            "start": start.isoformat(),
+            "end": (start + timedelta(days=6)).isoformat(),
+            "hours_per_week": 40,
         },
     )
     assert r.status_code < 300, r.text
@@ -83,14 +96,14 @@ def cell_center(pg, day: str):
 def test_drag_on_time_off_row_creates_vacation_and_over_capacity_turns_red(srv, ui, seeded):
     w2 = seeded["week2"]
     x1, y1 = cell_center(ui, w2.isoformat())
-    x2, _ = cell_center(ui, (w2 + timedelta(days=4)).isoformat())
+    x2, _ = cell_center(ui, (w2 + timedelta(days=3)).isoformat())
     ui.mouse.move(x1, y1)
     ui.mouse.down()
     ui.mouse.move(x2, y1, steps=8)
     ui.mouse.up()
     ui.wait_for_selector(".pln-bar.draft.abs")
     assert "1 draft change" in ui.inner_text(".pln-draftbar")
-    # the 40 h contract now has no capacity in that week: the utilisation cell is over capacity
+    # Monday to Thursday off: the 40 h assignment lands on Friday alone, so the assigned cell is over-assigned (red)
     ui.wait_for_selector(".pln-week.util.over", timeout=8000)
     assert ui.locator(".pln-week.util.over").count() >= 1
     # the real data is untouched until Apply
@@ -310,3 +323,89 @@ def test_earliest_start_counts_a_draft_vacation_and_shows_the_weekday(srv, ui, s
     found = date(int(m.group(4)), int(m.group(3)), int(m.group(2)))
     assert found > monday(today) + timedelta(days=4)  # after the draft vacation
     assert found.weekday() < 5
+
+
+def test_contract_without_enough_assigned_time_is_red_with_its_explanation(srv, ui, seeded):
+    # 80 h promised over two weeks, only 40 h assigned (the first week): the contract has a shortfall
+    bar = ui.locator('.pln-bar.contract[data-kind="com"]').first
+    ui.wait_for_selector(".pln-bar.contract.short")
+    assert "Retainer" in bar.get_attribute("aria-label")
+    assert "short 40 h" in bar.get_attribute("aria-label")  # the tooltip carries the server's explanation
+    bar.click()
+    ui.wait_for_function("() => document.getElementById('plnWhy').innerText.includes('Retainer')")
+    assert "short" in ui.inner_text("#plnWhy").lower()
+
+
+def test_draft_bar_lists_the_effect_on_the_shortfall(srv, ui, seeded):
+    w2 = seeded["week2"]
+    drag_vacation(ui, w2.isoformat(), (w2 + timedelta(days=3)).isoformat())
+    ui.wait_for_selector(".pln-delta")
+    text = ui.inner_text(".pln-delta")
+    assert "Demo project P: short" in text and "->" in text
+
+
+def add_total_allocation(srv, seeded, start: date, end: date, hours: float):
+    import httpx
+
+    h = {"Authorization": "Bearer " + srv.token}
+    alloc = srv.app.state.services.store.list("allocations")[0]
+    r = httpx.post(
+        srv.base + "/api/allocations",
+        headers=h,
+        json={
+            "user_id": seeded["me"]["id"],
+            "project_id": alloc["project_id"],
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "total_hours": hours,
+        },
+    )
+    assert r.status_code < 300, r.text
+    return r.json()
+
+
+def test_a_saved_total_hours_assignment_can_be_dragged_and_its_hours_changed(srv, ui, seeded):
+    w4 = seeded["week2"] + timedelta(days=14)
+    saved = add_total_allocation(srv, seeded, w4, w4 + timedelta(days=4), 30)
+    ui.reload()
+    ui.wait_for_selector("#plnWrap .pln-bar")
+    bar = ui.locator('.pln-bar.alloc[data-kind="alloc"]', has_text="h total")
+    assert bar.count() == 1
+    box = bar.bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    ui.mouse.move(x, y)
+    ui.mouse.down()
+    ui.mouse.move(x + 2 * 12, y, steps=5)  # two days to the right
+    ui.mouse.up()
+    ui.wait_for_selector(".pln-bar.alloc.draft")
+    hrs = ui.locator('input.pln-hrs[aria-label^="Total hours"]')
+    assert hrs.input_value() == "30"
+    with ui.expect_request(lambda r: r.url.endswith("/api/plan/simulate")) as req:
+        hrs.fill("45")
+        hrs.dispatch_event("change")
+    sent = req.value.post_data_json["changes"]["allocations"]
+    assert len(sent) == 1 and sent[0]["id"] == saved["id"] and sent[0]["total_hours"] == 45
+    assert "hours_per_week" not in sent[0]
+    assert sent[0]["start"] == (w4 + timedelta(days=2)).isoformat()
+    ui.click("[data-a=plnApply]")
+    ui.wait_for_function("() => !document.querySelector('.pln-bar.alloc.draft')")
+    row = next(a for a in srv.app.state.services.store.list("allocations") if a["id"] == saved["id"])
+    assert row["total_hours"] == 45 and not row.get("hours_per_week") and row["start"] == sent[0]["start"]
+    again = ui.locator('.pln-bar.alloc[data-kind="alloc"]', has_text="h total")
+    assert again.count() == 1  # editable again after the reload
+
+
+def test_an_assignment_that_ended_before_today_cannot_be_dragged(srv, ui, seeded):
+    today = date.today()
+    add_total_allocation(srv, seeded, today - timedelta(days=12), today - timedelta(days=3), 20)
+    ui.reload()
+    ui.wait_for_selector("#plnWrap .pln-bar")
+    bar = ui.locator(".pln-bar.alloc", has_text="(ended)")
+    assert bar.count() == 1 and not bar.get_attribute("data-kind")
+    box = bar.bounding_box()
+    x, y = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+    ui.mouse.move(x, y)
+    ui.mouse.down()
+    ui.mouse.move(x + 3 * 12, y, steps=5)
+    ui.mouse.up()
+    assert ui.locator(".pln-bar.alloc.draft").count() == 0

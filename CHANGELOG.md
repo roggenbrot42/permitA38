@@ -18,6 +18,42 @@ All notable changes to this project are documented here. The format is based on
 - **OCR on request for Windows**: a boss can download Tesseract from GitHub (size and host shown first, fixed checksum,
   per device, about 59 MB). The package is built by the manual workflow `ocr-tools.yaml` and published as a pre-release
   that never shows as the project's latest release. New route `POST /api/receipts/ocr/install`.
+- **Project-centric planning**: people and subcontractors are *assigned* to a project with hours per week or total
+  hours (**Assignments (n)** on every project and person of the Overview). The Overview shows per contract and offer
+  promised, booked, remaining, covered and shortfall hours, a sentence that explains the arithmetic, value / invoiced /
+  open, and *Assign* buttons that propose who has free hours. See `docs/planning.md`.
+- **Internal projects**: a project has a kind, *customer* or *internal* (administration, secretary, own tools). Internal
+  projects have assignments and an optional hour budget, never a customer, offers, contracts or invoices, and time on
+  them is never billable.
+- **Work limits for the boss**: *My settings -> Work limits* (info above 10 h a day, warning above 12, maximum 16,
+  60 h a week, 48 h average over 24 weeks). Employees are checked against the working time law; nothing is ever refused.
+  Saving an employee with more than 48 weekly hours warns.
+- **Project time sheet**: a card on the project page shows who booked how many hours per week or month, with billable
+  and unbilled hours, a CSV download and a link to each person's week.
+- **Today page**: the card *Your projects this week* (planned and booked hours today and this week, hours left) with
+  ▶ buttons to start the timer on a project or task, ▶ on today's entries, switching project and task while the timer
+  runs, a duration alone for manual time, ✎ Manual while the timer runs, and a question to discard a timer stopped
+  under a minute.
+
+### Changed
+- **Planner**: *Planning -> Forecast* is now *Overview*; contracts and offers no longer name a person, a new contract
+  needs a project, and a contract has either hours per week or total hours. Holidays and vacation reduce the assigned
+  time, not what a contract promises. Over-assignment is warned, never scaled down.
+- **Subcontractors**: accepting an incoming offer books a total assignment of the offer's hours, which you can edit;
+  weekly hours skip public holidays and their not-available periods like an employee's, so the planned cost of an
+  existing assignment can change when a holiday falls into its period.
+- **Plan & vacation**: recomputes with the new verdicts and shows the change of the shortfall per project in the draft.
+- **Database**: migration `0018-project_planning` adds the project kind, drops `personal` and `member_ids` and adds
+  database guards; an upgraded database cannot be opened by alpha.5. Back up your data folder first.
+- **Everyone sees every project**: the project field *Team* is gone; roles still decide which details (rates) are visible.
+
+### Removed
+- **Forecast**: the weekly revenue forecast, the *assumed* revenue from free capacity, utilisation, gaps and pools, and
+  the day table.
+- **Allocate my capacity**: the bootstrap button and `POST /api/allocations/bootstrap`; assign from a shortfall instead.
+- **Personal projects**: `personal` became *internal* (or *customer* when a customer was set).
+- **Per-contract assignees**: `user_ids` on contracts and offers is ignored and no longer written.
+- **Project team**: `member_ids` ("Team") on projects.
 
 ## [0.4.0-alpha.5] - 2026-10-27
 

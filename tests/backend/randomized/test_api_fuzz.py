@@ -328,7 +328,7 @@ def verify_consistency(world: World):
                      "expenses", "users", "templates"):  # fmt: skip
             r = c.get(f"/api/{coll}", headers=h)
             assert r.status_code == 200, (coll, r.status_code, r.text[:200])
-        for path in ("/api/bootstrap", "/api/dashboard", "/api/finance", "/api/forecast", "/api/project-report",
+        for path in ("/api/bootstrap", "/api/dashboard", "/api/finance", "/api/plan", "/api/project-report",
                      "/api/settings", "/api/timer"):  # fmt: skip
             r = c.get(path, headers=h)
             assert r.status_code == 200, (path, r.status_code, r.text[:200])
