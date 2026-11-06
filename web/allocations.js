@@ -40,7 +40,7 @@
       <td><b>${esc(who)}</b>${external ? ' <span class="pill">subcontractor</span>' : ''}${a.incoming_offer_id ? `<div class="small muted al-offer">from offer ${esc(a.offer_reference || '')}</div>` : ''}</td><td>${esc(proj)}</td>
       <td class="nowrap">${esc(fmtDate(a.start))} – ${esc(fmtDate(a.end))}</td>
       <td class="num">${hours}</td><td class="num">${a.planned_hours == null ? '' : esc(h2(a.planned_hours)) + ' h'}${external && a.planned_net != null ? `<div class="small muted">${esc(eur(a.planned_net))} planned${a.open_net != null ? `, ${esc(eur(a.open_net))} open` : ''}</div>` : ''}</td>
-      <td>${cancelled ? `<span class="pill">cancelled${a.cancelled_from ? ' from ' + esc(fmtDate(a.cancelled_from)) : ''}</span> ` : ''}${external && !cancelled && writable ? `<button type="button" class="ghost sm" data-a="alCancelAlloc" data-id="${esc(a.id)}" aria-label="Cancel assignment of ${esc(who)} to ${esc(proj)}">Cancel…</button> ` : ''}${readOnly ? '<span class="small muted">read-only</span>' : `<button type="button" class="ghost sm" data-a="alEdit" data-id="${esc(a.id)}" aria-label="Edit assignment of ${esc(who)} to ${esc(proj)}">Edit</button>`}</td></tr>`;
+      <td>${cancelled ? `<span class="pill">cancelled${a.cancelled_from ? ' from ' + esc(fmtDate(a.cancelled_from)) : ''}</span> ` : ''}${external && !cancelled && writable ? `<button type="button" class="ghost sm" data-a="alCancelAlloc" data-id="${esc(a.id)}" aria-label="Cancel assignment of ${esc(who)} to ${esc(proj)}">Cancel…</button> ` : ''}${readOnly ? '<span class="small muted">read-only</span>' : `<button type="button" class="ghost sm" data-a="alEdit" data-id="${esc(a.id)}" aria-label="Edit assignment of ${esc(who)} to ${esc(proj)}">Edit</button>${a.incoming_offer_id ? '' : ` <button type="button" class="ghost sm danger" data-a="alRowDelete" data-id="${esc(a.id)}" aria-label="Delete assignment of ${esc(who)} to ${esc(proj)}">Delete</button>`}`}</td></tr>`;
   }
 
   function ownerOptions(sel, a) {   // value "u:<id>" / "s:<id>"; an owner who is no longer active stays selectable for their own row
@@ -94,7 +94,7 @@
       ${notes ? `<div class="banner al-warn" role="status"><b>Saved. Please check:</b><ul class="small">${notes}</ul></div>` : ''}
       ${cancelForm()}${form()}
       ${Al.list.length ? `<table><tr><th>Who</th><th>Project</th><th>Period</th><th class="num">Hours</th><th class="num">Planned</th><th></th></tr>${Al.list.map(row).join('')}</table>`
-        : `<div class="empty">No assignments yet. An assignment gives the hours of a person or subcontractor to a project; the planner counts only these hours for that project.</div>`}`;
+        : `<div class="empty">No assignments yet. ${Al.projectId && Al.edit === undefined ? '<button type="button" class="primary sm" data-a="alNew">Add assignment</button> ' : ''}An assignment gives the hours of a person or subcontractor to a project; the planner counts only these hours for that project.</div>`}`;
     if (Al.focus) { Al.focus = false; focusFirst(); }
   }
 
@@ -178,6 +178,13 @@
     const id = Al.edit && Al.edit.id;
     if (!id || !window.confirm('Delete this assignment?')) return;
     try { await api.del('allocations/' + id); Al.edit = undefined; Al.changed = true; Al.notes = []; Al.error = ''; await load(); }
+    catch (e) { Al.error = e.message; }
+    paint();
+  };
+  A.alRowDelete = async el => {
+    const id = el.dataset.id;
+    if (!id || !window.confirm('Delete this assignment?')) return;
+    try { await api.del('allocations/' + id); Al.changed = true; Al.notes = []; Al.error = ''; await load(); }
     catch (e) { Al.error = e.message; }
     paint();
   };

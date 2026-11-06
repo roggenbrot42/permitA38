@@ -74,7 +74,7 @@ def plan_body():
                 "subcontractor_hours": 0.0,
             },
         ],
-        "people": [],
+        "people": [{"user_id": "u1", "name": "Ada", "capacity": 240.0, "assigned": 204.0, "unassigned": 36.0, "assignments": []}],
         "projects": [
             {
                 "project_id": "p-admin", "name": "Administration", "kind": "internal", "status": "ok",
@@ -120,6 +120,11 @@ class FakeApi:
         self.me = me or BOSS
         self.projects = copy.deepcopy(PROJECTS)
         self.requests = []
+        self.allocations = [
+            {"id": "a1", "project_id": "p-orchard", "user_id": "u1", "kind": "internal"},
+            {"id": "a2", "project_id": "p-admin", "user_id": "u1", "kind": "internal"},
+            {"id": "a3", "project_id": "p-admin", "supplier_id": "s1", "kind": "external"},
+        ]
 
     def plan_queries(self):
         return [q for m, p, q in self.requests if m == "GET" and p == "plan"]
@@ -148,6 +153,8 @@ class FakeApi:
             if wanted not in (None, "unassigned") and wanted not in [p["id"] for p in self.projects]:
                 return _json(route, 404, {"detail": "Project not found"})
             return _json(route, 200, self.body)
+        if path == "allocations":
+            return _json(route, 200, self.allocations)
         if path in ("holidays", "project-report"):
             return _json(route, 200, {})
         return _json(route, 200, [])
@@ -283,4 +290,33 @@ def test_skipped_line_only_for_the_boss(browser):
     ctx, pg, problems = open_app(browser, FakeApi(me=employee))
     assert pg.locator(".ov-skipped").count() == 0
     assert "damaged" not in pg.locator("main, #app, body").first.inner_text()
+    ctx.close()
+
+
+def test_assignment_buttons_with_counts_open_the_filtered_dialog(browser):
+    api = FakeApi()
+    ctx, pg, problems = open_app(browser, api)
+    orchard = pg.locator("tr.ov-project[data-project-row=p-orchard]")
+    admin = pg.locator("tr.ov-project[data-project-row=p-admin]")
+    expect(orchard.get_by_role("button", name=re.compile(r"^Assignments \(1\)"))).to_have_count(1)
+    expect(admin.get_by_role("button", name=re.compile(r"^Assignments \(2\)"))).to_have_count(1)
+    orchard.get_by_role("button", name=re.compile(r"^Assignments")).click()
+    expect(pg.locator("#modal-root .modal h2")).to_have_text("Assignments of Orchard")
+    assert ("GET", "allocations", {"project_id": ["p-orchard"]}) in api.requests
+    pg.keyboard.press("Escape")
+    person = pg.locator("tr[data-person-row=u1]")
+    expect(person.get_by_role("button", name=re.compile(r"^Assignments \(2\)"))).to_have_count(1)
+    person.get_by_role("button", name=re.compile(r"^Assignments")).click()
+    expect(pg.locator("#modal-root .modal h2")).to_have_text("Assignments of Ada")
+    assert ("GET", "allocations", {"user_id": ["u1"]}) in api.requests
+    assert problems == []
+    ctx.close()
+
+
+def test_read_only_user_sees_counts_but_no_assignment_buttons(browser):
+    me = {**BOSS, "role": "employee", "permissions": {a: {"read": "all", "write": "none"} for a in AREAS}}
+    ctx, pg, problems = open_app(browser, FakeApi(me=me))
+    expect(pg.locator("tr.ov-project[data-project-row=p-orchard]")).to_contain_text("Assignments (1)")
+    expect(pg.locator("tr[data-person-row=u1]")).to_contain_text("Assignments (2)")
+    assert pg.locator("button[data-a=allocations]").count() == 0
     ctx.close()

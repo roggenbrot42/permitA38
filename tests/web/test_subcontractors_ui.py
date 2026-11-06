@@ -1430,6 +1430,25 @@ def test_allocations_dialog_has_no_delete_for_an_offer_linked_row(browser):
     ctx.close()
 
 
+def test_allocations_dialog_deletes_from_the_list_row_and_offer_rows_have_no_delete(browser):
+    api = FakeApi()
+    api.allocation_list.append(
+        {**api.allocation_list[0], "id": "c04d77e2", "incoming_offer_id": None, "offer_reference": None}
+    )
+    ctx, pg, problems, dlg = open_dialog(browser, api)
+    offer_row = dlg.locator("tr", has_text="from offer ANG-2026-117")
+    expect(offer_row.locator("button[data-a=alEdit]")).to_have_count(1)
+    expect(offer_row.locator("button[data-a=alRowDelete]")).to_have_count(0)
+    plain = dlg.locator("tr:not(:has(.al-offer))", has_text="Example Freelance Studio")
+    before = dlg.locator("button[data-a=alRowDelete]").count()
+    plain.locator("button[data-a=alRowDelete]").click()
+    assert pg.confirms == ["Delete this assignment?"]
+    assert api.calls("DELETE", "allocations/c04d77e2")
+    expect(dlg.locator("button[data-a=alRowDelete]")).to_have_count(before - 1)
+    assert problems == []
+    ctx.close()
+
+
 def test_allocations_dialog_prefill_opens_the_form_with_the_given_values(browser):
     api = FakeApi()
     ctx, pg, problems = open_app(browser, api, page="project/a1b2c3d4")

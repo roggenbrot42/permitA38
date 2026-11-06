@@ -475,8 +475,15 @@ PAGES.plan = async (tab = 'forecast') => {
   const filters = `<div class="row" style="margin-bottom:12px"><div class="auto"><label>Horizon</label><select data-change="fcWeeks">${OV_WEEKS.map(n => `<option value="${n}" ${n === weeks ? 'selected' : ''}>${n} weeks</option>`).join('')}</select></div>
     <div class="auto"><label>Who</label><select data-change="fcUser"><option value="">Whole team</option>${S.d.users.filter(u => u.active !== false).map(u => `<option value="${esc(u.id)}" ${u.id === uid ? 'selected' : ''}>${esc(u.name)}</option>`).join('')}</select></div>
     <div class="auto"><label>Project</label><select data-change="fcProject"><option value="">All projects</option>${S.d.projects.filter(p => p.status !== 'archived' || p.id === pid).map(p => `<option value="${esc(p.id)}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}<option value="unassigned" ${pid === 'unassigned' ? 'selected' : ''}>Unassigned</option></select></div></div>`;
+  let rows = [];
+  try { rows = await api('GET', 'allocations'); } catch (e) { rows = []; }
+  const cnt = { project: {}, user: {} };
+  for (const r of Array.isArray(rows) ? rows : []) {
+    if (r.project_id) cnt.project[r.project_id] = (cnt.project[r.project_id] || 0) + 1;
+    if (r.user_id) cnt.user[r.user_id] = (cnt.user[r.user_id] || 0) + 1;
+  }
   const sk = Array.isArray(pl.skipped) ? pl.skipped : [], skipped = sk.length || (+pl.skipped || 0);
-  return head + filters + ovProjects(pl.projects || []) + ovWeeks(pl.weeks || []) + ppWarnings(pl.warnings) +
+  return head + filters + ovProjects(pl.projects || [], cnt.project) + ovPeople(pl.people || [], cnt.user) + ovWeeks(pl.weeks || []) + ppWarnings(pl.warnings) +
     (isBoss() && skipped ? `<details class="small muted ov-skipped"><summary>${skipped} damaged record${skipped === 1 ? ' was' : 's were'} skipped</summary><ul>${sk.map(s => `<li>${esc(s.coll)} ${esc(s.id)}: ${esc(s.reason)}</li>`).join('')}</ul></details>` : '');
 };
 /* ---- planner overview: everything below only draws numbers computed by the server (GET /api/plan) ---- */
@@ -495,7 +502,15 @@ function ovItem(it) {
     <td class="num ${it.shortfall > 0 ? 'pp-gap' : ''}" title="Remaining − covered">${esc(ppH(it.shortfall))}</td><td class="small">${money}</td></tr>
     <tr class="ov-expl"><td colspan="7"><div class="small ov-explanation">${esc(it.explanation || '')}</div>${writable && sugg ? `<div class="pp-remedy">${sugg}</div>` : ''}</td></tr>`;
 }
-function ovProjects(list) {
+function ovAssignBtn(n, attr, label) {   // the count is always shown; the button only with planning write
+  const text = `Assignments (${n})`;
+  return can('planning', 'write') ? `<button type="button" class="ghost sm" data-a="allocations" ${attr} aria-label="${esc(text)} of ${esc(label)}">${text}</button>` : `<span class="small muted">${text}</span>`;
+}
+function ovPeople(list, counts) {
+  if (!list.length) return '';
+  return `<div class="card"><h2>People</h2><table class="ov-people"><tr><th>Person</th><th></th></tr>${list.map(u => `<tr data-person-row="${esc(u.user_id)}"><td><b>${esc(u.name)}</b></td><td class="num">${ovAssignBtn(counts[u.user_id] || 0, `data-user="${esc(u.user_id)}"`, u.name)}</td></tr>`).join('')}</table></div>`;
+}
+function ovProjects(list, counts = {}) {
   if (!list.length) return '';
   const sorted = [...list].sort((a, b) => (a.kind === 'customer' ? 0 : 1) - (b.kind === 'customer' ? 0 : 1));
   const rows = sorted.map(p => {
@@ -504,7 +519,7 @@ function ovProjects(list) {
     const sum = internal
       ? `<span title="Assigned hours in the period">assigned ${esc(ppH(p.assigned))}</span> · <span title="Booked hours">booked ${esc(ppH(p.booked))}</span> · <span title="Budget hours">budget ${esc(ppH(p.budget_hours))}</span>`
       : `<span title="Remaining contract hours">remaining ${esc(ppH(p.remaining_contracts))}</span> · <span class="${p.shortfall_contracts > 0 ? 'pp-gap' : ''}" title="Contract hours not covered by assigned time">shortfall ${esc(ppH(p.shortfall_contracts))}</span>${p.shortfall_worst_case > p.shortfall_contracts ? ` · <span title="Including all offers">worst case ${esc(ppH(p.shortfall_worst_case))}</span>` : ''}`;
-    return `<tr class="ov-project" data-project-row="${esc(p.project_id)}"><td><button type="button" class="ghost sm pp-toggle" data-a="ovToggle" data-project="${esc(p.project_id)}" aria-expanded="${open}" aria-label="Items of ${esc(p.name)}">${open ? '▾' : '▸'}</button> <b>${esc(p.name)}</b> ${ovPill(p.status)}${internal ? ' <span class="small muted">internal</span>' : ''}</td><td class="small" colspan="5">${sum}</td><td class="small">${internal ? '' : `<span title="Contract value of the project">${esc(eur(p.contract_value))}</span>`}</td></tr>${open ? items : ''}`;
+    return `<tr class="ov-project" data-project-row="${esc(p.project_id)}"><td><button type="button" class="ghost sm pp-toggle" data-a="ovToggle" data-project="${esc(p.project_id)}" aria-expanded="${open}" aria-label="Items of ${esc(p.name)}">${open ? '▾' : '▸'}</button> <b>${esc(p.name)}</b> ${ovPill(p.status)}${internal ? ' <span class="small muted">internal</span>' : ''}</td><td class="small" colspan="5">${sum}</td><td class="small">${internal ? '' : `<span title="Contract value of the project">${esc(eur(p.contract_value))}</span> `}${p.project_id && p.project_id !== 'unassigned' ? ovAssignBtn(counts[p.project_id] || 0, `data-project="${esc(p.project_id)}"`, p.name) : ''}</td></tr>${open ? items : ''}`;
   }).join('');
   return `<div class="card"><h2>Projects</h2><table class="ov-table"><tr><th>Project / item</th><th class="num">Promised</th><th class="num">Booked</th><th class="num">Remaining</th><th class="num">Covered</th><th class="num">Shortfall</th><th>Value</th></tr>${rows}</table></div>`;
 }
