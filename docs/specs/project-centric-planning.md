@@ -304,7 +304,7 @@ Only time entries of that project count. Response:
 * Who sees what: a user whose scope on `time` is `ALL` (the boss) gets every person; a `LIMITED` user gets only their
   own row (and the total of their own hours); confirmed by the owner 2026-11-06. No money fields (rates stay governed by `core/rights.py`).
 * Web: the project page gets a card "Time sheet" with the week/month switch and the date range; each person's name
-  links to the time entries list filtered by project and person (existing filters). CSV download of the same table.
+  links to that person's week in the time view (`#/time/<monday>/<user>`; the time view has no project filter yet, accepted 2026-11-06). CSV download of the same table.
 * Work package WP7 (independent of the planner, Standard review tier); tests with literal hours.
 
 ## API contract (binding; backend and web UI are built against it in parallel)
