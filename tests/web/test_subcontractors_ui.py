@@ -139,6 +139,7 @@ class FakeApi:
         self.requests = []
         self.vendor_suggestions = fixture("vendor_suggestions")
         self.cancelled = None
+        self.plan = None  # GET plan answer; None = 500
         self.commitments = fixture("commitments")
         self.allocation_list = [
             {**fixture("accept_w1")["allocation"], "project_name": "Demo project P"},
@@ -372,6 +373,10 @@ class FakeApi:
         if path.startswith("allocations/") and m == "DELETE":
             self.allocation_list = [x for x in self.allocation_list if x["id"] != path.split("/")[1]]
             return _json(route, 200, {"ok": True})
+        if path == "plan" and m == "GET":
+            if self.plan is None:
+                return _json(route, 500, {"detail": "plan failed"})
+            return _json(route, 200, self.plan)
         if path == "allocations" and m == "GET":
             rows = self.allocation_list
             if query.get("status"):
@@ -1528,4 +1533,98 @@ def test_team_timeline_has_an_external_group(browser):
     assert "left:0px" in bar.get_attribute("style")  # the window starts on the first day shown
     assert "subcontractor," in bar.get_attribute("aria-label")
     assert problems == []
+    ctx.close()
+
+
+def _plan(short_contracts, worst, items):
+    return {
+        "projects": [
+            {
+                "project_id": "a1b2c3d4",
+                "shortfall_contracts": short_contracts,
+                "shortfall_worst_case": worst,
+                "items": items,
+            }
+        ]
+    }
+
+
+def _item(kind, start, end, shortfall):
+    return {"kind": kind, "id": kind + start, "start": start, "end": end, "shortfall": shortfall}
+
+
+def test_add_assignment_proposes_the_missing_contract_hours(browser):
+    api = FakeApi()
+    api.plan = _plan(
+        26.0,
+        26.0,
+        [
+            _item("contract", "2099-04-06", "2099-04-17", 20.0),
+            _item("contract", "2099-03-02", "2099-03-20", 6.0),
+            _item("contract", "2099-01-01", "2099-01-02", 0),
+        ],
+    )
+    ctx, pg, problems, dlg = open_dialog(browser, api)
+    dlg.locator("[data-a=alNew]").first.click()
+    expect(dlg.locator(".al-proposed")).to_have_text("Proposed: the 26 h still missing on Demo project P (contracts)")
+    expect(dlg.locator("#al_mode")).to_have_value("total")
+    expect(dlg.locator("#al_hours")).to_have_value("26")
+    expect(dlg.locator("#al_start")).to_have_value("2099-03-02")
+    expect(dlg.locator("#al_end")).to_have_value("2099-04-17")
+    assert api.calls("GET", "plan")[0][2] == {"project_id": ["a1b2c3d4"], "weeks": ["52"]}
+    assert len(api.calls("GET", "plan")) == 1
+    assert problems == []
+    ctx.close()
+
+
+def test_add_assignment_starts_tomorrow_when_the_short_item_began_earlier(browser):
+    api = FakeApi()
+    api.plan = _plan(5.5, 5.5, [_item("contract", "2020-01-06", "2099-01-31", 5.5)])
+    ctx, pg, problems, dlg = open_dialog(browser, api)
+    dlg.locator("[data-a=alNew]").first.click()
+    expect(dlg.locator("#al_hours")).to_have_value("5.5")
+    expect(dlg.locator(".al-proposed")).to_contain_text("5,5 h")
+    expect(dlg.locator("#al_start")).to_have_value((date.today() + timedelta(days=1)).isoformat())
+    expect(dlg.locator("#al_end")).to_have_value("2099-01-31")
+    assert problems == []
+    ctx.close()
+
+
+def test_add_assignment_proposes_the_worst_case_for_a_project_short_only_through_an_offer(browser):
+    api = FakeApi()
+    api.plan = _plan(
+        0, 40.0, [_item("contract", "2099-02-02", "2099-02-27", 0), _item("offer", "2099-05-04", "2099-05-29", 40.0)]
+    )
+    ctx, pg, problems, dlg = open_dialog(browser, api)
+    dlg.locator("[data-a=alNew]").first.click()
+    expect(dlg.locator(".al-proposed")).to_have_text(
+        "Proposed: the 40 h still missing on Demo project P (incl. open offers)"
+    )
+    expect(dlg.locator("#al_hours")).to_have_value("40")
+    expect(dlg.locator("#al_start")).to_have_value("2099-05-04")
+    expect(dlg.locator("#al_end")).to_have_value("2099-05-29")
+    assert problems == []
+    ctx.close()
+
+
+def test_add_assignment_on_a_covered_project_opens_the_empty_form(browser):
+    api = FakeApi()
+    api.plan = _plan(0, 0, [_item("contract", "2099-02-02", "2099-02-27", 0)])
+    ctx, pg, problems, dlg = open_dialog(browser, api)
+    dlg.locator("[data-a=alNew]").first.click()
+    expect(dlg.locator("#al_mode")).to_have_value("week")
+    expect(dlg.locator("#al_hours")).to_have_value("10")
+    expect(dlg.locator(".al-proposed")).to_have_count(0)
+    assert problems == []
+    ctx.close()
+
+
+def test_add_assignment_opens_the_form_when_the_plan_call_fails(browser):
+    api = FakeApi()
+    api.plan = None
+    ctx, pg, _problems, dlg = open_dialog(browser, api)
+    dlg.locator("[data-a=alNew]").first.click()
+    expect(dlg.locator("#al_hours")).to_have_value("10")
+    expect(dlg.locator(".al-proposed")).to_have_count(0)
+    expect(dlg.locator("[role=alert]")).to_have_count(0)
     ctx.close()

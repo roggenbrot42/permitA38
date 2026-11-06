@@ -65,6 +65,7 @@
     const isSup = sel[0] === 's';
     const rate = a.rate != null ? a.rate : (isSup ? ((window.SUP && window.SUP.byId(a.supplier_id)) || {}).rate : '');
     return `<form class="card al-form" novalidate><h3>${a.id ? 'Edit assignment' : 'New assignment'}</h3>
+      ${!a.id && !Al.draft && Al.prefill && Al.proposed ? `<div class="small muted al-proposed">Proposed: the ${esc(h2(Al.proposed.total_hours))} h still missing on ${esc(projectName(Al.proposed.project_id))} (${Al.proposed.contracts ? 'contracts' : 'incl. open offers'})</div>` : ''}
       ${a.incoming_offer_id ? `<div class="small muted al-offer">From offer ${esc(a.offer_reference || '')}: it can be edited or cancelled, not deleted.</div>` : ''}
       <div class="row"><div class="auto"><label for="al_owner">Person or subcontractor</label><select id="al_owner">${ownerOptions(sel, a)}</select></div>
       <div class="auto"><label for="al_project">Project</label><select id="al_project">${projects.map(p => `<option value="${esc(p.id)}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div></div>
@@ -109,7 +110,7 @@
     Al.open = true;
     const pre = !!(opts.start || opts.end || opts.total_hours != null);   // the overview's "Assign" buttons
     Object.assign(Al, { cancel: null, projectId: opts.projectId || null, userId: pre ? null : (opts.userId || null), list: [], edit: pre ? null : undefined, error: '', notes: [], changed: false, busy: false, draft: null,
-      prefill: pre ? { user_id: opts.userId || undefined, project_id: opts.projectId || undefined, start: opts.start, end: opts.end, total_hours: opts.total_hours } : null });
+      proposed: null, seq: 0, prefill: pre ? { user_id: opts.userId || undefined, project_id: opts.projectId || undefined, start: opts.start, end: opts.end, total_hours: opts.total_hours } : null });
     modal(`<div class="row" style="align-items:center"><h2 style="margin:0">${title()}</h2><div class="right auto"><button type="button" class="primary" data-a="alNew">+ Assignment</button></div></div><div id="al-body"><div class="empty">Loading…</div></div><div class="actions"><button type="button" id="al-close" data-a="alClose">Close</button></div>`, true);
     closeModal.onClose = () => { Al.open = false; if (Al.changed) { Al.changed = false; render(); } };   // every way of closing re-renders the page
     if (window.SUP && !window.SUP.list.length && can('suppliers')) window.SUP.load().then(paint).catch(() => {});
@@ -148,9 +149,36 @@
     } catch (e) { Al.error = e.message; }
     Al.busy = false; Al.focus = true; paint();
   };
-  A.alNew = () => { Al.edit = null; Al.prefill = null; Al.draft = null; Al.cancel = null; Al.error = ''; Al.notes = []; Al.focus = true; paint(); };
+  // What the project still lacks, read from the planner (null = nothing missing or the call failed: the empty form as before).
+  async function proposal(pid) {
+    try {
+      const r = await api('GET', 'plan?project_id=' + encodeURIComponent(pid) + '&weeks=52');
+      const p = ((r && r.projects) || []).find(x => x.project_id === pid);
+      if (!p) return null;
+      const contracts = p.shortfall_contracts > 0, hours = contracts ? p.shortfall_contracts : p.shortfall_worst_case;
+      if (!(hours > 0)) return null;
+      const short = (p.items || []).filter(i => i.shortfall > 0 && (contracts ? i.kind === 'contract' : true));
+      const out = { total_hours: hours, contracts, project_id: pid };
+      if (short.length) {
+        const tomorrow = addDays(todayISO(), 1), first = short.map(i => i.start).sort()[0];
+        out.start = first > tomorrow ? first : tomorrow;
+        out.end = short.map(i => i.end).sort().pop();
+        if (out.end < out.start) out.end = out.start;
+      }
+      return out;
+    } catch (e) { return null; }
+  }
+  A.alNew = async () => {
+    const pid = Al.projectId, seq = Al.seq = (Al.seq || 0) + 1;
+    const prop = pid ? await proposal(pid) : null;
+    if (!Al.open || seq !== Al.seq || pid !== Al.projectId) return;   // closed, reopened or clicked again meanwhile
+    Al.edit = null; Al.draft = null; Al.cancel = null; Al.error = ''; Al.notes = []; Al.focus = true;
+    Al.prefill = prop ? { project_id: pid, start: prop.start, end: prop.end, total_hours: prop.total_hours } : null;
+    Al.proposed = prop;
+    paint();
+  };
   A.alEdit = el => { Al.draft = null; Al.edit = Al.list.find(a => a.id === el.dataset.id) || null; Al.error = ''; Al.notes = []; Al.focus = true; paint(); };
-  A.alCancelEdit = () => { Al.edit = undefined; Al.prefill = null; Al.draft = null; Al.error = ''; paint(); };
+  A.alCancelEdit = () => { Al.edit = undefined; Al.prefill = null; Al.proposed = null; Al.draft = null; Al.error = ''; paint(); };
   A.alSave = async () => {
     if (Al.busy) return;
     const r0 = read(), b = r0.b, id = Al.edit && Al.edit.id;
@@ -167,7 +195,7 @@
       Al.notes = r.planning_warnings || [];
       if (typeof A.plnDismiss === 'function') A.plnDismiss();   // the dialog shows these warnings itself: no duplicate banner behind it
       Al.edit = undefined; Al.changed = true;
-      Al.prefill = null; Al.draft = null; toast('Assignment saved');
+      Al.prefill = null; Al.proposed = null; Al.draft = null; toast('Assignment saved');
       await load();
     } catch (e) { Al.error = e.message; }
     Al.busy = false;
