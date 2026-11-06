@@ -693,7 +693,11 @@ Vanilla JS as today, numbers only from the server, every label with its derivati
   subcontractor rows: owner select (people and active capacity suppliers), project, period, "hours per week" or
   "total hours" (exactly one), rate (subcontractors only, required), planned hours and planned net from the server;
   offer-linked rows show the offer, can be edited and cancelled, not deleted; every other writable row has "Edit"
-  and "Delete" (with a confirmation) directly in the list row, not only inside the edit form; the bootstrap button and its preview are
+  and "Delete" (with a confirmation) directly in the list row, not only inside the edit form; "Add assignment" in the
+  dialog of a project proposes what is missing (owner, 2026-11-06): total hours = the project's `shortfall_contracts`,
+  else `shortfall_worst_case`, read from `GET /api/plan?project_id=<id>&weeks=52`; period = from the later of tomorrow
+  and the earliest start of a short item to the latest end of a short item; nothing missing = empty field as before;
+  the bootstrap button and its preview are
   removed; the save warnings are shown as today. Procurement: the capacity-offer form no longer asks for hours per
   week (the hour lines are booked), it shows the period only.
 * **W4 My settings** (`web/app2.js` or the file that renders the "me" page): for a boss a card "Work limits" with the
