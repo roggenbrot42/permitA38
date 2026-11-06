@@ -124,22 +124,24 @@ def _attribute(states: list[_State], bookings: list[Booking]) -> float:
             continue  # history outside every item period
         rest = by_day[day]
         mon = _monday(day)
-        for s in weekly:
-            if rest <= _EPS:
-                break
-            if s.item.start <= day <= s.item.end:
-                take = min(rest, max(0.0, s.demand.get(mon, 0.0) - s.got.get(mon, 0.0)))
-                if take > 0:
-                    s.got[mon] = s.got.get(mon, 0.0) + take
-                    rest -= take
-        for s in totals:
-            if rest <= _EPS:
-                break
-            if s.item.start <= day <= s.item.end:
-                take = min(rest, max(0.0, (s.item.total_hours or 0.0) - s.got_total))
-                if take > 0:
-                    s.got_total += take
-                    rest -= take
+        # must before could: all contracts (weekly, then total) before any offer (weekly, then total)
+        for kind in ("contract", "offer"):
+            for s in weekly:
+                if rest <= _EPS:
+                    break
+                if s.item.kind == kind and s.item.start <= day <= s.item.end:
+                    take = min(rest, max(0.0, s.demand.get(mon, 0.0) - s.got.get(mon, 0.0)))
+                    if take > 0:
+                        s.got[mon] = s.got.get(mon, 0.0) + take
+                        rest -= take
+            for s in totals:
+                if rest <= _EPS:
+                    break
+                if s.item.kind == kind and s.item.start <= day <= s.item.end:
+                    take = min(rest, max(0.0, (s.item.total_hours or 0.0) - s.got_total))
+                    if take > 0:
+                        s.got_total += take
+                        rest -= take
         if rest > _EPS:
             unattributed += rest
     return unattributed

@@ -117,9 +117,11 @@ D2. A weekly item (`hours_per_week`) demands, per ISO week, `hours_per_week × w
     its period / 5`. Holidays and vacation do **not** reduce the promise (they reduce the supply).
 D3. A total item demands `total_hours` over its period.
 D4. **Booked attribution** (decided, D5). Time entries (billable or not) on the project, dated
-    inside an item's period and up to `today`, are attributed week by week: first to that week's weekly items (up to
-    their weekly demand, contracts before offers), the rest to total items whose period contains the entry date,
-    earliest end first, up to their `total_hours`. Hours left over are reported as `booked_unattributed` (info).
+    inside an item's period and up to `today`, are attributed day by day, **all contracts before any offer** (changed
+    2026-11-06, so adding an offer never changes a contract's verdict): first that week's weekly contracts (up to their
+    weekly demand), then the total contracts whose period contains the entry date (earliest end first, up to their
+    `total_hours`), then the weekly offers, then the total offers in the same way. Hours left over are reported as
+    `booked_unattributed` (info).
 D5. Remaining of a weekly item: for the current week `max(0, demand − booked attributed in this week)`, for every
     later week its demand. Past weeks are history and are not checked.
 D6. Remaining of a total item: `max(0, total_hours − booked attributed)`.
@@ -316,7 +318,7 @@ the shape `{code, severity, field, message, details, confirmable}` and **every m
 
 Query: `weeks` (1–52, default 12), `project_id` (a project id or `unassigned`; filters `projects`), `user_id`
 (filters `weeks` and `people`). Area `planning`, read. `people` and `projects[].supply` cover the same range as
-`weeks` (from the Monday of the current week to the last Sunday). The example is E1 with `weeks=6`.
+`weeks` (from the Monday of the current week to the last Sunday). The example is E1 with `weeks=7` (today, Sunday 08.11.2026, belongs to the week of 02.11.).
 
 ```json
 {

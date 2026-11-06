@@ -128,10 +128,24 @@ def _item_json(it: ItemVerdict, invoiced: Mapping[str, Decimal]) -> dict:
     }
 
 
+def _scope_supply(supply: Supply, pid: str | None) -> tuple[float, float]:
+    """(employees, subcontractors) of a scope over the days of ``supply`` (the requested weeks, after today).
+    The scope without a project is the team's unassigned time."""
+    if pid is None:
+        return sum(supply.unassigned(uid, d) for uid, rows in supply.people.items() for d in rows), 0.0
+    days = supply.project.get(pid, {})
+    return sum(e for e, _ in days.values()), sum(x for _, x in days.values())
+
+
 def _project_json(
-    v: ProjectVerdict, names: Mapping[str, str], cost: Mapping[str, Decimal], invoiced: Mapping[str, Decimal]
+    v: ProjectVerdict,
+    names: Mapping[str, str],
+    cost: Mapping[str, Decimal],
+    invoiced: Mapping[str, Decimal],
+    supply: Supply,
 ) -> dict:
     pid = v.project_id
+    employees, subcontractors = _scope_supply(supply, pid)
     value = sum((q2(i.value) for i in v.items if i.kind == "contract"), Decimal(0))
     spent = q2(dec(cost.get(pid, 0))) if pid is not None else Decimal(0)
     return {
@@ -139,9 +153,9 @@ def _project_json(
         "name": names.get(pid, pid) if pid is not None else _UNASSIGNED_NAME,
         "kind": "customer" if pid is not None else UNASSIGNED,
         "supply": {
-            "employees": _r(v.supply_employees),
-            "subcontractors": _r(v.supply_subcontractors),
-            "total": _r(v.supply_employees + v.supply_subcontractors),
+            "employees": _r(employees),
+            "subcontractors": _r(subcontractors),
+            "total": _r(employees + subcontractors),
         },
         "remaining_contracts": _r(v.remaining_contracts),
         "shortfall_contracts": _r(v.shortfall_contracts),
@@ -262,7 +276,7 @@ def plan_json(
             }
         )
 
-    projects = [_project_json(v, names, subcontractor_cost, invoiced) for v in verdicts]
+    projects = [_project_json(v, names, subcontractor_cost, invoiced, supply) for v in verdicts]
     # a legacy internal project that still carries a contract or offer is judged like a customer project (its verdict
     # wins, so the shortfall stays visible); it is not listed a second time as an internal entry
     judged = {v.project_id for v in verdicts}

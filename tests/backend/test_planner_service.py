@@ -82,7 +82,7 @@ def codes(body):
 
 # -- plan ------------------------------------------------------------------------------------------------------
 def test_plan_e1_numbers(svc, e1):
-    body = svc.plan(6, today=TODAY)
+    body = svc.plan(7, today=TODAY)
     o = project(body, ORCH)
     assert o["supply"] == {"employees": 24.0, "subcontractors": 24.0, "total": 48.0}
     assert (o["remaining_contracts"], o["shortfall_contracts"], o["status"]) == (74.0, 26.0, "short")
@@ -100,27 +100,27 @@ def test_plan_e1_numbers(svc, e1):
 
 
 def test_plan_week_row_of_ada_only(svc, e1):
-    body = svc.plan(6, user_id=ADA, today=TODAY)
+    body = svc.plan(7, user_id=ADA, today=TODAY)
     w = next(w for w in body["weeks"] if w["week"] == "2026-11-09")
     assert (w["capacity"], w["unassigned"], w["billable_share"], w["subcontractor_hours"]) == (40.0, 6.0, 10.0, 0.0)
     assert [p["user_id"] for p in body["people"]] == [ADA]
-    assert len(body["weeks"]) == 6
+    assert len(body["weeks"]) == 7
 
 
 def test_plan_project_filter(svc, e1):
-    body = svc.plan(6, project_id=ORCH, today=TODAY)
+    body = svc.plan(7, project_id=ORCH, today=TODAY)
     assert [p["project_id"] for p in body["projects"]] == [ORCH]
-    other = svc.plan(6, project_id=PINE, today=TODAY)
+    other = svc.plan(7, project_id=PINE, today=TODAY)
     assert other["projects"] == [] and "contract.shortfall" not in codes(other)
     with pytest.raises(ServiceError) as err:
-        svc.plan(6, project_id="nosuchproj", today=TODAY)
+        svc.plan(7, project_id="nosuchproj", today=TODAY)
     assert err.value.status == 404
 
 
 def test_plan_unassigned_scope(svc, e1, repo):
     repo.save("contracts", {"id": "contrfree01", "title": "Free", "customer_id": CUST, "start": "2026-11-09",
                             "end": "2026-11-20", "hours_per_week": 5, "status": "confirmed", "rate": 100})  # fmt: skip
-    body = svc.plan(6, project_id="unassigned", today=TODAY)
+    body = svc.plan(7, project_id="unassigned", today=TODAY)
     assert [p["project_id"] for p in body["projects"]] == ["unassigned"]
     assert "contract.no_project" in codes(body)
 
@@ -201,7 +201,7 @@ def test_saved_offer_e7_project_numbers_and_warning(svc, e1, repo):
                          "customer_id": CUST, "date": "2026-11-02", "valid_until": "2026-12-31", "lines": [],
                          "plan": {"start": "2026-11-16", "end": "2026-12-04", "total_hours": 10,
                                   "win_probability": 50}})  # fmt: skip
-    o = project(svc.plan(6, today=TODAY), ORCH)
+    o = project(svc.plan(7, today=TODAY), ORCH)
     assert (o["shortfall_contracts"], o["shortfall_worst_case"], o["shortfall_expected"]) == (26.0, 36.0, 31.0)
     rec = repo.get("offers", "offero1001")
     assert "offer.shortfall" in [x["code"] for x in svc.warnings_for("offers", rec, TODAY)]
@@ -242,11 +242,11 @@ def test_internal_over_budget(svc, repo):
 
 def test_assignment_no_demand(svc, repo):
     alloc(repo, "allocsam01", SAM, ORCH, total=24, end="2026-12-04", rate=90)
-    body = svc.plan(6, today=TODAY)
+    body = svc.plan(7, today=TODAY)
     w = [x for x in body["warnings"] if x["code"] == "assignment.no_demand"]
     assert len(w) == 1 and w[0]["severity"] == "info" and w[0]["details"]["assignment_id"] == "allocsam01"
     contract(repo, "contrk2001", total=50, end="2026-12-04")
-    assert "assignment.no_demand" not in codes(svc.plan(6, today=TODAY))
+    assert "assignment.no_demand" not in codes(svc.plan(7, today=TODAY))
 
 
 # -- entitlement, extension, cover_plan ---------------------------------------------------------------------------

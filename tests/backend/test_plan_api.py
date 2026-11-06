@@ -63,11 +63,11 @@ def orchard(body):
 
 
 def test_plan_shape_and_e1_numbers(boss_client, e1):
-    r = boss_client.get("/api/plan", params={"weeks": 6})
+    r = boss_client.get("/api/plan", params={"weeks": 7})
     assert r.status_code == 200, r.text
     body = r.json()
     assert set(body) >= {"today", "weeks", "people", "projects", "warnings", "skipped"}
-    assert body["today"] == "2026-11-08" and len(body["weeks"]) == 6 and body["skipped"] == []
+    assert body["today"] == "2026-11-08" and len(body["weeks"]) == 7 and body["skipped"] == []
     o = orchard(body)
     assert o["supply"] == {"employees": 24.0, "subcontractors": 24.0, "total": 48.0}
     assert (o["remaining_contracts"], o["shortfall_contracts"], o["status"]) == (74.0, 26.0, "short")
@@ -78,7 +78,7 @@ def test_plan_shape_and_e1_numbers(boss_client, e1):
 
 
 def test_plan_user_filter_gives_ada_week(boss_client, e1):
-    body = boss_client.get("/api/plan", params={"weeks": 6, "user_id": ADA}).json()
+    body = boss_client.get("/api/plan", params={"weeks": 7, "user_id": ADA}).json()
     w = next(w for w in body["weeks"] if w["week"] == "2026-11-09")
     assert (w["capacity"], w["assigned_customer"], w["assigned_internal"], w["unassigned"]) == (40.0, 4.0, 30.0, 6.0)
     assert (w["billable_share"], w["subcontractor_hours"]) == (10.0, 0.0)
@@ -96,7 +96,7 @@ def test_plan_project_filter_and_unknown_project(boss_client, e1):
 def test_simulate_delta_and_nothing_written(boss_client, e1, store):
     changes = {"allocations": [{"user_id": ADA, "project_id": ORCH, "start": "2026-11-09", "end": "2026-12-04",
                                 "hours_per_week": 6}]}  # fmt: skip
-    r = boss_client.post("/api/plan/simulate", json={"changes": changes, "weeks": 6})
+    r = boss_client.post("/api/plan/simulate", json={"changes": changes, "weeks": 7})
     assert r.status_code == 200, r.text
     body = r.json()
     assert orchard(body)["shortfall_contracts"] == 2.0

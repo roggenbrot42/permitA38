@@ -426,10 +426,8 @@ def test_project_supply_and_assigned_hours_equal_the_spreading(world):
     def check(b, svc):
         state = effective_settings(b.repo.settings()).get("state") or ""
         expected = oracle_supply(world, b, state)
-        # KNOWN DEVIATION from the spec ("projects[].supply cover the same range as weeks"): the verdict's supply of
-        # a customer project reaches to the latest item end (the judging range), not to the last requested week.
-        wide = max([LAST] + [TODAY + timedelta(days=300)] + [TODAY + timedelta(days=i["end"]) for i in world["items"]])
-        judged = oracle_supply(world, b, state, wide)
+        # spec: "people and projects[].supply cover the same range as weeks" (the requested weeks, after today)
+        judged = expected
         body = svc.plan(WEEKS, today=TODAY)
         by_project = {p["project_id"]: p for p in body["projects"]}
         for name in ("P0", "P1"):
@@ -441,7 +439,10 @@ def test_project_supply_and_assigned_hours_equal_the_spreading(world):
             )
             assert abs(got["employees"] - emp) <= 0.03 and abs(got["subcontractors"] - (want - emp)) <= 0.03, got
         want = sum(expected[n] for n, a in enumerate(world["assignments"]) if a["project"] == "I")
-        assert abs(by_project[b.pid["I"]]["assigned"] - want) <= 0.03
+        entry = by_project[b.pid["I"]]
+        # an internal project that a generated (legacy) item still refers to is judged like a customer project
+        got_i = entry["assigned"] if entry["kind"] == "internal" else entry["supply"]["total"]
+        assert abs(got_i - want) <= 0.03
         for i, uid in enumerate(b.users):
             row = next(p for p in body["people"] if p["user_id"] == uid)
             want = sum(expected[n] for n, a in enumerate(world["assignments"]) if a["kind"] == "u" and a["idx"] == i)
