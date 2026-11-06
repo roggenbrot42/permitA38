@@ -756,6 +756,10 @@ def load(store: Repository, today: date, busy: BusyTimeProvider | None = None, c
   `plan_hours`, `line_hours`), `calc.forecast`, and their tests (test_planning.py, test_planner_per_project.py,
   test_planner_external.py, test_utilisation_allocated.py, test_planning_spread.py, test_external_capacity.py and the
   four skipped user_ids tests); rewrite tests/backend/randomized/test_planning_invariants.py for the new engine.
+  Before deleting: `procurement.py` still uses `external_capacity` (`_weekly`, the dependency hint, `effective_end` of
+  cancelled rows; move `effective_end` into `planner/spread.py` or `load.py`) and the old engine in
+  `_first_week_without_demand` (replace it with `assignment.no_demand` of `PlannerService.plan`);
+  `AllocationService.present_external` / `commitments()` must use `planner/spread.py`.
 
 Order: P1, then P2 and P5/P6/P8 in parallel, then P3 and P4, then P7, then WP5 (web) and WP6 (docs). Review tier:
 Full (one review after P7 over the whole branch).
