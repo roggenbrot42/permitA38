@@ -523,7 +523,10 @@ def test_allocations_migration_has_both_owner_columns_indexes_and_the_one_owner_
             "idx_allocations_user",
             "idx_allocations_project",
         }
-        ins = 'INSERT INTO "allocations" ("id", "user_id", "supplier_id", "project_id") VALUES (?, ?, ?, ?)'
+        ins = (
+            'INSERT INTO "allocations" ("id", "user_id", "supplier_id", "project_id", "start", "end", "hours_per_week",'
+            " \"rate\") VALUES (?, ?, ?, ?, '2026-01-01', '2026-02-01', 10, 80)"
+        )
         raw.execute(ins, ("a1", "u1", None, "p1"))
         raw.execute(ins, ("a2", None, "s1", "p1"))
         for bad in (("a3", None, None, "p1"), ("a4", "u1", "s1", "p1")):

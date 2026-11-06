@@ -45,6 +45,17 @@ def sample(table: Table, i: int = 0) -> dict:
             rec[g.columns[0]] = "2026-01-05"
     if table.name == "allocations":
         rec.pop("supplier_id")  # a row has exactly one owner (the allocations_one_owner check)
+        # the guards of migration project_planning: one hour field, a known status, no cancel date while active,
+        # no incoming offer on an employee allocation
+        for col in ("total_hours", "cancelled_from", "incoming_offer_id"):
+            rec.pop(col)
+        rec["status"] = "active"
+    elif table.name == "contracts":
+        rec.pop("total_hours")  # exactly one hour field
+        rec["status"] = "confirmed"
+    elif table.name == "projects":
+        rec.pop("customer_id")  # an internal project has no customer
+        rec.update(kind="internal", status="active")
     return rec
 
 
@@ -80,8 +91,8 @@ def test_created_preserved_updated_refreshed(repo):
 
 
 def test_zero_false_and_empty_values_are_kept(repo):
-    p = repo.save("projects", {"name": "P", "personal": False, "rate": 0, "member_ids": [], "notes": ""})
-    assert p["personal"] is False and p["rate"] == 0 and p["member_ids"] == [] and p["notes"] == ""
+    p = repo.save("projects", {"name": "P", "kind": "internal", "rate": 0, "member_ids": [], "notes": ""})
+    assert p["kind"] == "internal" and p["rate"] == 0 and p["member_ids"] == [] and p["notes"] == ""
 
 
 def test_unknown_fields_survive(repo):
@@ -404,9 +415,10 @@ def test_allocations_employee_and_supplier_rows_with_nullable_owner_columns(repo
     assert "supplier_id" not in got and "user_id" not in repo.get("allocations", sup["id"])
     assert [r["id"] for r in repo.find("allocations", user_id="u1")] == [emp["id"]]
     assert {r["id"] for r in repo.find("allocations", project_id="p1")} == {emp["id"], sup["id"]}
-    for bad in ({"project_id": "p1"}, {"user_id": "u1", "supplier_id": "s1", "project_id": "p1"}):
+    valid = {"project_id": "p1", "start": "2026-03-02", "end": "2026-03-27", "hours_per_week": 10, "rate": 80.0}
+    for bad in (dict(valid), {**valid, "user_id": "u1", "supplier_id": "s1"}):
         with pytest.raises(integrity_error(repo)):  # exactly one owner
-            repo.save("allocations", dict(bad))
+            repo.save("allocations", bad)
     assert len(repo.list("allocations")) == 2
 
 

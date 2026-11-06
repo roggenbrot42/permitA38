@@ -59,7 +59,7 @@ def db_with_duplicate(tmp_path, monkeypatch):
     """A database at the head before the guards (0016) holding two invoices with the same number."""
     root = real_chain_copy(tmp_path)
     for d in DIALECT_NAMES:
-        (root / d / "0016-guards.sql").unlink()
+        [f.unlink() for f in (root / d).glob("001[6-9]-*.sql")]  # the guards and everything after
     with monkeypatch.context() as m:
         use_chain(m, root)
         old = SQLiteRepository(tmp_path / "data")

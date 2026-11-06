@@ -29,12 +29,16 @@ def repo(tmp_path):
     r.close()
 
 
+GUARD_MIGRATIONS = ("guards", "project_planning")  # the migrations that create guards
+
+
 def refused(code, fn, *args):
+    codes = (code,) if isinstance(code, str) else code  # several guards may refuse one value; any of them will do
     with pytest.raises(ConstraintViolation) as e:
         fn(*args)
-    assert e.value.code == code
+    assert e.value.code in codes
     assert isinstance(e.value.__cause__, sqlite3.IntegrityError)
-    assert str(e.value.__cause__) == f"permita38:{code}"
+    assert str(e.value.__cause__) == f"permita38:{e.value.code}"
 
 
 # ------------------------------------------------------------------ (a) schema description
@@ -53,12 +57,18 @@ def test_guard_declarations_are_well_formed():
         assert g.table in TABLES
         for c in g.columns:
             assert TABLES[g.table].column(c), (g.name, c)
-        assert len(g.columns) == (2 if g.kind == "order" else 1)
-    assert {g.code for g in GUARDS} == {
+        if g.kind != "implies":
+            assert len(g.columns) == (2 if g.kind in ("order", "exactly_one", "max_days") else 1)
+    assert {g.code for g in GUARDS if g.kind != "implies"} == {
         "numbering.duplicate",
         "format.date",
         "range.negative",
         "state.period_reversed",
+        "vocab.unknown",
+        "state.exactly_one",
+        "state.required",
+        "range.too_long",
+        "range.bounds",
     }
     # trips start/end are local datetimes: only the order guard
     assert [g.kind for g in GUARDS if g.table == "trips"] == ["order"]
@@ -80,7 +90,7 @@ def test_migrated_triggers_equal_guard_sql(repo):
 
 def test_sqlite_migration_file_is_exactly_the_generated_statements(tmp_path):
     d = SQLiteDialect()
-    sql = next(m for m in CHAIN if m.name == "guards").sql()
+    sql = "".join(m.sql() for m in CHAIN if m.name in GUARD_MIGRATIONS)
     statements = [s for g in GUARDS for s in d.guard_sql(g)]
     for s in statements:
         assert s in sql
@@ -90,7 +100,7 @@ def test_sqlite_migration_file_is_exactly_the_generated_statements(tmp_path):
 @pytest.mark.parametrize("dialect", ["postgresql", "mariadb"])
 def test_native_dialects_cover_every_guard(dialect):
     d = DIALECTS[dialect]
-    sql = next(m for m in database.list_migrations(dialect) if m.name == "guards").sql()
+    sql = "".join(m.sql() for m in database.list_migrations(dialect) if m.name in GUARD_MIGRATIONS)
     for g in GUARDS:
         for s in d.guard_sql(g):
             assert s in sql
@@ -156,25 +166,63 @@ DATE_CASES = [
 ]
 
 
-def _owner(table):
-    return {"user_id": "inv001"} if table == "allocations" else {}
+_VALID = {  # a row that passes the guards of migration project_planning
+    "allocations": {
+        "user_id": "inv001",
+        "project_id": "proj0001",
+        "start": "2026-01-01",
+        "end": "2026-02-01",
+        "hours_per_week": 10,
+        "status": "active",
+    },
+    "contracts": {
+        "title": "T",
+        "start": "2026-01-01",
+        "end": "2026-02-01",
+        "hours_per_week": 10,
+        "status": "confirmed",
+    },
+    "projects": {"name": "P", "kind": "internal", "status": "active"},
+}
+
+
+REQUIRED_DATES = {("contracts", "start"), ("contracts", "end"), ("allocations", "start"), ("allocations", "end")}
+
+
+def _owner(table, col=None):
+    """The valid base row of a table without the column under test (and without the other hour field)."""
+    row = dict(_VALID.get(table, {}))
+    row.pop(col, None)
+    if col == "total_hours":
+        row.pop("hours_per_week", None)
+    return row
 
 
 @pytest.mark.parametrize(("table", "col"), DATE_CASES)
 def test_date_guard_refuses_a_bad_format_and_accepts_iso(repo, table, col):
-    refused("format.date", repo.save, table, {**_owner(table), col: "2026-1-5"})
-    refused("format.date", repo.save, table, {**_owner(table), col: "05.01.2026"})
-    ok = repo.save(table, {**_owner(table), col: "2026-01-05"})
+    o = _owner(table, col)
+    active = o  # a cancel date needs a cancelled allocation; "not set" below needs an active one
+    if col == "cancelled_from":
+        o = {**o, "status": "cancelled"}
+    bad = ("format.date", "state.period_reversed") if col == "end" else "format.date"  # a bad end may also sort early
+    refused(bad, repo.save, table, {**o, col: "2026-1-5"})
+    refused(bad, repo.save, table, {**o, col: "05.01.2026"})
+    ok = repo.save(table, {**o, col: "2026-01-05"})
     assert ok[col] == "2026-01-05"
     refused("format.date", repo.save, table, {**ok, col: "tomorrow"})
     assert repo.get(table, ok["id"])[col] == "2026-01-05"
-    repo.save(table, {**_owner(table), col: None})  # not set
-    repo.save(table, {**_owner(table)})
+    o = active
+    if (table, col) not in REQUIRED_DATES:  # a required date cannot be left unset
+        repo.save(table, {**o, col: None})  # not set
+        repo.save(table, {**o})
 
 
 @pytest.mark.parametrize(("table", "col"), DATE_CASES)
 def test_date_and_order_guards_accept_empty_string_date(repo, table, col):
-    ok = repo.save(table, {**_owner(table), col: ""})
+    if (table, col) in REQUIRED_DATES:
+        refused("state.required", repo.save, table, {**_owner(table, col), col: ""})
+        return
+    ok = repo.save(table, {**_owner(table, col), col: ""})
     assert ok[col] == ""
 
 
@@ -203,14 +251,31 @@ NEGATIVE_CASES = [
 ]
 
 
+POSITIVE_ONLY = {
+    ("projects", "budget_hours"),
+    ("contracts", "hours_per_week"),
+    ("contracts", "total_hours"),
+    ("allocations", "hours_per_week"),
+    ("allocations", "total_hours"),
+}
+HOUR_FIELDS = POSITIVE_ONLY - {("projects", "budget_hours")}
+
+
 @pytest.mark.parametrize(("table", "col"), NEGATIVE_CASES)
 def test_negative_guard_refuses_below_zero_and_accepts_zero(repo, table, col):
-    refused("range.negative", repo.save, table, {**_owner(table), col: -1})
-    ok = repo.save(table, {**_owner(table), col: 0})
-    assert ok[col] == 0
-    repo.save(table, {**_owner(table), col: 1})
-    refused("range.negative", repo.save, table, {**ok, col: -2})
-    repo.save(table, {**_owner(table)})  # not set
+    o = _owner(table, col)
+    codes = ("range.negative", "range.bounds")  # a positive-only column is also guarded by a range guard
+    refused(codes, repo.save, table, {**o, col: -1})
+    if (table, col) in POSITIVE_ONLY:  # zero is refused by the range guard (min exclusive)
+        refused("range.bounds", repo.save, table, {**o, col: 0})
+        ok = repo.save(table, {**o, col: 1})
+    else:
+        ok = repo.save(table, {**o, col: 0})
+        assert ok[col] == 0
+        repo.save(table, {**o, col: 1})
+    refused(codes, repo.save, table, {**ok, col: -2})
+    if (table, col) not in HOUR_FIELDS:  # the contract / allocation needs one of its hour fields
+        repo.save(table, {**o})  # not set
 
 
 def test_negative_guard_covers_every_declared_column():
@@ -231,7 +296,8 @@ ORDER_CASES = [
 
 @pytest.mark.parametrize(("table", "a", "b", "late", "early"), ORDER_CASES)
 def test_period_guard_refuses_a_reversed_period_and_accepts_equal_ends(repo, table, a, b, late, early):
-    o = _owner(table)
+    o = _owner(table, a)
+    o.pop(b, None)
     refused("state.period_reversed", repo.save, table, {**o, a: late, b: early})
     ok = repo.save(table, {**o, a: early, b: late})
     assert (ok[a], ok[b]) == (early, late)
@@ -239,13 +305,18 @@ def test_period_guard_refuses_a_reversed_period_and_accepts_equal_ends(repo, tab
     assert (same[a], same[b]) == (late, late)
     refused("state.period_reversed", repo.save, table, {**ok, b: "2000-01-01"[: len(early)]})
     refused("state.period_reversed", repo.save, table, {**ok, a: "9999-01-01"[: len(early)]})
-    repo.save(table, {**o, a: late})  # an open end
-    repo.save(table, {**o, b: early})  # an open start
+    if (table, a) not in REQUIRED_DATES:  # a contract or allocation always has both ends
+        repo.save(table, {**o, a: late})  # an open end
+        repo.save(table, {**o, b: early})  # an open start
 
 
 @pytest.mark.parametrize(("table", "a", "b", "late", "early"), ORDER_CASES)
 def test_date_and_order_guards_accept_empty_string(repo, table, a, b, late, early):
-    o = _owner(table)
+    o = _owner(table, a)
+    o.pop(b, None)
+    if (table, a) in REQUIRED_DATES:
+        refused("state.required", repo.save, table, {**o, a: "", b: late})
+        return
     for first, second in (("", late), (late, ""), ("", early)):
         ok = repo.save(table, {**o, a: first, b: second})
         assert (ok[a], ok[b]) == (first, second)
@@ -269,7 +340,7 @@ def old_db(tmp_path, monkeypatch):
     """A database at the previous head (0016 removed from a copy of the real chain) holding violations."""
     root = real_chain_copy(tmp_path)
     for d in DIALECT_NAMES:
-        (root / d / "0016-guards.sql").unlink()
+        [f.unlink() for f in (root / d).glob("001[6-9]-*.sql")]  # the guards and everything after
     data = tmp_path / "data"
     with monkeypatch.context() as m:
         use_chain(m, root)
