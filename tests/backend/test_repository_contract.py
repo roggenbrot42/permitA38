@@ -28,8 +28,8 @@ def repo(request, tmp_path) -> Repository:
     r.close()
 
 
-def sample(table: Table, i: int = 0) -> dict:
-    """A record using every column with a value of the right logical type."""
+def sample_columns(table: Table, i: int = 0) -> dict:
+    """Every column of ``table`` with a value of its logical type (no guard adjustments)."""
     values = {
         "id": f"ref{i}abc",
         "str": f"Müller & Söhne “{i}” €",
@@ -39,7 +39,12 @@ def sample(table: Table, i: int = 0) -> dict:
         "bool": bool(i % 2),
         "json": [1, "two", {"k": [True, None, 2.5]}],
     }
-    rec = {c.name: values[c.type] for c in table.columns if c.name not in ("id", "created", "updated")}
+    return {c.name: values[c.type] for c in table.columns if c.name not in ("id", "created", "updated")}
+
+
+def sample(table: Table, i: int = 0) -> dict:
+    """A record using every column with a value of the right logical type."""
+    rec = sample_columns(table, i)
     for g in GUARDS:  # the database refuses dates in another format
         if g.table == table.name and g.kind == "date":
             rec[g.columns[0]] = "2026-01-05"
@@ -59,11 +64,36 @@ def sample(table: Table, i: int = 0) -> dict:
     return rec
 
 
+def sample_alt(table: Table, i: int = 0) -> dict:
+    """The second valid combination of the tables whose guards exclude columns of ``sample``: a cancelled
+    subcontractor allocation (supplier, rate, incoming offer, cancel date, total hours only) and a finished contract
+    with total hours only."""
+    rec = sample_columns(table, i)
+    for g in GUARDS:
+        if g.table == table.name and g.kind == "date":
+            rec[g.columns[0]] = "2026-01-05"
+    if table.name == "allocations":
+        rec.pop("user_id")  # a subcontractor row has no employee
+        rec.pop("hours_per_week")  # exactly one hour field
+        rec.update(status="cancelled", cancelled_from="2026-01-05", rate=55.5, total_hours=120.5)
+    elif table.name == "contracts":
+        rec.pop("hours_per_week")
+        rec.update(total_hours=120.5, status="done")
+    return rec
+
+
+ALT = ("allocations", "contracts")
+
+
 # ------------------------------------------------------------------ CRUD and fidelity
-@pytest.mark.parametrize("coll", ALL)
+@pytest.mark.parametrize("coll", [*ALL, *[f"{c}:alt" for c in ALT]])
 @pytest.mark.parametrize("i", [0, 1])  # i=0 -> bools False, i=1 -> True
 def test_round_trip_every_collection(repo, coll, i):
-    rec = sample(TABLES[coll], i)
+    if coll.endswith(":alt"):
+        coll = coll.removesuffix(":alt")
+        rec = sample_alt(TABLES[coll], i)
+    else:
+        rec = sample(TABLES[coll], i)
     saved = repo.save(coll, dict(rec))
     assert saved["id"] and isinstance(saved["created"], int) and isinstance(saved["updated"], int)
     for k, v in rec.items():

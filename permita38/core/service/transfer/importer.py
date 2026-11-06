@@ -157,7 +157,10 @@ def instance_state(store: Repository, *, allow_no_users: bool) -> str | None:
     for name in TABLES:
         if name in ("users", "settings"):
             continue
-        n = len(store.list(name))
+        rows = store.list(name)
+        if name == "projects":  # the default project of migration project_planning is not data
+            rows = [r for r in rows if r.get("id") != "internaladmin"]
+        n = len(rows)
         if n:
             found.append(f"{name}: {n}")
     users = store.list("users")
