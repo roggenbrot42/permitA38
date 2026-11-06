@@ -158,7 +158,7 @@ class TimeService:
         for pid, r in rows.items():
             p = projects.get(pid) or {}
             vals = {k: round(v, 2) for k, v in r.items()}
-            tasks = [
+            tasks: list[dict] = [
                 {"task_id": tid, "name": task_names.get(tid) or "(deleted task)", "booked_week": round(h, 2)}
                 for tid, h in task_minutes.get(pid, {}).items()
             ]
