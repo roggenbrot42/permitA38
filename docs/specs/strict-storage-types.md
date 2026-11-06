@@ -35,20 +35,29 @@ SQLite cannot switch an existing table to `STRICT`; each table is rebuilt in one
 this is expected to be `0019`):
 
 ```
-CREATE TABLE "x__new" (... STRICT);         -- generated from schema.py
+DROP TRIGGER ... ;                          -- 1. EVERY guard_% trigger, before anything else
+UPDATE ... ;                                -- 2. normalisation moves into extra (section 2)
+CREATE TABLE "x__new" (... STRICT);         -- 3. per table, in TABLES order
 INSERT INTO "x__new" (cols) SELECT <normalised cols> FROM "x";
 DROP TABLE "x";
 ALTER TABLE "x__new" RENAME TO "x";
-CREATE INDEX ... ;                          -- every index of the table, generated
-CREATE TRIGGER ... ;                        -- every guard trigger that reads the table, generated
+CREATE INDEX ... ;                          -- 4. every index, generated
+CREATE TRIGGER ... ;                        -- 5. every guard trigger, generated from schema.GUARDS
 ```
+
+**All guard triggers are dropped first** (verified 2026-11-06 on SQLite 3.51): `ALTER TABLE ... RENAME` re-parses
+the whole schema, and a trigger on another table that still names the dropped table fails it (`error in trigger
+g_ins: no such table: main.projects` for a reference trigger on `entries` while `projects` is rebuilt). Dropping them
+first also keeps the normalisation `UPDATE`s from tripping guards (e.g. a planner `required` guard when a value is
+moved out of a column).
 
 - **Order:** the runner already wraps the file in one transaction; a failure rolls everything back and the
   pre-migration backup exists. Tables are rebuilt in `TABLES` order.
-- **Triggers:** `DROP TABLE` drops the table's triggers, and the delete triggers of reference guards live on the
-  target table (`projects`, `users`, `suppliers`). The migration recreates **every** guard trigger after all tables
-  are rebuilt, from `guard_sql` of `schema.GUARDS` at that point (including the planner's guards). The drift test
-  (trigger set == `guard_sql`) proves nothing is lost.
+- **Triggers:** recreated after all tables and indexes, from `guard_sql` of `schema.GUARDS` (including the planner's
+  guards). The drift test (trigger set == `guard_sql`) proves nothing is lost.
+- **The migration file is a frozen snapshot** of `TABLES`, indexes and `GUARDS` at the time it is generated. Rule:
+  generate it only after the planner's `0018-project_planning` is on `main`, and regenerate it whenever another
+  migration lands before it (a test fails anyway if a trigger or index is missing, but regenerate rather than patch).
 - **CHECK `allocations_one_owner`** is kept in the new `allocations` table; it moves into `schema.CHECKS` as already
   declared and the DDL generator emits it.
 - **Type mapping** stays (`TEXT`, `INTEGER`, `REAL`); these are all valid `STRICT` types.
@@ -71,6 +80,12 @@ repository could never have written cannot be dropped silently either. The copy 
 "Moved into `extra`": the copy sets `extra = json_set(COALESCE(extra, '{}'), '$.<col>', <old value>)` for a row whose
 value does not fit, so nothing is lost and `check-db` keeps reporting it as `type.misplaced`. This is exactly where the
 repository would have put it. (Implementation: one `UPDATE` per affected column before the copy, inside the migration.)
+
+**Malformed `extra`:** `json_set` fails on a row whose `extra` is not valid JSON (verified: `malformed JSON`). Before
+the moves, a row with `json_valid(extra) = 0` gets `extra = json_object('_legacy_extra', extra)`: the old text is kept
+under the reserved key `_legacy_extra`, the row stays readable, and `check-db` reports it (`format.json` on `extra`
+is then satisfied, a new finding `state.legacy_extra` names the row). `_legacy_extra` is never written by the
+repository otherwise.
 
 ### 3. The repository refuses wrong types
 
@@ -127,7 +142,8 @@ statuses) are not duplicated.
 ### 5. JSON columns are valid JSON
 
 A new row-local guard kind `json` (guards v2 machinery): a set value of a `json` column (and every `extra` column) must
-satisfy `json_valid()`. Grandfathered like the other kinds; `check-db` gets the matching rule (`format.json`). The
+satisfy `json_valid()`. Grandfathered like the other kinds; it joins `ROW_LOCAL_KINDS` and `RESTORE_SUSPENDED`, and the
+generic row-local `check-db` rule covers it (code `format.json`, Python twin `json.loads`). The
 repository always writes JSON through `encode_json`, so this is a backstop for raw writes and restores.
 
 ### 6. `schema.py` describes it all
@@ -157,9 +173,10 @@ A read-only audit, results written into this spec before the first work package 
    generated DDL is `STRICT` and that `dump-ddl` matches.
 2. **Migration:** the rebuild with normalisation, extra-moves, index and trigger recreation for all three dialects;
    tests: a database at the previous head with a misplaced value in every column type, a NULL in a required field,
-   invalid JSON in a json column and a grandfathered duplicate number migrates without error, nothing is lost
-   (`check-db` before and after reports the same rows), every table is `STRICT` afterwards, the trigger and index sets
-   equal `schema.py`.
+   invalid JSON in a json column, malformed `extra` in the same row as a misplaced value, and a grandfathered duplicate
+   number migrates without error; nothing is lost: compare the **raw SQL values before** (read with `sqlite3`, not
+   the repository, whose decoder may not cope with wrong-typed columns) with the **decoded records after** (a moved
+   value comes back under its key); every table is `STRICT` afterwards; the trigger and index sets equal `schema.py`.
 3. **Repository:** `type.mismatch` instead of the `extra` fallback, `lenient_types()`, translation to 409; repository
    contract tests (`test_repository_contract.py`); update `fits()` users.
 4. **Required and JSON guards:** the `required` guard list from step 0, the `json` kind and its `check-db` rule; tests
