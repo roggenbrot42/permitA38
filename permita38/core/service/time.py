@@ -8,6 +8,8 @@ from permita38.core import calc, rights
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 
+from .project_customer import project_kind
+
 log = logging.getLogger("permita38.time")
 
 
@@ -78,6 +80,8 @@ class TimeService:
                 me["id"],
             )
             project_id = None
+        project = self.store.get("projects", project_id) if project_id else None
+        internal = project is not None and project_kind(project) == "internal"
         entry = self.store.save(
             "entries",
             dict(
@@ -89,7 +93,7 @@ class TimeService:
                 minutes=minutes,
                 start=_time.strftime("%H:%M", start),
                 end=_time.strftime("%H:%M"),
-                billable=True,
+                billable=not internal,
             ),
         )
         self._write_timer(me["id"], dict(id=me["id"], running=False))
