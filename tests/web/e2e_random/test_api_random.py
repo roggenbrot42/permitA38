@@ -438,11 +438,16 @@ class ApiSim:
         assert abs(dash["worked"] * 60 - worked) <= 1, (dash["worked"] * 60, worked)
         assert abs(dash["target"] * 60 - target) <= 1, (dash["target"] * 60, target)
         assert abs(dash["remaining"] * 60 - max(target - worked, 0)) <= 1.5
-        fc = self.boss.get("/forecast", weeks=3, user_id=self.boss_id)["weeks"]  # team = boss + member
-        assert abs(fc[0]["capacity"] * 60 - target) <= 6
+        fc = self.boss.get("/plan", weeks=3, user_id=self.boss_id)["weeks"]
+        # the plan counts only days after today, so compare the next (fully future) week
+        nxt = week_target_minutes(self.today + timedelta(days=7), 40, absent)
+        assert abs(fc[1]["capacity"] * 60 - nxt) <= 6, (fc[1], nxt)
         for w in fc:
-            assert abs(w["free"] - (w["capacity"] - w["confirmed"])) < 0.11
-        self.say("dashboard + forecast agree with the model")
+            # per day assigned - capacity = over - unassigned, so the week sums agree up to rounding
+            assigned = w["assigned_customer"] + w["assigned_internal"]
+            assert abs((w["capacity"] - assigned) - (w["unassigned"] - w["over_assigned"])) < 0.06, w
+            assert min(w["capacity"], w["unassigned"], w["over_assigned"]) >= 0, w
+        self.say("dashboard + plan agree with the model")
 
     # ---------------------------------------------------------------- permissions
     def op_member(self):
@@ -457,7 +462,7 @@ class ApiSim:
             "/templates",
             "/settings",
             "/finance",
-            "/forecast",
+            "/plan",
             "/project-report",
             "/attachments/abcdef123456.pdf",
         ):
@@ -555,8 +560,8 @@ class ApiSim:
                     "/attachments/..%2f..%2fsettings.json",
                     "/offers/x/pdf",
                     "/holidays?year=abc",
-                    "/forecast?weeks=-5",
-                    "/forecast?weeks=100000",
+                    "/plan?weeks=-5",
+                    "/plan?weeks=100000",
                     "/finance?year=0",
                     "/finance?year=99999999",
                     "/dashboard?user_id=nope",

@@ -756,7 +756,7 @@ class Journey:
         assert len(api.get("/absences")) == len(m.absences)
         assert len(api.get("/contracts")) == m.contracts
         if m.allocs:
-            rows = {(a["project_id"], a["hours_per_week"], a["start"], a["end"]) for a in api.get("/allocations")}
+            rows = {(a["project_id"], a["hours_per_week"], a["start"], a["end"]) for a in api.get("/allocations") if a["hours_per_week"] is not None}
             assert rows == set(m.allocs), (rows, m.allocs)
         fin = api.get("/finance", year=self.year)["totals"]
         revenue = sum((d.totals()[0] for d in m.paid_invoices()), Decimal(0))
@@ -769,8 +769,8 @@ class Journey:
         assert abs(money(fin["vat_out"]) - vat_out) <= Decimal("0.01") * groups, (fin, vat_out)
         assert money(fin["expenses"]) == expenses and money(fin["profit"]) == revenue - expenses
         assert money(fin["vat_in"]) == sum((e.vat for e in m.expenses), Decimal(0))
-        fc = api.get("/forecast", weeks=2)["weeks"][0]
-        target = week_target_minutes(self.today, m.weekly_hours, m.absent_days())
+        fc = api.get("/plan", weeks=2)["weeks"][1]  # the plan counts only days after today: use the next week
+        target = week_target_minutes(self.today + timedelta(days=7), m.weekly_hours, m.absent_days())
         assert round(fc["capacity"] * 60) == pytest.approx(target, abs=4), (fc, target)
 
     # ---- driver

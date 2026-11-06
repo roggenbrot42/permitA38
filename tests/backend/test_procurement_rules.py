@@ -280,7 +280,7 @@ def test_w13_just_below_the_boundary_has_no_hint(boss_client, store):
 def test_w6_offers_in_open_or_rejected_states_leave_forecast_and_commitments_unchanged(boss_client):
     s = capacity_supplier(boss_client)
     p = project(boss_client, "Demo project P")
-    base = boss_client.get("/api/forecast?weeks=4").json()
+    base = boss_client.get("/api/plan?weeks=4").json()
     base_com = boss_client.get("/api/finance/commitments").json()
     received = post(boss_client, "/api/incoming-offers", w1_offer(s["id"], p["id"]), 201).json()
     under = post(boss_client, "/api/incoming-offers", w1_offer(s["id"], p["id"], reference="B"), 201).json()
@@ -291,7 +291,8 @@ def test_w6_offers_in_open_or_rejected_states_leave_forecast_and_commitments_unc
         boss_client, "/api/incoming-offers", w1_offer(s["id"], p["id"], reference="D", valid_until="2026-03-01"), 201
     ).json()
     assert expired["effective_status"] == "expired" and received["effective_status"] == "received"
-    assert boss_client.get("/api/forecast?weeks=4").json() == base
+    after = boss_client.get("/api/plan?weeks=4").json()
+    assert after["projects"] == base["projects"] and after["weeks"] == base["weeks"]
     com = boss_client.get("/api/finance/commitments").json()
     assert com["items"] == base_com["items"] and com["totals"] == base_com["totals"]
 
