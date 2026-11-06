@@ -679,6 +679,10 @@ Vanilla JS as today, numbers only from the server, every label with its derivati
      share, subcontractors, holiday / vacation / absence / busy as a small grey line; over-assigned in red;
   3. the warnings as one list (severity colours as today), and, for the boss only, a collapsed "N damaged records
      were skipped" line from `skipped`.
+  4. (owner, 2026-11-06: "I can only edit the allocations if there is an Assign button") **every** project row, also
+     internal ones and ones without a shortfall, has a button "Assignments (n)" (n = its assignment rows) that opens
+     the dialog filtered to that project, with "Add assignment" in it; every person of the `people` list has
+     "Assignments (n)" filtered to that person. Shown to users with planning write; read-only users see the count.
 * **W2 Plan & vacation tab** (`web/planner.js`, `web/planner.css`): keeps the timeline and its draft editing
   (absences, contract/offer moves and hours, assignments) and the scenarios; recomputes with `POST
   /api/plan/simulate` (no `first`, no `include_external`); the week header shows capacity and assigned of the chosen
@@ -688,7 +692,8 @@ Vanilla JS as today, numbers only from the server, every label with its derivati
 * **W3 Assignments** (`web/allocations.js`, `web/procurement.js`): the dialog lists and edits employee AND
   subcontractor rows: owner select (people and active capacity suppliers), project, period, "hours per week" or
   "total hours" (exactly one), rate (subcontractors only, required), planned hours and planned net from the server;
-  offer-linked rows show the offer, can be edited and cancelled, not deleted; the bootstrap button and its preview are
+  offer-linked rows show the offer, can be edited and cancelled, not deleted; every other writable row has "Edit"
+  and "Delete" (with a confirmation) directly in the list row, not only inside the edit form; the bootstrap button and its preview are
   removed; the save warnings are shown as today. Procurement: the capacity-offer form no longer asks for hours per
   week (the hour lines are booked), it shows the period only.
 * **W4 My settings** (`web/app2.js` or the file that renders the "me" page): for a boss a card "Work limits" with the
