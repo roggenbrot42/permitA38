@@ -270,7 +270,9 @@ def _damage(app, plant):
     uid = store.list("users")[0]["id"]
 
     cust = store.save("customers", {"name": "C", "rate": "abc"})
-    proj = store.save("projects", {"name": "P", "customer_id": cust["id"], "rate": float("nan") if False else "x"})
+    proj = store.save(
+        "projects", {"name": "P", "kind": "customer", "customer_id": cust["id"], "rate": float("nan") if False else "x"}
+    )
     plant(store, "absences", {"start": "garbage", "user_id": uid}, "format.date")
     store.save("absences", {"start": "2026-10-19", "end": "2026-10-22"})  # no owner
     plant(
@@ -282,7 +284,8 @@ def _damage(app, plant):
         {"title": "bad", "start": "nope", "end": "2026-12-31", "hours_per_week": 5},
         ("format.date", "state.period_reversed"),
     )
-    store.save("contracts", {"title": "text", "start": "2026-01-01", "end": "2026-12-31", "hours_per_week": "lots"})
+    # text in a numeric hours field is no longer storable (the planner guards refuse it): keep a text title only
+    store.save("contracts", {"title": "text", "start": "2026-01-01", "end": "2026-12-31", "hours_per_week": 5})
     store.save(
         "contracts",
         {

@@ -102,7 +102,17 @@ def test_model_invalid_reports_field_and_never_the_value(store):
 
 def test_model_date_format_on_tables_without_crud_model(store, unguarded):
     # "2026-02-30" has the date shape, so no guard refuses it
-    store.save("allocations", {"id": "alloc01", "user_id": "boss01", "start": "2026-02-30", "end": "2026-03-01"})
+    store.save(
+        "allocations",
+        {
+            "id": "alloc01",
+            "user_id": "boss01",
+            "project_id": "proj01",
+            "hours_per_week": 5,
+            "start": "2026-02-30",
+            "end": "2026-03-01",
+        },
+    )
     store.save("trips", {"id": "trip01", "start": "2026-03-01", "end": "2026-03-02T10:00"})  # start lacks the time
     store.save("trips", {"id": "trip02", "start": "2026-03-01T08:00", "end": "2026-03-02T10:00"})
     unguarded(store, "incoming_offers", {"id": "inoff01", "received_on": "yesterday"}, "format.date")
@@ -128,10 +138,10 @@ def test_format_date_reports_only_filled_non_iso_values(store, unguarded):
     unguarded(
         store,
         "projects",
-        {"id": "proj01", "name": "P", "start": "2026-03-01", "end": "01.03.2026"},
+        {"id": "proj01", "name": "P", "kind": "customer", "start": "2026-03-01", "end": "01.03.2026"},
         ("format.date", "state.period_reversed"),
     )
-    store.save("projects", {"id": "proj02", "name": "Q", "start": "", "end": None})
+    store.save("projects", {"id": "proj02", "name": "Q", "kind": "customer", "start": "", "end": None})
     unguarded(store, "expenses", {"id": "exp001", "date": "2026-3-1", "paid_on": "2026-03-01"}, "format.date")
     store.save("entries", {"id": "ent001", "user_id": "boss01", "date": "2026-03-01", "minutes": 5})
     assert sorted(found(store, "format.date")) == [
@@ -199,7 +209,7 @@ def test_dangling_errors(store):
 
 def test_dangling_warnings_lists_and_templates(store):
     store.save("tasks", {"id": "task01", "project_id": "proj99", "name": "T"})
-    store.save("projects", {"id": "proj01", "name": "P", "member_ids": ["boss01", "ghost01"]})
+    store.save("projects", {"id": "proj01", "name": "P", "kind": "customer", "member_ids": ["boss01", "ghost01"]})
     store.save("invoices", doc("invoices", "inv001", customer_id=None, template_id="tpl99999"))
     store.save("invoices", doc("invoices", "inv002", customer_id=None, template_id="classic"))  # built-in id
     store.save("offers", doc("offers", "off001", customer_id="", project_id=""))  # empty means not set
@@ -228,18 +238,62 @@ def test_document_scan_record_points_into_the_named_collection(store):
 def test_project_customer_mismatch(store):
     store.save("customers", {"id": "cust01", "name": "A"})
     store.save("customers", {"id": "cust02", "name": "B"})
-    store.save("projects", {"id": "proj01", "name": "P", "customer_id": "cust02"})
-    store.save("projects", {"id": "proj02", "name": "Q"})  # no customer: nothing to compare
-    store.save("contracts", {"id": "con001", "start": "2026-01-01", "customer_id": "cust01", "project_id": "proj01"})
-    store.save("contracts", {"id": "con002", "start": "2026-01-01", "customer_id": "cust01", "project_id": "proj02"})
-    store.save("contracts", {"id": "con003", "start": "2026-01-01", "customer_id": "cust02", "project_id": "proj01"})
+    store.save("projects", {"id": "proj01", "name": "P", "kind": "customer", "customer_id": "cust02"})
+    store.save("projects", {"id": "proj02", "name": "Q", "kind": "customer"})  # no customer: nothing to compare
+    store.save(
+        "contracts",
+        {
+            "id": "con001",
+            "title": "T",
+            "hours_per_week": 5,
+            "start": "2026-01-01",
+            "end": "2026-12-31",
+            "customer_id": "cust01",
+            "project_id": "proj01",
+        },
+    )
+    store.save(
+        "contracts",
+        {
+            "id": "con002",
+            "title": "T",
+            "hours_per_week": 5,
+            "start": "2026-01-01",
+            "end": "2026-12-31",
+            "customer_id": "cust01",
+            "project_id": "proj02",
+        },
+    )
+    store.save(
+        "contracts",
+        {
+            "id": "con003",
+            "title": "T",
+            "hours_per_week": 5,
+            "start": "2026-01-01",
+            "end": "2026-12-31",
+            "customer_id": "cust02",
+            "project_id": "proj01",
+        },
+    )
     assert found(store, "ref.") == [("ref.self_project_customer", "contracts", "con001", "customer_id")]
 
 
 def test_project_without_customer_is_never_a_mismatch(store):
     store.save("customers", {"id": "cust01", "name": "A"})
-    store.save("projects", {"id": "proj02", "name": "Q"})
-    store.save("contracts", {"id": "con002", "start": "2026-01-01", "customer_id": "cust01", "project_id": "proj02"})
+    store.save("projects", {"id": "proj02", "name": "Q", "kind": "customer"})
+    store.save(
+        "contracts",
+        {
+            "id": "con002",
+            "title": "T",
+            "hours_per_week": 5,
+            "start": "2026-01-01",
+            "end": "2026-12-31",
+            "customer_id": "cust01",
+            "project_id": "proj02",
+        },
+    )
     assert found(store, "ref.") == []
 
 
@@ -371,10 +425,12 @@ def test_period_reversed(store, unguarded):
     unguarded(
         store,
         "projects",
-        {"id": "proj01", "name": "P", "start": "2026-03-10", "end": "2026-03-01"},
+        {"id": "proj01", "name": "P", "kind": "customer", "start": "2026-03-10", "end": "2026-03-01"},
         "state.period_reversed",
     )
-    store.save("projects", {"id": "proj02", "name": "Q", "start": "2026-03-01", "end": "2026-03-01"})
+    store.save(
+        "projects", {"id": "proj02", "name": "Q", "kind": "customer", "start": "2026-03-01", "end": "2026-03-01"}
+    )
     unguarded(
         store,
         "absences",
@@ -396,10 +452,22 @@ def test_period_reversed(store, unguarded):
     unguarded(
         store,
         "allocations",
-        {"id": "alloc01", "user_id": "boss01", "start": "2026-04-02", "end": "2026-04-01"},
+        {
+            "id": "alloc01",
+            "user_id": "boss01",
+            "project_id": "proj01",
+            "hours_per_week": 5,
+            "start": "2026-04-02",
+            "end": "2026-04-01",
+        },
         "state.period_reversed",
     )
-    unguarded(store, "contracts", {"id": "con001", "start": "2026-04-02", "end": "2026-04-01"}, "state.period_reversed")
+    unguarded(
+        store,
+        "contracts",
+        {"id": "con001", "title": "T", "hours_per_week": 5, "start": "2026-04-02", "end": "2026-04-01"},
+        "state.period_reversed",
+    )
     store.save(
         "entries",
         {"id": "ent001", "user_id": "boss01", "date": "2026-03-01", "minutes": 480, "start": "22:00", "end": "06:00"},
@@ -520,9 +588,9 @@ def test_row_local_guard_kinds_are_reported_with_code_collection_id_and_field(st
     save("customers", {"id": "cus002", "name": "Demo Client", "rate": 0.01})
     save("customers", {"id": "cus003", "name": "Demo Client", "rate": 500.5})
     save("customers", {"id": "cus004", "name": "Demo Client", "rate": 500})
-    save("projects", {"id": "prj001", "name": "A", "status": "done", "end": ""})
-    save("projects", {"id": "prj002", "name": "B", "status": "done", "end": "2026-02-01"})
-    save("projects", {"id": "prj003", "name": "C", "status": "open"})
+    save("projects", {"id": "prj001", "name": "A", "kind": "customer", "status": "done", "end": ""})
+    save("projects", {"id": "prj002", "name": "B", "kind": "customer", "status": "done", "end": "2026-02-01"})
+    save("projects", {"id": "prj003", "name": "C", "kind": "customer", "status": "active"})
     findings = IntegrityService(store).run(("vocab.", "state.exactly_one", "state.required", "range.", "state.implies"))
     assert [(f.code, f.collection, f.id, f.field, f.severity) for f in findings] == [
         ("range.bounds", "customers", "cus001", "rate", "error"),

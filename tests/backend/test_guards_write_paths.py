@@ -218,5 +218,5 @@ def test_store_refuses_a_negative_value(store):
 
 def test_store_refuses_a_reversed_period(store):
     with pytest.raises(ConstraintViolation) as e:
-        store.save("projects", {"name": "P", "start": "2026-03-03", "end": DAY})
+        store.save("projects", {"name": "P", "kind": "customer", "start": "2026-03-03", "end": DAY})
     assert e.value.code == "state.period_reversed"
