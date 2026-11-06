@@ -1,9 +1,58 @@
 """Accepting a capacity offer whose plan names no hour field or both: the booked total comes from the hour lines.
 Literal numbers; invented data only."""
 
+from datetime import date
+
 import pytest
 
-from .test_planner_external import _Frozen, boss_id, frozen_today, new_project, supplier  # noqa: F401
+import permita38.api.routers.incoming_offers as offers_router
+import permita38.core.service.planner.service as planner_module
+import permita38.core.service.procurement as procurement_module
+
+TODAY = date(2026, 3, 2)
+
+
+class _Frozen(date):
+    @classmethod
+    def today(cls):
+        return TODAY
+
+
+@pytest.fixture(autouse=True)
+def frozen_today(monkeypatch):
+    for mod in (planner_module, offers_router, procurement_module):
+        if hasattr(mod, "date"):
+            monkeypatch.setattr(mod, "date", _Frozen)
+
+
+@pytest.fixture
+def boss_id(app):
+    return next(u["id"] for u in app.state.services.store.list("users") if u["role"] == "boss")
+
+
+def new_project(c, name):
+    cu = c.post("/api/customers", json={"name": f"{name} Client (Demo)"})
+    assert cu.status_code == 200, cu.text
+    r = c.post("/api/projects", json={"name": name, "customer_id": cu.json()["id"]})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def supplier(c):
+    r = c.post(
+        "/api/suppliers",
+        json={
+            "name": "Example Freelance Studio (Demo)",
+            "kind": "person-capacity",
+            "workdays": [0, 1, 2, 3],
+            "weekly_hours": 24,
+            "rate": 80.0,
+            "country": "DE",
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
 
 SUM_MSG = "The offer's hour lines must add up to more than 0 and at most 100000 h"
 

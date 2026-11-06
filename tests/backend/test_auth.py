@@ -162,7 +162,7 @@ def test_member_permissions(boss_client, member_client):
         "/api/finance",
         "/api/customers",
         "/api/settings",
-        "/api/forecast",
+        "/api/plan",
         "/api/contracts",
         "/api/expenses",
         "/api/project-report",

@@ -407,7 +407,7 @@ def load(store: Repository, today: date, busy: BusyTimeProvider | None = None, c
         )
 
     for c in contracts:
-        if c.get("status") != "confirmed":
+        if (c.get("status") or "confirmed") != "confirmed":  # a missing status is the default, as in the migration
             continue
         it = make("contract", c["id"], c, c, c.get("rate"), c.get("title") or "Contract", 1.0)
         if it:
