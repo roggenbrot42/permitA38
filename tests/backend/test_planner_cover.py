@@ -322,3 +322,14 @@ def test_covered_current_week_and_short_later_week_has_no_second_sentence():
     supply = build(owners, asg, _no_holiday, today, today, D(2026, 12, 31))
     (v,) = cover([it], bookings, supply, owners, today, NAMES)
     assert v.items[0].explanation == "2.5 h per week from 09.11.2026 to 20.11.2026: short 1.5 h in 1 week (16.11.)."
+
+
+def test_booked_hours_go_to_all_contracts_before_any_offer():
+    """D4 (2026-11-06): a weekly contract and an overlapping weekly offer of one project, plus a total contract.
+    6 h booked on Monday: the weekly contract takes 4 (its weekly demand), the total contract the other 2, and the
+    offer nothing, although a weekly offer used to come before a total contract."""
+    contract_w = _item("contract", "CW", "orchard", *WK, hpw=4.0)
+    offer_w = _item("offer", "OW", "orchard", *WK, hpw=6.0)
+    contract_t = _item("contract", "CT", "orchard", *WK, total=10.0)
+    _, items = _one(20.0, [contract_w, offer_w, contract_t], [Booking("orchard", WK[0], 6.0)], D(2026, 11, 15))
+    assert (items["CW"].booked, items["CT"].booked, items["OW"].booked) == (4, 2, 0)

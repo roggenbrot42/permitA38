@@ -540,6 +540,8 @@ class ApiMachine(RuleBasedStateMachine):
             exp["user_id"] = actor_user["id"]
         elif coll == "entries" and not exp.get("user_id"):  # an entry without a person belongs to its writer
             exp["user_id"] = (old or {}).get("user_id") or actor_user["id"]
+        if coll == "entries" and self.is_internal(exp.get("project_id")):
+            exp["billable"] = False  # internal projects are never billed, whatever the request says
         if coll == "entries" and actor_user["role"] != "boss":
             # billing fields are boss/system-only: a member can neither set nor change them
             for k in ("rate", "invoice_id"):
@@ -758,13 +760,75 @@ class ApiMachine(RuleBasedStateMachine):
             assert r.json() == {"running": False}
             return
         e = r.json()["entry"]
-        assert e["id"] not in before and e["user_id"] == s.user_id and e["billable"] is True
+        assert e["id"] not in before and e["user_id"] == s.user_id
+        assert e["billable"] is (not self.is_internal(t["project_id"]))  # internal projects are never billable
         assert e["date"] in days and 1 <= e["minutes"] <= 2
         assert e.get("project_id") == t["project_id"] and e.get("task_id") == t["task_id"]
         assert e["note"] == (note if note is not None else t["note"])
         self.m["entries"][e["id"]] = {k: v for k, v in e.items() if v is not None and k not in ("created", "updated")}
         self.timers[s.user_id] = None
         self.dirty |= {"entries"}
+        assert self.call("GET", "/timer", s).json()["running"] is False
+
+    def is_internal(self, pid) -> bool:
+        return self.m["projects"].get(pid, {}).get("kind") == "internal"
+
+    @rule(data=st.data(), note=maybe_none(TEXT), has=st.tuples(st.booleans(), st.booleans(), st.booleans()))
+    def timer_update(self, data, note, has):
+        """PATCH /timer: only the given fields change, the start is kept; a project change without a task clears
+        the task; 409 without a running timer; unknown project/task and a foreign task are 422."""
+        self.tick()
+        s = data.draw(self.actor())
+        body = {}
+        if has[0]:
+            body["project_id"] = data.draw(self.ref("projects"))
+        if has[1]:
+            body["task_id"] = data.draw(self.ref("tasks"))
+        if has[2]:
+            body["note"] = note
+        r = self.call("PATCH", "/timer", s, json=body)
+        if (g := self.gate(s)) is not None:
+            assert r.status_code == g
+            return
+        cur = self.timers.get(s.user_id)
+        if not cur:
+            assert r.status_code == 409 and r.json() == {"detail": "No timer is running"}, r.text
+            return
+        pid = body["project_id"] if "project_id" in body else cur["project_id"]
+        tid = body["task_id"] if "task_id" in body else cur["task_id"]
+        if "project_id" in body and "task_id" not in body and pid != cur["project_id"]:
+            tid = None
+        task_rec = self.m["tasks"].get(tid)
+        if pid and pid not in self.m["projects"]:
+            return self._assert_detail(r, 422, "Unknown project")
+        if tid and task_rec is None:
+            return self._assert_detail(r, 422, "Unknown task")
+        if tid and task_rec.get("project_id") != pid:
+            return self._assert_detail(r, 422, "The task does not belong to the project")
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["running"] is True and got.get("project_id") == pid and got.get("task_id") == tid
+        new_note = body["note"] if body.get("note") is not None else cur["note"]
+        assert got["note"] == new_note
+        self.timers[s.user_id] = {"project_id": pid, "task_id": tid, "note": new_note}
+
+    def _assert_detail(self, r, code, detail):
+        assert r.status_code == code and r.json() == {"detail": detail}, r.text
+
+    @rule(data=st.data(), note=maybe_none(TEXT))
+    def timer_discard(self, data, note):
+        """POST /timer/stop with discard=true resets the timer and writes no entry."""
+        self.tick()
+        s = data.draw(self.actor())
+        before = {e["id"] for e in self.call("GET", "/entries", self.mint(self.boss_id)).json()}
+        r = self.call("POST", "/timer/stop", s, json={"discard": True, "note": note})
+        if (g := self.gate(s)) is not None:
+            assert r.status_code == g
+            return
+        assert r.status_code == 200 and r.json() == {"running": False}, r.text
+        after = {e["id"] for e in self.call("GET", "/entries", self.mint(self.boss_id)).json()}
+        assert after == before
+        self.timers[s.user_id] = None
         assert self.call("GET", "/timer", s).json()["running"] is False
 
     def _booked_entry(self, uid, t, note):
