@@ -259,7 +259,10 @@ write path, including import, transfer and procurement accept, comes before the 
 number guard); the importer reports a row it cannot fix instead of writing it. A restore into a fresh instance ignores
 the untouched `internaladmin` project when it checks whether the target is empty (decided after WP1c). WP4 must
 update the transfer shape check `_allocation_problem` (`transfer/importer.py`) so employee allocations with only
-`total_hours` are restorable.
+`total_hours` are restorable. db-guards-v2 part B (PR #99) guards every project link (allocations, tasks, entries,
+contracts, offers, invoices, expenses, incoming offers, trips, timers) and the project ids inside saved scenarios
+(`models.scenario_project_refs(changes)`); WP4's `changes.assignments` (alias of `changes.allocations`) must be added
+to that helper so the delete check and `check-db` keep seeing every project id.
 
 ## API contract (binding; backend and web UI are built against it in parallel)
 
