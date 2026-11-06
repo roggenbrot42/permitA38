@@ -1068,18 +1068,21 @@ class AllocationChange(v.CheckedBody):
     start: v.OptDate = None
     end: v.OptDate = None
     hours_per_week: v.AllocHours | None = None
+    total_hours: v.PositiveTotalHours | None = None
 
     @model_validator(mode="after")
     def _rules(self):
         _check_alloc_period(self.start, self.end)
+        if self.hours_per_week is not None and self.total_hours is not None:
+            raise ValueError("give at most one of hours_per_week and total_hours")
         if self.project_id == v.UNASSIGNED:
             raise ValueError("project_id must be a project")
         if self.delete and not self.id:
             raise ValueError("delete needs an id")
         if not self.id and not self.delete:
-            missing = [
-                k for k in ("user_id", "project_id", "start", "end", "hours_per_week") if getattr(self, k) is None
-            ]
+            missing = [k for k in ("user_id", "project_id", "start", "end") if getattr(self, k) is None]
+            if self.hours_per_week is None and self.total_hours is None:
+                missing.append("hours_per_week or total_hours")
             if missing:
                 raise ValueError("a new allocation needs " + ", ".join(missing))
         return self

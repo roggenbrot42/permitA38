@@ -352,6 +352,24 @@ def test_changes_apply_in_memory_without_writing(repo):
     assert {c: repo.list(c) for c in before} == before  # nothing written
 
 
+def test_changes_edit_a_total_hours_allocation_in_memory(repo):
+    alloc(repo, "alloc00001", EMP, hours_per_week=None, total_hours=60)
+    alloc(repo, "alloc00002", EMP, project=P3)
+    before = repo.list("allocations")
+    snap = load(repo, TODAY, changes={"allocations": [
+        {"id": "alloc00001", "total_hours": 80, "start": "2026-11-10", "end": "2026-11-30"},
+        {"id": "alloc00002", "total_hours": 30},  # switching the kind clears hours_per_week
+    ]})  # fmt: skip
+    by = {a.id: a for a in snap.assignments}
+    a1, a2 = by["alloc00001"], by["alloc00002"]
+    assert (a1.hours_per_week, a1.total_hours, a1.start, a1.end) == (None, 80.0, D(2026, 11, 10), D(2026, 11, 30))
+    assert (a2.hours_per_week, a2.total_hours) == (None, 30.0)
+    snap = load(repo, TODAY, changes={"allocations": [{"id": "alloc00001", "hours_per_week": 10}]})
+    a1 = next(a for a in snap.assignments if a.id == "alloc00001")
+    assert (a1.hours_per_week, a1.total_hours) == (10.0, None)
+    assert repo.list("allocations") == before
+
+
 def test_changes_to_an_unknown_allocation_raise_not_found(repo):
     with pytest.raises(ServiceError) as e:
         load(repo, TODAY, changes={"allocations": [{"id": "nothere001", "delete": True}]})

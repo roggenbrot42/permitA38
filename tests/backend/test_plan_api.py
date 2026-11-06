@@ -93,6 +93,17 @@ def test_plan_project_filter_and_unknown_project(boss_client, e1):
     assert boss_client.get("/api/plan", params={"weeks": 53}).status_code == 422
 
 
+def test_simulate_rejects_both_hour_fields_in_one_allocation_change(boss_client, e1):
+    both = {"allocations": [{"user_id": ADA, "project_id": ORCH, "start": "2026-11-09", "end": "2026-12-04",
+                             "hours_per_week": 6, "total_hours": 40}]}  # fmt: skip
+    assert boss_client.post("/api/plan/simulate", json={"changes": both}).status_code == 422
+    none = {"allocations": [{"user_id": ADA, "project_id": ORCH, "start": "2026-11-09", "end": "2026-12-04"}]}
+    assert boss_client.post("/api/plan/simulate", json={"changes": none}).status_code == 422
+    total = {"allocations": [{"user_id": ADA, "project_id": ORCH, "start": "2026-11-09", "end": "2026-12-04",
+                              "total_hours": 40}]}  # fmt: skip
+    assert boss_client.post("/api/plan/simulate", json={"changes": total}).status_code == 200
+
+
 def test_simulate_delta_and_nothing_written(boss_client, e1, store):
     changes = {"allocations": [{"user_id": ADA, "project_id": ORCH, "start": "2026-11-09", "end": "2026-12-04",
                                 "hours_per_week": 6}]}  # fmt: skip

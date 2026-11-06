@@ -53,9 +53,11 @@
     P.abs[key] = { ...cur, ...patch };
   }
   function realAlloc(id) { return P.allocs.find(a => a.id === id); }
+  const allocHours = a => (a.hours_per_week != null ? { hours_per_week: a.hours_per_week } : { total_hours: a.total_hours });   // exactly the field the row has
+  const allocBase = a => ({ id: a.id, user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, ...allocHours(a) });
   function editAlloc(key, patch) {
     const orig = key.startsWith('r:') ? realAlloc(key.slice(2)) : null;
-    const cur = P.alloc[key] || (orig ? { id: orig.id, user_id: orig.user_id, project_id: orig.project_id, start: orig.start, end: orig.end, hours_per_week: orig.hours_per_week } : null);
+    const cur = P.alloc[key] || (orig ? allocBase(orig) : null);
     if (!cur) return;
     P.alloc[key] = { ...cur, ...patch };
   }
@@ -69,7 +71,7 @@
     const commitments = Object.values(P.com).map(c => ({ kind: c.kind, id: c.id, start: c.start, end: c.end, ...(c.hours_per_week != null ? { hours_per_week: c.hours_per_week } : { total_hours: c.total_hours ?? null }) }));
     const allocations = Object.entries(P.alloc).map(([k, a]) => {
       if (a.delete) return { id: a.id, delete: true };
-      const out = { user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, hours_per_week: a.hours_per_week };
+      const out = { user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, ...allocHours(a) };
       if (k.startsWith('r:')) out.id = k.slice(2);
       return out;
     });
@@ -196,11 +198,12 @@
     const row = (key, a, draft) => {
       const perWeek = a.hours_per_week != null;
       const amount = perWeek ? `${num(a.hours_per_week, 2)} h/week` : `${num(a.total_hours, 2)} h total`;
-      const label = `${projName(a.project_id)}: ${amount}, ${fmtDate(a.start)} – ${fmtDate(a.end)}`;
+      const ended = !!a.id && a.end < todayISO();   // a saved assignment that ended before today is history
+      const label = `${projName(a.project_id)}: ${amount}, ${fmtDate(a.start)} – ${fmtDate(a.end)}${ended ? ' (ended)' : ''}`;
       const who = (S.d.users.find(u => u.id === a.user_id) || {}).name || '';
       const dim = P.project && a.project_id !== P.project ? ' dim' : '';
-      rows.push(`<div class="pln-row${dim}"><div class="pln-label"><span>${esc(projName(a.project_id))}</span><div class="small muted">${uid ? '' : esc(who) + ' · '}${perWeek ? `<input type="number" class="pln-hrs" min="0.25" max="80" step="0.25" value="${esc(a.hours_per_week)}" data-change="plnAllocHours" data-key="${esc(key)}" aria-label="Hours per week of ${esc(label)}"> h/week` : esc(amount)}</div></div>
-        <div class="pln-lane" data-lane="alloc" style="width:${horizon() * DW}px">${cells()}${bar(a.start, a.end, `alloc${draft ? ' draft' : ''}${perWeek ? '' : ' fixed'}`, label, perWeek ? { kind: 'alloc', key, id: a.id || key } : {})}</div></div>`);
+      rows.push(`<div class="pln-row${dim}"><div class="pln-label"><span>${esc(projName(a.project_id))}</span><div class="small muted">${uid ? '' : esc(who) + ' · '}${ended ? esc(amount) : perWeek ? `<input type="number" class="pln-hrs" min="0.25" max="80" step="0.25" value="${esc(a.hours_per_week)}" data-change="plnAllocHours" data-key="${esc(key)}" aria-label="Hours per week of ${esc(label)}"> h/week` : `<input type="number" class="pln-hrs" min="0.25" max="100000" step="0.25" value="${esc(a.total_hours)}" data-change="plnAllocHours" data-key="${esc(key)}" aria-label="Total hours of ${esc(label)}"> h total`}</div></div>
+        <div class="pln-lane" data-lane="alloc" style="width:${horizon() * DW}px">${cells()}${bar(a.start, a.end, `alloc${draft ? ' draft' : ''}${perWeek ? '' : ' fixed'}${ended ? ' ended' : ''}`, label, !ended ? { kind: 'alloc', key, id: a.id || key } : {})}</div></div>`);
     };
     for (const a of P.allocs) {
       if (a.kind && a.kind !== 'employee') continue;
@@ -224,7 +227,7 @@
       if (cancelled && (!a.cancelled_from || end < a.start)) return '';
       const label = `${a.supplier_name || 'Subcontractor'}: ${projName(a.project_id)}, ${a.hours_per_week != null ? num(a.hours_per_week, 2) + ' h/week' : num(a.total_hours, 2) + ' h total'}, ${fmtDate(a.start)} – ${fmtDate(a.end)}${cancelled ? `, cancelled from ${fmtDate(a.cancelled_from)}` : ''}`;
       return `<div class="pln-row pln-ext-row${cancelled ? ' cancelled' : ''}" data-ext="${esc(a.id)}"><div class="pln-label"><span>${esc(a.supplier_name || 'Subcontractor')}</span><div class="small muted">${esc(projName(a.project_id))}${cancelled ? `, cancelled from ${esc(fmtDate(a.cancelled_from))}` : ''}</div></div>
-        <div class="pln-lane" style="width:${horizon() * DW}px">${cells()}<div class="pln-bar ext${cancelled ? ' cancelled' : ''}" style="${barStyle(a.start, end)}" tabindex="0" role="group" aria-label="${esc(label)}" title="${esc(label)}"><span class="pln-bar-t">${esc(a.supplier_name || 'External')}</span></div></div></div>`;
+        <div class="pln-lane" style="width:${horizon() * DW}px">${cells()}<div class="pln-bar ext${cancelled ? ' cancelled' : ''}" style="${barStyle(a.start, end)}" tabindex="0" role="group" aria-label="${esc(label)}" title="${esc(label + ' (edit in Assignments)')}"><span class="pln-bar-t">${esc(a.supplier_name || 'External')}</span></div></div></div>`;
     }).join('');
     return rows ? `<div class="pln-row pln-group"><div class="pln-label"><b>External</b></div></div>${rows}` : '';
   }
@@ -296,7 +299,7 @@
       items.push({ store: 'com', key, what: `${key.startsWith('offer') ? 'Offer' : 'Contract'}: ${fmtDate(c.start)} – ${fmtDate(c.end)}` });
     }
     for (const [key, a] of Object.entries(P.alloc)) {
-      items.push({ store: 'alloc', key, what: a.delete ? `Remove allocation to ${projName((realAlloc(a.id) || {}).project_id)}` : `${key.startsWith('n:') ? 'New allocation' : 'Allocation'} to ${projName(a.project_id)}: ${num(a.hours_per_week, 2)} h/week, ${fmtDate(a.start)} – ${fmtDate(a.end)}` });
+      items.push({ store: 'alloc', key, what: a.delete ? `Remove allocation to ${projName((realAlloc(a.id) || {}).project_id)}` : `${key.startsWith('n:') ? 'New allocation' : 'Allocation'} to ${projName(a.project_id)}: ${a.hours_per_week != null ? num(a.hours_per_week, 2) + ' h/week' : num(a.total_hours, 2) + ' h total'}, ${fmtDate(a.start)} – ${fmtDate(a.end)}` });
     }
     if (!items.length) return '';
     return `${deltaBox()}<ul class="pln-draftlist">${items.map(i => `<li><span>${esc(i.what)}</span> <button type="button" class="ghost sm" data-a="plnDiscardOne" data-store="${i.store}" data-key="${esc(i.key)}">Discard</button></li>`).join('')}</ul>`;
@@ -385,7 +388,7 @@
       if (end < start) return;
       editAbs(key, { start, end });
     } else if (kind === 'alloc') {
-      const cur = P.alloc[key] || (key.startsWith('r:') ? (() => { const a = realAlloc(id); return a && { id, user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, hours_per_week: a.hours_per_week }; })() : null);
+      const cur = P.alloc[key] || (key.startsWith('r:') ? (() => { const a = realAlloc(id); return a && allocBase(a); })() : null);
       if (!cur) return;
       let { start, end } = cur;
       if (mode === 'start') start = addDays(start, days);
@@ -415,7 +418,7 @@
   function onDown(e) {
     const bar = e.target.closest('.pln-bar');
     const lane = e.target.closest('[data-lane="time"]');
-    if (bar && !bar.dataset.kind) return;   // read-only bars (subcontractors, total-hours assignments)
+    if (bar && !bar.dataset.kind) return;   // read-only bars (subcontractors, assignments that ended before today)
     if (bar && e.button === 0) {
       const mode = (e.target.dataset && e.target.dataset.mode) || 'move';
       drag = { kind: bar.dataset.kind, key: bar.dataset.key, id: bar.dataset.id, mode, x0: e.clientX, el: bar, delta: 0,
@@ -536,9 +539,16 @@
   A.plnDiscard = () => { P.abs = {}; P.com = {}; P.alloc = {}; P.sugg = null; schedule(); };
   A.plnProject = el => { P.project = el.value; lsSet('plnProject', P.project); P.why = null; schedule(); };
   A.plnAllocHours = el => {
-    const v = +el.value;
-    if (!(v >= 0.25 && v <= 80)) { toast(`Hours per week must be between ${num(0.25, 2)} and ${num(80, 0)}`, true); return paint(); }
-    editAlloc(el.dataset.key, { hours_per_week: v });
+    const v = +el.value, key = el.dataset.key;
+    const row = P.alloc[key] || (key.startsWith('r:') ? realAlloc(key.slice(2)) : null);
+    if (!row) return;
+    if (row.hours_per_week == null) {
+      if (!(v >= 0.25 && v <= 100000)) { toast(`Total hours must be between ${num(0.25, 2)} and ${num(100000, 0)}`, true); return paint(); }
+      editAlloc(key, { total_hours: v });
+    } else {
+      if (!(v >= 0.25 && v <= 80)) { toast(`Hours per week must be between ${num(0.25, 2)} and ${num(80, 0)}`, true); return paint(); }
+      editAlloc(key, { hours_per_week: v });
+    }
     schedule();
   };
   A.plnAddAlloc = () => {
@@ -625,8 +635,8 @@
     if (!s) return;
     P.abs = {}; P.com = {}; P.alloc = {};
     for (const a of s.changes.allocations || []) {
-      if (a.id) P.alloc['r:' + a.id] = a.delete ? { id: a.id, delete: true } : { id: a.id, user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, hours_per_week: a.hours_per_week };
-      else P.alloc['n:' + Math.random().toString(36).slice(2, 8)] = { user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, hours_per_week: a.hours_per_week };
+      if (a.id) P.alloc['r:' + a.id] = a.delete ? { id: a.id, delete: true } : allocBase(a);
+      else P.alloc['n:' + Math.random().toString(36).slice(2, 8)] = { user_id: a.user_id, project_id: a.project_id, start: a.start, end: a.end, ...allocHours(a) };
     }
     for (const a of s.changes.absences || []) {
       if (a.id) { if (a.delete) P.abs['r:' + a.id] = { id: a.id, delete: true, user_id: a.user_id }; else P.abs['r:' + a.id] = { id: a.id, user_id: a.user_id, kind: a.kind || 'vacation', start: a.start, end: a.end }; }

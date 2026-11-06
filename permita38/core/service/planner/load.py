@@ -125,16 +125,19 @@ def apply_allocation_changes(
                 base.pop(rid)
                 continue
             merged = dict(old)
-            for k in ("user_id", "project_id", "start", "end", "hours_per_week"):
+            for k in ("user_id", "project_id", "start", "end", "hours_per_week", "total_hours"):
                 if ch.get(k) is not None:
                     merged[k] = ch[k]
+            for k, other in (("hours_per_week", "total_hours"), ("total_hours", "hours_per_week")):
+                if ch.get(k) is not None:
+                    merged[other] = None
         else:
             merged = dict(
                 id=f"new{i}",
                 status="active",
                 **{
                     k: ch[k]
-                    for k in ("user_id", "project_id", "start", "end", "hours_per_week")
+                    for k in ("user_id", "project_id", "start", "end", "hours_per_week", "total_hours")
                     if ch.get(k) is not None
                 },
             )

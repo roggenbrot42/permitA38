@@ -9849,6 +9849,19 @@
               }
             ],
             "title": "Hours Per Week"
+          },
+          "total_hours": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Hours"
           }
         },
         "additionalProperties": false,
