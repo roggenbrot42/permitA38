@@ -66,8 +66,8 @@ def test_guard_declarations_are_well_formed():
             assert g.target in TABLES and len(g.columns) == 1, g.name
         else:
             assert g.target is None, g.name
-    # trips start/end are local datetimes: only the order guard
-    assert [g.kind for g in GUARDS if g.table == "trips"] == ["order"]
+    # trips start/end are local datetimes: only the order guard (plus the project reference)
+    assert [g.kind for g in GUARDS if g.table == "trips"] == ["order", "reference"]
     assert CHECKS["allocations"][0] == "allocations_one_owner"
 
 

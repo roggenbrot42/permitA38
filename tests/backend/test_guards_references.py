@@ -27,6 +27,11 @@ EXPECTED = [
     ("entries", "project_id", "projects"),
     ("offers", "project_id", "projects"),
     ("invoices", "project_id", "projects"),
+    ("tasks", "project_id", "projects"),
+    ("expenses", "project_id", "projects"),
+    ("incoming_offers", "project_id", "projects"),
+    ("trips", "project_id", "projects"),
+    ("timers", "project_id", "projects"),
 ]
 CASES = [pytest.param(t, c, tgt, id=f"{t}.{c}") for t, c, tgt in EXPECTED]
 
@@ -69,7 +74,10 @@ def target_row(repo, target):
 
 
 def companions(repo, table, col, value):
-    """The other fields a row needs: an allocation has exactly one owner (user xor supplier)."""
+    """The other fields a row needs: an allocation has exactly one owner (user xor supplier); a timer row has the
+    id of its user (one timer row per user)."""
+    if table == "timers":
+        return {"id": target_row(repo, "users")["id"]}
     if table != "allocations":
         return {}
     if col == "project_id":
@@ -121,7 +129,7 @@ def test_every_guarded_reference_is_covered_by_the_check_db_rule():
 
 def test_lookup_indexes_exist_in_the_schema_and_the_database(repo):
     names = {r[0] for r in repo.conn.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
-    for t in ("contracts", "offers", "invoices"):
+    for t in ("contracts", "offers", "invoices", "incoming_offers", "trips", "timers"):
         assert any(
             i.name == f"idx_{t}_project" and i.columns == ("project_id",) and not i.unique for i in TABLES[t].indexes
         )
@@ -141,7 +149,7 @@ def test_sqlite_triggers_equal_guard_sql_including_the_delete_side(repo):
         want[f"{g.name}_ins"] = norm(ins)
         want[f"{g.name}_upd"] = norm(upd)
         want[f"{g.name}_del"] = norm(dele)
-    assert len(want) == 21
+    assert len(want) == 36
     got = {
         name: norm(sql)
         for name, sql in repo.conn.execute("SELECT name, sql FROM sqlite_master WHERE type = 'trigger'")
@@ -161,12 +169,12 @@ def test_sqlite_migration_file_is_exactly_the_generated_statements_and_indexes()
     assert m.requires == "e4b70dba"
     sql = m.sql()
     statements = reference_statements("sqlite")
-    assert len(statements) == 21
+    assert len(statements) == 36
     for s in statements:
         assert s in sql
-    assert sql.count("CREATE TRIGGER") == 21
-    assert sql.count("CREATE INDEX") == 3
-    for t in ("contracts", "offers", "invoices"):
+    assert sql.count("CREATE TRIGGER") == 36
+    assert sql.count("CREATE INDEX") == 6
+    for t in ("contracts", "offers", "invoices", "incoming_offers", "trips", "timers"):
         assert f'CREATE INDEX "idx_{t}_project" ON "{t}" ("project_id");' in sql
     assert m.id == HEAD
 
@@ -180,9 +188,9 @@ def test_native_migration_files_contain_the_generated_statements(dialect):
     assert statements
     for s in statements:
         assert s in sql
-    assert sql.count("CREATE INDEX") == 3
-    assert sql.count("permita38:ref.dangling") == (7 if dialect == "postgresql" else 14)
-    assert sql.count("permita38:ref.in_use") == 7
+    assert sql.count("CREATE INDEX") == 6
+    assert sql.count("permita38:ref.dangling") == (12 if dialect == "postgresql" else 24)
+    assert sql.count("permita38:ref.in_use") == 12
 
 
 def test_every_dialect_folder_has_the_migration():
@@ -197,11 +205,11 @@ def test_postgresql_and_mariadb_statements_signal_the_codes():
     pg = "\n".join(reference_statements("postgresql"))
     assert "RAISE EXCEPTION 'permita38:ref.dangling'" in pg
     assert "RAISE EXCEPTION 'permita38:ref.in_use'" in pg
-    assert pg.count("BEFORE DELETE ON") == 7
+    assert pg.count("BEFORE DELETE ON") == 12
     maria = "\n".join(reference_statements("mariadb"))
     assert "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'" in maria
     assert "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.in_use'" in maria
-    assert maria.count("BEFORE DELETE ON") == 7
+    assert maria.count("BEFORE DELETE ON") == 12
 
 
 # ------------------------------------------------------------------ (c) insert / update side

@@ -192,6 +192,7 @@ TABLES: dict[str, Table] = {
             (
                 Index("idx_incoming_offers_supplier", ("supplier_id",)),
                 Index("idx_incoming_offers_status", ("status",)),
+                Index("idx_incoming_offers_project", ("project_id",)),
             ),
         ),
         # business trips (docs/specs/business-trips.md): the meal allowance and mileage are computed from these rows
@@ -202,7 +203,7 @@ TABLES: dict[str, Table] = {
                 "places:json meals_provided:json mileage:json not_needed:json cost_centre:str status:str allowance_total:float "
                 "mileage_km:float mileage_total:float rules_version:str days:json" + _EXTRA
             ),
-            (Index("idx_trips_user", ("user_id",)),),
+            (Index("idx_trips_user", ("user_id",)), Index("idx_trips_project", ("project_id",))),
         ),
         Table(
             "users",
@@ -244,6 +245,7 @@ TABLES: dict[str, Table] = {
         Table(
             "timers",
             _cols(_BASE + "running:bool started:int project_id:id task_id:id note:text" + _EXTRA),
+            (Index("idx_timers_project", ("project_id",)),),
         ),
         # document number counters: one row per document type (or 'shared') and period (see core/numbering.py)
         Table(
@@ -617,6 +619,11 @@ _REFERENCES: tuple[tuple[str, str, str], ...] = (
     ("entries", "project_id", "projects"),
     ("offers", "project_id", "projects"),
     ("invoices", "project_id", "projects"),
+    ("tasks", "project_id", "projects"),
+    ("expenses", "project_id", "projects"),
+    ("incoming_offers", "project_id", "projects"),
+    ("trips", "project_id", "projects"),
+    ("timers", "project_id", "projects"),
 )
 _ORDER_TABLES = ("absences", "contracts", "projects", "allocations", "trips")
 

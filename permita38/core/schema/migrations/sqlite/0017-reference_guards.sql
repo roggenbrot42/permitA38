@@ -6,6 +6,9 @@
 CREATE INDEX "idx_contracts_project" ON "contracts" ("project_id");
 CREATE INDEX "idx_offers_project" ON "offers" ("project_id");
 CREATE INDEX "idx_invoices_project" ON "invoices" ("project_id");
+CREATE INDEX "idx_incoming_offers_project" ON "incoming_offers" ("project_id");
+CREATE INDEX "idx_trips_project" ON "trips" ("project_id");
+CREATE INDEX "idx_timers_project" ON "timers" ("project_id");
 
 -- reference guards: generated from core/repository/schema.py GUARDS by Dialect.guard_sql (a test keeps them equal)
 CREATE TRIGGER "guard_allocations_project_id_ref_ins" BEFORE INSERT ON "allocations"
@@ -84,4 +87,59 @@ WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10,
 BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
 CREATE TRIGGER "guard_invoices_project_id_ref_del" BEFORE DELETE ON "projects"
 WHEN EXISTS (SELECT 1 FROM "invoices" WHERE "project_id" = OLD."id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.in_use'); END;
+CREATE TRIGGER "guard_tasks_project_id_ref_ins" BEFORE INSERT ON "tasks"
+WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = NEW."project_id")
+ AND NOT EXISTS (SELECT 1 FROM "tasks" WHERE "id" = NEW."id" AND "project_id" IS NEW."project_id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
+CREATE TRIGGER "guard_tasks_project_id_ref_upd" BEFORE UPDATE OF "project_id" ON "tasks"
+WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = NEW."project_id")
+ AND (NEW."project_id" IS NOT OLD."project_id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
+CREATE TRIGGER "guard_tasks_project_id_ref_del" BEFORE DELETE ON "projects"
+WHEN EXISTS (SELECT 1 FROM "tasks" WHERE "project_id" = OLD."id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.in_use'); END;
+CREATE TRIGGER "guard_expenses_project_id_ref_ins" BEFORE INSERT ON "expenses"
+WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = NEW."project_id")
+ AND NOT EXISTS (SELECT 1 FROM "expenses" WHERE "id" = NEW."id" AND "project_id" IS NEW."project_id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
+CREATE TRIGGER "guard_expenses_project_id_ref_upd" BEFORE UPDATE OF "project_id" ON "expenses"
+WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = NEW."project_id")
+ AND (NEW."project_id" IS NOT OLD."project_id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
+CREATE TRIGGER "guard_expenses_project_id_ref_del" BEFORE DELETE ON "projects"
+WHEN EXISTS (SELECT 1 FROM "expenses" WHERE "project_id" = OLD."id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.in_use'); END;
+CREATE TRIGGER "guard_incoming_offers_project_id_ref_ins" BEFORE INSERT ON "incoming_offers"
+WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = NEW."project_id")
+ AND NOT EXISTS (SELECT 1 FROM "incoming_offers" WHERE "id" = NEW."id" AND "project_id" IS NEW."project_id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
+CREATE TRIGGER "guard_incoming_offers_project_id_ref_upd" BEFORE UPDATE OF "project_id" ON "incoming_offers"
+WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = NEW."project_id")
+ AND (NEW."project_id" IS NOT OLD."project_id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
+CREATE TRIGGER "guard_incoming_offers_project_id_ref_del" BEFORE DELETE ON "projects"
+WHEN EXISTS (SELECT 1 FROM "incoming_offers" WHERE "project_id" = OLD."id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.in_use'); END;
+CREATE TRIGGER "guard_trips_project_id_ref_ins" BEFORE INSERT ON "trips"
+WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = NEW."project_id")
+ AND NOT EXISTS (SELECT 1 FROM "trips" WHERE "id" = NEW."id" AND "project_id" IS NEW."project_id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
+CREATE TRIGGER "guard_trips_project_id_ref_upd" BEFORE UPDATE OF "project_id" ON "trips"
+WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = NEW."project_id")
+ AND (NEW."project_id" IS NOT OLD."project_id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
+CREATE TRIGGER "guard_trips_project_id_ref_del" BEFORE DELETE ON "projects"
+WHEN EXISTS (SELECT 1 FROM "trips" WHERE "project_id" = OLD."id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.in_use'); END;
+CREATE TRIGGER "guard_timers_project_id_ref_ins" BEFORE INSERT ON "timers"
+WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = NEW."project_id")
+ AND NOT EXISTS (SELECT 1 FROM "timers" WHERE "id" = NEW."id" AND "project_id" IS NEW."project_id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
+CREATE TRIGGER "guard_timers_project_id_ref_upd" BEFORE UPDATE OF "project_id" ON "timers"
+WHEN (NEW."project_id" IS NOT NULL AND trim(NEW."project_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "projects" WHERE "id" = NEW."project_id")
+ AND (NEW."project_id" IS NOT OLD."project_id")
+BEGIN SELECT RAISE(ABORT, 'permita38:ref.dangling'); END;
+CREATE TRIGGER "guard_timers_project_id_ref_del" BEFORE DELETE ON "projects"
+WHEN EXISTS (SELECT 1 FROM "timers" WHERE "project_id" = OLD."id")
 BEGIN SELECT RAISE(ABORT, 'permita38:ref.in_use'); END;

@@ -6,6 +6,9 @@
 CREATE INDEX `idx_contracts_project` ON `contracts` (`project_id`);
 CREATE INDEX `idx_offers_project` ON `offers` (`project_id`);
 CREATE INDEX `idx_invoices_project` ON `invoices` (`project_id`);
+CREATE INDEX `idx_incoming_offers_project` ON `incoming_offers` (`project_id`);
+CREATE INDEX `idx_trips_project` ON `trips` (`project_id`);
+CREATE INDEX `idx_timers_project` ON `timers` (`project_id`);
 
 -- reference guards: generated from core/repository/schema.py GUARDS by Dialect.guard_sql (a test keeps them equal)
 CREATE TRIGGER `guard_allocations_project_id_ref_ins` BEFORE INSERT ON `allocations` FOR EACH ROW
@@ -91,4 +94,64 @@ END;
 CREATE TRIGGER `guard_invoices_project_id_ref_del` BEFORE DELETE ON `projects` FOR EACH ROW
 BEGIN
   IF EXISTS (SELECT 1 FROM `invoices` WHERE `project_id` = OLD.`id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.in_use'; END IF;
+END;
+CREATE TRIGGER `guard_tasks_project_id_ref_ins` BEFORE INSERT ON `tasks` FOR EACH ROW
+BEGIN
+  IF (NEW.`project_id` IS NOT NULL AND NEW.`project_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `projects` WHERE `id` = NEW.`project_id`) AND NOT EXISTS (SELECT 1 FROM `tasks` WHERE `id` = NEW.`id` AND `project_id` <=> NEW.`project_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
+END;
+CREATE TRIGGER `guard_tasks_project_id_ref_upd` BEFORE UPDATE ON `tasks` FOR EACH ROW
+BEGIN
+  IF NOT (OLD.`project_id` <=> NEW.`project_id`) AND (NEW.`project_id` IS NOT NULL AND NEW.`project_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `projects` WHERE `id` = NEW.`project_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
+END;
+CREATE TRIGGER `guard_tasks_project_id_ref_del` BEFORE DELETE ON `projects` FOR EACH ROW
+BEGIN
+  IF EXISTS (SELECT 1 FROM `tasks` WHERE `project_id` = OLD.`id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.in_use'; END IF;
+END;
+CREATE TRIGGER `guard_expenses_project_id_ref_ins` BEFORE INSERT ON `expenses` FOR EACH ROW
+BEGIN
+  IF (NEW.`project_id` IS NOT NULL AND NEW.`project_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `projects` WHERE `id` = NEW.`project_id`) AND NOT EXISTS (SELECT 1 FROM `expenses` WHERE `id` = NEW.`id` AND `project_id` <=> NEW.`project_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
+END;
+CREATE TRIGGER `guard_expenses_project_id_ref_upd` BEFORE UPDATE ON `expenses` FOR EACH ROW
+BEGIN
+  IF NOT (OLD.`project_id` <=> NEW.`project_id`) AND (NEW.`project_id` IS NOT NULL AND NEW.`project_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `projects` WHERE `id` = NEW.`project_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
+END;
+CREATE TRIGGER `guard_expenses_project_id_ref_del` BEFORE DELETE ON `projects` FOR EACH ROW
+BEGIN
+  IF EXISTS (SELECT 1 FROM `expenses` WHERE `project_id` = OLD.`id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.in_use'; END IF;
+END;
+CREATE TRIGGER `guard_incoming_offers_project_id_ref_ins` BEFORE INSERT ON `incoming_offers` FOR EACH ROW
+BEGIN
+  IF (NEW.`project_id` IS NOT NULL AND NEW.`project_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `projects` WHERE `id` = NEW.`project_id`) AND NOT EXISTS (SELECT 1 FROM `incoming_offers` WHERE `id` = NEW.`id` AND `project_id` <=> NEW.`project_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
+END;
+CREATE TRIGGER `guard_incoming_offers_project_id_ref_upd` BEFORE UPDATE ON `incoming_offers` FOR EACH ROW
+BEGIN
+  IF NOT (OLD.`project_id` <=> NEW.`project_id`) AND (NEW.`project_id` IS NOT NULL AND NEW.`project_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `projects` WHERE `id` = NEW.`project_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
+END;
+CREATE TRIGGER `guard_incoming_offers_project_id_ref_del` BEFORE DELETE ON `projects` FOR EACH ROW
+BEGIN
+  IF EXISTS (SELECT 1 FROM `incoming_offers` WHERE `project_id` = OLD.`id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.in_use'; END IF;
+END;
+CREATE TRIGGER `guard_trips_project_id_ref_ins` BEFORE INSERT ON `trips` FOR EACH ROW
+BEGIN
+  IF (NEW.`project_id` IS NOT NULL AND NEW.`project_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `projects` WHERE `id` = NEW.`project_id`) AND NOT EXISTS (SELECT 1 FROM `trips` WHERE `id` = NEW.`id` AND `project_id` <=> NEW.`project_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
+END;
+CREATE TRIGGER `guard_trips_project_id_ref_upd` BEFORE UPDATE ON `trips` FOR EACH ROW
+BEGIN
+  IF NOT (OLD.`project_id` <=> NEW.`project_id`) AND (NEW.`project_id` IS NOT NULL AND NEW.`project_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `projects` WHERE `id` = NEW.`project_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
+END;
+CREATE TRIGGER `guard_trips_project_id_ref_del` BEFORE DELETE ON `projects` FOR EACH ROW
+BEGIN
+  IF EXISTS (SELECT 1 FROM `trips` WHERE `project_id` = OLD.`id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.in_use'; END IF;
+END;
+CREATE TRIGGER `guard_timers_project_id_ref_ins` BEFORE INSERT ON `timers` FOR EACH ROW
+BEGIN
+  IF (NEW.`project_id` IS NOT NULL AND NEW.`project_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `projects` WHERE `id` = NEW.`project_id`) AND NOT EXISTS (SELECT 1 FROM `timers` WHERE `id` = NEW.`id` AND `project_id` <=> NEW.`project_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
+END;
+CREATE TRIGGER `guard_timers_project_id_ref_upd` BEFORE UPDATE ON `timers` FOR EACH ROW
+BEGIN
+  IF NOT (OLD.`project_id` <=> NEW.`project_id`) AND (NEW.`project_id` IS NOT NULL AND NEW.`project_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `projects` WHERE `id` = NEW.`project_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
+END;
+CREATE TRIGGER `guard_timers_project_id_ref_del` BEFORE DELETE ON `projects` FOR EACH ROW
+BEGIN
+  IF EXISTS (SELECT 1 FROM `timers` WHERE `project_id` = OLD.`id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.in_use'; END IF;
 END;
