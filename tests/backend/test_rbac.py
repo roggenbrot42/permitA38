@@ -647,6 +647,11 @@ def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
         raw.execute('DROP TABLE "document_scans"')
     if "guards" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
         raw.executescript('DROP INDEX "idx_invoices_number"; DROP INDEX "idx_offers_number";')
+    if "project_planning" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
+        raw.executescript(
+            'DELETE FROM "projects" WHERE "id" = \'internaladmin\'; ALTER TABLE "projects" DROP COLUMN "kind";'
+            ' ALTER TABLE "projects" ADD COLUMN "personal" INTEGER;'
+        )
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)
@@ -744,6 +749,6 @@ def test_employee_gets_404_for_unassigned_project_and_does_not_see_its_tasks(bos
     t_other = boss_client.post("/api/tasks", json={"name": "T2", "project_id": other["id"]}).json()
     assert emp.get(f"/api/projects/{other['id']}").status_code == 404
     assert emp.get(f"/api/projects/{mine['id']}").status_code == 200
-    assert [p["id"] for p in emp.get("/api/projects").json()] == [mine["id"]]
+    assert [p["id"] for p in emp.get("/api/projects").json() if p["id"] != "internaladmin"] == [mine["id"]]
     assert emp.get(f"/api/tasks/{t_other['id']}").status_code == 404
     assert [t["id"] for t in emp.get("/api/tasks").json()] == [t_mine["id"]]

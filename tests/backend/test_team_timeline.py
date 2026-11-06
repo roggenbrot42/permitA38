@@ -197,7 +197,7 @@ def test_assignment_of_a_deleted_project_has_null_project_and_cancelled_ones_are
     store.save("allocations", {"user_id": ids["bea"], "project_id": "gone", "start": "2026-11-05", "end": "2026-11-06",
                                "hours_per_week": 5, "status": "active"})  # fmt: skip
     store.save("allocations", {"user_id": ids["bea"], "project_id": ids["p_web"], "start": "2026-11-05",
-                               "end": "2026-11-06", "hours_per_week": 5, "status": "cancelled"})  # fmt: skip
+                               "end": "2026-11-06", "hours_per_week": 5, "status": "cancelled", "cancelled_from": "2026-11-05"})  # fmt: skip
     bea = _by_name(world["boss"].get(TIMELINE).json())["Bea Example"]
     assert len(bea["assignments"]) == 1
     a = bea["assignments"][0]

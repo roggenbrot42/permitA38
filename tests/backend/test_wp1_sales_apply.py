@@ -57,7 +57,7 @@ def test_accept_without_hours_is_refused_and_writes_nothing(boss_client):
     assert r.status_code == 422
     assert "no hours to plan" in r.text
     assert boss_client.get("/api/contracts").json() == []
-    assert boss_client.get("/api/projects").json() == []
+    assert [p for p in boss_client.get("/api/projects").json() if p["id"] != "internaladmin"] == []
     assert boss_client.get(f"/api/offers/{o['id']}").json()["status"] != "accepted"
 
 
