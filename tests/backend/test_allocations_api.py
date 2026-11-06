@@ -595,7 +595,8 @@ def test_subcontractor_row_roundtrip_with_planned_figures(boss_client, sam, proj
     # 4 weeks (09.11.-04.12.) x 8 h at 90.00
     assert (r.json()["planned_hours"], r.json()["planned_net"]) == (32.0, 2880.0)
     assert "total_hours" not in store.get("allocations", row["id"])
-    assert boss_client.delete(f"/api/allocations/{row['id']}").status_code == 204
+    r = boss_client.delete(f"/api/allocations/{row['id']}")
+    assert r.status_code == 204
 
 
 @pytest.mark.parametrize(
@@ -653,7 +654,8 @@ def test_offer_linked_rows_can_be_cancelled_but_not_deleted(boss_client, offer_r
     assert r.status_code == 200 and r.json()["status"] == "cancelled"
     # 24 h over 16 days (Mon-Thu, 4 weeks) = 1.5 h a day; 8 lie before 23.11. -> 12 h, 12 x 90.00 = 1,080.00
     assert (r.json()["planned_hours"], r.json()["planned_net"]) == (12.0, 1080.0)
-    assert boss_client.delete(f"/api/allocations/{row['id']}").status_code == 409  # cancelled rows stay
+    r = boss_client.delete(f"/api/allocations/{row['id']}")
+    assert r.status_code == 409  # cancelled rows stay
 
 
 def test_overlap_warning_for_a_subcontractor(boss_client, sam, project):
@@ -692,15 +694,19 @@ def test_rights_follow_the_kind_of_the_row(
     assert accountant_client.post("/api/allocations", json=body(boss_id, project, end=day(6))).status_code == 201
     assert accountant_client.post("/api/allocations", json=sup_body(sam, project)).status_code == 403
     assert accountant_client.put(f"/api/allocations/{sup_row['id']}", json=sup_body(sam, project)).status_code == 403
-    assert accountant_client.delete(f"/api/allocations/{sup_row['id']}").status_code == 403
-    assert accountant_client.delete(f"/api/allocations/{emp_row['id']}").status_code == 204
+    r = accountant_client.delete(f"/api/allocations/{sup_row['id']}")
+    assert r.status_code == 403
+    r = accountant_client.delete(f"/api/allocations/{emp_row['id']}")
+    assert r.status_code == 204
     # procurement write as well: subcontractor rows yes
     monkeypatch.setitem(rights.MATRIX["accountant"], "procurement", (rights.Scope.ALL, rights.Scope.ALL))
     assert accountant_client.put(f"/api/allocations/{sup_row['id']}", json=sup_body(sam, project)).status_code == 200
     assert accountant_client.post("/api/allocations", json=sup_body(sam, project, end="2026-11-13")).status_code == 201
-    assert accountant_client.delete(f"/api/allocations/{sup_row['id']}").status_code == 204
+    r = accountant_client.delete(f"/api/allocations/{sup_row['id']}")
+    assert r.status_code == 204
     _, linked = offer_row
-    assert accountant_client.delete(f"/api/allocations/{linked['id']}").status_code == 409
+    r = accountant_client.delete(f"/api/allocations/{linked['id']}")
+    assert r.status_code == 409
 
 
 def test_apply_change_keeps_total_hours_rows_working(boss_client, boss_id, project, store):

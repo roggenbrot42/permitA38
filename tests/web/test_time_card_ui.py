@@ -219,7 +219,8 @@ def test_project_and_task_stay_editable_while_a_timer_runs_and_a_change_patches(
 
     def fake(route, req):
         if req.method != "PATCH":
-            return route.continue_()
+            route.continue_()
+            return
         sent.append(req.post_data_json)
         body = {**timer, "project_id": req.post_data_json["project_id"], "task_id": req.post_data_json["task_id"]}
         route.fulfill(status=200, content_type="application/json", body=json.dumps(body))

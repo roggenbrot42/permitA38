@@ -800,11 +800,14 @@ class ApiMachine(RuleBasedStateMachine):
             tid = None
         task_rec = self.m["tasks"].get(tid)
         if pid and pid not in self.m["projects"]:
-            return self._assert_detail(r, 422, "Unknown project")
+            self._assert_detail(r, 422, "Unknown project")
+            return
         if tid and task_rec is None:
-            return self._assert_detail(r, 422, "Unknown task")
+            self._assert_detail(r, 422, "Unknown task")
+            return
         if tid and task_rec.get("project_id") != pid:
-            return self._assert_detail(r, 422, "The task does not belong to the project")
+            self._assert_detail(r, 422, "The task does not belong to the project")
+            return
         assert r.status_code == 200, r.text
         got = r.json()
         assert got["running"] is True and got.get("project_id") == pid and got.get("task_id") == tid
