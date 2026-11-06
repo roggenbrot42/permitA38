@@ -191,11 +191,11 @@ def test_the_viewer_is_first_then_by_name_and_inactive_people_are_missing(world)
     ]  # fmt: skip
 
 
-def test_assignment_of_a_deleted_project_has_null_project_and_cancelled_ones_are_skipped(world, app):
+def test_assignment_of_a_deleted_project_has_null_project_and_cancelled_ones_are_skipped(world, app, unguarded):
     store = app.state.services.store
     ids = world["ids"]
-    store.save("allocations", {"user_id": ids["bea"], "project_id": "gone", "start": "2026-11-05", "end": "2026-11-06",
-                               "hours_per_week": 5, "status": "active"})  # fmt: skip
+    unguarded(store, "allocations", {"user_id": ids["bea"], "project_id": "gone", "start": "2026-11-05",
+                                     "end": "2026-11-06", "hours_per_week": 5, "status": "active"}, "ref.dangling")  # fmt: skip
     store.save("allocations", {"user_id": ids["bea"], "project_id": ids["p_web"], "start": "2026-11-05",
                                "end": "2026-11-06", "hours_per_week": 5, "status": "cancelled", "cancelled_from": "2026-11-05"})  # fmt: skip
     bea = _by_name(world["boss"].get(TIMELINE).json())["Bea Example"]

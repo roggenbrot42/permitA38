@@ -70,22 +70,42 @@ _COUNTER = itertools.count(1)
 
 def target_row(repo, target):
     n = next(_COUNTER)
-    return repo.save(target, {"name": f"Demo {n}", "username": f"demo-user-{n}"})
+    row = {"name": f"Demo {n}", "username": f"demo-user-{n}"}
+    if target == "projects":
+        row["kind"] = "internal"  # state.required by the planner guards; internal needs no customer
+    return repo.save(target, row)
 
 
 def companions(repo, table, col, value):
-    """The other fields a row needs: an allocation has exactly one owner (user xor supplier); a timer row has the
-    id of its user (one timer row per user)."""
+    """The other fields a row needs so that exactly the reference rule under test can fire: a timer row has the id of
+    its user; an allocation has one owner (user xor supplier, a supplier row has a rate), a project, one hour field,
+    status and period (planner guards of 0018-project_planning); a contract has title, period and one hour field."""
     if table == "timers":
         return {"id": target_row(repo, "users")["id"]}
+    if table == "contracts":
+        return {
+            "title": "Demo contract",
+            "start": "2026-01-05",
+            "end": "2026-03-27",
+            "hours_per_week": 8,
+            "status": "confirmed",
+        }
     if table != "allocations":
         return {}
+    row = {"start": "2026-01-05", "end": "2026-03-27", "hours_per_week": 8, "status": "active"}
+    if col != "project_id":
+        row["project_id"] = target_row(repo, "projects")["id"]
     if col == "project_id":
-        return {"user_id": target_row(repo, "users")["id"]}
-    if value is None:  # an unset owner needs the other one
-        other = "supplier_id" if col == "user_id" else "user_id"
-        return {other: target_row(repo, "suppliers" if other == "supplier_id" else "users")["id"]}
-    return {}
+        owner = "user_id"
+    elif value is None:  # an unset owner needs the other one (a blank string already counts for the CHECK)
+        owner = "supplier_id" if col == "user_id" else "user_id"
+    else:
+        owner = col
+    if owner == "supplier_id":
+        row["rate"] = 50
+    if owner != col:
+        row[owner] = target_row(repo, "suppliers" if owner == "supplier_id" else "users")["id"]
+    return row
 
 
 def build(repo, table, col, value):
@@ -176,7 +196,7 @@ def test_sqlite_migration_file_is_exactly_the_generated_statements_and_indexes()
     assert sql.count("CREATE INDEX") == 6
     for t in ("contracts", "offers", "invoices", "incoming_offers", "trips", "timers"):
         assert f'CREATE INDEX "idx_{t}_project" ON "{t}" ("project_id");' in sql
-    assert m.id == HEAD
+    assert m.id == "dea6e12b"
 
 
 @pytest.mark.parametrize("dialect", ["postgresql", "mariadb"])
@@ -232,6 +252,10 @@ def test_insert_with_an_existing_target_is_accepted(repo, table, col, target):
 @pytest.mark.parametrize(("table", "col", "target"), CASES)
 @pytest.mark.parametrize("unset", [None, "", "   "])
 def test_an_unset_reference_is_accepted(repo, table, col, target, unset):
+    if (table, col) == ("allocations", "project_id"):
+        # the project of an allocation is required (planner guards), so an unset one is refused for that reason
+        refused("state.required", repo.save, table, build(repo, table, col, unset))
+        return
     row = build(repo, table, col, unset)
     saved = repo.save(table, row)
     assert saved.get(col) == unset
@@ -266,6 +290,7 @@ def old_db(tmp_path, monkeypatch):
     root = real_chain_copy(tmp_path)
     for d in DIALECT_NAMES:
         (root / d / "0017-reference_guards.sql").unlink()
+        (root / d / "0018-project_planning.sql").unlink()  # requires 0017: removed with it
     data = tmp_path / "data"
     planted = {}
     with monkeypatch.context() as m:
@@ -337,7 +362,7 @@ def test_a_target_is_protected_only_while_a_row_still_points_at_it(repo, table, 
 
 
 def test_an_unrelated_record_can_always_be_deleted(repo):
-    p = repo.save("projects", {"name": "Demo"})
+    p = repo.save("projects", {"name": "Demo", "kind": "internal"})
     c = repo.save("customers", {"name": "Demo customer"})
     deleted = repo.delete("customers", c["id"])
     assert deleted is True

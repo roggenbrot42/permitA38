@@ -355,7 +355,7 @@ def test_repository_delete_of_a_used_target_raises_constraint_violation(tmp_path
 
     repo = SQLiteRepository(tmp_path / "new")
     repo.startup()
-    proj = repo.save("projects", {"name": "Demo"})
+    proj = repo.save("projects", {"name": "Demo", "kind": "internal"})
     repo.save("entries", {"project_id": proj["id"], "date": "2026-03-02", "minutes": 30})
     with pytest.raises(ConstraintViolation) as e:
         repo.delete("projects", proj["id"])
@@ -373,7 +373,7 @@ def test_delete_side_is_suspended_inside_a_restore_block_and_back_afterwards(tmp
     repo.startup()
     before = triggers(repo)
     assert "guard_entries_project_id_ref_del" in before
-    used = repo.save("projects", {"name": "Demo"})
+    used = repo.save("projects", {"name": "Demo", "kind": "internal"})
     repo.save("entries", {"project_id": used["id"], "date": "2026-03-02", "minutes": 30})
     with repo.transaction(), repo.guards_suspended({"reference"}):
         assert "guard_entries_project_id_ref_del" not in triggers(repo)
@@ -381,7 +381,7 @@ def test_delete_side_is_suspended_inside_a_restore_block_and_back_afterwards(tmp
         assert deleted is True
     assert repo.get("projects", used["id"]) is None
     assert triggers(repo) == before
-    again = repo.save("projects", {"name": "Demo 2"})
+    again = repo.save("projects", {"name": "Demo 2", "kind": "internal"})
     repo.save("entries", {"project_id": again["id"], "date": "2026-03-02", "minutes": 30})
     with pytest.raises(ConstraintViolation) as e:
         repo.delete("projects", again["id"])
@@ -393,7 +393,7 @@ def test_delete_side_triggers_are_back_and_the_delete_rolled_back_after_an_excep
     repo = SQLiteRepository(tmp_path / "new")
     repo.startup()
     before = triggers(repo)
-    used = repo.save("projects", {"name": "Demo"})
+    used = repo.save("projects", {"name": "Demo", "kind": "internal"})
     repo.save("entries", {"project_id": used["id"], "date": "2026-03-02", "minutes": 30})
     try:
         with repo.transaction(), repo.guards_suspended({"reference"}):
