@@ -23,7 +23,7 @@ def srv(tmp_path):
 
 @pytest.fixture
 def seeded(srv):
-    """A boss with 40 h/week, and a contract that books the whole week after next (week 2 of the horizon)."""
+    """A boss with 40 h/week, a 40 h/week contract for the two weeks after next and a 40 h assignment in the first of them."""
     import httpx
 
     h = {"Authorization": "Bearer " + srv.token}
@@ -45,6 +45,19 @@ def seeded(srv):
             "hours_per_week": 40,
             "rate": 90,
             "status": "confirmed",
+        },
+    )
+    assert r.status_code < 300, r.text
+    # the boss works the whole week after next on the project: a vacation there leaves the assignment over capacity
+    r = httpx.post(
+        srv.base + "/api/allocations",
+        headers=h,
+        json={
+            "user_id": me["id"],
+            "project_id": proj["id"],
+            "start": start.isoformat(),
+            "end": (start + timedelta(days=6)).isoformat(),
+            "hours_per_week": 40,
         },
     )
     assert r.status_code < 300, r.text
@@ -83,14 +96,14 @@ def cell_center(pg, day: str):
 def test_drag_on_time_off_row_creates_vacation_and_over_capacity_turns_red(srv, ui, seeded):
     w2 = seeded["week2"]
     x1, y1 = cell_center(ui, w2.isoformat())
-    x2, _ = cell_center(ui, (w2 + timedelta(days=4)).isoformat())
+    x2, _ = cell_center(ui, (w2 + timedelta(days=3)).isoformat())
     ui.mouse.move(x1, y1)
     ui.mouse.down()
     ui.mouse.move(x2, y1, steps=8)
     ui.mouse.up()
     ui.wait_for_selector(".pln-bar.draft.abs")
     assert "1 draft change" in ui.inner_text(".pln-draftbar")
-    # the 40 h contract now has no capacity in that week: the utilisation cell is over capacity
+    # Monday to Thursday off: the 40 h assignment lands on Friday alone, so the assigned cell is over-assigned (red)
     ui.wait_for_selector(".pln-week.util.over", timeout=8000)
     assert ui.locator(".pln-week.util.over").count() >= 1
     # the real data is untouched until Apply
@@ -310,3 +323,22 @@ def test_earliest_start_counts_a_draft_vacation_and_shows_the_weekday(srv, ui, s
     found = date(int(m.group(4)), int(m.group(3)), int(m.group(2)))
     assert found > monday(today) + timedelta(days=4)  # after the draft vacation
     assert found.weekday() < 5
+
+
+def test_contract_without_enough_assigned_time_is_red_with_its_explanation(srv, ui, seeded):
+    # 80 h promised over two weeks, only 40 h assigned (the first week): the contract has a shortfall
+    bar = ui.locator('.pln-bar.contract[data-kind="com"]').first
+    ui.wait_for_selector(".pln-bar.contract.short")
+    assert "Retainer" in bar.get_attribute("aria-label")
+    assert "short 40 h" in bar.get_attribute("aria-label")  # the tooltip carries the server's explanation
+    bar.click()
+    ui.wait_for_function("() => document.getElementById('plnWhy').innerText.includes('Retainer')")
+    assert "short" in ui.inner_text("#plnWhy").lower()
+
+
+def test_draft_bar_lists_the_effect_on_the_shortfall(srv, ui, seeded):
+    w2 = seeded["week2"]
+    drag_vacation(ui, w2.isoformat(), (w2 + timedelta(days=3)).isoformat())
+    ui.wait_for_selector(".pln-delta")
+    text = ui.inner_text(".pln-delta")
+    assert "Demo project P: short" in text and "->" in text
