@@ -382,7 +382,12 @@ class Journey:
             self.page.wait_for_function("() => document.querySelector('#clock').innerText !== '00:00:00'", timeout=5000)
         except Exception:
             pytest.fail("the running timer does not tick")
-        self.click_render("[data-a=timerStop]")
+        # under a minute the app asks whether to drop the timer; always decline so it books 1 min as modelled
+        accepted, self.watch.accept_confirm = self.watch.accept_confirm, 0.0
+        try:
+            self.click_render("[data-a=timerStop]")
+        finally:
+            self.watch.accept_confirm = accepted
         self.m.entries.append(MEntry(tag, 1, self.today, proj, True))
         self.say(f"timer {tag} on {proj.name!r} -> 1min")
         self.check_week_ui()

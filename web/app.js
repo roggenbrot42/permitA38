@@ -421,13 +421,26 @@ function timerUpd() {
   const c = $('#clock'); if (c) c.textContent = moneyView ? earned(rate) : !S.timer?.running ? '0:00' : clockStr(timerElapsed());
 }
 function timerTick() { clearInterval(render.tick); if (S.timer?.running) render.tick = setInterval(timerUpd, 1000); }
+/* A running timer shows its clock after a page load, whatever the stored mode. Only pressing ✎ in this session shows the manual
+   form (pre-filled from the timer) while it runs; the flag is module-level, not stored, and cleared by ⏱, Add and Stop. */
+let manualWhileRunning = false;
+const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/* Date/start/stop of a running timer for the manual form: started (unix seconds) to now, or to 23:59 when it started on an earlier day. */
+function timerPrefill() {
+  const a = new Date(S.timer.started * 1000), n = new Date(), m = d => d.getHours() * 60 + d.getMinutes();
+  const date = isoLocal(a), end = date === isoLocal(n) ? m(n) : 23 * 60 + 59;
+  return { date, start: hhmm(m(a)), end: hhmm(end), dur: m(a) < end ? hm((end - m(a)) / 60) : '' };
+}
 function timerModeHtml() {
-  const run = !!S.timer?.running;   // a running timer always shows its clock and Stop, whatever the stored mode
-  if (!run && localStorage.timeMode !== 'tracker') return `<div class="field" style="margin:0"><label for="t_date">Date</label><input type="date" id="t_date" value="${todayISO()}"></div>
-    <div class="field" style="margin:0"><label for="t_start">Start</label><input type="time" id="t_start" data-change="timerTimes"></div>
-    <div class="field" style="margin:0"><label for="t_end">Stop</label><input type="time" id="t_end" data-change="timerTimes"></div>
-    <div class="field" style="margin:0"><label for="t_dur">Duration</label><input id="t_dur" placeholder="hh:mm" style="width:90px" data-change="timerDur"></div>
+  const run = !!S.timer?.running;   // a running timer shows its clock and Stop, unless ✎ was pressed meanwhile
+  if ((run && manualWhileRunning) || (!run && localStorage.timeMode !== 'tracker')) {
+    const v = run ? timerPrefill() : { date: todayISO(), start: '', end: '', dur: '' };
+    return `<div class="field" style="margin:0"><label for="t_date">Date</label><input type="date" id="t_date" value="${v.date}"></div>
+    <div class="field" style="margin:0"><label for="t_start">Start</label><input type="time" id="t_start" value="${v.start}" data-change="timerTimes"></div>
+    <div class="field" style="margin:0"><label for="t_end">Stop</label><input type="time" id="t_end" value="${v.end}" data-change="timerTimes"></div>
+    <div class="field" style="margin:0"><label for="t_dur">Duration</label><input id="t_dur" value="${v.dur}" placeholder="hh:mm" style="width:90px" data-change="timerDur"></div>
     <button class="primary" data-a="timerAdd">Add</button>`;
+  }
   return `<button type="button" class="clock" id="clock" data-a="timerMoney" aria-label="Show time or money earned">${run ? clockStr(timerElapsed()) : '0:00'}</button>
     <div class="small muted" id="t_hint"></div>
     ${run ? '<button class="stop big" data-a="timerStop">■ Stop</button>' : '<button class="primary big" data-a="timerStart">▶ Start</button>'}`;
@@ -446,6 +459,7 @@ function timerCard() {
 }
 A.timeMode = el => {
   localStorage.timeMode = el.dataset.mode;
+  manualWhileRunning = el.dataset.mode === 'manual';
   $('#t_mode_area').innerHTML = timerModeHtml();
   document.querySelectorAll('[data-a="timeMode"]').forEach(b => b.setAttribute('aria-pressed', String(b === el)));
   timerUpd(); timerTick();
@@ -473,10 +487,13 @@ A.timerAdd = timerOnce('add', async () => {
   // no guard() wrapper here: a failed save throws to the click handler, which toasts it, and the form keeps the typed values
   await api.upsert('entries', { user_id: S.me.id, date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: !projIsInternal(projIdOrThrow()) });
   toast('Saved');
+  if (S.timer?.running) { await api('POST', 'timer/stop', { discard: true }); S.timer = { running: false }; moneyView = false; }   // the entry replaces the running timer
+  manualWhileRunning = false;
   await loadAll(['entries']);
   render();
 });
 A.timerStop = timerOnce('timer', async () => {
+  manualWhileRunning = false;
   const secs = Date.now() / 1000 - S.timer?.started;   // under a minute would book 1 min: offer to drop it instead
   const discard = secs < 60 && confirm('Less than a minute tracked. Delete it instead of booking 1 min?');
   const r = await api('POST', 'timer/stop', { note: $('#t_note').value, ...(discard ? { discard: true } : {}) });
