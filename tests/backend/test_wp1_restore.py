@@ -97,7 +97,6 @@ def test_transfer_archive_of_the_previous_head_is_upgraded(source, target, tmp_p
     assert r.status_code == 200, r.text
     check_planning(dst.get)
     assert dst.get("projects", ids["project"])["kind"] == "customer"  # has a customer
-    assert dst.get("projects", "internaladmin")["name"] == "Administration"  # the migration's, not invented
 
 
 def test_allocation_with_both_hour_fields_keeps_only_hours_per_week(source, target, tmp_path):
@@ -130,17 +129,6 @@ def test_row_that_still_violates_a_guard_is_restored_with_a_warning(source, targ
     assert dst.get("contracts", "cont0002")["total_hours"] == 0
     warned = [w for w in r.json()["warnings"] if w["code"] == "range.bounds"]
     assert warned and "cont0002" in json.dumps(warned)
-
-
-def test_untouched_default_project_is_not_data_but_a_renamed_one_is(target):
-    from permita38.core.service.transfer.importer import instance_state
-
-    _, _, store = target
-    assert instance_state(store, allow_no_users=True) is None
-    row = store.get("projects", "internaladmin")
-    store.save("projects", {**row, "name": "Administration (renamed)"})
-    reason = instance_state(store, allow_no_users=True)
-    assert reason and reason.startswith("This instance already contains data (") and "projects: 1" in reason
 
 
 def write_legacy(folder, coll, rec):

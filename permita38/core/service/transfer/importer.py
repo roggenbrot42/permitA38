@@ -57,7 +57,6 @@ REFERENCES: dict[str, str] = {
     "created_by": "users",
 }
 LIST_REFERENCES: dict[str, tuple[str, str]] = {  # (collection, column) -> target collection
-    "projects.member_ids": ("projects", "users"),
     "contracts.user_ids": ("contracts", "users"),
 }
 #: attachment names referenced by a record
@@ -151,19 +150,6 @@ def _manifest_summary(m: dict) -> dict:
 
 
 # ------------------------------------------------------------------ empty-instance precondition
-def _untouched_default_project(r: dict) -> bool:
-    """The migration's default project, as long as nobody changed it."""
-    return (
-        r.get("id") == "internaladmin"
-        and r.get("name") == "Administration"
-        and r.get("kind") == "internal"
-        and r.get("status") == "active"
-        and not r.get("member_ids")
-        and not r.get("budget_hours")
-        and not r.get("notes")
-    )
-
-
 def instance_state(store: Repository, *, allow_no_users: bool) -> str | None:
     """None when the instance is empty in the sense of spec decision 8, else the reason (409 text)."""
     found: list[str] = []
@@ -171,8 +157,6 @@ def instance_state(store: Repository, *, allow_no_users: bool) -> str | None:
         if name in ("users", "settings"):
             continue
         rows = store.list(name)
-        if name == "projects":  # the default project of migration project_planning is not data
-            rows = [r for r in rows if not _untouched_default_project(r)]
         n = len(rows)
         if n:
             found.append(f"{name}: {n}")

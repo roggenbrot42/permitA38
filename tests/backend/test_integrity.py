@@ -209,14 +209,13 @@ def test_dangling_errors(store):
 
 def test_dangling_warnings_lists_and_templates(store):
     store.save("tasks", {"id": "task01", "project_id": "proj99", "name": "T"})
-    store.save("projects", {"id": "proj01", "name": "P", "kind": "customer", "member_ids": ["boss01", "ghost01"]})
+    store.save("projects", {"id": "proj01", "name": "P", "kind": "customer"})
     store.save("invoices", doc("invoices", "inv001", customer_id=None, template_id="tpl99999"))
     store.save("invoices", doc("invoices", "inv002", customer_id=None, template_id="classic"))  # built-in id
     store.save("offers", doc("offers", "off001", customer_id="", project_id=""))  # empty means not set
     got = {(f.code, f.severity, f.collection, f.id, f.field) for f in IntegrityService(store).run(["ref."])}
     assert got == {
         ("ref.dangling", "warning", "tasks", "task01", "project_id"),
-        ("ref.dangling", "warning", "projects", "proj01", "member_ids"),
         ("ref.dangling", "warning", "invoices", "inv001", "template_id"),
     }
 

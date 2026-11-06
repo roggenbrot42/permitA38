@@ -150,7 +150,7 @@ REF_TARGETS = {
     "batch_id": "import_batches",
     "template_id": "templates",
 }
-REF_LISTS = {"member_ids": "users", "user_ids": "users"}
+REF_LISTS = {"user_ids": "users"}
 _DANGLING_ERRORS = {
     ("entries", "invoice_id"),
     ("invoices", "customer_id"),

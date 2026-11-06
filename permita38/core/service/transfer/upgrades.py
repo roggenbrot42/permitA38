@@ -35,6 +35,7 @@ def normalise_planning_record(coll: str, rec: dict, referenced: set[str]) -> Non
                 "customer" if (customer is not None and customer != "") or rec.get("id") in referenced else "internal"
             )
         rec.pop("personal", None)
+        rec.pop("member_ids", None)  # assignments decide who sees a project
         if rec.get("status") is None:
             rec["status"] = "active"
     elif coll in ("contracts", "allocations"):
@@ -45,9 +46,8 @@ def normalise_planning_record(coll: str, rec: dict, referenced: set[str]) -> Non
 
 
 def _project_planning(records: Records) -> None:
-    """Migration 0017: projects get a kind and lose ``personal``; a record with both hour fields keeps only
-    hours_per_week; a missing status becomes the default. The ``internaladmin`` project is not invented here: the
-    migration inserts it in the target database."""
+    """Migration 0017: projects get a kind and lose ``personal`` and ``member_ids``; a record with both hour
+    fields keeps only hours_per_week; a missing status becomes the default."""
     referenced = referenced_project_ids(records)
     for coll in ("projects", "contracts", "allocations"):
         for rec in records.get(coll, []):
