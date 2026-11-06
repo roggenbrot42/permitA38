@@ -219,6 +219,7 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
     ("PUT", "/api/tasks/{rid}"): ("projects", "write", False),
     ("DELETE", "/api/tasks/{rid}"): ("projects", "write", False),
     ("GET", "/api/entries"): ("time", "read", False),
+    ("GET", "/api/projects/{rid}/timesheet"): ("time", "read", False),
     ("POST", "/api/entries"): ("time", "write", False),
     ("GET", "/api/entries/{rid}"): ("time", "read", False),
     ("PUT", "/api/entries/{rid}"): ("time", "write", False),

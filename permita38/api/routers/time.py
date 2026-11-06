@@ -1,9 +1,9 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 
 from permita38.api.deps import Needs, ServicesDep
-from permita38.core.models import TimerStartIn, TimerStopIn
+from permita38.core.models import TimerStartIn, TimerStopIn, Timesheet
 
 router = APIRouter(tags=["time"])
 routers = [router]
@@ -36,3 +36,19 @@ def dashboard(
     user: Annotated[dict, Needs("timer")], services: ServicesDep, user_id: str | None = None
 ) -> dict[str, Any]:
     return services.time.dashboard(user, user_id)
+
+
+@router.get(
+    "/projects/{rid}/timesheet",
+    response_model=Timesheet,
+    summary="who booked how many hours on a project, per week or month",
+)
+def project_timesheet(
+    rid: str,
+    user: Annotated[dict, Needs("time")],
+    services: ServicesDep,
+    from_: Annotated[str | None, Query(alias="from", max_length=10)] = None,
+    to: Annotated[str | None, Query(max_length=10)] = None,
+    group: Annotated[str, Query(max_length=10)] = "week",
+):
+    return services.timesheet.timesheet(user, rid, from_, to, group)

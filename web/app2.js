@@ -172,7 +172,36 @@ PAGES.project = async id => {
   ${others ? `<div class="small muted" style="margin-top:10px">${others} more ${others === 1 ? 'contract' : 'contracts'} of ${esc(nameOf('customers', p.customer_id))} without a project${can('planning') ? ' – <a href="#/plan/contracts">show in Planning</a>' : ''}</div>` : ''}</div>` : ''}
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Tasks & task rates</h2><div class="right auto"><button data-a="editTask" data-proj="${id}">+ Task</button></div></div>
   ${tasks.length ? `<table><tr><th>Task</th><th class="num">Hours</th><th class="num">Rate</th></tr>${tasks.map(t => `<tr class="click" data-a="editTask" data-id="${t.id}" data-proj="${id}"><td>${esc(t.name)}</td><td class="num">${hm(th(t))}</td><td class="num">${t.rate ? eur(t.rate) : '<span class="muted">project rate</span>'}</td></tr>`).join('')}</table>` : '<div class="empty">No tasks. Tasks are optional – use them when different work has a different rate (e.g. "Consulting" vs "Development").</div>'}</div>
+  ${can('time') ? await timesheetCard(id) : ''}
   ${ex.length ? `<div class="card"><h2>Expenses on this project</h2><table>${ex.map(e => `<tr><td>${fmtDate(e.date)}</td><td>${esc(e.vendor || '')}</td><td class="num">${eur(e.net)}</td></tr>`).join('')}</table></div>` : ''}`;
+};
+/* project time sheet card: GET projects/{id}/timesheet; the options live in TS (per page visit, not stored) */
+let TS = { group: 'week', from: '', to: '', data: null };
+async function timesheetCard(id) {
+  if (TS.id !== id) TS = { id, group: 'week', from: '', to: '', data: null };
+  let t = null, err = '';
+  try { t = TS.data = await api('GET', `projects/${id}/timesheet?group=${TS.group}${TS.from ? '&from=' + TS.from : ''}${TS.to ? '&to=' + TS.to : ''}`); } catch (e) { err = e.message || String(e); TS.data = null; }
+  const lab = d => TS.group === 'month' ? fmtDate(d).slice(3) : fmtDate(d).slice(0, 5);
+  const link = pp => pp.user_id ? `<a href="#/time/${mondayOf(t.from || todayISO())}/${esc(pp.user_id)}">${esc(pp.name)}</a>` : esc(pp.name);
+  const cell = h => h ? num(h, 2) : '<span class="muted">–</span>';
+  const tbl = t && t.people.length ? `<div style="overflow-x:auto"><table><tr><th>Person</th>${t.periods.map(d => `<th class="num nowrap">${lab(d)}</th>`).join('')}<th class="num">Hours</th><th class="num">Billable</th><th class="num">Unbilled</th></tr>
+    ${t.people.map(pp => `<tr><td>${link(pp)}</td>${pp.by_period.map(h => `<td class="num">${cell(h)}</td>`).join('')}<td class="num"><b>${num(pp.hours, 2)}</b></td><td class="num">${num(pp.billable_hours, 2)}</td><td class="num">${num(pp.unbilled_hours, 2)}</td></tr>`).join('')}
+    <tr><td><b>Total</b></td>${t.total.by_period.map(h => `<td class="num"><b>${cell(h)}</b></td>`).join('')}<td class="num"><b>${num(t.total.hours, 2)}</b></td><td class="num"><b>${num(t.total.billable_hours, 2)}</b></td><td class="num"><b>${num(t.total.unbilled_hours, 2)}</b></td></tr></table></div>` : (err ? '' : '<div class="empty">No time booked on this project in this range.</div>');
+  return `<div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Time sheet</h2><div class="right auto row tight" style="align-items:center">
+    <select style="width:auto" data-change="tsOpt" data-k="group" aria-label="Group by"><option value="week" ${TS.group === 'week' ? 'selected' : ''}>Week</option><option value="month" ${TS.group === 'month' ? 'selected' : ''}>Month</option></select>
+    <label class="small muted" for="ts_from">From</label><input type="date" id="ts_from" style="width:auto" value="${esc(TS.from)}" data-change="tsOpt" data-k="from">
+    <label class="small muted" for="ts_to">To</label><input type="date" id="ts_to" style="width:auto" value="${esc(TS.to)}" data-change="tsOpt" data-k="to">
+    <button data-a="tsCsv" ${t && t.people.length ? '' : 'disabled'}>CSV</button></div></div>
+    ${err ? `<div class="banner warn">${esc(err)}</div>` : `<div class="small muted">${t && t.from ? fmtDate(t.from) + ' – ' + fmtDate(t.to) + ' · ' : ''}hours; a name opens that person's week in the time view</div>`}${tbl}</div>`;
+}
+A.tsOpt = el => { TS[el.dataset.k] = el.value; render(); };
+A.tsCsv = () => {
+  const t = TS.data; if (!t) return;
+  const cellText = v => { let x = typeof v === 'number' ? String(v).replace('.', ',') : String(v ?? ''); if (typeof v !== 'number' && /^[=+\-@\t\r]/.test(x)) x = "'" + x; return /[;"\n\r]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
+  const rows = [['Person', ...t.periods, 'Hours', 'Billable', 'Unbilled'], ...t.people.map(p => [p.name, ...p.by_period, p.hours, p.billable_hours, p.unbilled_hours]), ['Total', ...t.total.by_period, t.total.hours, t.total.billable_hours, t.total.unbilled_hours]];
+  const url = URL.createObjectURL(new Blob(['﻿' + rows.map(r => r.map(cellText).join(';')).join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a'); a.href = url; a.download = `timesheet-${t.project_id}-${t.group}.csv`; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 };
 A.editTask = el => {
   const t = el.dataset.id ? S.d.tasks.find(x => x.id === el.dataset.id) : { project_id: el.dataset.proj };

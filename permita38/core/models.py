@@ -365,6 +365,38 @@ class TeamTimeline(BaseModel):
     people: list[TimelinePerson] = []
 
 
+class TimesheetPerson(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    user_id: str | None = None
+    name: str
+    hours: float
+    billable_hours: float
+    unbilled_hours: float
+    by_period: list[float] = []
+
+
+class TimesheetTotal(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    hours: float
+    billable_hours: float
+    unbilled_hours: float
+    by_period: list[float] = []
+
+
+class Timesheet(BaseModel):
+    """GET /api/projects/{id}/timesheet (docs/specs/project-centric-planning.md, "Project time sheet")."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+    project_id: str
+    name: str | None = None
+    from_: str | None = Field(None, alias="from")
+    to: str | None = None
+    group: str
+    periods: list[str] = []
+    people: list[TimesheetPerson] = []
+    total: TimesheetTotal
+
+
 # ======================================================================================================
 # Strict request models. They accept exactly what is sane; the lenient classes above describe responses
 # (a record stored by an older version or another device must never turn a *response* into an error).
