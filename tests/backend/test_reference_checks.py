@@ -146,7 +146,8 @@ def test_delete_refused_planning_scenario(boss_client, app):
     other = _project(c, "Other")
     store = app.state.services.store
     store.save("plan_scenarios", {"name": "On other", "user_id": _uid(c), "changes": _scenario_changes(other["id"])})
-    assert c.delete(f"/api/projects/{p['id']}").status_code == 204  # a scenario on ANOTHER project does not block
+    deleted = c.delete(f"/api/projects/{p['id']}")
+    assert deleted.status_code == 204  # a scenario on ANOTHER project does not block
     p = _project(c)
     store.save("plan_scenarios", {"name": "What if", "user_id": _uid(c), "changes": _scenario_changes(p["id"])})
     _refused(c, p["id"], "This project is still used by 1 planning scenario; archive it instead.")
@@ -157,7 +158,8 @@ def test_delete_clears_a_legacy_stopped_timer_but_a_running_one_blocks(boss_clie
     store = app.state.services.store
     p = _project(c)
     store.save("timers", {"id": _uid(c), "running": False, "project_id": p["id"], "task_id": "task0001"})
-    assert c.delete(f"/api/projects/{p['id']}").status_code == 204
+    deleted = c.delete(f"/api/projects/{p['id']}")
+    assert deleted.status_code == 204
     timer = store.get("timers", _uid(c))
     assert timer["running"] is False and "project_id" not in timer and "task_id" not in timer
     p2 = _project(c, "Second")
@@ -246,7 +248,8 @@ def test_scenario_with_malformed_allocations_does_not_block_or_crash(boss_client
         "plan_scenarios",
         {"name": "Odd", "user_id": _uid(c), "changes": {"allocations": [None, "x", {"project_id": 5}]}},
     )
-    assert c.delete(f"/api/projects/{p['id']}").status_code == 204
+    deleted = c.delete(f"/api/projects/{p['id']}")
+    assert deleted.status_code == 204
 
 
 def test_refused_delete_leaves_a_legacy_stopped_timer_untouched(boss_client, app):
@@ -324,8 +327,10 @@ def test_stopped_timer_does_not_block_delete(boss_client):
     stop = c.post("/api/timer/stop", json={})
     assert stop.status_code == 200
     entry_id = stop.json()["entry"]["id"]
-    assert c.delete(f"/api/entries/{entry_id}").status_code == 204
-    assert c.delete(f"/api/projects/{p['id']}").status_code == 204
+    deleted = c.delete(f"/api/entries/{entry_id}")
+    assert deleted.status_code == 204
+    deleted = c.delete(f"/api/projects/{p['id']}")
+    assert deleted.status_code == 204
 
 
 def test_unused_project_deletes(boss_client):
@@ -333,7 +338,8 @@ def test_unused_project_deletes(boss_client):
     p = _project(c)
     other = _project(c, "Other")
     _entry(c, other["id"])  # a record on ANOTHER project does not block
-    assert c.delete(f"/api/projects/{p['id']}").status_code == 204
+    deleted = c.delete(f"/api/projects/{p['id']}")
+    assert deleted.status_code == 204
     assert [x["id"] for x in c.get("/api/projects").json()] == [other["id"]]
 
 
@@ -342,7 +348,8 @@ def test_archived_unused_project_deletes_archived_used_does_not(boss_client):
     unused = _project(c, "Old", status="archived")
     used = _project(c, "Used", status="archived")
     _entry(c, used["id"])
-    assert c.delete(f"/api/projects/{unused['id']}").status_code == 204
+    deleted = c.delete(f"/api/projects/{unused['id']}")
+    assert deleted.status_code == 204
     _refused(c, used["id"], "This project is still used by 1 time entry; archive it instead.")
 
 

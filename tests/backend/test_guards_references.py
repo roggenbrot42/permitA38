@@ -313,11 +313,14 @@ def test_deleting_a_referenced_target_is_refused_and_an_unreferenced_one_is_allo
     used, unused = target_row(repo, target), target_row(repo, target)
     saved = repo.save(table, build(repo, table, col, used["id"]))
     refused_delete(repo, target, used["id"])
-    assert repo.delete(target, unused["id"]) is True
+    deleted = repo.delete(target, unused["id"])
+    assert deleted is True
     assert repo.get(target, unused["id"]) is None
     # once the referencing row is gone, the target can go
-    assert repo.delete(table, saved["id"]) is True
-    assert repo.delete(target, used["id"]) is True
+    deleted = repo.delete(table, saved["id"])
+    assert deleted is True
+    deleted = repo.delete(target, used["id"])
+    assert deleted is True
     assert repo.get(target, used["id"]) is None
 
 
@@ -328,15 +331,18 @@ def test_a_target_is_protected_only_while_a_row_still_points_at_it(repo, table, 
     b = target_row(repo, target)
     saved = repo.save(table, build(repo, table, col, a["id"]))
     repo.save(table, {**saved, col: b["id"]})  # moved: a is free now, b is in use
-    assert repo.delete(target, a["id"]) is True
+    deleted = repo.delete(target, a["id"])
+    assert deleted is True
     refused_delete(repo, target, b["id"])
 
 
 def test_an_unrelated_record_can_always_be_deleted(repo):
     p = repo.save("projects", {"name": "Demo"})
     c = repo.save("customers", {"name": "Demo customer"})
-    assert repo.delete("customers", c["id"]) is True
-    assert repo.delete("projects", p["id"]) is True
+    deleted = repo.delete("customers", c["id"])
+    assert deleted is True
+    deleted = repo.delete("projects", p["id"])
+    assert deleted is True
 
 
 # ------------------------------------------------------------------ check-db finds the legacy dangling values
