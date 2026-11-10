@@ -1,5 +1,6 @@
 """Every data file inside the package must be listed as package data, or the wheel and the bundle miss it."""
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -32,6 +33,15 @@ def test_data_files_are_declared_as_package_data():
     assert not missing, f"not declared in [tool.setuptools.package-data]: {missing}"
 
 
-def test_bundle_spec_lists_trip_rates():
+def test_bundle_spec_lists_every_data_file():
+    """PyInstaller does not read package-data: each data directory needs its own entry in the spec's datas."""
     spec = (ROOT.parent / "packaging" / "permita38.spec").read_text(encoding="utf-8")
-    assert '"trip_rates"' in spec
+    targets = re.findall(r'"(permita38/[^"]+)"', spec)
+    missing = []
+    for path in sorted(ROOT.rglob("*")):
+        if path.suffix not in DATA_SUFFIXES or "__pycache__" in path.parts:
+            continue
+        rel = "permita38/" + path.relative_to(ROOT).as_posix()
+        if not any(rel.startswith(t.rstrip("/") + "/") for t in targets):
+            missing.append(rel)
+    assert not missing, f"not bundled by packaging/permita38.spec: {missing}"

@@ -1,6 +1,7 @@
 # PyInstaller spec for the standalone desktop bundle (onedir: fewer antivirus false positives than onefile).
 # Build from the repository root:   pyinstaller packaging/permita38.spec --noconfirm --clean
-# The bundle contains the interpreter, all dependencies, the web frontend and the SQL migrations.
+# The bundle contains the interpreter, all dependencies, the web frontend, the package data files and the SQL migrations.
+# Every data directory inside permita38/ must be listed in `datas` (tests/backend/test_package_data.py checks it).
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules
@@ -11,6 +12,7 @@ datas = [
     (str(root / "web"), "web"),  # permita38.core.config.default_web_dir() looks for <package root>/web
     (str(root / "permita38" / "core" / "templates"), "permita38/core/templates"),
     (str(root / "permita38" / "core" / "trip_rates"), "permita38/core/trip_rates"),
+    (str(root / "permita38" / "core" / "tax_rules"), "permita38/core/tax_rules"),
     (str(root / "permita38" / "core" / "schema" / "migrations"), "permita38/core/schema/migrations"),
 ]
 
