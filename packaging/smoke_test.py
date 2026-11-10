@@ -5,7 +5,8 @@
 
 Starts the app on a free port with a throw-away data folder and config (the real user config is never touched),
 then checks: health, public status, the bundled web frontend, first-run setup + login, a database write, and PDF
-rendering and a trip preview (which need the bundled templates, rate tables and the migrations). Stdlib only, so it runs against any build.
+rendering and a trip preview (which need the bundled templates, rate tables and the migrations), and finally a
+sweep over every parameterless GET endpoint that fails on any server error (catches data files missing from a bundle). Stdlib only, so it runs against any build.
 """
 
 from __future__ import annotations
@@ -46,6 +47,33 @@ def expect(cond: bool, what: str) -> None:
     if not cond:
         raise AssertionError(what)
     print("  ok:", what)
+
+
+def sweep_get_endpoints(base: str, token: str) -> list[str]:
+    """Call every GET route without path parameters, as listed by the server's own OpenAPI document.
+
+    A missing bundled file usually surfaces as a 500 on the one page that needs it; sweeping all routes catches that
+    without keeping a hand-written list up to date. Client errors (4xx, e.g. a required query parameter) are fine.
+    """
+    _, _, raw = call(base, "GET", "/api/openapi.json")
+    paths = json.loads(raw)["paths"]
+    crashed = []
+    swept = 0
+    for path, ops in sorted(paths.items()):
+        if "get" not in ops or "{" in path:
+            continue
+        swept += 1
+        try:
+            status, _, _ = call(base, "GET", path, None, token)
+        except urllib.error.HTTPError as e:
+            status = e.code
+        except (urllib.error.URLError, OSError) as e:
+            crashed.append(f"{path} ({e})")
+            continue
+        if status >= 500:
+            crashed.append(f"{path} ({status})")
+    print(f"  swept {swept} GET endpoints from the OpenAPI document")
+    return crashed
 
 
 def main(argv: list[str]) -> int:
@@ -118,6 +146,11 @@ def main(argv: list[str]) -> int:
             expect(status == 200, "trip preview (bundled rate tables and checklist)")
             status, ctype, raw = call(base, "GET", f"/api/invoices/{inv['id']}/pdf", None, token)
             expect(status == 200 and raw.startswith(b"%PDF") and "pdf" in ctype, "invoice PDF is rendered")
+            crashed = sweep_get_endpoints(base, token)
+            expect(
+                not crashed,
+                f"every parameterless GET endpoint answers without a server error{f' {crashed}' if crashed else ''}",
+            )
         except Exception:
             print("\nSMOKE TEST FAILED", file=sys.stderr)
             raise
