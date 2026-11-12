@@ -20,7 +20,7 @@ pydantic==2.14.2
     #   fastapi
 pydantic-core==2.50.2
     # via pydantic
-pypdfium2==5.14.0
+pypdfium2==5.15.0
 zxing-cpp==3.1.1
     # via permita38 (pyproject.toml)
 python-multipart==0.0.33
