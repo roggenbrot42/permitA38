@@ -44,7 +44,7 @@ def _draft(c, customer_id, **kw):
 # ------------------------------------------------------------------ time
 def test_entry_with_one_minute_and_rate_zero(boss_client, me):
     r = ok(boss_client.post("/api/entries", json={"user_id": me["id"], "date": DAY, "minutes": 1, "rate": 0}))
-    assert r["minutes"] == 1 and r["rate"] == 0
+    assert r["minutes"] == 1 and r["rate"] == "0.00"
 
 
 def test_timer_start_stop_makes_an_entry(boss_client):
@@ -130,9 +130,9 @@ def test_allocation_with_start_equal_end(boss_client, me):
 
 
 def test_rate_zero_on_customer_task_supplier(boss_client):
-    assert _customer(boss_client, rate=0)["rate"] == 0
+    assert _customer(boss_client, rate=0)["rate"] == "0.00"
     p = ok(boss_client.post("/api/projects", json={"name": "P"}))
-    assert ok(boss_client.post("/api/tasks", json={"project_id": p["id"], "name": "T", "rate": 0}))["rate"] == 0
+    assert ok(boss_client.post("/api/tasks", json={"project_id": p["id"], "name": "T", "rate": 0}))["rate"] == "0.00"
     ok(
         boss_client.post(
             "/api/suppliers",
@@ -145,10 +145,10 @@ def test_rate_zero_on_customer_task_supplier(boss_client):
 # ------------------------------------------------------------------ expenses, procurement
 def test_expenses_with_zero_amounts_and_itemised(boss_client):
     z = ok(boss_client.post("/api/expenses", json={"date": DAY, "net": 0, "vat": 0, "paid_on": DAY}))
-    assert z["net"] == 0 and z["vat"] == 0
+    assert z["net"] == "0.00" and z["vat"] == "0.00"
     lines = [{"description": "inv001", "gross": 10.0, "vat_rate": 0}]
     item = ok(boss_client.post("/api/expenses", json={"date": DAY, "lines": lines}))
-    assert item["net"] == 10.0 and item["vat"] == 0
+    assert item["net"] == "10.00" and item["vat"] == "0.00"
 
 
 def test_incoming_offer_with_dates(boss_client):

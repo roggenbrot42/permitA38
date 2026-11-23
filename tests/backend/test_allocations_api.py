@@ -586,7 +586,7 @@ def test_subcontractor_row_roundtrip_with_planned_figures(boss_client, sam, proj
     assert r.status_code == 201, r.text
     row = r.json()
     assert row["kind"] == "external" and row["supplier_name"] == "Sam Example (Demo)"
-    assert row["planned_hours"] == 24.0 and row["planned_net"] == 2160.0 and row["planning_warnings"] == []
+    assert row["planned_hours"] == 24.0 and row["planned_net"] == "2160.00" and row["planning_warnings"] == []
     assert "user_id" not in store.get("allocations", row["id"])
     r = boss_client.put(
         f"/api/allocations/{row['id']}", json=sup_body(sam, project, total_hours=None, hours_per_week=8)

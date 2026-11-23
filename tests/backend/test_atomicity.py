@@ -44,7 +44,7 @@ def test_invoice_from_time_failing_midway_leaves_nothing_behind(app, boss_client
 def test_invoice_from_time_succeeds_normally_after_a_failed_attempt(boss_client, billable):
     cust, _ = billable
     inv = boss_client.post("/api/invoices/from-time", json={"customer_id": cust["id"]}).json()
-    assert inv["lines"][0]["amount"] == 300.0
+    assert inv["lines"][0]["amount"] == "300.00"
     assert all(e["invoice_id"] == inv["id"] for e in boss_client.get("/api/entries").json())
 
 
