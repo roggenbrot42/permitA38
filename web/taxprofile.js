@@ -92,7 +92,7 @@ const TP_NOTE = 'Estimate only – not tax advice. Not modelled: capital gains, 
 
 function tpNum(id, label, v, o = {}) {
   const val = v === null || v === undefined ? '' : v;
-  return `<div class="field"${o.wrap || ''}><label for="tp_${id}">${label}</label><input type="number" id="tp_${id}" data-tp="${id}" step="${o.step || '0.01'}" min="${o.min ?? 0}" max="${o.max ?? TP_YEAR_MAX}" value="${esc(String(val))}"${o.ph ? ` placeholder="${esc(o.ph)}"` : ''}>${o.hint ? `<div class="small muted">${o.hint}</div>` : ''}</div>`;
+  return `<div class="field"${o.wrap || ''}><label for="tp_${id}">${label}</label>${o.money ? '<input type="text" inputmode="decimal" autocomplete="off"' : `<input type="number" step="${o.step || '0.01'}" min="${o.min ?? 0}" max="${o.max ?? TP_YEAR_MAX}"`} id="tp_${id}" data-tp="${id}" value="${esc(String(val))}"${o.ph ? ` placeholder="${esc(o.ph)}"` : ''}>${o.hint ? `<div class="small muted">${o.hint}</div>` : ''}</div>`;
 }
 function tpCheck(id, label, v) { return `<div class="field"><label><input type="checkbox" id="tp_${id}" data-tp="${id}"${v ? ' checked' : ''}> ${label}</label></div>`; }
 function tpSel(id, label, v, opts, o = {}) {
@@ -110,9 +110,9 @@ function taxFormHTML(t, warnings) {
   <div class="card" id="tp-assessment"><h2>Assessment</h2>
     ${tpSel('assessment', 'Assessment', t.assessment || 'single', [['single', 'Single (Einzelveranlagung)'], ['joint', 'Joint (Zusammenveranlagung)']])}
     ${tpNum('church_tax_percent', 'Church tax %', t.church_tax_percent ?? 0, { max: 15, step: '0.1', hint: '0 = none; 8 in Bayern and Baden-Württemberg, 9 elsewhere' })}
-    ${tpNum('other_income_year', 'Other income per year € (after its own costs)', t.other_income_year ?? 0)}
-    ${tpNum('other_deductions_year', 'Other deductions per year € (Sonderausgaben, besides insurance)', t.other_deductions_year ?? 0)}
-    ${tpNum('other_insurance_year', 'Other insurance per year € (liability, disability, term life)', t.other_insurance_year ?? 0)}</div>
+    ${tpNum('other_income_year', 'Other income per year € (after its own costs)', t.other_income_year ?? 0, { money: true })}
+    ${tpNum('other_deductions_year', 'Other deductions per year € (Sonderausgaben, besides insurance)', t.other_deductions_year ?? 0, { money: true })}
+    ${tpNum('other_insurance_year', 'Other insurance per year € (liability, disability, term life)', t.other_insurance_year ?? 0, { money: true })}</div>
   <div class="card" id="tp-children"><h2>Children</h2>
     ${tpNum('children_count', 'Children with Kindergeld', c.count ?? 0, { max: 15, step: '1' })}
     ${tpCheck('children_full_allowance', 'Single assessment: the full child allowances were transferred to me', c.full_allowance)}
@@ -124,26 +124,26 @@ function taxFormHTML(t, warnings) {
       ${tpCheck('health_krankengeld', 'Including Krankengeld (general rate 14.6 %)', h.krankengeld ?? true)}
       ${tpNum('health_zusatzbeitrag_percent', 'Zusatzbeitrag %', h.zusatzbeitrag_percent, { max: 10, step: '0.01', ph: 'average', hint: 'Empty = the average Zusatzbeitrag of the rate table.' })}</div>
     <div data-tp-mode="pkv"${hide(h.mode === 'pkv')}>
-      ${tpNum('health_pkv_monthly', 'Premium per month € (total)', h.pkv_monthly ?? 0, { max: TP_MONTHLY_MAX })}
-      ${tpNum('health_pkv_basis_monthly', 'Of which basic cover per month €', h.pkv_basis_monthly ?? 0, { max: TP_MONTHLY_MAX, hint: 'From your insurer\'s annual statement; must not exceed the premium.' })}
-      ${tpNum('health_pkv_care_monthly', 'Care insurance per month €', h.pkv_care_monthly ?? 0, { max: TP_MONTHLY_MAX })}
-      ${tpNum('health_pkv_employer_subsidy_monthly', 'Employer subsidy per month €', h.pkv_employer_subsidy_monthly ?? 0, { max: TP_MONTHLY_MAX })}</div></div>
+      ${tpNum('health_pkv_monthly', 'Premium per month € (total)', h.pkv_monthly ?? 0, { max: TP_MONTHLY_MAX, money: true })}
+      ${tpNum('health_pkv_basis_monthly', 'Of which basic cover per month €', h.pkv_basis_monthly ?? 0, { max: TP_MONTHLY_MAX, hint: 'From your insurer\'s annual statement; must not exceed the premium.', money: true })}
+      ${tpNum('health_pkv_care_monthly', 'Care insurance per month €', h.pkv_care_monthly ?? 0, { max: TP_MONTHLY_MAX, money: true })}
+      ${tpNum('health_pkv_employer_subsidy_monthly', 'Employer subsidy per month €', h.pkv_employer_subsidy_monthly ?? 0, { max: TP_MONTHLY_MAX, money: true })}</div></div>
   <div class="card" id="tp-pension"><h2>Pension</h2>
     ${tpSel('pension_mode', 'Pension insurance', p.mode || 'none', [['none', 'None'], ['statutory_income', 'Statutory, on income'], ['statutory_regular', 'Statutory, regular amount'], ['fixed', 'Fixed amount (Rürup, Versorgungswerk, voluntary)']], { change: 'tpMode' })}
-    <div data-tp-mode="pension_fixed"${hide(p.mode === 'fixed')}>${tpNum('pension_fixed_monthly', 'Amount per month €', p.fixed_monthly ?? 0, { max: TP_MONTHLY_MAX })}</div>
+    <div data-tp-mode="pension_fixed"${hide(p.mode === 'fixed')}>${tpNum('pension_fixed_monthly', 'Amount per month €', p.fixed_monthly ?? 0, { max: TP_MONTHLY_MAX, money: true })}</div>
     <h3 style="margin-top:12px">Unemployment insurance</h3>
     ${tpSel('unemployment_mode', 'Voluntary unemployment insurance', u.mode || 'none', [['none', 'None'], ['voluntary', 'Voluntary'], ['voluntary_half', 'Half rate (founding years)']])}</div>
   <div class="card" id="tp-employment"><h2>Employment</h2>
     ${tpCheck('has_employment', 'I also have employment income', !!e).replace('data-tp="has_employment"', 'data-tp="has_employment" data-change="tpMode"')}
     <div data-tp-mode="employment"${hide(!!e)}>
-      ${tpNum('employment_gross_year', 'Gross wage per year € (before Entgeltumwandlung, without VWL and employer bAV)', e?.gross_year ?? 0)}
+      ${tpNum('employment_gross_year', 'Gross wage per year € (before Entgeltumwandlung, without VWL and employer bAV)', e?.gross_year ?? 0, { money: true })}
       ${tpCheck('employment_sv_liable', 'Subject to social insurance', e ? e.sv_liable : true)}
       ${tpSel('employment_steuerklasse', 'Steuerklasse', e?.steuerklasse ?? '', [['', '–'], ...[1, 2, 3, 4, 5, 6].map(n => [n, String(n)])], { hint: 'Only affects monthly withholding, not the annual tax.' })}
-      ${tpNum('employment_bav_employee_year', 'bAV Entgeltumwandlung per year €', e?.bav_employee_year ?? 0, { max: 100000 })}
-      ${tpNum('employment_bav_employer_year', 'bAV employer contribution per year €', e?.bav_employer_year ?? 0, { max: 100000 })}
-      ${tpNum('employment_vwl_employer_year', 'VWL employer contribution per year €', e?.vwl_employer_year ?? 0, { max: 10000 })}
-      ${tpNum('employment_werbungskosten_year', 'Werbungskosten per year €', e?.werbungskosten_year ?? 0, { hint: '0 = Pauschbetrag.' })}
-      ${tpNum('employment_withheld_year', 'Tax withheld for the whole year € (Lohnsteuer + Soli + church tax)', e?.withheld_year, { ph: 'unknown' })}</div></div></div>
+      ${tpNum('employment_bav_employee_year', 'bAV Entgeltumwandlung per year €', e?.bav_employee_year ?? 0, { max: 100000, money: true })}
+      ${tpNum('employment_bav_employer_year', 'bAV employer contribution per year €', e?.bav_employer_year ?? 0, { max: 100000, money: true })}
+      ${tpNum('employment_vwl_employer_year', 'VWL employer contribution per year €', e?.vwl_employer_year ?? 0, { max: 10000, money: true })}
+      ${tpNum('employment_werbungskosten_year', 'Werbungskosten per year €', e?.werbungskosten_year ?? 0, { hint: '0 = Pauschbetrag.', money: true })}
+      ${tpNum('employment_withheld_year', 'Tax withheld for the whole year € (Lohnsteuer + Soli + church tax)', e?.withheld_year, { ph: 'unknown', money: true })}</div></div></div>
   <div class="actions" style="margin:14px 0"><button class="primary" data-a="tpSave" id="tp-save">Save tax profile</button></div>
   <p class="small muted" id="tp-footer">${TP_NOTE} Rates ${year} from the official tables; values marked as not confirmed are listed after saving.</p></div>`;
 }

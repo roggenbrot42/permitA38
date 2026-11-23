@@ -89,6 +89,18 @@ five minutes lock that address out. Behind a reverse proxy permitA38 sees only t
 `PERMITA38_TRUST_PROXY` (`trust_proxy`, see [docker.md](docker.md)); with it set, the address the proxy appends in `X-Forwarded-For` is used. Set it
 only when the app is reachable exclusively through your proxy, otherwise clients could pick their own address.
 
+## Money format
+
+Money amounts in responses are decimal strings with two to six decimals, for example `"1190.00"`, not numbers.
+Send amounts as a decimal string (preferred) or a number; quantities, hours, percentages and VAT rates are numbers.
+Parse the strings with a decimal type, not a float.
+
+```bash
+curl -s -X POST -H "Authorization: Bearer pat_xxx" -H "Content-Type: application/json" \
+  -d '{"description": "Paper", "amount": "119.00"}' http://127.0.0.1:8765/api/expenses
+# {"id": 7, "description": "Paper", "amount": "119.00", ...}
+```
+
 ## Security tips
 
 * Keep tokens in a password manager or a secret store, not in the code, a chat or a screenshot.

@@ -54,6 +54,8 @@ annotations `readOnlyHint` (true for all read tools), `destructiveHint: false`, 
 Tools are registered **only if the token's effective rights include `read` on the underlying area** (the owner's `permissions` as returned by
 `/api/auth/me`, with write already set to `none` for a read-only token; checked at startup and re-checked on `403`, so the model is not shown tools it cannot use).
 
+Money amounts are emitted as decimal strings (`"1190.00"`), exactly as the HTTP API returns them; never as floats.
+
 ### Read tools (version 1)
 
 | Tool | Area (needs read) | Backing API | Input |
