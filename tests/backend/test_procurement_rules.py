@@ -102,7 +102,7 @@ def test_server_owned_fields_in_a_request_are_not_stored(boss_client, store):
     offer = post(boss_client, "/api/incoming-offers", body, 201).json()
     assert offer["status"] == "received" and "allocation_id" not in offer
     # the forged customer is dropped; the customer comes from the project
-    assert (offer["hours"], offer["net_total"], offer.get("customer_id")) == (80.0, 6400.0, p["customer_id"])
+    assert (offer["hours"], offer["net_total"], offer.get("customer_id")) == (80.0, "6400.00", p["customer_id"])
     assert offer["supplier_name"] == s["name"]
     stored = store.get("incoming_offers", offer["id"])
     assert "external_id" not in stored and "import_batch" not in stored and stored.get("decided_by") is None
@@ -259,8 +259,8 @@ def test_w13_hint_at_the_boundary(boss_client, store):
                 "customer_id": a["id"],
                 "customer_name": "Demo Customer A",
                 "share_percent": 83.0,
-                "revenue_customer": 49800.0,
-                "revenue_total": 60000.0,
+                "revenue_customer": "49800.00",
+                "revenue_total": "60000.00",
                 "from": "2025-03-03",
                 "to": "2026-03-02",
             },

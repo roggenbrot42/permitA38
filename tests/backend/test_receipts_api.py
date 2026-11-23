@@ -144,11 +144,11 @@ def test_hotel_is_booked_with_the_oracle_figures(c, reader):
     body = r.json()
     assert body["outcome"] == "booked"
     e, scan = body["expense"], body["scan"]
-    assert (e["net"], e["vat"]) == (180.74, 15.26)
+    assert (e["net"], e["vat"]) == ("180.74", "15.26")
     assert [(ln["vat_rate"], ln["gross"], ln["net"], ln["vat"]) for ln in e["lines"]] == [
-        (7, 160.0, 149.53, 10.47),
-        (19, 30.0, 25.21, 4.79),
-        (0, 6.0, 6.0, 0.0),
+        (7, "160.00", "149.53", "10.47"),
+        (19, "30.00", "25.21", "4.79"),
+        (0, "6.00", "6.00", "0.00"),
     ]
     assert (e["date"], e["vendor"], e["invoice_no"], e["category"]) == (
         "2026-10-07",
@@ -160,12 +160,12 @@ def test_hotel_is_booked_with_the_oracle_figures(c, reader):
     assert e["external_id"] == "scan:" + scan["id"] and e["attachment"] == scan["attachment"]
     assert (scan["status"], scan["engine"], scan["flags"], scan["expense_id"]) == ("booked", "pdf_text", [], e["id"])
     assert "sha256" not in scan and "invoice_key" not in scan
-    assert c.get(f"/api/expenses/{e['id']}").json()["lines"][0]["gross"] == 160.0
+    assert c.get(f"/api/expenses/{e['id']}").json()["lines"][0]["gross"] == "160.00"
 
 
 def test_single_rate_bill_is_a_classic_expense(c, reader):
     e = up(c, reader.add(SINGLE)).json()["expense"]
-    assert (e["net"], e["vat"], e["vat_rate"]) == (10.0, 1.9, 19)
+    assert (e["net"], e["vat"], e["vat_rate"]) == ("10.00", "1.90", 19)
     assert "lines" not in e
 
 
@@ -173,9 +173,9 @@ def test_restaurant_bill_is_a_business_meal_and_feeds_the_finance_figures(c, rea
     r = up(c, reader.add(RESTAURANT))
     e = r.json()["expense"]
     assert (e["category"], e["deductible"], e["vat_deductible"]) == ("Business meals", 70, 100)
-    assert (e["net"], e["vat"], e["paid_on"]) == (84.03, 15.97, "2026-10-12")
+    assert (e["net"], e["vat"], e["paid_on"]) == ("84.03", "15.97", "2026-10-12")
     t = totals(c)
-    assert (t["expenses"], t["vat_in"]) == (58.82, 15.97)
+    assert (t["expenses"], t["vat_in"]) == ("58.82", "15.97")
 
 
 def test_flagged_bill_is_not_an_expense_and_changes_no_figure(c, reader):
@@ -269,7 +269,7 @@ def test_real_pdf_with_a_full_vat_table_goes_through_pdfium_and_books_clean(c):
     body = up(c, pdf.output()).json()
     assert body["outcome"] == "booked", body["scan"].get("flags")
     e = body["expense"]
-    assert (e["net"], e["vat"]) == (180.74, 15.26)
+    assert (e["net"], e["vat"]) == ("180.74", "15.26")
     assert body["scan"]["engine"] == "pdf_text"
     assert {b["field"] for b in body["scan"]["doc"]["boxes"]} >= {"vendor", "date", "invoice_no", "total", "vat_group"}
 
@@ -503,12 +503,12 @@ def test_confirm_books_the_corrected_bill_once_and_the_figures_match(c, reader, 
     )
     assert r.status_code == 200, r.text
     e = r.json()["expense"]
-    assert (e["net"], e["vat"]) == (42.02, 7.98)
+    assert (e["net"], e["vat"]) == ("42.02", "7.98")
     assert e["external_id"] == "scan:" + scan["id"] and e["attachment"] == scan["attachment"]
     assert "sanity_warnings" in e
     assert r.json()["scan"]["status"] == "booked" and r.json()["scan"]["expense_id"] == e["id"]
     t = totals(c)
-    assert (t["expenses"], t["vat_in"]) == (42.02, 7.98)
+    assert (t["expenses"], t["vat_in"]) == ("42.02", "7.98")
     again = c.post(f"/api/receipts/{scan['id']}/confirm", json=TANK_BODY)
     assert again.status_code == 409
     assert len(expenses(c)) == 1 and c.get("/api/receipts").json() == {"items": []}
@@ -533,7 +533,7 @@ def test_confirm_with_another_gross_needs_total_differs(c, reader):
     assert r.status_code == 409 and r.json()["missing"] == ["total_differs"]
     assert expenses(c) == []
     ok = c.post(f"/api/receipts/{scan['id']}/confirm", json={**body, "accepted": ["total_differs"]})
-    assert ok.status_code == 200 and ok.json()["expense"]["net"] == 47.06
+    assert ok.status_code == 200 and ok.json()["expense"]["net"] == "47.06"
 
 
 def test_confirm_with_a_typed_invoice_number_checks_for_duplicates_again(c, reader):
@@ -643,16 +643,16 @@ def test_bill_with_a_tip_is_booked_with_the_oracle_figures(c, reader):
     r = up(c, reader.add(TIP_BILL))
     assert r.json()["outcome"] == "booked", r.text
     e = r.json()["expense"]
-    assert [(ln["gross"], ln["vat_rate"]) for ln in e["lines"]] == [(9.5, 19), (14.3, 7), (2.2, 0)]
+    assert [(ln["gross"], ln["vat_rate"]) for ln in e["lines"]] == [("9.50", 19), ("14.30", 7), ("2.20", 0)]
     assert (e["net"], e["vat"], e["category"], e["deductible"], e["vat_deductible"]) == (
-        23.54,
-        2.46,
+        "23.54",
+        "2.46",
         "Business meals",
         70,
         100,
     )
     t = totals(c)
-    assert (t["expenses"], t["vat_in"]) == (16.48, 2.46)
+    assert (t["expenses"], t["vat_in"]) == ("16.48", "2.46")
 
 
 def _alt_result(first: list[str], *others: list[str]) -> ReadResult:
@@ -956,7 +956,7 @@ def test_confirm_with_both_acceptances_missing_names_both_and_one_given_leaves_t
     r = c.post(f"/api/receipts/{scan['id']}/confirm", json={**body, "accepted": ["total_differs"]})
     assert r.status_code == 409 and r.json()["missing"] == ["no_invoice_number"]
     r = c.post(f"/api/receipts/{scan['id']}/confirm", json={**body, "accepted": ["no_invoice_number", "total_differs"]})
-    assert r.status_code == 200 and expenses(c)[0]["net"] + expenses(c)[0]["vat"] == 310.0
+    assert r.status_code == 200 and D(expenses(c)[0]["net"]) + D(expenses(c)[0]["vat"]) == D("310.00")
 
 
 def test_confirm_one_cent_off_the_printed_total_raises_total_differs(c, reader):
@@ -998,7 +998,7 @@ def test_an_ubl_file_is_read_by_the_real_reader_and_a_broken_sum_is_flagged(c, s
     r = up(c, clean.encode(), "bill.xml")
     assert r.status_code == 201 and r.json()["outcome"] == "booked", r.text
     e = r.json()["expense"]
-    assert (e["net"], e["vat"], e["invoice_no"], e["date"]) == (149.53, 10.47, "RE-2026-0042", "2026-10-07")
+    assert (e["net"], e["vat"], e["invoice_no"], e["date"]) == ("149.53", "10.47", "RE-2026-0042", "2026-10-07")
     broken = clean.replace("RE-2026-0042", "RE-2026-0043").replace(
         'TaxInclusiveAmount currencyID="EUR">160.00', 'TaxInclusiveAmount currencyID="EUR">161.00'
     )

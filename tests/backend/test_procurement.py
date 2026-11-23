@@ -84,10 +84,10 @@ def test_w1_offer_figures_and_accept_creates_the_external_allocation(boss_client
     offer = post_offer(boss_client, offer_w1(s["id"], project["id"]))
     assert (offer["hours"], offer["net_total"], offer["vat_rate"], offer["vat"], offer["gross_total"]) == (
         80.0,
-        6400.0,
+        "6400.00",
         19.0,
-        1216.0,
-        7616.0,
+        "1216.00",
+        "7616.00",
     )
     assert offer["vat_mode"] == "domestic" and offer["status"] == "received"
 
@@ -204,10 +204,10 @@ def test_w7_rounding_half_up_and_domestic_vat(boss_client):
         },
     )
     assert (offer["net_total"], offer["vat_rate"], offer["vat"], offer["gross_total"], offer["vat_mode"]) == (
-        3091.88,
+        "3091.88",
         19.0,
-        587.46,
-        3679.34,
+        "587.46",
+        "3679.34",
         "domestic",
     )
     assert offer["hours"] == 37.5
@@ -226,10 +226,10 @@ def test_w8_reverse_charge_from_an_austrian_supplier_has_no_vat(boss_client):
         },
     )
     assert (offer["net_total"], offer["vat_rate"], offer["vat"], offer["gross_total"], offer["vat_mode"]) == (
-        3091.88,
+        "3091.88",
         0.0,
-        0.0,
-        3091.88,
+        "0.00",
+        "3091.88",
         "eu_reverse_charge",
     )
 
@@ -271,7 +271,7 @@ def test_w9_cancel_keeps_the_days_before_the_cut_and_w10_floors_the_open_net(bos
     com = boss_client.get("/api/finance/commitments").json()
     assert len(com["items"]) == 1
     assert com["items"][0]["allocation_id"] == alloc["id"]
-    assert com["totals"] == {"planned_net": 3200.0, "invoiced_net": 1600.0, "open_net": 1600.0}
+    assert com["totals"] == {"planned_net": "3200.00", "invoiced_net": "1600.00", "open_net": "1600.00"}
 
     over = boss_client.post(
         "/api/expenses",
@@ -535,10 +535,10 @@ def test_flat_commitment_of_an_accepted_plain_supplier_offer(boss_client, projec
     assert r.json()["commitment"] == {"kind": "flat", "planned_net": 3091.88, "open_net": 3091.88}
     com = boss_client.get("/api/finance/commitments").json()
     flat = [i for i in com["items"] if i["kind"] == "flat"]
-    assert len(flat) == 1 and flat[0]["planned_net"] == 3091.88 and flat[0]["invoiced_net"] is None
-    assert com["totals"] == {"planned_net": 3091.88, "invoiced_net": 0.0, "open_net": 3091.88}
+    assert len(flat) == 1 and flat[0]["planned_net"] == "3091.88" and flat[0]["invoiced_net"] is None
+    assert com["totals"] == {"planned_net": "3091.88", "invoiced_net": "0.00", "open_net": "3091.88"}
     assert com["by_project"] == [
-        {"project_id": None, "name": "No project", "planned_net": 3091.88, "invoiced_net": None, "open_net": 3091.88}
+        {"project_id": None, "name": "No project", "planned_net": "3091.88", "invoiced_net": None, "open_net": "3091.88"}
     ]
 
 
