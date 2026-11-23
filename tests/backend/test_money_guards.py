@@ -11,6 +11,7 @@ A new numeric field that is not money is added to the allowlist WITH a reason; a
 decimal string. Fake data only."""
 
 import ast
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -92,23 +93,16 @@ SCHEMA_NUMERIC_PAIRS = {
 # ---------------------------------------------------------------------------------------------------------------------
 SWEEP_NUMERIC_KEYS = dict(SCHEMA_NUMERIC_ALLOWLIST) | {
     "worked": "dashboard hours",
-    "target": "dashboard target hours",
-    "balance": "dashboard hours balance",
     "month": "calendar month number",
     "week": "calendar week number",
     "weeks": "number of weeks",
     "day": "day number",
     "capacity": "hours",
-    "booked": "hours",
-    "free": "hours",
     "percent": "percent",
     "ratio": "ratio",
     "version": "schema version",
-    "limit": "page size",
     "size": "bytes",
     # dashboard (hours and days)
-    "remaining": "hours left",
-    "overtime": "hours",
     "per_day_needed": "hours per day",
     "remaining_days": "days",
     "today_worked": "hours",
@@ -122,11 +116,8 @@ SWEEP_NUMERIC_KEYS = dict(SCHEMA_NUMERIC_ALLOWLIST) | {
     "months_left": "months of reserve",
     "kfb_used": "child allowances used (count)",
     # plan (hours and shares)
-    "assigned": "hours",
     "unassigned": "hours",
-    "covered": "hours",
     "promised": "hours",
-    "shortfall": "hours",
     "shortfall_expected": "hours",
     "shortfall_worst_case": "hours",
     "shortfall_contracts": "hours",
@@ -154,7 +145,30 @@ SWEEP_NUMERIC_PAIRS = {
 }
 # ambiguous names (money in some places, not in others) may NEVER be allowlisted by bare key: only as a (route, key)
 # pair above, with a reason, so that a new money field with such a name is caught.
-AMBIGUOUS_KEYS = frozenset({"rate", "total", "value", "amount", "net", "vat", "gross", "price", "cost", "margin"})
+AMBIGUOUS_KEYS = frozenset(
+    {
+        "rate",
+        "total",
+        "value",
+        "amount",
+        "net",
+        "vat",
+        "gross",
+        "price",
+        "cost",
+        "margin",
+        "balance",
+        "remaining",
+        "free",
+        "target",
+        "booked",
+        "covered",
+        "assigned",
+        "shortfall",
+        "overtime",
+        "limit",
+    }
+)
 
 
 def test_ambiguous_key_names_are_not_allowlisted_by_bare_key():
@@ -286,9 +300,15 @@ def _seed(c):
     today = date.today()
     monday = today - timedelta(days=today.weekday())
 
-    def ok(r):
+    ids: dict[str, str] = {}
+    responses: list[tuple[str, object]] = []
+
+    def ok(r, keep=True):
         assert r.status_code in (200, 201), (r.request.method, r.request.url, r.text)
-        return r.json()
+        body = r.json()
+        if keep and r.request.method != "GET":
+            responses.append((_label(r.request.method, r.request.url.path, ids), body))
+        return body
 
     me = ok(c.get("/api/auth/me"))
     cust = ok(
@@ -297,16 +317,22 @@ def _seed(c):
             json={"name": "Demo Client GmbH", "street": "Teststr. 1", "zip": "10115", "city": "Berlin", "rate": 100},
         )
     )
+    ids["customer"] = cust["id"]
     proj = ok(c.post("/api/projects", json={"name": "Demo Website", "customer_id": cust["id"]}))
-    ok(
+    ids["project"] = proj["id"]
+    ids["entry"] = ok(
         c.post(
             "/api/entries",
             json={"user_id": me["id"], "date": today.isoformat(), "minutes": 150, "project_id": proj["id"]},
         )
-    )
+    )["id"]
     inv = ok(c.post("/api/invoices/from-time", json={"customer_id": cust["id"]}))
+    ids["invoice"] = inv["id"]
     ok(c.post(f"/api/invoices/{inv['id']}/finalize"))
-    ok(c.post("/api/expenses", json={"date": today.isoformat(), "net": 50, "vat": 9.5, "category": "Software"}))
+    exp = ok(c.post("/api/expenses", json={"date": today.isoformat(), "net": 50, "vat": 9.5, "category": "Software"}))
+    ids["expense"] = exp["id"]
+    ok(c.put(f"/api/expenses/{exp['id']}", json={"date": today.isoformat(), "net": 52, "vat": 9.88, "category": "Software"}))
+    ok(c.put(f"/api/customers/{cust['id']}", json={"name": "Demo Client GmbH", "rate": 105}))
     ok(
         c.post(
             "/api/expenses",
@@ -335,7 +361,23 @@ def _seed(c):
             },
         )
     )
+    ids["offer"] = off["id"]
     ok(c.post(f"/api/offers/{off['id']}/finalize"))
+    ok(c.post(f"/api/offers/{off['id']}/accept"))
+    ids["contract"] = ok(
+        c.post(
+            "/api/contracts",
+            json={
+                "title": "Support",
+                "customer_id": cust["id"],
+                "project_id": proj["id"],
+                "start": today.isoformat(),
+                "end": (today + timedelta(days=60)).isoformat(),
+                "total_hours": 40,
+                "rate": 90,
+            },
+        )
+    )["id"]
     sup = ok(
         c.post(
             "/api/suppliers",
@@ -349,7 +391,8 @@ def _seed(c):
             },
         )
     )
-    ok(
+    ids["supplier"] = sup["id"]
+    io = ok(
         c.post(
             "/api/incoming-offers",
             json={
@@ -368,7 +411,10 @@ def _seed(c):
             },
         )
     )
-    ok(
+    ids["incoming offer"] = io["id"]
+    ok(c.post(f"/api/incoming-offers/{io['id']}/review"))
+    ok(c.post(f"/api/incoming-offers/{io['id']}/accept", json={"confirm_warnings": ["*"], "confirm_expired": True}))
+    alloc = ok(
         c.post(
             "/api/allocations",
             json={
@@ -380,7 +426,20 @@ def _seed(c):
             },
         )
     )
+    ids["allocation"] = alloc["id"]
     ok(
+        c.put(
+            f"/api/allocations/{alloc['id']}",
+            json={
+                "user_id": me["id"],
+                "project_id": proj["id"],
+                "start": monday.isoformat(),
+                "end": (monday + timedelta(days=25)).isoformat(),
+                "hours_per_week": 20.0,
+            },
+        )
+    )
+    trip = ok(
         c.post(
             "/api/trips",
             json={
@@ -391,6 +450,15 @@ def _seed(c):
             },
         )
     )
+    ids["trip"] = trip["id"]
+    return ids, responses
+
+
+def _label(method, path, ids):
+    """``POST /api/offers/{id}/accept``: the request with every seeded id replaced by ``{id}``."""
+    for value in ids.values():
+        path = path.replace(value, "{id}")
+    return f"{method} {path}"
 
 
 def _walk_numbers(obj, path=()):
@@ -405,28 +473,101 @@ def _walk_numbers(obj, path=()):
         yield path, (path[-1] if path else ""), obj
 
 
-def _sweep_offenders(app, c):
-    _seed(c)
-    swept, offenders = 0, []
+# GET routes with an id that are not swept; reason each
+SWEEP_ID_SKIP = {
+    "/api/attachments/{name}": "binary file",
+    "/api/invoices/{rid}/pdf": "PDF",
+    "/api/offers/{rid}/pdf": "PDF",
+    "/api/trips/{rid}/statement.pdf": "PDF",
+    "/api/tasks/{rid}": "no money fields (task record without a rate in the seed)",
+    "/api/absences/{rid}": "no money fields",
+    "/api/templates/{rid}": "no money fields",
+    "/api/calendars/{source_id}/preview": "needs a calendar source; no money fields",
+    "/api/tokens/{token_id}/audit": "audit entries, no money fields",
+    "/api/receipts/{scan_id}": "needs an OCR reader; covered by test_money_scan_drafts",
+    "/api/receipts/{scan_id}/pages/{page}": "image",
+    "/api/document-scans/{scan_id}": "needs an OCR reader; covered by test_money_scan_drafts",
+    "/api/document-scans/{scan_id}/pages/{page}": "image",
+}
+# the seeded record behind the id parameter of a GET route, by path prefix
+SWEEP_ID_RECORD = {
+    "/api/projects/": "project",
+    "/api/allocations/": "allocation",
+    "/api/suppliers/": "supplier",
+    "/api/incoming-offers/": "incoming offer",
+    "/api/customers/": "customer",
+    "/api/entries/": "entry",
+    "/api/contracts/": "contract",
+    "/api/offers/": "offer",
+    "/api/invoices/": "invoice",
+    "/api/expenses/": "expense",
+    "/api/trips/": "trip",
+}
+
+
+def _id_url(path, ids):
+    for prefix, kind in SWEEP_ID_RECORD.items():
+        if path.startswith(prefix):
+            return re.sub(r"\{[^}]+\}", ids[kind], path, count=1)
+    raise AssertionError(f"GET route {path} has an id but is neither swept nor in SWEEP_ID_SKIP")
+
+
+def _sweep(app, c):
+    """(number of GET routes swept, number of write responses checked, offenders, numbers seen).
+    Offenders are (route, key, text); seen is the set of (route, key) that were numbers."""
+    ids, responses = _seed(c)
+    swept, offenders, seen = 0, [], set()
+
+    def check(route, body):
+        for kp, key, value in _walk_numbers(body):
+            seen.add((route, key))
+            if key in SWEEP_NUMERIC_KEYS or (route, key) in SWEEP_NUMERIC_PAIRS:
+                continue
+            offenders.append((route, key, f"{route} {'.'.join(kp)} = {value!r}"))
+
     for method, _route, path in _routes(app):
-        if method != "GET" or "{" in path or path in SWEEP_SKIP or path in SWEEP_ROUTE_ALL_NUMERIC:
+        if method != "GET" or path in SWEEP_SKIP or path in SWEEP_ID_SKIP or path in SWEEP_ROUTE_ALL_NUMERIC:
             continue
-        r = c.get(path + SWEEP_QUERY.get(path, ""))
+        url = _id_url(path, ids) if "{" in path else path
+        r = c.get(url + SWEEP_QUERY.get(path, ""))
         if r.status_code != 200 or "json" not in r.headers.get("content-type", ""):
             continue
         swept += 1
-        for kp, key, value in _walk_numbers(r.json()):
-            if key in SWEEP_NUMERIC_KEYS or (path, key) in SWEEP_NUMERIC_PAIRS:
-                continue
-            offenders.append((path, key, f"{path} {'.'.join(kp)} = {value!r}"))
+        check(path, r.json())
+    for label, body in responses:
+        check(label, body)
     assert swept > 25, swept
-    return offenders
+    return swept, len(responses), offenders, seen
 
 
-def test_parameterless_get_responses_carry_no_money_numbers(app, boss_client):
+def _sweep_offenders(app, c):
+    return _sweep(app, c)[2]
+
+
+def test_get_responses_and_write_responses_carry_no_money_numbers(app, boss_client):
     offenders = _sweep_offenders(app, boss_client)
     new = sorted({text for path, key, text in offenders if (path, key) not in KNOWN_MONEY_NUMBERS})
     assert not new, "numbers at keys that are not on the allowlist (money must be a decimal string):\n" + "\n".join(new)
+
+
+def test_sweep_covers_the_id_routes_and_the_write_responses(app, boss_client):
+    swept, written, _, _ = _sweep(app, boss_client)
+    id_routes = [p for m, _r, p in _routes(app) if m == "GET" and "{" in p and p not in SWEEP_ID_SKIP]
+    assert len(id_routes) >= 10, id_routes
+    assert swept >= 40, swept
+    assert written >= 15, written
+
+
+def test_sweep_allowlists_have_no_stale_entries(app, boss_client):
+    _, _, _, seen = _sweep(app, boss_client)
+    seen_keys = {key for _route, key in seen}
+    routes = {p for _m, _r, p in _routes(app)}
+    stale = [k for k in SWEEP_NUMERIC_KEYS if k not in SCHEMA_NUMERIC_ALLOWLIST and k not in seen_keys]
+    stale_pairs = [pair for pair in SWEEP_NUMERIC_PAIRS if pair not in seen]
+    stale_routes = [p for p in SWEEP_ROUTE_ALL_NUMERIC if p not in routes]
+    stale_known = [pair for pair in KNOWN_MONEY_NUMBERS if pair not in seen]
+    assert not (stale or stale_pairs or stale_routes or stale_known), (stale, stale_pairs, stale_routes, stale_known)
+    assert not (set(SWEEP_ID_SKIP) - routes), sorted(set(SWEEP_ID_SKIP) - routes)
 
 
 def test_known_money_numbers_is_empty():
