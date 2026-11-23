@@ -44,6 +44,23 @@ def test_next_working_day():
     assert holidays.next_working_day(date(2026, 12, 31), "") == date(2026, 12, 31)
 
 
+@pytest.mark.parametrize(
+    ("day", "state", "expected"),
+    [
+        (date(2026, 6, 4), "BY", date(2026, 6, 5)),  # Thu, Fronleichnam in Bavaria
+        (date(2026, 6, 4), "", date(2026, 6, 4)),
+        (date(2026, 11, 18), "SN", date(2026, 11, 19)),  # Wed, Buss- und Bettag in Saxony
+        (date(2026, 11, 18), "BY", date(2026, 11, 18)),
+        (date(2026, 1, 6), "BY", date(2026, 1, 7)),  # Tue, Epiphany in Bavaria
+        (date(2026, 1, 6), "BE", date(2026, 1, 6)),
+        (date(2026, 12, 24), "", date(2026, 12, 24)),  # Thu, not a public holiday
+        (date(2026, 12, 25), "", date(2026, 12, 28)),  # Fri + Sat 26th + Sun 27th
+    ],
+)
+def test_next_working_day_uses_state(day, state, expected):
+    assert holidays.next_working_day(day, state) == expected
+
+
 def _all_periods():
     for year in range(2023, 2029):
         for no in range(1, 13):
@@ -64,7 +81,15 @@ def test_all_due_dates_are_working_days(state):
             # Dauerfrist moves by one month before the shift
             plain = ustva_due(year, kind, no, False, state)
             assert due >= plain
-            assert (due - plain).days in range(20, 40) if dauer else due == plain
+            raw_plain = date(end.year + (end.month == 12), end.month % 12 + 1, 10)
+            raw_dauer = date(raw_plain.year + (raw_plain.month == 12), raw_plain.month % 12 + 1, 10)
+            if dauer:
+                # unshifted Dauerfrist date is exactly one calendar month after the unshifted plain date
+                assert (raw_dauer.year * 12 + raw_dauer.month) - (raw_plain.year * 12 + raw_plain.month) == 1
+                assert raw_dauer.day == raw_plain.day == 10
+                assert due == holidays.next_working_day(raw_dauer, state)
+            else:
+                assert due == plain == holidays.next_working_day(raw_plain, state)
         if kind == "quarter":
             z = zm_due(year, no, state)
             assert z.weekday() < 5
