@@ -317,3 +317,12 @@ def test_accounting_modules_use_no_float() -> None:
                     path.name,
                     tok.start,
                 )
+
+
+def test_mixed_sign_rate_groups_are_refused_at_issue() -> None:
+    doc = {"lines": [{"qty": 1, "price": 100, "vat": 19}, {"qty": 1, "price": -50, "vat": 7}]}
+    with pytest.raises(ValueError, match="mixed signs"):
+        snapshot_from_document(doc, {}, document_id="m1", treatment="standard", invoice_date=date(2026, 3, 2))
+    negative = {"lines": [{"qty": 1, "price": -100, "vat": 19}, {"qty": 1, "price": -50, "vat": 7}]}
+    snap = snapshot_from_document(negative, {}, document_id="m2", treatment="standard", invoice_date=date(2026, 3, 2))
+    assert [g.gross for g in snap.rates] == [-11900, -5350]  # one sign only: allowed (a legacy credit invoice)
