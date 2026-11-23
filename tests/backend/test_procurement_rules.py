@@ -186,7 +186,7 @@ def test_flat_accept_checks_project_contract_and_closed_project(boss_client, sto
     ).json()
     assert ok["offer"]["status"] == "accepted" and ok["offer"]["project_id"] == q["id"]
     assert "contract_id" not in ok["offer"]
-    assert ok["commitment"] == {"kind": "flat", "planned_net": 100.0, "open_net": 100.0}
+    assert ok["commitment"] == {"kind": "flat", "planned_net": "100.00", "open_net": "100.00"}
 
 
 # ----------------------------------------------------------------------------- C3: the second accept sees the first

@@ -187,7 +187,7 @@ def test_flagged_bill_is_not_an_expense_and_changes_no_figure(c, reader):
     scan = body["scan"]
     assert (scan["status"], codes(scan)) == ("flagged", ["items_mismatch"])
     assert scan["flags"][0]["message"] == "The items do not add up."
-    assert scan["draft"]["gross"] == 50.0 and scan["draft"]["vat_rate"] == 19
+    assert scan["draft"]["gross"] == "50.00" and scan["draft"]["vat_rate"] == 19
     failed = [x for x in scan["doc"]["checks"] if not x["ok"]]
     assert [(x["name"], x["expected"], x["found"]) for x in failed] == [
         ("items_group", "56.00", "50.00"),  # computed from the items vs printed
