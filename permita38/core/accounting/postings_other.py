@@ -13,6 +13,7 @@ __all__ = [
     "special_prepayment_payment_entry",
     "tax_payment_entry",
     "tax_provision_entry",
+    "tax_provision_settlement_entry",
     "tax_refund_entry",
     "trip_entry",
     "trip_reversal_entry",
@@ -68,17 +69,27 @@ def trip_entry(
     )
 
 
-def trip_reversal_entry(original: Entry, *, booking_date: date | None = None) -> Entry:
-    """Reopening a trip: the same lines with every sign flipped (same ``income_date`` so the EÜR nets to 0)."""
+def trip_reversal_entry(original: Entry, *, first_open_day: date, year_closed: bool) -> Entry:
+    """Reopening a trip: every sign flipped, booked on ``max(original booking date, first_open_day)`` (7.8, 9.8).
+
+    The ``income_date`` stays the original while the year is open (the EÜR nets to 0); once the year is closed it
+    becomes the booking date of the reversal.
+    """
+    booking = max(original.booking_date, first_open_day)
     lines = tuple(
-        Line(ln.role, Cents(-ln.amount_cents), income_date=ln.income_date, open_item_id=ln.open_item_id)
+        Line(
+            ln.role,
+            Cents(-ln.amount_cents),
+            income_date=(booking if year_closed else ln.income_date) if ln.income_date else None,
+            open_item_id=ln.open_item_id,
+        )
         for ln in original.lines
     )
     return Entry(
         lines=lines,
-        booking_date=booking_date or original.booking_date,
+        booking_date=booking,
         document_date=original.document_date,
-        event_key=f"{original.event_key}:reversal",
+        event_key=f"{original.event_key}:rev",
     )
 
 
@@ -123,8 +134,13 @@ def special_prepayment_payment_entry(
 
 def special_prepayment_credit_entry(
     event_id: str, return_date: date, kz39: Cents, *, booking_date: date | None = None
-) -> Entry:
-    """December/Q4 return finalised: D vat_prepayments / C vat_special_prepayment with the Kz 39 amount (9.6)."""
+) -> Entry | None:
+    """December/Q4 return finalised: D vat_prepayments / C vat_special_prepayment with the Kz 39 amount (9.6).
+
+    Returns None when Kz 39 is 0 (nothing to credit).
+    """
+    if kz39 == 0:
+        return None
     return _vat_move(
         event_id,
         return_date,
@@ -179,15 +195,43 @@ def tax_provision_entry(
     *,
     booking_date: date | None = None,
 ) -> Entry:
-    """Accrual at year closing: D expense / C provision; no ``income_date`` (accrual only)."""
+    """Accrual at year closing: D expense / C provision; the expense line carries the closing date as ``income_date``.
+
+    ``amount`` is already net of the prepayments expensed in that year (9.7).
+    """
     _positive(amount)
     return _entry(
         booking_date or closing_date,
         closing_date,
         f"manual:{manual_id}",
-        Line(Role(_EXPENSE[kind]), amount),
+        Line(Role(_EXPENSE[kind]), amount, income_date=closing_date),
         Line(Role(_PROVISION[kind]), Cents(-amount)),
     )
+
+
+def tax_provision_settlement_entry(
+    kind: Literal["trade_tax", "corporate_tax"],
+    manual_id: str,
+    provision_cents: Cents,
+    paid_cents: Cents,
+    pay_date: date,
+    *,
+    booking_date: date | None = None,
+) -> Entry:
+    """Payment of last year's provision plus the true-up (9.7), so the provision account ends at 0.
+
+    D provision (the whole provision) / C bank (the payment). Above the provision the difference is D expense
+    (``income_date`` = payment date); below it the rest is released as C ``tax_refunds`` (``income_date`` = payment date).
+    """
+    _positive(provision_cents)
+    _positive(paid_cents)
+    lines = [Line(Role(_PROVISION[kind]), provision_cents), Line(_BANK, Cents(-paid_cents))]
+    diff = paid_cents - provision_cents
+    if diff > 0:
+        lines.append(Line(Role(_EXPENSE[kind]), Cents(diff), income_date=pay_date))
+    elif diff < 0:
+        lines.append(Line(Role("tax_refunds"), Cents(diff), income_date=pay_date))
+    return _entry(booking_date or pay_date, pay_date, f"manual:{manual_id}", *lines)
 
 
 def tax_refund_entry(
