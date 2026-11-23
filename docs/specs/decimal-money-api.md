@@ -104,10 +104,10 @@ JSON number. The server already computes with `Decimal` (`core/money.py`); float
 | Endpoint (builder) | Money keys |
 |---|---|
 | `GET /finance` (`calc.finance`, `tax.py` estimate, `redact_tax`) | months[]: `revenue`, `vat_out`, `expenses`, `vat_in`, `profit`, `vat_due`, `tax_set_aside`, `vat_set_aside`, `social`, `take_home`; `totals{…}`, `projected_profit`, `social_year`, `take_home`, `categories{*}`, `open_receivables`; `tax_actual`/`tax_projected`/`tax_owed`/`reserve`: every key except `rate`, `effective_rate`, `months_left` and counts (the WP lists them from `tax.py` and asserts the list in a test). The redaction allowlists keep working on key names. |
-| `GET /project-report` | `revenue`, `cost`, `expenses`, `margin`, `unbilled_revenue` (not `hours`, `unbilled_hours`) |
-| `GET /finance/commitments` (`procurement.py`) | `planned_net`, `invoiced_net`, `open_net` (rows, per project, totals) |
+| `GET /project-report` | `revenue`, `cost`, `expenses`, `margin`, `unbilled_revenue`, `committed_external_cost` (not `hours`, `unbilled_hours`) |
+| `GET /finance/commitments` (`procurement.py`) | `planned_net`, `invoiced_net`, `open_net` (rows, per supplier, per project, totals), hint details `revenue_customer`, `revenue_total` |
 | procurement offer figures, rows, warning details | `net_total`, `vat`, `gross_total`, `rate`, `planned_net`, `difference`, `invoiced_net`, `excess`, `revenue_customer`, `revenue_total` (not `share_percent`, `hours`, `vat_rate`) |
-| `GET /plan` (`planner/views.py`), planner suggestions (`cover.py`) | `rate`, `value`, `invoiced`, `open`, `expected_value`, `planned_subcontractor_cost`, `contract_value`, `margin` (not `promised`, `booked`, `remaining`, `covered`, `shortfall`, `win_probability`) |
+| `GET /plan`, `POST /plan/simulate`, `POST /plan/check-offer` (`planner/views.py`), planner suggestions (`cover.py`) | `rate`, `value`, `invoiced`, `open`, `expected_value`, `planned_subcontractor_cost`, `contract_value`, `margin` (not `promised`, `booked`, `remaining`, `covered`, `shortfall`, `win_probability`) |
 | trip preview and save (`trips_calc.py`, `service/trips.py`) | `reductions[].amount`, `days[].base`, `days[].amount`, `allowance_total`, `mileage_rate`, `mileage_total`, `bills.net`, `bills.vat`, `items_expected_total`, `items_actual_total`, `checklist[].sum` |
 | expense itemise (`calc.itemise_expense`) | `lines[].net`, `lines[].vat`, `net`, `vat` |
 | receipt and document scans (`draft`, `doc`, `given_totals`, `totals_info`) | `gross`, `total`, `net`, `vat`, line `price`/`gross`, expense `net`/`vat` |
