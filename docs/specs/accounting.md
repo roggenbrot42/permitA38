@@ -379,7 +379,7 @@ are expenses and post as 9.4.
 | Gewerbesteuer prepayment / final payment | D `trade_tax_expense` / C `bank` (`income_date` = payment). For EÜR this is the whole treatment. Not deductible for income tax (§ 4 Abs. 5b EStG): the EÜR report shows it on its own line and adds it back *(verify line)* |
 | Gewerbesteuer provision (accrual, at year closing) | D `trade_tax_expense` (`income_date` = the closing date, so the year's P&L carries it) / C `trade_tax_provision`, amount = the estimate from `core/tax.py` **minus the trade-tax prepayments already expensed in that year** (the user confirms or edits it); next year's payment D `trade_tax_provision` / C `bank` (no `income_date`) up to the provision; a payment above the provision posts the difference D `trade_tax_expense` (`income_date` = payment date), a payment below it releases the rest D `trade_tax_provision` / C `tax_refunds` (`income_date` = payment date), so the provision account ends at 0 |
 | Income tax, Soli, church tax of a sole proprietor | D `private_withdrawal` / C `bank` (never an expense) |
-| Corporate tax (GmbH) | D `corporate_tax_expense` / C `bank`; provision like the trade tax |
+| Corporate tax (GmbH) | D `corporate_tax_expense` / C `bank`; provision and its settlement like the trade tax (a payment below the provision releases the rest to `tax_refunds`) |
 | Tax refunds | the reverse lines; GewSt refunds to `tax_refunds` |
 
 These are offered as **entry templates** in the manual entry dialog (prefilled roles, the user types amount and date).
