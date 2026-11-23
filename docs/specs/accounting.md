@@ -711,7 +711,7 @@ maintainer's sign-off of these specs (PR #124).
 | D1 | `money.to_decimal_str`, a `Money` response type in `validation.py`, input accepting a string or number; unit tests | F | S0 |
 | D2 | Response models + routers: documents/invoices/offers, contracts, projects | F | D1 |
 | D3 | Response models + routers: expenses, receipts/scans, suppliers/procurement, trips | F | D1 |
-| D4 | Response models + routers: finance/Money page, tax estimate, planner/capacity, export/import (the data export bundle keeps its own format version: bump it and read old bundles) | F | D1 |
+| D4 | Dict endpoints: finance/Money page, tax estimate, project report, commitments, planner (storage and the data export bundle stay unchanged — conversion only at the API boundary, see `decimal-money-api.md`) | F | D1 |
 | D5 | Web: parse/format money strings in `app.js`, `app2.js`, `money.js`, `trips.js`, `procurement.js`, … (split per file group, ≤ 6 files each), no JS arithmetic on money | S | D2–D4 |
 | D6 | Clients: stateful randomized model, web `e2e_random` models, MCP schema (if PR #73 is merged), OpenAPI regeneration, CHANGELOG breaking note | F (test) | D2–D5 |
 | **M1 foundations** (inert; PRs to `main`) | | | |
