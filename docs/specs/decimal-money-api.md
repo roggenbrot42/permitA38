@@ -24,35 +24,52 @@ JSON number. The server already computes with `Decimal` (`core/money.py`); float
 
 ## The rules
 
-1. **Output type.** New primitive `Money` in `core/validation.py` for the lenient response models:
-   `Annotated[Decimal, PlainSerializer(money.to_decimal_str, return_type=str), WithJsonSchema({"type": "string",
-   "format": "decimal", "pattern": "^-?[0-9]+\\.[0-9]{2}$"})]`; it validates leniently from a float, int or decimal
-   string (stored values). `money.to_decimal_str(x) -> str` = `format(q2(dec(x)), "f")`; `money.to_float` stays for
-   internal and storage use only (a test forbids it in response builders, rule 5).
-2. **Input type.** The money primitives of the strict `*In` models (`Amount`, `NonNegAmount`, `MonthlyAmount`,
-   `Rate`, the `Strict*` variants, `Amount100k`/`Amount10k`) accept **either** a JSON number (as today, parsed exactly
-   by `money.dec` via `repr`) **or** a string matching `^-?[0-9]{1,10}(\.[0-9]{1,2})?$` (no exponent, no comma, no
-   spaces; bools still refused). Bounds, finiteness and whole-cent checks stay as they are. After validation the
-   field value keeps today's Python type (float, from `q2`), so services and storage are unchanged. OpenAPI shows
-   `anyOf: [number, string(pattern)]`. `CheckedBody`/`_check_value` let such strings through for money fields only.
+1. **Output types.** Two primitives in `core/validation.py` for the lenient response models; the Python value keeps
+   its stored type (float) so internal callers of `model_dump()` (e.g. `service/personal_tax.py`) are unaffected — the
+   serializer runs **only in JSON mode** (`PlainSerializer(…, when_used="json")`), and a lenient before-validator
+   accepts a stored float, int or decimal string:
+   * `Money` — amounts, totals, net/VAT/gross: `money.to_decimal_str` = at least two decimals and **all** significant
+     stored decimals up to six (`118.09` → `"118.09"`, `0` → `"0.00"`, a stored `0.125` → `"0.125"`); `-0.00` is
+     normalised to `"0.00"`. A stored money amount with more than two decimals is never rounded silently; it is
+     emitted as stored and reported by `check-db` (new finding `money.sub_cent`).
+   * `UnitPrice` — `Line.price`, incoming-offer `unit_price`, every `rate` (EUR/h) and `mileage_rate` (EUR/km): the
+     same function; sub-cent values are legitimate here (no finding).
+   JSON schema: `{"type": "string", "format": "decimal", "pattern": "^-?[0-9]+\\.[0-9]{2,6}$"}`. `money.to_float` stays
+   for internal and storage use only (rule 5).
+2. **Input types.** The money primitives of the strict `*In` models (`Amount`, `NonNegAmount`, `MonthlyAmount`, `Rate`,
+   the `Strict*` variants, `Amount100k`/`Amount10k`) accept **either** a JSON number (as today, parsed exactly by
+   `money.dec` via `repr`) **or** a decimal string `^-?[0-9]{1,10}(\.[0-9]{1,6})?$` (no exponent, comma, spaces or
+   thousands separators; bools refused). Both paths apply the same bounds, finiteness and the existing whole-cent
+   checks; the string path never accepts more decimals than the number path would. After validation the value keeps
+   today's Python type (float), so existing services and storage are unchanged. (New accounting models use the
+   Decimal-yielding `MoneyIn` instead, accounting 7a.) OpenAPI shows `anyOf: [number, string(pattern)]`;
+   `CheckedBody`/`_check_value` let such strings through for money fields only.
 3. **Stored-record responses.** Records returned as stored (`StoredJSON`, `api/responses.py`) pass through one
    function `present(model, record)` that converts the fields annotated `Money` in the record's lenient model,
    recursively into nested models (`lines`, `ExpenseLine`, trip parts, plan, allocations). Unknown extra fields are
-   left alone (they round-trip untouched).
+   left alone (they round-trip untouched). `None`, empty and unparsable stored values are passed through unchanged
+   (never a 500). **Derived, response-only money** (`Line.amount`, `open_net`, `invoiced_net`, `items_*_total`,
+   trip totals) is dropped from a written record, never stored back from a whole-record PUT.
 4. **Dict endpoints.** Each endpoint that builds a dict (table below) converts its money keys at the **response
    boundary** (router or service `…_response` function) with `money.to_decimal_str`; internal functions
    (`calc.doc_totals`, `calc.finance` internals, `tax.estimate`, planner, procurement math) keep their numeric types
    for their internal callers (PDF, planner, sanity rules). Untyped draft dicts (receipt/document scans, incoming
    offer lines) convert the listed keys.
-5. **Guards (tests).**
-   * An OpenAPI walker fails on any property of type `number`/`integer` whose name is in the money-name list of this
-     spec (table "money keys") and on any `Money` field without the decimal schema.
-   * A response sweep: with seeded fake data, every GET route (the existing route sweep of the smoke test) is called
-     as the boss; the JSON is walked and fails on a float or int at a key in the money-name list.
+5. **Guards (tests)** — fail closed:
+   * An OpenAPI walker: every `number`/`integer` property in a **response** schema must be on an explicit
+     **non-money allowlist** (quantities, hours, minutes, km, percentages and VAT rates, ratios, probabilities,
+     confidence, counts, ids, years/months, whole-euro bases are *not* on it — they are strings); anything else fails,
+     so a new money field cannot slip through as a number. Every `Money`/`UnitPrice` field must carry the decimal
+     schema.
+   * A response sweep: with seeded fake data, every parameterless GET route (the existing route sweep of the smoke
+     test) is called as the boss; the JSON is walked and fails on a number at a key that is not on the allowlist
+     for its path.
    * A source check fails when `money.to_float` or a bare `float(` on money appears in a response builder module.
 6. **Web.** `eur()` (`web/app.js`) accepts a decimal string (display only). Every arithmetic on money in JS goes
    through `web/money.js` (`Money.parse` already accepts strings; cents as BigInt). Form fields send what the user
-   typed as a string (`"12.50"`; a comma is normalised to a dot by `Money.parse` before sending).
+   typed as a string (`"12.50"`). Input rule: one comma **or** one dot as the decimal separator; an input with both,
+   or with thousands separators (`"1.234,56"`), is refused with a message. D5 checks every money site for the string
+   pitfalls: `"0.00"` is truthy, `+` concatenates, `.toFixed` on a string throws, sorting compares text.
 7. **Breaking change.** CHANGELOG "Breaking" section; `docs/api-tokens.md` and `docs/validation.md` state the money
    format; the OpenAPI contract changes. There is no MCP module on `main` yet; the MCP spec (`docs/specs/mcp-server.md`)
    gets a line that it emits money as decimal strings.
@@ -99,12 +116,13 @@ JSON number. The server already computes with `Decimal` (`core/money.py`); float
 used for non-money values elsewhere (`rate` inside the tax estimate dicts, `vat` on `Line`) — those two are checked
 per model/path instead of by name.
 
-## Work packages (M0b; tiers per plan)
+## Work packages (M0b; tiers: D1–D4 and D6 Full, D5 Standard)
 
 | WP | Content | Files (indicative) |
 |---|---|---|
 | D1 | `money.to_decimal_str`, `Money` output type, string-or-number input primitives, `present()`, `CheckedBody` change, unit tests | `money.py`, `validation.py`, `api/responses.py`, tests |
-| D2 | Models + routers: documents/offers/invoices (`Line`), customers, projects, tasks, entries, contracts, plans, allocations, users, settings, personal tax | `models.py`, affected routers/services, tests |
+| D2a | Models + routers: documents/offers/invoices (`Line`), customers, projects, tasks, entries, contracts | `models.py`, affected routers/services, tests |
+| D2b | Models + routers: plans, allocations, users, settings, personal tax | `models.py`, affected routers/services, tests |
 | D3 | Expenses (+ itemise), receipts and document scans, suppliers, procurement, incoming offers, trips | `models.py`, services, tests |
 | D4 | Dict endpoints: finance (incl. tax estimate and redaction), project report, commitments, planner | `calc.py` boundary, `finance.py` router, `procurement.py`, `planner/views.py`, tests |
 | D5 ×2–3 | Web: `eur()`, every money arithmetic site through `Money` (inventory: `app.js`, `app2.js`, `receipts.js`, `docscan.js`, `trips.js`, `suppliers.js`, `procurement.js`, `allocations.js`, `taxprofile.js`), inputs sent as strings | web files, UI tests |

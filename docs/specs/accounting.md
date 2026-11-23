@@ -139,7 +139,7 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
 3. **One writer.** Only `JournalService` inserts entries. Services call it with an *event*; the posting engine
    (`core/accounting/postings*.py`, pure functions) turns the event into lines.
 4. **Idempotent.** Each entry has a unique `event_key` (`issue:<invoice id>`, `payment:<payment id>`,
-   `wo_reversal:<payment id>`, `expense:<expense id>:bill:r<revision>`, `expense:<expense id>:pay:r<revision>`,
+   `expense:<expense id>:bill:r<bill_rev>`, `expense:<expense id>:pay:r<pay_rev>`,
    `credit:<doc id>`, `trip:<id>:r<revision>`, `manual:<uuid>`, `open:<year>:<item>`, ...). Re-delivering
    an event with an existing key is a no-op that returns the existing entry.
 5. **Gapless numbers.** `entry_no` is gapless per fiscal year, allocated through `number_sequences` (doc type
@@ -169,8 +169,10 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
   (event + state in, lines out). A test fails when an accounting module uses `float` or `money.to_float`.
 * **Money in the API is a decimal string** with two decimals (`"1190.00"`, `"-57.10"`), in every response of this
   release and — by milestone M0b ([`decimal-money-api.md`](decimal-money-api.md)) — in every existing endpoint too.
-  Inputs accept a decimal string or a JSON number (parsed exactly by `money.dec`). Percentages, rates, quantities and
-  hours stay numbers. The web UI formats the strings and never computes with money.
+  Inputs accept a decimal string or a JSON number (parsed exactly by `money.dec`); the new `*In` models of this
+  release use a Decimal-yielding primitive `MoneyIn` (no float after validation). Percentages, quantities and hours
+  stay numbers. The web UI formats the strings and computes with money only through `web/money.js` (cents as
+  BigInt), never with JS numbers.
 
 ## 8. Data model (migration sketch, ids via `permita38 create-migration`; the head at the time of the migration WP)
 
@@ -183,8 +185,8 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
 | `journal_lines` | `id`, `entry_id` FK, `line_no` int, `role` null, `account` text, `amount_cents` int, `tax_key` null, `tax_kind` null, `tax_rate` null text, `tax_base_cents` int null, `vat_date` date null, `income_date` date null, `open_item_id` null, `treatment` null | unique (`entry_id`,`line_no`); implies(`tax_kind` → `tax_key`), implies(`tax_key` ≠ NONE → `vat_date`); append_only |
 | `payments` | `id`, `document_id` FK, `date`, `amount_cents` int (≠ 0; positive = money received, negative = money paid back), `method` (`bank`/`cash`), `kind` (`payment` / `refund` / `reversal`; a `reversal` row has `reverses_id` and the opposite sign of the row it cancels, and cannot itself be reversed), `note` null (≤ 200), `reverses_id` null FK, `created_at`, `created_by` | append_only; no journal column: the entry finds its payment through `event_key = payment:<id>` / `source_id`, so payments recorded before initialisation need no update |
 | `period_locks` | `id`, `year`, `month` 1..12, `locked_at`, `locked_by`, `reason` (`vat_return:<id>` / `manual` / `year_close`) | unique (`year`,`month`); append_only |
-| `vat_returns` | fields of [`ustva.md`](ustva.md) "Data model", plus `amends_key` (= `amends_id` or `''`) | unique (`year`,`period_kind`,`period_no`,`amends_key`) — a plain unique index, so it works on MariaDB too; the service additionally refuses a second open draft; guard: a row with `status = final` may change only `filed_on`, `reference`, `note`, `replaced_by` and `status` back to `draft` while `filed_on` is null |
-| `zm_reports` | fields of [`zm.md`](zm.md), plus `amends_key` | unique (`year`,`quarter`,`amends_key`); the same final-row guard |
+| `vat_returns` | fields of [`ustva.md`](ustva.md) "Data model", plus `amends_key` | unique (`year`,`period_kind`,`period_no`,`amends_key`) — a plain unique index, so it works on MariaDB; CHECK `amends_key = COALESCE(amends_id, '')`; the service refuses a second open draft and an `amends_id` that does not point at the current row of the period (`replaced_by` null, `filed_on` set). **Final-row guard:** while `status = final`, an UPDATE may change only `filed_on` (from null to a date, never back), `reference`, `note`, `replaced_by`; an UPDATE that sets `status = draft` (reopen) is allowed only when the stored `filed_on` is null and may then clear `finalised_at/by`, `boxes`, `source_lines`; DELETE of a final row is refused. **External returns** (`external = true`, accounting 16 step 5b) are exempt from the guard until an amended return points at them, so a typo in the entered figures can be corrected or the row deleted |
+| `zm_reports` | fields of [`zm.md`](zm.md), plus `amends_key` | unique (`year`,`quarter`,`amends_key`); the same CHECK, service rules and final-row guard |
 
 Indexes: `journal_lines(vat_date, tax_key)`, `journal_lines(income_date)`, `journal_lines(open_item_id)`,
 `journal_entries(source_id)`, `journal_entries(booking_date)`, `payments(document_id)`.
@@ -198,8 +200,9 @@ Indexes: `journal_lines(vat_date, tax_key)`, `journal_lines(income_date)`, `jour
 * `expenses`: `tax_treatment` (expense enum, null reads as derived, section 16), `service_date` date null (the
   performance date for § 13b; default = `date`). `reverse_charge` stays readable for old clients and is **derived**
   from `tax_treatment` on output; writing it is accepted and mapped (section 16).
-* `expenses` and `trips`: `posting_rev` int (internal, default 0; the revision `r<n>` of their event keys, increased by
-  the service on every repost, never sent by clients). Trips are posted on finalise.
+* `expenses`: `bill_rev` and `pay_rev` int (internal, default 0; the revisions in the event keys of the bill and the
+  payment event, increased independently by the service on every repost, never sent by clients); `trips`: `post_rev`
+  int (same rule). Trips are posted on finalise.
 * `number_sequences`: new doc types `journal`, `credit_note`.
 
 Every new field is added to the strict `*In` model (with bounds) and the lenient response model; `schema.py`, all
@@ -416,7 +419,8 @@ postings start only after initialisation (section 16).
   3. a § 13b tax date (EU service period, third-country date) in a locked month;
   4. an `eu_b2b_service` performance date in a locked month (Kz 21, ZM).
   Input VAT (`VST`) never drifts: its `vat_date` moves to the booking date (a later deduction is allowed). Credit
-  notes and write-offs are dated in an open month and never drift. Drift lines are listed on the return of their
+  notes and write-offs are dated in an open month and never drift — except the write-off reversal record, which is
+  dated the payment date (drift case 2). Drift lines are listed on the return of their
   period and call for an amended return ([`ustva.md`](ustva.md)); ZM drift likewise ([`zm.md`](zm.md)).
 * `income_date` follows the document date within an open fiscal year; in a closed year it becomes the booking date.
 
@@ -672,7 +676,8 @@ VAT sums per period; [`ustva.md`](ustva.md) adds the box/form expectations.
   payments and refunds in random order, under all four bases, and checks with `fractions.Fraction` and its own
   rounding helpers (not `core/money.py`): every entry balances; every cash event moves exactly its amount through
   the 9.2 targets (ΔT + Δ(P − T) = p), also after credit notes, partial refunds and write-off reversals; after full settlement the
-  recognised VAT and base equal the current document; under Soll a credit never reduces VAT on cash still kept; Σ VAT lines by `vat_date` equals the independently computed due VAT; order of payments does not
+  recognised VAT and base equal the current document; under Soll the due VAT of an invoice in total is never below the
+  VAT of the cash it keeps (Σ_r D_r ≥ Σ_r TV_r; per rate group it can be, see A18); Σ VAT lines by `vat_date` equals the independently computed due VAT; order of payments does not
   change the totals.
 * **Guarantees:** UPDATE/DELETE refused by the database in every dialect (contract test); `event_key` idempotence;
   gapless `entry_no` under concurrent posting; hash chain detects a changed row and a forked sequence.
@@ -700,7 +705,7 @@ VAT sums per period; [`ustva.md`](ustva.md) adds the box/form expectations.
 
 ## 22. Work packages
 
-Reviewed by Fable on 2026-11-23. Each WP is one implementer prompt (`Contract:`/`Files:`/`Stop:`/`Report:`, at most
+The plan was reviewed by Fable on 2026-11-23; this table was spot-checked. Each WP is one implementer prompt (`Contract:`/`Files:`/`Stop:`/`Report:`, at most
 6 files and about 300 changed lines, AGENTS.md); "×2" means two prompts. Tiers: F = Full, S = Standard, L = Light.
 The contract of a WP is the section of this spec (or of the companion spec) its content names. **S0** is the
 maintainer's sign-off of these specs (PR #124).
@@ -709,7 +714,7 @@ maintainer's sign-off of these specs (PR #124).
 |---|---|---|---|
 | **M0b decimal money in the existing API** (its own PR to `main`, independent of accounting; contract: a new short spec `docs/specs/decimal-money-api.md` written in Step 0, listing every money field per router) | | | |
 | D1 | `money.to_decimal_str`, a `Money` response type in `validation.py`, input accepting a string or number; unit tests | F | S0 |
-| D2 | Response models + routers: documents/invoices/offers, contracts, projects | F | D1 |
+| D2a/b | Response models + routers (split as in `decimal-money-api.md`) | F | D1 |
 | D3 | Response models + routers: expenses, receipts/scans, suppliers/procurement, trips | F | D1 |
 | D4 | Dict endpoints: finance/Money page, tax estimate, project report, commitments, planner (storage and the data export bundle stay unchanged — conversion only at the API boundary, see `decimal-money-api.md`) | F | D1 |
 | D5 | Web: parse/format money strings in `app.js`, `app2.js`, `money.js`, `trips.js`, `procurement.js`, … (split per file group, ≤ 6 files each), no JS arithmetic on money | S | D2–D4 |
@@ -754,13 +759,13 @@ maintainer's sign-off of these specs (PR #124).
 | **M2c initialisation** | | | |
 | E22 | Init core: year, snapshots, replay, CLI | F | E12, E14, E15 |
 | E23 | Pre-start baseline, opening items, lazy baseline | F | E22 |
-| E24 | Review list + API, expense rules, legacy `cancelled`, external returns | F | E23, O2 |
+| E24 | Review list + API, expense rules, legacy `cancelled`, legacy `paid` without date or before the invoice date | F | E23 |
 | E25 | Integrity: `check-db` chain/balance, sanity warnings, synced-folder warning | S | E6 |
 | E26 | Transfer export/import/restore with the new tables and the trigger exception | F | E2 |
 | **M3 outputs** | | | |
 | O1 | UStVA computation (pure) | F | F2, E6 |
 | O2 | Return records: draft/finalise + lock, reopen, filed, delete, drill-down | F | O1, E7 |
-| O3 | Amended return, drift, external returns | F | O2 |
+| O3 | Amended return, drift, external returns (init step 5b: entry, edit/delete until amended, list) | F | O2 |
 | O4 | Return payment, special prepayment | F | O2, E17 |
 | O5 | Exports CSV (decimal comma), JSON, PDF + banner | F | O2 |
 | O6 | ZM computation, records, drift, API | F | E6, E7 |
@@ -776,7 +781,7 @@ maintainer's sign-off of these specs (PR #124).
 | W5 | ZM tab, Today banners | S | O6 |
 | W6 | Accounting page A: journal, reports | S | O8, O9 |
 | W7 | Accounting page B: manual entry, locks, years, closing, DATEV | S | E16–E18, O11 |
-| W8 | Init wizard with review list and external returns | S | E24 |
+| W8 | Init wizard with review list and external returns | S | E24, O3 |
 | W9 | Adviser banner, set-up state | L | F2 |
 | **M5 hardening** | | | |
 | H1 | Stateful model: locks/returns invariants; random suite run | F (test) | M3 |

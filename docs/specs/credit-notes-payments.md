@@ -35,7 +35,8 @@ unchanged value of a frozen field is not a change (old clients PUT whole records
   **open amount** dated `paid_date` (method `bank`, note "recorded as paid"), returns 200 with the updated invoice.
 * Same request when the open amount is already 0 → no-op, 200.
 * `status: "paid"` without `paid_date` → 422.
-* `status` from `paid` back to `sent`/`accepted` → 409 "reverse the payment instead".
+* `status` from `paid` back to `sent`/`accepted` → 409 "reverse the payment instead", except for a legacy virtual
+  payment (2.3), which it reverses.
 * `paid_date` alone changed on a paid invoice → 409.
 
 ### 2.3 Derived fields (responses, lenient model)
@@ -45,7 +46,13 @@ they are read as having **one virtual payment** of their gross on `paid_date` (`
 `kind: "payment"`, note "migrated"), so upgraded users see them paid whether or not accounting is initialised. The
 first write that touches payments or credits of such an invoice (a payment, refund, credit note, write-off) and the
 accounting initialisation **materialise** the virtual payment as a real `payments` row in the same transaction,
-before acting. A stored `paid` without `paid_date` reads as unpaid with a sanity warning (it cannot be dated).
+before acting; materialising also writes the `issued` snapshot when the invoice has none, so the frozen amounts and
+the payment agree. **Reversing** a virtual payment (`POST /api/invoices/{id}/payments/legacy/reverse`, or `paid` →
+`sent` through PUT for old clients) materialises it and then posts its reversal. A stored `paid` **without**
+`paid_date` is read as a virtual payment dated the **invoice date**, with a sanity warning, and goes to the review list
+at the initialisation (the user confirms or corrects the date); a legacy `paid_date` **before** the invoice date is
+materialised as stored (the "not before the invoice date" rule does not apply to it) and also goes to the review
+list. These rules keep today's figures: such invoices count as paid, never as open receivables.
 
 `kind` (`invoice` / `credit_note`), `credit_kind`, `corrects_id`, `tax_treatment`, `issued` (snapshot),
 `paid_amount`, `credited_amount`, `open_amount` (= gross − credited − paid, may be negative = customer credit),

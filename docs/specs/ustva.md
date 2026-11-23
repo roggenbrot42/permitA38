@@ -182,13 +182,13 @@ into the last period with the extension *(verify)*.
 
 | Field | Type | Notes |
 |---|---|---|
-| `id`, `year`, `period_kind` (`month`/`quarter`), `period_no` | | unique (`year`,`period_kind`,`period_no`) where `amends_id` is null and the row is not replaced |
+| `id`, `year`, `period_kind` (`month`/`quarter`), `period_no` | | unique with `amends_key`; final-row guard and external-return exception: accounting 8.1 |
 | `from_date`, `to_date`, `due_date` | date | due date after the shift |
 | `status` | `draft` / `final` | CHECK |
 | `basis`, `frequency`, `dauerfrist`, `small_business`, `rules_version` | | snapshot from `fiscal_years` at finalise |
-| `boxes` | JSON | `{ "81": {"base": 3500, "tax": "665.00", "booked_base": "3500.50", "booked_tax": "665.10"}, "66": {"amount": "76.00"} }` |
+| `boxes` | JSON | `{ "81": {"base": "3500.00", "tax": "665.00", "booked_base": "3500.50", "booked_tax": "665.10"}, "66": {"amount": "76.00"} }` (all money as decimal strings; whole-euro form bases as `"3500.00"`) |
 | `source_lines` | JSON | ids of the journal lines (max 20,000; above that the return stores the per-box sums and a hash of the id list, and the drill-down queries the journal by period) |
-| `result` (Kz 83), `special_prepayment_credit` (Kz 39), `rounding_difference` | decimal | decimal strings in the API (accounting 7a); whole-euro bases are integers |
+| `result` (Kz 83), `special_prepayment_credit` (Kz 39), `rounding_difference` | decimal | decimal strings in the API (accounting 7a), whole-euro bases included |
 | `filed_on`, `reference`, `note` | | bounded, escaped |
 | `amends_id`, `replaced_by` | id | `amends_key` = `amends_id` or `''` carries the unique index (accounting 8.1) |
 | `external` | bool | a return filed outside the app before the accounting start of the year was set up (accounting section 16 step 5b): `boxes` hold the entered figures (at least Kz 83), drift compares them with the journal |
