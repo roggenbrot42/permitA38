@@ -150,7 +150,7 @@
     const wd = s.workdays || [0, 1, 2, 3, 4];
     return `<fieldset id="sup_cap" class="sup-cap" ${s.kind === 'person-capacity' ? '' : 'hidden'}><legend>Capacity of the subcontractor</legend>
       <div class="row"><div><label for="sup_weekly">Hours per week they can offer</label><input id="sup_weekly" type="number" step="any" min="0" value="${esc(s.weekly_hours ?? '')}"></div>
-      <div><label for="sup_rate">Rate € / h</label><input id="sup_rate" type="number" step="any" min="0" value="${esc(s.rate ?? '')}"></div></div>
+      <div><label for="sup_rate">Rate € / h</label><input id="sup_rate" type="text" autocomplete="off" inputmode="decimal" value="${esc(s.rate ?? '')}"></div></div>
       <div class="field"><label>Working days</label><div class="sup-days">${DAYS.map((d, i) => `<label class="sup-check"><input type="checkbox" id="sup_wd${i}" ${wd.includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div></div>
       <div class="field"><label>Not available (inclusive)</label><div id="sup_wins">${(s.unavailable || []).map((u, i) => unavailRow(u, i)).join('')}</div>
       <button type="button" class="ghost sm" data-a="supWinAdd">+ Add window</button></div></fieldset>`;
@@ -174,9 +174,12 @@
     }
     const weekly = num0('#sup_weekly');
     if (!(weekly > 0)) throw new Error('A subcontractor needs the hours per week they can offer');
+    const rate = Money.parseInput($('#sup_rate').value);   // money: the typed decimal string goes to the API
+    if (!rate.ok) throw new Error('Rate: ' + rate.error);
+    if (rate.value !== null && Money.isNeg(rate.value)) throw new Error('Rate: must not be negative');
     const workdays = DAYS.map((_, i) => i).filter(i => $('#sup_wd' + i).checked);
     if (!workdays.length) throw new Error('Pick at least one working day');
-    return { weekly_hours: weekly, rate: num0('#sup_rate'), workdays, unavailable: windows };
+    return { weekly_hours: weekly, rate: rate.value, workdays, unavailable: windows };
   }
   function openSupplierForm(s = {}) {
     const vals = { kind: 'company', active: true, country: 'DE', ...s, tags: (s.tags || []).join(', '), vat_mode: s.vat_mode || '' };
@@ -436,7 +439,9 @@
   };
   A.supRcPropose = () => {
     const gross = $('#f_gross')?.value, rate = $('#f_vat_rate')?.value;
-    if (!gross) return toast('Enter the amount on the bill first', true);
-    $('#f_rc_vat').value = Money.toNumber(Money.vatCents(Money.lineCents(1, gross), rate));
+    const g = Money.parseInput(gross);
+    if (!g.ok) return toast('Amount on the bill: ' + g.error, true);
+    if (g.value === null) return toast('Enter the amount on the bill first', true);
+    $('#f_rc_vat').value = Money.fromCents(Money.vatCents(Money.lineCents(1, g.value), rate));
   };
 })();
