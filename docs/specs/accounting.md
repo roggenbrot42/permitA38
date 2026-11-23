@@ -231,7 +231,9 @@ Small-business status of the year forces `treatment = small_business` and rate 0
 | EÜR, Ist, `standard` | no entry (the payment posts); an entry with no lines is not written |
 | accrual, `eu_b2b_service` | D `receivables` G; C `revenue_eu_svc` N (`income_date` = invoice date, `tax_key` EU_SVC, `tax_kind` base_only, base N, `vat_date` = perf) — Ist **and** Soll: Kz 21/ZM always follow perf |
 | EÜR, `eu_b2b_service` | one statistical line: `revenue_eu_svc`, amount 0, `tax_key` EU_SVC, base_only, base N, `vat_date` = perf (an entry of only statistical lines is allowed; it balances trivially) |
-| accrual, `small_business` | D `receivables` G; C `revenue_ku` G (`tax_key` KU, base_only, base G, `vat_date` = invoice date) |
+| accrual, `small_business` | D `receivables` G; C `revenue_ku` G (`tax_key` KU, base_only, base G, `vat_date` = invoice date, `income_date` = invoice date) |
+| any basis, rate 0 on a `standard` invoice | that group posts like a revenue group without VAT: accrual C `revenue_s0` N (`tax_key` NONE, `income_date`), no VAT, `vat_not_due` or clearing line; EÜR: revenue at payment (9.2). Lines with `tax_key` NONE are ignored by every VAT sum, the UStVA, the ZM and the DATEV tax keys |
+| any basis, an invoice whose every amount is 0 | no entry |
 | EÜR, `small_business` | no entry |
 
 ### 9.2 Later events on an invoice: one target rule for payments, refunds, credit notes and write-offs
