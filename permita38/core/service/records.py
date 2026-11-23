@@ -206,11 +206,11 @@ class RecordService:
             project = self.store.get("projects", pid) if pid else None
             if project and project_kind(project) == "internal":
                 data["billable"] = False  # internal projects are never billed
-            self._check_day_total(data, old)
             if old and old.get("invoice_id"):
                 if not full:
                     raise ServiceError(403, "Entry already invoiced")
                 data.setdefault("invoice_id", old["invoice_id"])
+            self._check_day_total(data, old)
         if data.get("created") is None:
             data.pop("created", None)
         saved = self.store.save(coll, data)
