@@ -26,8 +26,8 @@ number; booleans and strings that are not plain decimals (`"1,5"`, `"1e3"`, `"ab
 Quantities, hours, percentages and VAT rates stay numbers. The web forms accept a comma or a dot and send a string.
 
 ```
-POST /api/expenses   {"description": "Paper", "amount": "119.00", ...}
-201                  {"id": 7, "amount": "119.00", ...}
+POST /api/expenses   {"date": "2026-01-15", "net": "100.00", "vat": "19.00", "vat_rate": 19, "description": "Paper"}
+201                  {"id": "abc123", "date": "2026-01-15", "net": "100.00", "vat": "19.00", "vat_rate": 19.0, ...}
 ```
 
 ## Input validation

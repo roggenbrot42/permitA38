@@ -97,8 +97,9 @@ Parse the strings with a decimal type, not a float.
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer pat_xxx" -H "Content-Type: application/json" \
-  -d '{"description": "Paper", "amount": "119.00"}' http://127.0.0.1:8765/api/expenses
-# {"id": 7, "description": "Paper", "amount": "119.00", ...}
+  -d '{"date": "2026-01-15", "net": "100.00", "vat": "19.00", "vat_rate": 19, "description": "Paper"}' \
+  http://127.0.0.1:8765/api/expenses
+# {"id": "abc123", "date": "2026-01-15", "net": "100.00", "vat": "19.00", "vat_rate": 19.0, ...}
 ```
 
 ## Security tips

@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
 
 def test_full_business_flow(boss_client):
@@ -32,9 +33,9 @@ def test_full_business_flow(boss_client):
     assert c.put(f"/api/invoices/{inv['id']}", json=fin).status_code == 200
     c.post("/api/expenses", json={"date": today, "net": 50, "vat": 9.5, "category": "Software"})
     f = c.get("/api/finance").json()
-    assert abs(f["totals"]["revenue"] - 250) < 0.01
-    assert abs(f["totals"]["profit"] - 200) < 0.01
-    assert abs(f["totals"]["vat_due"] - (47.5 - 9.5)) < 0.01
+    assert Decimal(f["totals"]["revenue"]) == Decimal("250")
+    assert Decimal(f["totals"]["profit"]) == Decimal("200")
+    assert Decimal(f["totals"]["vat_due"]) == Decimal("47.5") - Decimal("9.5")
 
     off = c.post(
         "/api/offers",
