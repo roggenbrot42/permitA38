@@ -1,0 +1,37 @@
+{
+  "form_year": 2026,
+  "source": "Umsatzsteuer-Voranmeldung 2026 (BMF form), docs/specs/ustva.md; every value to be verified against the official form",
+  "status": "to_verify",
+  "base_rounding": "truncate_toward_zero",
+  "boxes": [
+    {"kz": "81", "label_de": "Steuerpflichtige Umsätze zum Steuersatz von 19 % (Bemessungsgrundlage)", "label_en": "Taxable sales at 19 % (base)", "kind": "base", "tax_kz": null, "computed_tax_rate": "19"},
+    {"kz": "86", "label_de": "Steuerpflichtige Umsätze zum Steuersatz von 7 % (Bemessungsgrundlage)", "label_en": "Taxable sales at 7 % (base)", "kind": "base", "tax_kz": null, "computed_tax_rate": "7"},
+    {"kz": "35", "label_de": "Steuerpflichtige Umsätze zu anderen Steuersätzen (Bemessungsgrundlage)", "label_en": "Taxable sales at other rates (base)", "kind": "base", "tax_kz": "36", "computed_tax_rate": null},
+    {"kz": "36", "label_de": "Steuer auf Umsätze zu anderen Steuersätzen", "label_en": "Tax on sales at other rates", "kind": "tax_entered", "tax_kz": null, "computed_tax_rate": null},
+    {"kz": "21", "label_de": "Nicht steuerbare sonstige Leistungen an Unternehmer in anderen EU-Staaten (§ 18b Satz 1 Nr. 2 UStG)", "label_en": "Non-taxable services to EU businesses (§ 18b sentence 1 no. 2)", "kind": "base", "tax_kz": null, "computed_tax_rate": null},
+    {"kz": "46", "label_de": "Sonstige Leistungen eines im übrigen EU-Gebiet ansässigen Unternehmers (§ 13b Abs. 1 UStG), Bemessungsgrundlage", "label_en": "Services from EU suppliers (§ 13b para. 1), base", "kind": "base", "tax_kz": "47", "computed_tax_rate": null},
+    {"kz": "47", "label_de": "Steuer auf Leistungen nach § 13b Abs. 1 UStG", "label_en": "Tax on services under § 13b para. 1", "kind": "tax_entered", "tax_kz": null, "computed_tax_rate": null},
+    {"kz": "84", "label_de": "Andere Leistungen nach § 13b UStG (u. a. Abs. 2 Nr. 1 Drittlandsleistungen), Bemessungsgrundlage", "label_en": "Other § 13b services incl. para. 2 no. 1 third-country services, base", "kind": "base", "tax_kz": "85", "computed_tax_rate": null},
+    {"kz": "85", "label_de": "Steuer auf andere Leistungen nach § 13b UStG", "label_en": "Tax on other § 13b services", "kind": "tax_entered", "tax_kz": null, "computed_tax_rate": null},
+    {"kz": "66", "label_de": "Vorsteuerbeträge aus Rechnungen von anderen Unternehmern", "label_en": "Input VAT from invoices of other businesses", "kind": "amount", "tax_kz": null, "computed_tax_rate": null},
+    {"kz": "67", "label_de": "Vorsteuer aus Leistungen im Sinne des § 13b UStG", "label_en": "Input VAT from § 13b services", "kind": "amount", "tax_kz": null, "computed_tax_rate": null},
+    {"kz": "39", "label_de": "Anrechnung der festgesetzten Sondervorauszahlung für Dauerfristverlängerung", "label_en": "Credit of the special prepayment (Dauerfrist)", "kind": "amount", "tax_kz": null, "computed_tax_rate": null},
+    {"kz": "83", "label_de": "Verbleibende Umsatzsteuer-Vorauszahlung (+) / Erstattungsanspruch (−)", "label_en": "Remaining prepayment (+) or refund (−)", "kind": "result", "tax_kz": null, "computed_tax_rate": null},
+    {"kz": "10", "label_de": "Berichtigte Anmeldung (1 eintragen)", "label_en": "Amended return (enter 1)", "kind": "flag", "tax_kz": null, "computed_tax_rate": null}
+  ],
+  "map": [
+    {"tax_key": "S19", "tax_kind": "tax", "base_kz": "81", "tax_kz": null},
+    {"tax_key": "S7", "tax_kind": "tax", "base_kz": "86", "tax_kz": null},
+    {"tax_key": "SX", "tax_kind": "tax", "base_kz": "35", "tax_kz": "36"},
+    {"tax_key": "EU_SVC", "tax_kind": "base_only", "base_kz": "21", "tax_kz": null},
+    {"tax_key": "RC_EU_SVC", "tax_kind": "tax", "base_kz": "46", "tax_kz": "47"},
+    {"tax_key": "RC_EU_SVC", "tax_kind": "input", "base_kz": null, "tax_kz": "67"},
+    {"tax_key": "RC_3C_SVC", "tax_kind": "tax", "base_kz": "84", "tax_kz": "85"},
+    {"tax_key": "RC_3C_SVC", "tax_kind": "input", "base_kz": null, "tax_kz": "67"},
+    {"tax_key": "VST", "tax_kind": "input", "base_kz": null, "tax_kz": "66"}
+  ],
+  "result": {"kz": "83", "plus": ["81t", "86t", "36", "47", "85"], "minus": ["66", "67", "39"]},
+  "klein_limit_prev": "25000",
+  "klein_limit_cur": "100000",
+  "input_vat_timing": "invoice_date"
+}
