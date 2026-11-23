@@ -44,7 +44,7 @@ class Customer(Record):
     email: str | None = None
     phone: str | None = None
     notes: str | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     external_id: str | None = None
     import_batch: str | None = None
 
@@ -53,7 +53,7 @@ class Project(Record):
     name: str
     customer_id: str | None = None
     kind: str = "customer"
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     budget_hours: float | None = None
     status: str = "active"
     color: str | None = None
@@ -67,7 +67,7 @@ class Project(Record):
 class Task(Record):
     project_id: str
     name: str
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
 
 
 class Entry(Record):
@@ -81,7 +81,7 @@ class Entry(Record):
     end: str | None = None
     billable: bool = True
     invoice_id: str | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
 
 
 class Contract(Record):
@@ -92,7 +92,7 @@ class Contract(Record):
     end: str
     hours_per_week: float | None = None
     total_hours: float | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     status: str = "confirmed"
     user_ids: list[str] = []
     offer_id: str | None = None
@@ -149,9 +149,9 @@ class Line(BaseModel):
     description: str = ""
     qty: float = 0
     unit: str | None = None
-    price: float = 0
+    price: v.UnitPrice = 0
     vat: float | None = None
-    amount: float | None = None
+    amount: v.Money | None = None
 
 
 class Plan(BaseModel):
@@ -161,7 +161,7 @@ class Plan(BaseModel):
     hours_per_week: float | None = None
     total_hours: float | None = None
     user_ids: list[str] = []
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     win_probability: float | None = None
 
 
