@@ -1,0 +1,849 @@
+{
+ "chart": "skr03",
+ "year": 2026,
+ "source": "SYNTHETIC test chart, fake account numbers",
+ "status": "to_verify",
+ "roles": {
+  "bank": {
+   "account": "9001",
+   "name": "Synthetic bank",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "cash": {
+   "account": "9002",
+   "name": "Synthetic cash",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "receivables": {
+   "account": "9003",
+   "name": "Synthetic receivables",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "payables": {
+   "account": "9004",
+   "name": "Synthetic payables",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "customer_credit": {
+   "account": "9005",
+   "name": "Synthetic customer_credit",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "payables_employee": {
+   "account": "9006",
+   "name": "Synthetic payables_employee",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "revenue_s19": {
+   "account": "9007",
+   "name": "Synthetic revenue_s19",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_s19",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "revenue_s7": {
+   "account": "9008",
+   "name": "Synthetic revenue_s7",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_s7",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "revenue_sx": {
+   "account": "9009",
+   "name": "Synthetic revenue_sx",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_sx",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "revenue_s0": {
+   "account": "9010",
+   "name": "Synthetic revenue_s0",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_s0",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "revenue_ku": {
+   "account": "9011",
+   "name": "Synthetic revenue_ku",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_ku",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "revenue_eu_svc": {
+   "account": "9012",
+   "name": "Synthetic revenue_eu_svc",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_eu_svc",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "vat_out_s19": {
+   "account": "9013",
+   "name": "Synthetic vat_out_s19",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "S19"
+  },
+  "vat_out_s7": {
+   "account": "9014",
+   "name": "Synthetic vat_out_s7",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "S7"
+  },
+  "vat_out_sx": {
+   "account": "9015",
+   "name": "Synthetic vat_out_sx",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "vat_not_due_s19": {
+   "account": "9016",
+   "name": "Synthetic vat_not_due_s19",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "vat_not_due_s7": {
+   "account": "9017",
+   "name": "Synthetic vat_not_due_s7",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "vat_not_due_sx": {
+   "account": "9018",
+   "name": "Synthetic vat_not_due_sx",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "vat_soll_clearing_s19": {
+   "account": "9019",
+   "name": "Synthetic vat_soll_clearing_s19",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "vat_soll_clearing_s7": {
+   "account": "9020",
+   "name": "Synthetic vat_soll_clearing_s7",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "vat_soll_clearing_sx": {
+   "account": "9021",
+   "name": "Synthetic vat_soll_clearing_sx",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "input_vat_s19": {
+   "account": "9022",
+   "name": "Synthetic input_vat_s19",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "VST"
+  },
+  "input_vat_s7": {
+   "account": "9023",
+   "name": "Synthetic input_vat_s7",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "VST"
+  },
+  "input_vat_sx": {
+   "account": "9024",
+   "name": "Synthetic input_vat_sx",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "VST"
+  },
+  "rc_vat_out_eu": {
+   "account": "9025",
+   "name": "Synthetic rc_vat_out_eu",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "rc_vat_out_3c": {
+   "account": "9026",
+   "name": "Synthetic rc_vat_out_3c",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "rc_input_vat": {
+   "account": "9027",
+   "name": "Synthetic rc_input_vat",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "VST"
+  },
+  "vat_prepayments": {
+   "account": "9028",
+   "name": "Synthetic vat_prepayments",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "vat_special_prepayment": {
+   "account": "9029",
+   "name": "Synthetic vat_special_prepayment",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "vat_previous_year": {
+   "account": "9030",
+   "name": "Synthetic vat_previous_year",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "input_vat_clearing": {
+   "account": "9031",
+   "name": "Synthetic input_vat_clearing",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "rc_vat_nondeductible": {
+   "account": "9032",
+   "name": "Synthetic rc_vat_nondeductible",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "vat_paid_private": {
+   "account": "9033",
+   "name": "Synthetic vat_paid_private",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "datev_transfer": {
+   "account": "9034",
+   "name": "Synthetic datev_transfer",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "expense_software": {
+   "account": "9035",
+   "name": "Synthetic expense_software",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line expense_software",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "meals_deductible": {
+   "account": "9036",
+   "name": "Synthetic meals_deductible",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line meals_deductible",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "meals_nondeductible": {
+   "account": "9037",
+   "name": "Synthetic meals_nondeductible",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line meals_nondeductible",
+    "deductible": false
+   },
+   "automatic": null
+  },
+  "travel_costs": {
+   "account": "9038",
+   "name": "Synthetic travel_costs",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line travel_costs",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "expense_other": {
+   "account": "9039",
+   "name": "Synthetic expense_other",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line expense_other",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "bad_debts": {
+   "account": "9040",
+   "name": "Synthetic bad_debts",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line bad_debts",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "cash_discount_granted": {
+   "account": "9041",
+   "name": "Synthetic cash_discount_granted",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line cash_discount_granted",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "trade_tax_expense": {
+   "account": "9042",
+   "name": "Synthetic trade_tax_expense",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line trade_tax_expense",
+    "deductible": false
+   },
+   "automatic": null
+  },
+  "trade_tax_provision": {
+   "account": "9043",
+   "name": "Synthetic trade_tax_provision",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "corporate_tax_expense": {
+   "account": "9044",
+   "name": "Synthetic corporate_tax_expense",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line corporate_tax_expense",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  "corporate_tax_provision": {
+   "account": "9045",
+   "name": "Synthetic corporate_tax_provision",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "tax_refunds": {
+   "account": "9046",
+   "name": "Synthetic tax_refunds",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line tax_refunds",
+    "deductible": false
+   },
+   "automatic": null
+  },
+  "private_withdrawal": {
+   "account": "9047",
+   "name": "Synthetic private_withdrawal",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "private_deposit": {
+   "account": "9048",
+   "name": "Synthetic private_deposit",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "equity": {
+   "account": "9049",
+   "name": "Synthetic equity",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "opening_balance": {
+   "account": "9050",
+   "name": "Synthetic opening_balance",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "closing_balance": {
+   "account": "9051",
+   "name": "Synthetic closing_balance",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  "profit_carryforward": {
+   "account": "9052",
+   "name": "Synthetic profit_carryforward",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  }
+ },
+ "categories": {
+  "software": "expense_software",
+  "travel": "travel_costs",
+  "meals": "meals_deductible"
+ },
+ "accounts": [
+  {
+   "account": "9001",
+   "name": "Synthetic bank",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9002",
+   "name": "Synthetic cash",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9003",
+   "name": "Synthetic receivables",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9004",
+   "name": "Synthetic payables",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9005",
+   "name": "Synthetic customer_credit",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9006",
+   "name": "Synthetic payables_employee",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9007",
+   "name": "Synthetic revenue_s19",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_s19",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9008",
+   "name": "Synthetic revenue_s7",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_s7",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9009",
+   "name": "Synthetic revenue_sx",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_sx",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9010",
+   "name": "Synthetic revenue_s0",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_s0",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9011",
+   "name": "Synthetic revenue_ku",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_ku",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9012",
+   "name": "Synthetic revenue_eu_svc",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line revenue_eu_svc",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9013",
+   "name": "Synthetic vat_out_s19",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "S19"
+  },
+  {
+   "account": "9014",
+   "name": "Synthetic vat_out_s7",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "S7"
+  },
+  {
+   "account": "9015",
+   "name": "Synthetic vat_out_sx",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9016",
+   "name": "Synthetic vat_not_due_s19",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9017",
+   "name": "Synthetic vat_not_due_s7",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9018",
+   "name": "Synthetic vat_not_due_sx",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9019",
+   "name": "Synthetic vat_soll_clearing_s19",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9020",
+   "name": "Synthetic vat_soll_clearing_s7",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9021",
+   "name": "Synthetic vat_soll_clearing_sx",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9022",
+   "name": "Synthetic input_vat_s19",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "VST"
+  },
+  {
+   "account": "9023",
+   "name": "Synthetic input_vat_s7",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "VST"
+  },
+  {
+   "account": "9024",
+   "name": "Synthetic input_vat_sx",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "VST"
+  },
+  {
+   "account": "9025",
+   "name": "Synthetic rc_vat_out_eu",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9026",
+   "name": "Synthetic rc_vat_out_3c",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9027",
+   "name": "Synthetic rc_input_vat",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": "VST"
+  },
+  {
+   "account": "9028",
+   "name": "Synthetic vat_prepayments",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9029",
+   "name": "Synthetic vat_special_prepayment",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9030",
+   "name": "Synthetic vat_previous_year",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9031",
+   "name": "Synthetic input_vat_clearing",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9032",
+   "name": "Synthetic rc_vat_nondeductible",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9033",
+   "name": "Synthetic vat_paid_private",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9034",
+   "name": "Synthetic datev_transfer",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9035",
+   "name": "Synthetic expense_software",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line expense_software",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9036",
+   "name": "Synthetic meals_deductible",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line meals_deductible",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9037",
+   "name": "Synthetic meals_nondeductible",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line meals_nondeductible",
+    "deductible": false
+   },
+   "automatic": null
+  },
+  {
+   "account": "9038",
+   "name": "Synthetic travel_costs",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line travel_costs",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9039",
+   "name": "Synthetic expense_other",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line expense_other",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9040",
+   "name": "Synthetic bad_debts",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line bad_debts",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9041",
+   "name": "Synthetic cash_discount_granted",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line cash_discount_granted",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9042",
+   "name": "Synthetic trade_tax_expense",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line trade_tax_expense",
+    "deductible": false
+   },
+   "automatic": null
+  },
+  {
+   "account": "9043",
+   "name": "Synthetic trade_tax_provision",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9044",
+   "name": "Synthetic corporate_tax_expense",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line corporate_tax_expense",
+    "deductible": true
+   },
+   "automatic": null
+  },
+  {
+   "account": "9045",
+   "name": "Synthetic corporate_tax_provision",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9046",
+   "name": "Synthetic tax_refunds",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line tax_refunds",
+    "deductible": false
+   },
+   "automatic": null
+  },
+  {
+   "account": "9047",
+   "name": "Synthetic private_withdrawal",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9048",
+   "name": "Synthetic private_deposit",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9049",
+   "name": "Synthetic equity",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9050",
+   "name": "Synthetic opening_balance",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9051",
+   "name": "Synthetic closing_balance",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9052",
+   "name": "Synthetic profit_carryforward",
+   "class": "balance",
+   "eur_line": null,
+   "automatic": null
+  },
+  {
+   "account": "9900",
+   "name": "Synthetic extra",
+   "class": "pl",
+   "eur_line": {
+    "line": "Line extra",
+    "deductible": true
+   },
+   "automatic": null
+  }
+ ]
+}

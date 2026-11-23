@@ -30,6 +30,9 @@ class VatRulesInvalid(VatRulesMissing):
     """A rule table file is malformed (wrong year, missing key, unknown box reference)."""
 
 
+# Stable tax-key vocabulary (accounting.md section 6); the charts module imports it for an account's `automatic`.
+TAX_KEYS: frozenset[str] = frozenset({"S19", "S7", "SX", "KU", "EU_SVC", "VST", "RC_EU_SVC", "RC_3C_SVC", "NONE"})
+
 _TOP_KEYS = (
     "form_year",
     "source",
