@@ -339,8 +339,8 @@ closed); EÜR `income_date` = the payment date.
 
 | Treatment / basis | Bill entry | Payment entry |
 |---|---|---|
-| `standard`, accrual | D category `cd`, D non-deductible/private `c − cd` (`income_date`), D `input_vat_r` iv (`tax_key` VST, input, `vat_date`), C `payables` g (open item) | D `payables` g / C `bank` g |
-| `standard`, EÜR | D `input_vat_r` iv (VST, input, `vat_date`), C `input_vat_clearing` iv | D category `cd`, D non-deductible/private `c − cd`, D `input_vat_clearing` iv (all with `income_date` = payment date; the clearing line is the "input VAT paid" of the gross EÜR), C `bank` g |
+| `standard`, accrual | D category `cd` (`income_date`), D `meals_nondeductible` `c − cd` (`income_date`) or D `private_withdrawal` `c − cd` (no `income_date`: private shares never enter the P&L or the EÜR), D `input_vat_r` iv (`tax_key` VST, input, `vat_date`), C `payables` g (open item) | D `payables` g / C `bank` g |
+| `standard`, EÜR | D `input_vat_r` iv (VST, input, `vat_date`), C `input_vat_clearing` iv | D category `cd`, D `meals_nondeductible` or `private_withdrawal` `c − cd`, D `input_vat_clearing` iv (all with `income_date` = payment date except `private_withdrawal`; the clearing line is the "input VAT paid" of the gross EÜR), C `bank` g |
 | `no_input_vat` | as `standard` with `iv = 0`, `c = g` (EÜR: no bill entry) | as `standard` |
 | `reverse_charge_eu_service`, accrual | per rate group (default 19): `t = q2(n_r × r / 100)`, `ri = q2(t × vp / 100)` (0 for a small business): C `rc_vat_out_eu` t (`tax_key` RC_EU_SVC, tax, base n_r, `vat_date` = § 13b tax date), D `rc_input_vat` ri (RC_EU_SVC, input, same `vat_date`), D cost `n + (t − ri)` split by `pct` (`income_date`), C `payables` n | D `payables` n / C `bank` n |
 | `reverse_charge_eu_service`, EÜR | C `rc_vat_out_eu` t, D `rc_input_vat` ri (as accrual), D `rc_vat_nondeductible` `t − ri` (no `income_date`: under EÜR the non-deductible tax becomes an expense when it is paid to the tax office with the return, section 9.6, so it must not be counted twice) | D cost `n` split by `pct` (`income_date` = payment date) / C `bank` n |
