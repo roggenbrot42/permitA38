@@ -181,3 +181,13 @@ after hard limits and sanity checks), `docs/porting-to-postgres.md` (see above),
 
 - No duplicate invoice or offer numbers, ever, for new data and restores (maintainer, 2026-11-05). Old duplicates are
   reported and logged, not blocking (see "Storage layer").
+
+## Guard kind `append_only` (accounting foundations)
+
+A table-level guard without columns (`Guard(name, table, "append_only", (), "state.append_only")`): the table refuses
+every UPDATE and DELETE, INSERT stays allowed. The dialects emit a `BEFORE UPDATE` and a `BEFORE DELETE` trigger
+(`<name>_upd` / `<name>_del`; PostgreSQL shares one trigger function `<name>_fn`) that raise `permita38:state.append_only`
+(SQLite `RAISE(ABORT)`, PostgreSQL `RAISE EXCEPTION`, MariaDB `SIGNAL SQLSTATE '45000'`). There is no grandfathering and
+no per-row exception. The SQLite upsert (`ON CONFLICT DO UPDATE`) fires the update trigger, so re-saving an existing
+row is refused as well. The only intended exception is the transfer importer's replace-restore, which drops and
+recreates the triggers inside its transaction (a later work package). No table carries the guard yet.

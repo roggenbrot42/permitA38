@@ -47,7 +47,8 @@ def test_guard_declarations_are_well_formed():
     used = {g.kind for g in GUARDS}
     assert used <= set(GUARD_KINDS)  # no unknown kind
     # no dead kind: used by a real guard, or a row-local kind (exercised by test_guards_v2_kinds.py)
-    assert set(GUARD_KINDS) <= used | ROW_LOCAL_KINDS
+    # append_only is attached to no table yet (accounting tables come later; test_guard_append_only.py)
+    assert set(GUARD_KINDS) <= used | ROW_LOCAL_KINDS | {"append_only"}
     # every row-local kind is covered by the check-db rule (it raises for a kind it does not know)
     samples = {case[0].kind: case[0] for case in V2_CASES.values()}
     for kind in ROW_LOCAL_KINDS:

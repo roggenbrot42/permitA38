@@ -269,6 +269,12 @@ class SQLiteDialect(Dialect):
         The repository writes with an upsert, so the INSERT trigger fires on every re-save: it skips a row whose
         guarded values equal the stored ones."""
         q, t = self.quote, self.quote(guard.table)
+        if guard.kind == "append_only":  # table-level: no columns, no grandfathering
+            raise_ = f"BEGIN SELECT RAISE(ABORT, 'permita38:{guard.code}'); END;"
+            return [
+                f"CREATE TRIGGER {q(guard.name + '_upd')} BEFORE UPDATE ON {t}\n{raise_}",
+                f"CREATE TRIGGER {q(guard.name + '_del')} BEFORE DELETE ON {t}\n{raise_}",
+            ]
         cols = [q(c) for c in guard.read_columns]
         c = cols[0]
         if guard.kind in ROW_LOCAL_KINDS:
@@ -351,6 +357,14 @@ class PostgresDialect(Dialect):
     def guard_sql(self, guard: Guard) -> list[str]:
         """Native constraints. Unlike the SQLite triggers they validate existing rows (docs/porting-to-postgres.md)."""
         q, t = self.quote, self.quote(guard.table)
+        if guard.kind == "append_only":
+            fn = q(guard.name + "_fn")
+            return [
+                f"CREATE FUNCTION {fn}() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n"
+                f"  RAISE EXCEPTION 'permita38:{guard.code}' USING ERRCODE = '23000';\nEND;\n$$;",
+                f"CREATE TRIGGER {q(guard.name + '_upd')} BEFORE UPDATE ON {t} FOR EACH ROW EXECUTE FUNCTION {fn}();",
+                f"CREATE TRIGGER {q(guard.name + '_del')} BEFORE DELETE ON {t} FOR EACH ROW EXECUTE FUNCTION {fn}();",
+            ]
         cols = [q(c) for c in guard.columns]
         c = cols[0]
         if guard.kind in ROW_LOCAL_KINDS:
@@ -446,6 +460,12 @@ class MariaDBDialect(Dialect):
     def guard_sql(self, guard: Guard) -> list[str]:
         """Native constraints (a generated column carries the unique key). Unlike the SQLite triggers they validate existing rows (docs/porting-to-postgres.md)."""
         q, t = self.quote, self.quote(guard.table)
+        if guard.kind == "append_only":
+            signal = f"SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:{guard.code}'"
+            return [
+                f"CREATE TRIGGER {q(guard.name + '_upd')} BEFORE UPDATE ON {t} FOR EACH ROW\nBEGIN\n  {signal};\nEND;",
+                f"CREATE TRIGGER {q(guard.name + '_del')} BEFORE DELETE ON {t} FOR EACH ROW\nBEGIN\n  {signal};\nEND;",
+            ]
         cols = [q(c) for c in guard.columns]
         c = cols[0]
         if guard.kind in ROW_LOCAL_KINDS:
