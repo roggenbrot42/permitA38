@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Response
 
 from permita38.api.deps import Needs, ServicesDep, SessionOnly
+from permita38.api.money_out import convert_warnings
 from permita38.api.responses import stored
 from permita38.core.models import UserIn, UserOut
 from permita38.core.service.records import user_warnings
@@ -16,7 +17,7 @@ def _dump(body: UserIn) -> dict:
 
 
 def _with_warnings(saved: dict) -> dict:
-    return {**saved, "planning_warnings": user_warnings(saved)}
+    return convert_warnings({**saved, "planning_warnings": user_warnings(saved)})
 
 
 @router.get("", response_model=list[UserOut], response_model_exclude_none=True)

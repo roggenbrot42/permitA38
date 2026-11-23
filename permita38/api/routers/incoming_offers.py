@@ -15,10 +15,11 @@ from permita38.core import validation as v
 router = APIRouter(prefix="/incoming-offers", tags=["procurement"])
 routers = [router]
 
+
 def _offer(data, status_code: int = 200) -> StoredJSON:
     """A stored offer (or list) as a response: Money fields and the untyped ``lines[].unit_price`` as decimal strings."""
     full = money_out.incoming_offer_lines(present(models.IncomingOffer, with_defaults(models.IncomingOffer, data)))
-    return StoredJSON(full, status_code=status_code)
+    return StoredJSON(money_out.convert_warnings(full), status_code=status_code)
 
 
 OfferId = Annotated[str, Path(pattern=v.ID_PATTERN)]
@@ -88,8 +89,7 @@ def delete_offer(incoming_offer_id: OfferId, _: Writer, services: ServicesDep):
     name="review_incoming_offer",
 )
 def review_offer(incoming_offer_id: OfferId, user: Writer, services: ServicesDep):
-    return _offer(services.procurement.transition(incoming_offer_id, "review", user, None, date.today())
-    )
+    return _offer(services.procurement.transition(incoming_offer_id, "review", user, None, date.today()))
 
 
 @router.post(
@@ -107,7 +107,7 @@ def accept_offer(incoming_offer_id: OfferId, body: models.AcceptIn, user: Writer
         out["allocation"] = present(models.Allocation, out["allocation"])
     if isinstance(out.get("commitment"), dict):
         out["commitment"] = money_out.money_strings(out["commitment"], money_out.COMMITMENT_KEYS)
-    return out
+    return money_out.convert_warnings(out)
 
 
 @router.post(
@@ -117,7 +117,8 @@ def accept_offer(incoming_offer_id: OfferId, body: models.AcceptIn, user: Writer
     name="reject_incoming_offer",
 )
 def reject_offer(incoming_offer_id: OfferId, body: models.RejectIn, user: Writer, services: ServicesDep):
-    return _offer(services.procurement.transition(incoming_offer_id, "reject", user, body.model_dump(), date.today()),
+    return _offer(
+        services.procurement.transition(incoming_offer_id, "reject", user, body.model_dump(), date.today()),
     )
 
 
@@ -128,8 +129,7 @@ def reject_offer(incoming_offer_id: OfferId, body: models.RejectIn, user: Writer
     name="reopen_incoming_offer",
 )
 def reopen_offer(incoming_offer_id: OfferId, user: Writer, services: ServicesDep):
-    return _offer(services.procurement.transition(incoming_offer_id, "reopen", user, None, date.today())
-    )
+    return _offer(services.procurement.transition(incoming_offer_id, "reopen", user, None, date.today()))
 
 
 @router.post(

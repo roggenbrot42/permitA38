@@ -3,6 +3,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Query
 
 from permita38.api.deps import Needs, ServicesDep
+from permita38.api.money_out import convert_warnings
 from permita38.core.models import TimerStartIn, TimerStopIn, TimerUpdateIn, Timesheet
 
 router = APIRouter(tags=["time"])
@@ -35,7 +36,7 @@ def stop_timer(
     out = services.time.stop_timer(user, body.note, body.discard)
     if out.get("entry"):
         out["sanity_warnings"] = services.sanity.check("entries", out["entry"])
-    return out
+    return convert_warnings(out)
 
 
 @router.get("/dashboard", summary="weekly goal, remaining hours and per-day breakdown")

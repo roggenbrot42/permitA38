@@ -6,7 +6,7 @@ from fastapi import APIRouter, Response, UploadFile
 from pydantic import BaseModel
 
 from permita38.api.deps import Needs, ServicesDep, SessionOnly
-from permita38.api.money_out import money_strings
+from permita38.api.money_out import convert_warnings, money_strings
 from permita38.api.responses import stored
 from permita38.api.routers.files import ATTACHMENT_CSP
 from permita38.core import models
@@ -79,7 +79,7 @@ def _scan_out(scan: dict) -> dict:
 
 
 def _result_out(result: dict) -> dict:
-    return {**result, "scan": _scan_out(result["scan"])}
+    return convert_warnings({**result, "scan": _scan_out(result["scan"])})
 
 
 Boss = Annotated[dict, Needs("settings", "write", full=True)]
