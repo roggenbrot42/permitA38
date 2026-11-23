@@ -16,6 +16,8 @@ All notable changes to this project are documented here. The format is based on
   the first trip, so *Add bill* preselected the wrong trip. A bill started from a trip now keeps that trip (the select
   is locked), trip names in the select show the period and destination, and bills booked against a planned cost have
   an *Edit bill* button.
+- **Side menu** (#102): on short windows the bottom of the menu (My settings, API tokens, Sign out) could not be
+  reached; the menu now scrolls on its own.
 - **Billable flag** (#102): moving an entry from an internal project to no project kept it unbillable.
 - **Nightly randomized tests** (#102): the API model knows the 24-hours-per-day limit; the browser journeys select the
   allocation mode and do not wait for a re-render when the open page's link is clicked.
