@@ -52,8 +52,8 @@ def test_the_tiles_agree_with_the_finance_figures(browser, srv, accounting, klei
     pg.goto(srv.base + "/#/expenses")
     pg.wait_for_selector(".kpi")
     tiles = pg.locator(".kpi .v").all_inner_texts()
-    assert _number(tiles[0]) == pytest.approx(fin["expenses"], abs=0.005)
-    assert _number(tiles[1]) == pytest.approx(0.0 if klein else fin["vat_in"], abs=0.005)
+    assert _number(tiles[0]) == pytest.approx(float(fin["expenses"]), abs=0.005)
+    assert _number(tiles[1]) == pytest.approx(0.0 if klein else float(fin["vat_in"]), abs=0.005)
     ctx.close()
 
 
@@ -76,5 +76,5 @@ def test_damaged_paid_on_counts_as_the_bill_date_and_empty_lines_are_skipped(bro
         }""",
         YEAR,
     )
-    assert result == {"cost": 35.0, "vat": 25.65}
+    assert result == {"cost": "35.00", "vat": "25.65"}
     ctx.close()

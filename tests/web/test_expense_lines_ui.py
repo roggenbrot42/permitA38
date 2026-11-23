@@ -202,12 +202,12 @@ def test_save_hotel_bill_then_reopen_and_edit(srv, ui):
     ui.click("#m-save")
     ui.wait_for_selector("#m-save", state="detached")
     (e,) = api(srv, "expenses")
-    assert [(x["description"], x["gross"], x["vat_rate"]) for x in e["lines"]] == [
-        ("Room 2 nights", 160, 7),
-        ("Breakfast", 30, 19),
-        ("City tax", 6, 0),
+    assert [(x["description"], D(x["gross"]), x["vat_rate"]) for x in e["lines"]] == [
+        ("Room 2 nights", D(160), 7),
+        ("Breakfast", D(30), 19),
+        ("City tax", D(6), 0),
     ]
-    assert (e["net"], e["vat"], e["vat_rate"]) == (180.74, 15.26, None)
+    assert (D(e["net"]), D(e["vat"]), e["vat_rate"]) == (D("180.74"), D("15.26"), None)
     # the list says "3 items"
     ui.wait_for_selector("tr[data-a=editExpense]")
     assert "3 items" in ui.inner_text("tr[data-a=editExpense]")
@@ -222,7 +222,7 @@ def test_save_hotel_bill_then_reopen_and_edit(srv, ui):
     ui.click("#m-save")
     ui.wait_for_selector("#m-save", state="detached")
     (e,) = api(srv, "expenses")
-    assert e["lines"][1]["gross"] == 40 and e["net"] + e["vat"] == pytest.approx(206.0)
+    assert D(e["lines"][1]["gross"]) == 40 and D(e["net"]) + D(e["vat"]) == D("206.00")
 
 
 def test_existing_single_amount_bill_opens_as_before(srv, ui):
@@ -629,4 +629,4 @@ def test_switching_itemising_off_after_removing_lines_saves_a_classic_bill(srv, 
     ui.wait_for_selector("#m-save", state="detached")
     (e,) = api(srv, "expenses")
     assert "lines" not in e and e["vendor"] == "Hotel Beispiel"
-    assert e["net"] + e["vat"] == pytest.approx(160)
+    assert D(e["net"]) + D(e["vat"]) == D("160.00")

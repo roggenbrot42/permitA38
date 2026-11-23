@@ -71,7 +71,7 @@ def test_plan_shape_and_e1_numbers(boss_client, e1):
     o = orchard(body)
     assert o["supply"] == {"employees": 24.0, "subcontractors": 24.0, "total": 48.0}
     assert (o["remaining_contracts"], o["shortfall_contracts"], o["status"]) == (74.0, 26.0, "short")
-    assert (o["planned_subcontractor_cost"], o["contract_value"], o["margin"]) == (2160.0, 8880.0, 6720.0)
+    assert (o["planned_subcontractor_cost"], o["contract_value"], o["margin"]) == ("2160.00", "8880.00", "6720.00")
     k2 = next(i for i in o["items"] if i["id"] == "contrk2001")
     assert (k2["remaining"], k2["covered"], k2["shortfall"]) == (50.0, 24.0, 26.0)
     assert "contract.shortfall" in [w["code"] for w in body["warnings"]]

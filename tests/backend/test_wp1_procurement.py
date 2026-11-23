@@ -117,7 +117,7 @@ def test_e6_24_hours_at_90_book_a_total_of_24_and_planned_net_2160(boss_client):
     a = offer(boss_client, sid, pid, [hours(24, 90.0)], {"hours_per_week": 8})
     assert a.status_code == 200, a.text
     alloc = a.json()["allocation"]
-    assert alloc["total_hours"] == 24 and alloc["planned_net"] == 2160.00
+    assert alloc["total_hours"] == 24 and alloc["planned_net"] == "2160.00"
 
 
 @pytest.mark.parametrize(

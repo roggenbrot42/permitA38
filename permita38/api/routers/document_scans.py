@@ -6,6 +6,7 @@ from fastapi import APIRouter, Response, UploadFile
 from pydantic import BaseModel
 
 from permita38.api.deps import Needs, ServicesDep
+from permita38.api.money_out import money_strings
 from permita38.api.responses import stored
 from permita38.api.routers.files import ATTACHMENT_CSP
 from permita38.core import models
@@ -81,8 +82,16 @@ CustomerReader = Annotated[dict, Needs("customers", "read")]
 CustomerWriter = Annotated[dict, Needs("customers", "write")]
 
 
+# Money keys of the untyped scan dicts (docs/specs/decimal-money-api.md, rule 4); vat_rate and quantities stay as they are.
+SCAN_MONEY_KEYS = frozenset({"gross", "total", "net", "vat", "price"})
+SCAN_DICTS = ("draft", "doc", "given_totals", "totals_info")
+
+
 def _public(scan: dict) -> dict:
-    return {k: scan[k] for k in PUBLIC if k in scan}
+    out = {k: scan[k] for k in PUBLIC if k in scan}
+    return {
+        k: money_strings(v, SCAN_MONEY_KEYS) if k in SCAN_DICTS and isinstance(v, dict) else v for k, v in out.items()
+    }
 
 
 @router.post(

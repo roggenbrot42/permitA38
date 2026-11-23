@@ -230,7 +230,7 @@ def test_classic_expense_is_unchanged_by_the_feature(boss_client):
     assert r.status_code in (200, 201), r.text
     e = r.json()
     assert not e.get("lines")
-    assert (e["net"], e["vat"], e["vat_rate"], e["deductible"]) == (84.03, 15.97, 19, 50)
+    assert (e["net"], e["vat"], e["vat_rate"], e["deductible"]) == ("84.03", "15.97", 19, 50)
     t = totals(boss_client)["totals"]
     assert dd(t["expenses"]) == q2(D("84.03") * D("0.5")) == D("42.02")
     assert dd(t["vat_in"]) == q2(D("15.97") * D("0.5")) == D("7.99")  # golden value, as before the change
@@ -243,7 +243,7 @@ def test_empty_lines_list_is_a_classic_expense(boss_client):
     assert r.status_code in (200, 201), r.text
     e = r.json()
     assert not e.get("lines")
-    assert (e["net"], e["vat"], e["vat_rate"]) == (84.03, 15.97, 19)  # nothing overwritten
+    assert (e["net"], e["vat"], e["vat_rate"]) == ("84.03", "15.97", 19)  # nothing overwritten
     t = totals(boss_client)["totals"]
     assert dd(t["expenses"]) == D("84.03") and dd(t["vat_in"]) == D("15.97")
 

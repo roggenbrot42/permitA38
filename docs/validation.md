@@ -18,6 +18,18 @@ Example: 19 % of 621.50 is 118.085 → **118.09** (binary floats gave 118.08).
 
 The backend and the browser use the same rule; `tests/web/test_money_js.py` checks 400 random documents cent for cent.
 
+## Money format in the API
+
+Money amounts in **responses** are decimal strings with two to six decimals (`"1190.00"`, unit prices up to six),
+never JSON numbers, so no client rounds them in binary floating point. **Requests** accept a decimal string or a
+number; booleans and strings that are not plain decimals (`"1,5"`, `"1e3"`, `"abc"`) are refused with 422.
+Quantities, hours, percentages and VAT rates stay numbers. The web forms accept a comma or a dot and send a string.
+
+```
+POST /api/expenses   {"date": "2026-01-15", "net": "100.00", "vat": "19.00", "vat_rate": 19, "description": "Paper"}
+201                  {"id": "abc123", "date": "2026-01-15", "net": "100.00", "vat": "19.00", "vat_rate": 19.0, ...}
+```
+
 ## Input validation
 
 Request bodies are validated by strict models (`permita38/core/models.py` `*In`, building blocks in

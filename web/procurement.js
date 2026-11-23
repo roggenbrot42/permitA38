@@ -94,7 +94,7 @@
     <td><input data-f="description" value="${esc(l.description)}" maxlength="200" aria-label="Line ${i + 1}: description"></td>
     <td><input data-f="quantity" type="number" step="any" min="0" value="${esc(l.quantity)}" aria-label="Line ${i + 1}: quantity"></td>
     <td><select data-f="unit" aria-label="Line ${i + 1}: unit"><option value="h" ${l.unit === 'h' ? 'selected' : ''}>hours</option><option value="flat" ${l.unit === 'flat' ? 'selected' : ''}>flat</option></select></td>
-    <td><input data-f="unit_price" type="number" step="any" min="0" value="${esc(l.unit_price)}" aria-label="Line ${i + 1}: unit price in euro"></td>
+    <td><input data-f="unit_price" type="text" autocomplete="off" inputmode="decimal" value="${esc(l.unit_price)}" aria-label="Line ${i + 1}: unit price in euro"></td>
     <td><button type="button" class="ghost sm" data-a="offLineRemove" data-i="${i}" aria-label="Remove line ${i + 1}" ${LINES.length < 2 ? 'disabled' : ''}>✕</button></td></tr>`;
   function paintLines() { const b = $('#off_lines'); if (b) b.innerHTML = LINES.map(lineRow).join(''); const a = $('#off_addline'); if (a) a.disabled = LINES.length >= 50; }
   A.offLineAdd = () => { if (LINES.length < 50) { LINES.push({ description: '', quantity: '', unit: 'h', unit_price: '' }); paintLines(); } };
@@ -145,9 +145,10 @@
           if (!v.supplier_id) throw new Error('Choose a supplier');
           if (!v.received_on) throw new Error('Enter the date you received the offer');
           const lines = LINES.map((l, i) => {
-            const q = numOrNull(l.quantity), pr = numOrNull(l.unit_price);
+            const q = numOrNull(l.quantity), pi = Money.parseInput(l.unit_price), pr = pi.ok ? pi.value : null;
             if (Number.isNaN(q) || q < 0) throw new Error(`Line ${i + 1}: enter the quantity`);
-            if (Number.isNaN(pr) || pr < 0) throw new Error(`Line ${i + 1}: enter the unit price`);
+            if (!pi.ok) throw new Error(`Line ${i + 1}: unit price: ${pi.error}`);
+            if (pr === null || Money.isNeg(pr)) throw new Error(`Line ${i + 1}: enter the unit price`);
             return { description: l.description, quantity: q, unit: l.unit, unit_price: pr };
           });
           Object.assign(body, { supplier_id: v.supplier_id, reference: strOrNull(v.reference), title: strOrNull(v.title), received_on: v.received_on, valid_until: v.valid_until || null, lines,

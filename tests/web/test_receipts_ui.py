@@ -273,7 +273,7 @@ def test_flagged_bill_edit_and_save(make_ui):
     pg.wait_for_selector("#m-save", state="detached")
     (_, path, body) = mock.calls("POST", "receipts/s2/confirm")[0]
     assert body["vendor"] == "Tankstelle Beispiel" and body["accepted"] == []
-    assert (body["net"], body["vat"], body["vat_rate"]) == (42.02, 7.98, 19)
+    assert (body["net"], body["vat"], body["vat_rate"]) == ("42.02", "7.98", 19)
     assert "attachment" not in body and "external_id" not in body
     pg.wait_for_selector("tr[data-id=es2]")
     assert pg.locator("#rcpt_flagged").count() == 0
