@@ -1,6 +1,6 @@
 # Specification: issued invoices, payments and credit notes (API contract)
 
-Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.4.0-alpha.7). Author: architect (Opus).
+Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.4.0-alpha.8). Author: architect (Opus).
 Review tier: **Full** (money, numbering, existing clients). This is the **contract** that the web UI, the MCP server,
 API-token clients, the importer and the randomized test models depend on; it is written first so backend and web can
 work in parallel. Postings are in [`accounting.md`](accounting.md) (sections 9.1–9.3, 10). All figures are fake.
@@ -15,7 +15,9 @@ work in parallel. Postings are in [`accounting.md`](accounting.md) (sections 9.1
 | Totals follow the current settings | Totals of issued documents come from the `issued` snapshot |
 | No partial payments, no credit notes | `payments` and credit notes (3, 4) |
 
-Offers are unchanged. Drafts are unchanged.
+Offers are unchanged. Drafts are unchanged. All money in requests and responses of this contract is a decimal string
+(`"1190.00"`; inputs also accept a JSON number), as everywhere in the API after milestone M0b
+([`decimal-money-api.md`](decimal-money-api.md)); the examples below write euros for readability.
 
 ## 2. Issued invoices
 
@@ -37,6 +39,13 @@ unchanged value of a frozen field is not a change (old clients PUT whole records
 * `paid_date` alone changed on a paid invoice → 409.
 
 ### 2.3 Derived fields (responses, lenient model)
+
+**Legacy paid invoices** (issued before this release, stored `status = paid` with a `paid_date`, no `payments` rows):
+they are read as having **one virtual payment** of their gross on `paid_date` (`payments` lists it with `id: null`,
+`kind: "payment"`, note "migrated"), so upgraded users see them paid whether or not accounting is initialised. The
+first write that touches payments or credits of such an invoice (a payment, refund, credit note, write-off) and the
+accounting initialisation **materialise** the virtual payment as a real `payments` row in the same transaction,
+before acting. A stored `paid` without `paid_date` reads as unpaid with a sanity warning (it cannot be dated).
 
 `kind` (`invoice` / `credit_note`), `credit_kind`, `corrects_id`, `tax_treatment`, `issued` (snapshot),
 `paid_amount`, `credited_amount`, `open_amount` (= gross − credited − paid, may be negative = customer credit),

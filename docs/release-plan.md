@@ -55,7 +55,7 @@ Cadence: alphas roughly every 2-3 weeks once alpha.1 is out; each alpha has a sh
 | Release | Planned |
 |---|---|
 | alpha.2 | roles and rights, validation / sanity-check layer |
-| alpha.7 (moved from alpha.3) | accounting and the German VAT return (Umsatzsteuer-Voranmeldung), ZM, DATEV export |
+| alpha.8 (moved from alpha.3; alpha.7 is a bugfix release) | accounting and the German VAT return (Umsatzsteuer-Voranmeldung), ZM, DATEV export |
 | alpha.4 | legal-retention backup module (GoBD), per-IP login throttling, server-side session revocation |
 | later | Android app, PostgreSQL/MariaDB backends, sync/merge, SSO, e-invoice, DATEV, ELSTER research, translations |
 

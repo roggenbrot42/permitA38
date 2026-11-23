@@ -1,6 +1,6 @@
 # Specification: accounting (journal, charts, payments, period lock)
 
-Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.4.0-alpha.7; maintainer decisions of
+Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.4.0-alpha.8; maintainer decisions of
 2026-11-23). Author: architect (Opus). Review tier: **Full** for everything that posts, pays, credits, locks or
 exports; **Standard** for schema, rules data and the guard. The implementer follows this document, does not decide
 tax or accounting questions, and lists every choice it had to make under "Open design decisions" in its report.
@@ -150,7 +150,7 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
    integrity service verify the chain; a break is an `error` finding ("journal changed outside the app or forked by a
    synced folder").
 7. **Integer cents.** Lines store `amount_cents` and `tax_base_cents` as integers; services convert at the edge with
-   `core/money.py` (`dec`, `q2`); responses carry decimals like the rest of the API.
+   `core/money.py` (`dec`, `q2`); responses carry money as **decimal strings** (section 7a).
 8. **Dates and the lock.** Every entry has a `document_date` (the date of the payment, bill, invoice, credit note)
    and a `booking_date = max(document_date, first day of the first unlocked month)`: late documents are booked into
    the first open month, never refused for being late (section 11). `vat_date` and `income_date` follow the rules of
@@ -160,7 +160,19 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
    setting), the app shows "use permitA38 on one device at a time while accounting is on"; the hash chain detects a
    fork.
 
-## 8. Data model (migration sketch, ids via `permita38 create-migration`, after head `7ca84bdc`)
+## 7a. Typing and money representation (maintainer decisions of 2026-11-23)
+
+* **Strict Python.** `core/accounting/`, `core/vat/` and every new service run under `mypy --strict` (a per-module
+  override in `pyproject.toml`, enforced in CI by `make lint`): no `Any`, no untyped dicts inside the engine.
+  `NewType`s `Cents` (int), `Role`, `AccountNo`, `TaxKey`; frozen dataclasses for events, states, targets and lines;
+  `Literal`/`Enum` for tax keys, tax kinds, bases, treatments and credit kinds. The posting engine is pure functions
+  (event + state in, lines out). A test fails when an accounting module uses `float` or `money.to_float`.
+* **Money in the API is a decimal string** with two decimals (`"1190.00"`, `"-57.10"`), in every response of this
+  release and — by milestone M0b ([`decimal-money-api.md`](decimal-money-api.md)) — in every existing endpoint too.
+  Inputs accept a decimal string or a JSON number (parsed exactly by `money.dec`). Percentages, rates, quantities and
+  hours stay numbers. The web UI formats the strings and never computes with money.
+
+## 8. Data model (migration sketch, ids via `permita38 create-migration`; the head at the time of the migration WP)
 
 ### 8.1 New tables (internal collections, not reachable through the generic CRUD router)
 
@@ -171,16 +183,23 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
 | `journal_lines` | `id`, `entry_id` FK, `line_no` int, `role` null, `account` text, `amount_cents` int, `tax_key` null, `tax_kind` null, `tax_rate` null text, `tax_base_cents` int null, `vat_date` date null, `income_date` date null, `open_item_id` null, `treatment` null | unique (`entry_id`,`line_no`); implies(`tax_kind` → `tax_key`), implies(`tax_key` ≠ NONE → `vat_date`); append_only |
 | `payments` | `id`, `document_id` FK, `date`, `amount_cents` int (≠ 0; positive = money received, negative = money paid back), `method` (`bank`/`cash`), `kind` (`payment` / `refund` / `reversal`; a `reversal` row has `reverses_id` and the opposite sign of the row it cancels, and cannot itself be reversed), `note` null (≤ 200), `reverses_id` null FK, `created_at`, `created_by` | append_only; no journal column: the entry finds its payment through `event_key = payment:<id>` / `source_id`, so payments recorded before initialisation need no update |
 | `period_locks` | `id`, `year`, `month` 1..12, `locked_at`, `locked_by`, `reason` (`vat_return:<id>` / `manual` / `year_close`) | unique (`year`,`month`); append_only |
+| `vat_returns` | fields of [`ustva.md`](ustva.md) "Data model", plus `amends_key` (= `amends_id` or `''`) | unique (`year`,`period_kind`,`period_no`,`amends_key`) — a plain unique index, so it works on MariaDB too; the service additionally refuses a second open draft; guard: a row with `status = final` may change only `filed_on`, `reference`, `note`, `replaced_by` and `status` back to `draft` while `filed_on` is null |
+| `zm_reports` | fields of [`zm.md`](zm.md), plus `amends_key` | unique (`year`,`quarter`,`amends_key`); the same final-row guard |
+
+Indexes: `journal_lines(vat_date, tax_key)`, `journal_lines(income_date)`, `journal_lines(open_item_id)`,
+`journal_entries(source_id)`, `journal_entries(booking_date)`, `payments(document_id)`.
 
 ### 8.2 Changed tables
 
 * `invoices`: `kind` (`invoice` / `credit_note`, default `invoice`), `credit_kind` (`storno` / `partial` / `discount` /
-  `write_off`, null for invoices), `corrects_id` (FK to the invoice a credit note corrects), `tax_treatment` (sales
+  `write_off` / `write_off_reversal`, null for invoices; write-offs and write-off reversals carry no `number` and are
+  exempt from the number guards — they are internal vouchers identified by their journal entry), `corrects_id` (FK to the invoice a credit note corrects), `tax_treatment` (sales
   enum, null reads as `standard`), `issued` JSON (null for drafts): the snapshot of section 9.1. Offers are unchanged.
 * `expenses`: `tax_treatment` (expense enum, null reads as derived, section 16), `service_date` date null (the
   performance date for § 13b; default = `date`). `reverse_charge` stays readable for old clients and is **derived**
   from `tax_treatment` on output; writing it is accepted and mapped (section 16).
-* `trips`: no change (posted on finalise).
+* `expenses` and `trips`: `posting_rev` int (internal, default 0; the revision `r<n>` of their event keys, increased by
+  the service on every repost, never sent by clients). Trips are posted on finalise.
 * `number_sequences`: new doc types `journal`, `credit_note`.
 
 Every new field is added to the strict `*In` model (with bounds) and the lenient response model; `schema.py`, all
@@ -681,12 +700,101 @@ VAT sums per period; [`ustva.md`](ustva.md) adds the box/form expectations.
 
 ## 22. Work packages
 
-See the release plan in the session plan; each WP names its contract section here. Summary: M1 foundations (guard,
-migration, models, rules loader, charts, posting engine sales/purchase, deadlines), M2 event wiring (JournalService,
-issue snapshot + freeze, payments, credit notes, expense/trip posting, fiscal years + locks, init/backfill,
-integrity, manual entries + taxes), M3 outputs (UStVA, VAT return records, exports, ZM, reports, DATEV, `finance()`
-from the journal), M4 web, M5 hardening. Tiers: Full for posting, payments, credit notes, backfill, VAT, DATEV;
-Standard for schema, guard, rules data, deadlines, locks.
+Reviewed by Fable on 2026-11-23. Each WP is one implementer prompt (`Contract:`/`Files:`/`Stop:`/`Report:`, at most
+6 files and about 300 changed lines, AGENTS.md); "×2" means two prompts. Tiers: F = Full, S = Standard, L = Light.
+The contract of a WP is the section of this spec (or of the companion spec) its content names. **S0** is the
+maintainer's sign-off of these specs (PR #124).
+
+| WP | Content (contract) | Tier | Depends on |
+|---|---|---|---|
+| **M0b decimal money in the existing API** (its own PR to `main`, independent of accounting; contract: a new short spec `docs/specs/decimal-money-api.md` written in Step 0, listing every money field per router) | | | |
+| D1 | `money.to_decimal_str`, a `Money` response type in `validation.py`, input accepting a string or number; unit tests | F | S0 |
+| D2 | Response models + routers: documents/invoices/offers, contracts, projects | F | D1 |
+| D3 | Response models + routers: expenses, receipts/scans, suppliers/procurement, trips | F | D1 |
+| D4 | Response models + routers: finance/Money page, tax estimate, planner/capacity, export/import (the data export bundle keeps its own format version: bump it and read old bundles) | F | D1 |
+| D5 | Web: parse/format money strings in `app.js`, `app2.js`, `money.js`, `trips.js`, `procurement.js`, … (split per file group, ≤ 6 files each), no JS arithmetic on money | S | D2–D4 |
+| D6 | Clients: stateful randomized model, web `e2e_random` models, MCP schema (if PR #73 is merged), OpenAPI regeneration, CHANGELOG breaking note | F (test) | D2–D5 |
+| **M1 foundations** (inert; PRs to `main`) | | | |
+| F1 | `append_only` guard kind (`schema.py`, `dialect.py`, test, `db-constraints.md`) | S | S0 |
+| F2 | Rules loader + `vat_rules/2026.json` + `datev/2026.json`, `KLEIN_LIMIT` move, packaging (`permita38.spec`, `test_package_data.py`), strict-mypy override | S + logic | S0 |
+| F3 | SKR03/04 charts + role test (synthetic fixture first) | S + logic | F2 |
+| F4 | `next_working_day`, UStVA/ZM deadlines | S | – |
+| F5 | Engine types (`Cents`…), §9.1 issue templates, treatments | F | F2 |
+| F6 | §9.2 state, allocation, targets/delta (A1–A4, A8, A11, A12, A18) | F | F5 |
+| F7 | Write-off, discount complement, write-off reversal (A9, A13) | F | F6 |
+| F8 | Expense bill/pay engine, § 13b, meals, private share (A5, A6, A14, A17) | F | F5 |
+| F9 | Trips, VAT payments, special prepayment, taxes §9.5–9.7 | F | F5 |
+| F10 | Fraction oracle (hypothesis, 4 bases), fixture coverage test, CI guard that the fixture changes only in architect commits; **separate agent that has not seen the engine** | F (test + logic) | F6, F7 |
+| **M2a storage + skeleton** (`feat/accounting`) | | | |
+| E1 | Migration A: years, journal, payments, locks, indexes, sequences | S | F1 |
+| E2 | Migration B: invoice/expense columns, `vat_returns`, `zm_reports`, final-row guard | S | E1 |
+| E3 | Models ×2 (documents/payments/credit notes; journal/years/returns/ZM), strict `*In`, decimal strings | S | E2 |
+| E4 | Rights areas, router skeletons, rbac table, tokens session-only, `roles.md` | F | E3 |
+| E5 | Fiscal years service + API | S | E4 |
+| E6 | `JournalService`: balance, `event_key`, gapless number, hash chain, `booking_date` | F | E1, E5, F5 |
+| E7 | Locks, late booking, drift flags (A15, A16) | F | E6 |
+| **M2b events + clients** (**one PR**: the freeze merges together with its clients) | | | |
+| E8 | Issue snapshot, `doc_totals` from snapshot, issue posting | F | E6 |
+| E9 | Freeze, legacy `paid` translation, derived fields, legacy read rule + materialisation | F | E8 |
+| E10 | Payments, refund, reversal, overpayment | F | E9, F6 |
+| E11 | Credit notes storno/partial, numbering settings + page | F | E10 |
+| E12 | Write-off, reversal record, settle-discount | F | E11, F7 |
+| E13 | Credit-note PDF | F | E11 |
+| E14 | Expense treatment mapping, `service_date`, bill/pay posting, repost/409 | F | E7, F8 |
+| E15 | Trip posting | F | E7, F9 |
+| E16 | Manual entries, reverse, accounts API, templates | F | E7 |
+| E17 | VAT/tax bookings, opening balances | F | E16, F9 |
+| E18 | Year closing / EÜR year end | F | E17 |
+| E19 | xlsx importer: snapshot, `paid`→payment, `cancelled`→review, undo | F | E10 |
+| E20 | Stateful randomized model ×2 (freeze/payments; credit notes/locks) | F (test) | E12 |
+| E21 | Web `e2e_random` models | S | E12, W1 |
+| W1 | Read-only issued invoice, treatment select, payments panel | S | E10 |
+| W2 | Credit note / write-off / discount actions | S | W1, E12 |
+| W3 | Expense treatment + service date | S | E14 |
+| **M2c initialisation** | | | |
+| E22 | Init core: year, snapshots, replay, CLI | F | E12, E14, E15 |
+| E23 | Pre-start baseline, opening items, lazy baseline | F | E22 |
+| E24 | Review list + API, expense rules, legacy `cancelled`, external returns | F | E23, O2 |
+| E25 | Integrity: `check-db` chain/balance, sanity warnings, synced-folder warning | S | E6 |
+| E26 | Transfer export/import/restore with the new tables and the trigger exception | F | E2 |
+| **M3 outputs** | | | |
+| O1 | UStVA computation (pure) | F | F2, E6 |
+| O2 | Return records: draft/finalise + lock, reopen, filed, delete, drill-down | F | O1, E7 |
+| O3 | Amended return, drift, external returns | F | O2 |
+| O4 | Return payment, special prepayment | F | O2, E17 |
+| O5 | Exports CSV (decimal comma), JSON, PDF + banner | F | O2 |
+| O6 | ZM computation, records, drift, API | F | E6, E7 |
+| O7 | ZM exports, BZSt golden file | F | O6 |
+| O8 | Reports A: journal, ledger, trial balance, open items | F | E6 |
+| O9 | Reports B: EÜR (deductible), P&L, balance sheet, VAT reconciliation, before-start | F | O8, F3 |
+| O10 | DATEV rows (anchor, folding, § 13b, reclassification) with **hand-written golden rows** | F | F3, E6 |
+| O11 | DATEV fallback, simulation self-check, report, zip, API | F | O10 |
+| O12 | `finance()` from the journal + reconciliation | F | E22 |
+| O13 | MCP invoice schema (only if PR #73 is merged) | S | E9 |
+| **M4 web** | | | |
+| W4 | VAT page (returns, detail, finalise/filed/amend, exports) | S | O2–O5 |
+| W5 | ZM tab, Today banners | S | O6 |
+| W6 | Accounting page A: journal, reports | S | O8, O9 |
+| W7 | Accounting page B: manual entry, locks, years, closing, DATEV | S | E16–E18, O11 |
+| W8 | Init wizard with review list and external returns | S | E24 |
+| W9 | Adviser banner, set-up state | L | F2 |
+| **M5 hardening** | | | |
+| H1 | Stateful model: locks/returns invariants; random suite run | F (test) | M3 |
+| H2 | Docs: `compliance.md`, user guide, `validation.md`, CHANGELOG with a **breaking** section (freeze) | L | M4 |
+| H3 | Release gate (below), tag alpha.8 | maintainer | all |
+
+**Hot files** are worked on one WP at a time: `models.py`, `schema.py`, `rights.py`, `test_rbac.py`, `web/app2.js`,
+`web/index.html`, `test_api_stateful.py`. Only the integrator regenerates `api/openapi.json`, at each milestone merge.
+
+**Merge order:**
+0. M0b → `main` (its own PR, CI incl. browser suite green; randomized suites once locally since it touches every
+   API model). M1 can run in parallel; M2 starts after M0b so the new models are built on `Money` from the start.
+1. M1 → `main`.
+2. M2a, M2b (one PR), M2c, M3 → `feat/accounting`; M4 as it goes.
+3. One PR → `main` after H1.
+
+`make test-summary SUITES="random"` runs at the M2b merge and again before `main`.
+
 
 ## Open design decisions (for the implementer's report)
 
