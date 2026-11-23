@@ -140,7 +140,17 @@ FINANCE_NUMBERS = {"month", "year", "rate", "effective_rate", "months_left", "kf
 
 def test_finance_boss_money_keys_are_strings(seeded):
     f = seeded.get("/api/finance").json()
-    for k in ("revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due", "tax_set_aside", "vat_set_aside", "social"):
+    for k in (
+        "revenue",
+        "vat_out",
+        "expenses",
+        "vat_in",
+        "profit",
+        "vat_due",
+        "tax_set_aside",
+        "vat_set_aside",
+        "social",
+    ):
         assert_money(f["months"], k, 12)
     assert_money(f["months"], "take_home", 1)  # None for the months not begun yet
     for k in ("revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due"):

@@ -104,7 +104,9 @@ def finance_response(result: dict[str, Any]) -> dict[str, Any]:
 
 
 # GET /project-report ------------------------------------------------------------------------------------------------
-PROJECT_REPORT_KEYS = frozenset({"revenue", "cost", "expenses", "margin", "unbilled_revenue", "committed_external_cost"})
+PROJECT_REPORT_KEYS = frozenset(
+    {"revenue", "cost", "expenses", "margin", "unbilled_revenue", "committed_external_cost"}
+)
 # not hours, unbilled_hours
 
 
