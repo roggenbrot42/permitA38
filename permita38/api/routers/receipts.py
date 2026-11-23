@@ -6,6 +6,7 @@ from fastapi import APIRouter, Response, UploadFile
 from pydantic import BaseModel
 
 from permita38.api.deps import Needs, ServicesDep, SessionOnly
+from permita38.api.money_out import money_strings
 from permita38.api.responses import stored
 from permita38.api.routers.files import ATTACHMENT_CSP
 from permita38.core import models
@@ -65,6 +66,22 @@ class OcrInstalled(BaseModel):
     version: str
 
 
+# Money keys of the untyped scan dicts (docs/specs/decimal-money-api.md, rule 4); vat_rate and the percents stay numbers.
+SCAN_MONEY_KEYS = frozenset({"gross", "total", "net", "vat", "price"})
+SCAN_DICTS = ("draft", "doc", "given_totals", "totals_info")
+
+
+def _scan_out(scan: dict) -> dict:
+    """The scan with the money of its draft and doc dicts as decimal strings."""
+    return {
+        k: money_strings(v, SCAN_MONEY_KEYS) if k in SCAN_DICTS and isinstance(v, dict) else v for k, v in scan.items()
+    }
+
+
+def _result_out(result: dict) -> dict:
+    return {**result, "scan": _scan_out(result["scan"])}
+
+
 Boss = Annotated[dict, Needs("settings", "write", full=True)]
 Reader = Annotated[dict, Needs("expenses", "read")]
 AttachReader = Annotated[dict, Needs("attachments", "read")]
@@ -77,7 +94,7 @@ AttachWriter = Annotated[dict, Needs("attachments", "write")]
 )
 def upload(file: UploadFile, user: Writer, _a: AttachWriter, services: ServicesDep):
     blob = file.file.read(MAX_UPLOAD + 1)
-    reply = stored(UploadResult, services.receipts.upload(user, file.filename, blob))
+    reply = stored(UploadResult, _result_out(services.receipts.upload(user, file.filename, blob)))
     reply.status_code = 201  # a returned response ignores the status of the decorator
     return reply
 
@@ -91,14 +108,14 @@ def upload(file: UploadFile, user: Writer, _a: AttachWriter, services: ServicesD
 )
 def add_part(scan_id: str, file: UploadFile, user: Writer, _a: AttachWriter, services: ServicesDep):
     blob = file.file.read(MAX_UPLOAD + 1)
-    reply = stored(UploadResult, services.receipts.add_part(user, scan_id, file.filename, blob))
+    reply = stored(UploadResult, _result_out(services.receipts.add_part(user, scan_id, file.filename, blob)))
     reply.status_code = 201
     return reply
 
 
 @router.get("", response_model=ScanList, response_model_exclude_none=True, summary="receipts that need a check")
 def list_receipts(user: Reader, _a: AttachReader, services: ServicesDep, status: Literal["flagged"] = "flagged"):
-    return stored(ScanList, {"items": services.receipts.list_flagged()})
+    return stored(ScanList, {"items": [_scan_out(s) for s in services.receipts.list_flagged()]})
 
 
 # declared before `/{scan_id}`, or it would be taken for an id
@@ -124,7 +141,7 @@ def install_ocr(user: Boss, services: ServicesDep):
 
 @router.get("/{scan_id}", response_model=ScanResult, response_model_exclude_none=True, summary="one scanned receipt")
 def get_receipt(scan_id: str, user: Reader, _a: AttachReader, services: ServicesDep):
-    return stored(ScanResult, services.receipts.get(scan_id))
+    return stored(ScanResult, _scan_out(services.receipts.get(scan_id)))
 
 
 @router.get(
@@ -149,7 +166,7 @@ def page_image(scan_id: str, page: int, user: Reader, _a: AttachReader, services
     summary="save a flagged receipt",
 )
 def confirm(scan_id: str, body: models.ReceiptConfirmIn, user: Writer, _a: AttachWriter, services: ServicesDep):
-    return stored(ConfirmResult, services.receipts.confirm(user, scan_id, body))
+    return stored(ConfirmResult, _result_out(services.receipts.confirm(user, scan_id, body)))
 
 
 @router.delete("/{scan_id}", status_code=204, summary="discard a flagged receipt")
