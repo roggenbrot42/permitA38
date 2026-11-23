@@ -288,9 +288,9 @@ def test_w9_cancel_keeps_the_days_before_the_cut_and_w10_floors_the_open_net(bos
     assert len(warn) == 1
     assert warn[0]["details"] == {
         "allocation_id": alloc["id"],
-        "planned_net": 3200.0,
-        "invoiced_net": 3300.0,
-        "excess": 100.0,
+        "planned_net": "3200.00",
+        "invoiced_net": "3300.00",
+        "excess": "100.00",
     }
     final = boss_client.get(f"/api/allocations/{alloc['id']}").json()
     assert (final["invoiced_net"], final["open_net"]) == ("3300.00", "0.00")
