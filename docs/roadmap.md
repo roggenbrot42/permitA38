@@ -79,7 +79,12 @@ decides.
 | **Project capacity**: people and subcontractors are allocated to projects; a project's demand is covered by its own pool, contracts only state what is owed | spec: [`specs/project-capacity.md`](specs/project-capacity.md) (draft, architect sign-off pending); Full review tier |
 | **Fix: contract customer rule and the customer's accepted items** (contract refused for another customer's project; items view after accepting an offer) | spec: [`specs/contract-items.md`](specs/contract-items.md) (draft, architect sign-off pending); Full review tier |
 
-## v0.4.0-alpha.8: VAT and accounting
+## v0.4.0-alpha.7: fixes for alpha.6
+
+Fixes for the bugs reported against alpha.6: manual time entry and Today card layout, business trip bills, billable flag,
+nightly tests (milestone `0.4.0-alpha.7`).
+
+## v0.5.0-alpha.1: VAT and accounting
 
 A release of its own (maintainer decision 2026-11-23). Specs: [`specs/accounting.md`](specs/accounting.md),
 [`specs/ustva.md`](specs/ustva.md) (v2), [`specs/zm.md`](specs/zm.md), [`specs/datev-export.md`](specs/datev-export.md),
@@ -96,7 +101,7 @@ E); the adviser's sign-off gates the beta.
 | **Period lock (GoBD Festschreibung)**, free manual entries, Gewerbesteuer / income-tax / corporate-tax bookings, opening balances and year closing | spec; Full review tier |
 | **Reports** (journal, ledger, trial balance, EÜR in gross form, P&L, balance sheet, open items) and **DATEV export** (EXTF Buchungsstapel) | spec; Full review tier |
 
-## v0.4.0-alpha.9
+## v0.5.0-alpha.2
 
 | Item | Status |
 |---|---|
@@ -136,7 +141,7 @@ E); the adviser's sign-off gates the beta.
 | **SSO / OIDC** login | for team and server installations |
 | **ELSTER transmission** | research: certificate handling, ERiC library licensing, or an export for the official software |
 | **Public customer demo** | per-visitor sandboxes with fake data, risky features off; see [`specs/demo-deployment.md`](specs/demo-deployment.md) |
-| **GDPR per-person export** from the export archive (filter by customer or user) | planned (alpha.9, with the GDPR tooling) |
+| **GDPR per-person export** from the export archive (filter by customer or user) | planned (0.5.0-alpha.2, with the GDPR tooling) |
 | Recurring invoices, credit notes, reminders (Mahnungen) | |
 | macOS and Linux arm64 bundles | needs signing and notarisation |
 
@@ -150,14 +155,14 @@ release; `proposed` means not yet scheduled.
 |---|---|---|
 | **E-invoice receiving** (parse XRechnung/ZUGFeRD XML, archive the original) | Receiving e-invoices is already mandatory since 2025 *(verify)* | beta (moved back) |
 | **E-invoice issuing** (XRechnung / ZUGFeRD export) | Mandatory for all domestic B2B from 2028, for large businesses 2027 *(verify)* | beta (moved back; before the deadline) |
-| **GoBD change log (audit trail)** and **Verfahrensdokumentation generator** | GoBD core requirements | alpha.9 (the append-only journal and the period lock come in alpha.8) |
-| **Zusammenfassende Meldung (ZM)** for EU B2B services | Separate mandatory report next to the UStVA | alpha.8 |
-| **Annual VAT return** and **EÜR form export** (*Anlage EÜR*) | Year-end filing | alpha.9 (the EÜR report comes in alpha.8) |
+| **GoBD change log (audit trail)** and **Verfahrensdokumentation generator** | GoBD core requirements | 0.5.0-alpha.2 (the append-only journal and the period lock come in 0.5.0-alpha.1) |
+| **Zusammenfassende Meldung (ZM)** for EU B2B services | Separate mandatory report next to the UStVA | 0.5.0-alpha.1 |
+| **Annual VAT return** and **EÜR form export** (*Anlage EÜR*) | Year-end filing | 0.5.0-alpha.2 (the EÜR report comes in 0.5.0-alpha.1) |
 | **Income-tax advance-payment reminders** (10 Mar/Jun/Sep/Dec) | Cash planning | alpha.6 |
 | **Asset register and depreciation (AfA)** | Needed for correct EÜR/balance sheet | beta |
-| **Invoice lifecycle**: credit notes/cancellations, advance and final invoices, early-payment discount | Everyday invoicing needs | alpha.8: credit notes, cancellations, discount; advance and final invoices later |
+| **Invoice lifecycle**: credit notes/cancellations, advance and final invoices, early-payment discount | Everyday invoicing needs | 0.5.0-alpha.1: credit notes, cancellations, discount; advance and final invoices later |
 | **Reminders (Mahnwesen)** with default interest and flat fee (§ 288 BGB) | Getting paid | alpha.6 |
-| **Bank statement import** (CAMT.053/MT940/CSV) and payment matching; **EPC GiroCode QR** on invoices | Faster payment and reconciliation | alpha.9 |
+| **Bank statement import** (CAMT.053/MT940/CSV) and payment matching; **EPC GiroCode QR** on invoices | Faster payment and reconciliation | 0.5.0-alpha.2 |
 | **SEPA direct-debit file export** | Optional collection of recurring payments | beta |
 | **Working-time law checks** (ArbZG breaks, rest, 10 h) as sanity warnings; absence entitlement (BUrlG) | Teams with employees | warnings released in alpha.2; entitlement (BUrlG) beta |
 | **ArbZG averages for booked time**: §3 average of 8 h per working day over the rolling 24 weeks, 60 h week; for the boss own limits from "My settings" (`work_limits`, shared with the planner, defaults: more than 10 h a day info, more than 12 h warning, more than 16 h warning "more than your maximum"; long weeks and a high average info), never a refused booking and no law wording, no break, rest or Sunday messages; never for subcontractors; **automatic breaks for employees** as a business setting (`auto_break_employees`, default on: the missing 30/45 minutes of §4 deducted on booking, shown on the entry and replaceable by real break times), never for the boss | Teams with employees | after the planner rework |
@@ -165,7 +170,7 @@ release; `proposed` means not yet scheduled.
 | **One-Stop-Shop (OSS)** support | EU sales to private customers | later |
 | **Security baseline self-assessment (OWASP ASVS L2)** and **CRA readiness** review | Trust, regulatory outlook | beta |
 | **Accessibility audit (WCAG 2.2 AA)** | Usability, legal outlook | beta (PWA work starts it) |
-| **Privacy pack** (privacy notice, Art. 28 agreement outline, breach checklist, erasure concept) | GDPR for hosted instances | alpha.9 (with GDPR tooling) |
+| **Privacy pack** (privacy notice, Art. 28 agreement outline, breach checklist, erasure concept) | GDPR for hosted instances | 0.5.0-alpha.2 (with GDPR tooling) |
 | **Mobile web app (PWA)** with offline-tolerant time tracking | Phone use before a native app exists | beta (moved back) |
 
 

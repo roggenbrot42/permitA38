@@ -1,7 +1,7 @@
 # Specification: money as decimal strings in the whole HTTP API (milestone M0b)
 
 Status: **draft for maintainer sign-off** (maintainer decision of 2026-11-23: "old api endpoints should also use
-decimal strings"; ships before the VAT + accounting work, release v0.4.0-alpha.8). Author: architect (Opus). Review
+decimal strings"; ships before the VAT + accounting work, release v0.5.0-alpha.1). Author: architect (Opus). Review
 tier: **Full** (money, every API client). Inventory of the current fields: an Explore pass of 2026-11-23 (the tables
 below); the implementer re-greps before each WP and lists additions under "Open design decisions".
 

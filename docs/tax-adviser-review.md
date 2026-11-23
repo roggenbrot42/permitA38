@@ -6,7 +6,7 @@ user can plan monthly set-asides. It is not tax advice and never replaces the ta
 to confirm it. Each item has an ID (TA-nn), what the app does today, the question, and why it matters. Record the
 answer in the last two columns and set the Status to `open`, `confirmed` or `changed`. Sections A to C and E are for
 the tax adviser (Steuerberater); section D is for the maintainer only. Section E covers the VAT return, the ZM and the
-bookkeeping of release alpha.8; unlike the estimate, these figures are filed, so they ship behind a "not confirmed by
+bookkeeping of release 0.5.0-alpha.1; unlike the estimate, these figures are filed, so they ship behind a "not confirmed by
 a tax adviser" banner until every E item is answered.
 
 References: "spec" is `docs/specs/tax-burden-and-settings.md` (part B, "Algorithm" step N); the rate tables are
@@ -62,7 +62,7 @@ Not verified against the official publications. Values, source and valid_from ar
 | TA-25 | GmbH take_home | For `gmbh` the formula subtracts the household tax (on the salary) and the corporate taxes from the GmbH profit, so `take_home` is the company's cash after set-asides, not the owner's. | Keep, or hide `take_home` for `gmbh`. | open | |
 | TA-26 | Recording Vorauszahlungen later | Not recorded (see TA-14); "currently owed" and the reserve ignore them. | Record them in a later version? | open | |
 
-## E. VAT return, ZM and bookkeeping (release alpha.8)
+## E. VAT return, ZM and bookkeeping (release 0.5.0-alpha.1)
 
 References: `docs/specs/ustva.md` (U), `zm.md` (Z), `accounting.md` (A), `datev-export.md` (D); rules data
 `permita38/core/vat_rules/<year>.json`, `core/charts/skr03|skr04-<year>.json`, `core/datev/<year>.json`; the worked

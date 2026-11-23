@@ -1,6 +1,6 @@
 # Specification: VAT advance return (Umsatzsteuer-Voranmeldung, UStVA), v2
 
-Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.4.0-alpha.8; maintainer decisions of
+Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.5.0-alpha.1; maintainer decisions of
 2026-11-23). Author: architect (Opus); v1 by a Sonnet architect, revised after a Fable review (2026-11-23).
 Review tier: **Full** (money/VAT, rights, immutability). The implementer follows this document, does not decide tax
 questions, and lists every choice it had to make under "Open design decisions".

@@ -1,6 +1,6 @@
 # Specification: issued invoices, payments and credit notes (API contract)
 
-Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.4.0-alpha.8). Author: architect (Opus).
+Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.5.0-alpha.1). Author: architect (Opus).
 Review tier: **Full** (money, numbering, existing clients). This is the **contract** that the web UI, the MCP server,
 API-token clients, the importer and the randomized test models depend on; it is written first so backend and web can
 work in parallel. Postings are in [`accounting.md`](accounting.md) (sections 9.1–9.3, 10). All figures are fake.

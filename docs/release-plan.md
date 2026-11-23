@@ -34,6 +34,8 @@ the alpha is in [`roadmap.md`](roadmap.md).*
 | rc | candidate for 1.0, no changes except blockers | `v1.0.0-rc.N` | anybody who wants to test the final | pre-release |
 | 1.0 | stable | `v1.0.0` | everybody | normal release, `latest` image tag |
 
+The VAT + accounting release is `v0.5.0-alpha.1` and starts the 0.5.0 series, because it changes the data model and the bookkeeping fundamentally; the 0.5.0 betas follow its alphas.
+
 Cadence: alphas roughly every 2-3 weeks once alpha.1 is out; each alpha has a short, explicit scope (section 3).
 
 ## 3. Scope of v0.4.0-alpha.1
@@ -55,7 +57,7 @@ Cadence: alphas roughly every 2-3 weeks once alpha.1 is out; each alpha has a sh
 | Release | Planned |
 |---|---|
 | alpha.2 | roles and rights, validation / sanity-check layer |
-| alpha.8 (moved from alpha.3; alpha.7 is a bugfix release) | accounting and the German VAT return (Umsatzsteuer-Voranmeldung), ZM, DATEV export |
+| 0.5.0-alpha.1 (moved from alpha.3; alpha.7 is a bugfix release) | accounting and the German VAT return (Umsatzsteuer-Voranmeldung), ZM, DATEV export |
 | alpha.4 | legal-retention backup module (GoBD), per-IP login throttling, server-side session revocation |
 | later | Android app, PostgreSQL/MariaDB backends, sync/merge, SSO, e-invoice, DATEV, ELSTER research, translations |
 

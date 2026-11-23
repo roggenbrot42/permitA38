@@ -1,6 +1,6 @@
 # Specification: accounting (journal, charts, payments, period lock)
 
-Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.4.0-alpha.8; maintainer decisions of
+Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.5.0-alpha.1; maintainer decisions of
 2026-11-23). Author: architect (Opus). Review tier: **Full** for everything that posts, pays, credits, locks or
 exports; **Standard** for schema, rules data and the guard. The implementer follows this document, does not decide
 tax or accounting questions, and lists every choice it had to make under "Open design decisions" in its report.
@@ -781,7 +781,7 @@ maintainer's sign-off of these specs (PR #124).
 | **M5 hardening** | | | |
 | H1 | Stateful model: locks/returns invariants; random suite run | F (test) | M3 |
 | H2 | Docs: `compliance.md`, user guide, `validation.md`, CHANGELOG with a **breaking** section (freeze) | L | M4 |
-| H3 | Release gate (below), tag alpha.8 | maintainer | all |
+| H3 | Release gate (below), tag 0.5.0-alpha.1 | maintainer | all |
 
 **Hot files** are worked on one WP at a time: `models.py`, `schema.py`, `rights.py`, `test_rbac.py`, `web/app2.js`,
 `web/index.html`, `test_api_stateful.py`. Only the integrator regenerates `api/openapi.json`, at each milestone merge.

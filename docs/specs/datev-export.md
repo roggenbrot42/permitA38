@@ -1,6 +1,6 @@
 # Specification: DATEV export (EXTF Buchungsstapel)
 
-Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.4.0-alpha.8). Author: architect (Opus).
+Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.5.0-alpha.1). Author: architect (Opus).
 Review tier: **Full** (money, outside format). Depends on [`accounting.md`](accounting.md). Format details marked
 *(verify)* must be checked against the official DATEV "Formatbeschreibung DATEV-Format" (the work package obtains it
 from DATEV's developer portal or the maintainer provides it) and, before the release, by an import at the tax

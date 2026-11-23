@@ -1,6 +1,6 @@
 # Specification: Zusammenfassende Meldung (ZM, EC sales list) for services
 
-Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.4.0-alpha.8). Author: architect (Opus).
+Status: **draft for maintainer sign-off** (release "VAT + accounting", v0.5.0-alpha.1). Author: architect (Opus).
 Review tier: **Full** (VAT, outside reporting). Depends on [`accounting.md`](accounting.md) and
 [`ustva.md`](ustva.md). Rules marked *(verify)* go to `docs/tax-adviser-review.md` section E and ship behind the
 adviser banner. All figures and VAT ids in this document and its fixtures are fake.
