@@ -54,39 +54,41 @@ def normalize_username(u: str) -> str | None:
     return u if USERNAME_RE.match(u) else None
 
 
-def line_amount(line: dict) -> float:
-    return float(money(Decimal(str(line.get("qty", 0))) * Decimal(str(line.get("price", 0)))))
+def line_amount(line: dict) -> Decimal:
+    return money(Decimal(str(line.get("qty", 0))) * Decimal(str(line.get("price", 0))))
 
 
-def doc_totals(doc: dict, klein: bool) -> dict:
+def doc_totals(doc: dict, klein: bool) -> dict[str, Decimal]:
     """net / vat / gross of an offer or invoice. Per-line VAT beats the document rate beats 19 %."""
     doc_rate = doc.get("vat_rate")
-    doc_rate = DEFAULT_VAT if doc_rate is None else float(doc_rate)
-    by_rate: dict[float, Decimal] = {}
+    doc_rate = Decimal(DEFAULT_VAT) if doc_rate is None else Decimal(str(doc_rate))
+    by_rate: dict[Decimal, Decimal] = {}
     net = Decimal(0)
     for ln in doc.get("lines", []):
-        amt = Decimal(str(line_amount(ln)))
+        amt = line_amount(ln)
         net += amt
-        rate = 0.0 if klein else float(ln["vat"] if ln.get("vat") is not None else doc_rate)
+        rate = Decimal(0) if klein else Decimal(str(ln["vat"] if ln.get("vat") is not None else doc_rate))
         by_rate[rate] = by_rate.get(rate, Decimal(0)) + amt
-    vat = sum((amt * Decimal(str(r)) / 100 for r, amt in by_rate.items()), Decimal(0))
-    return {"net": float(net), "vat": float(vat), "gross": float(net + vat)}
+    vat = sum((amt * r / 100 for r, amt in by_rate.items()), Decimal(0))
+    return {"net": net, "vat": vat, "gross": net + vat}
 
 
-def resolve_rate(entry: dict, tasks: dict, projects: dict, customers: dict, users: dict, default_rate: float) -> float:
+def resolve_rate(
+    entry: dict, tasks: dict, projects: dict, customers: dict, users: dict, default_rate: Decimal | int | str
+) -> Decimal:
     """entry override > task > project > customer > person's default rate > global default."""
     if entry.get("rate") is not None:
-        return float(entry["rate"])
+        return Decimal(str(entry["rate"]))
     task = tasks.get(entry.get("task_id"))
     proj = projects.get(entry.get("project_id"))
     cust = customers.get(proj.get("customer_id")) if proj else None
     for src in (task, proj, cust):
         if src and src.get("rate") is not None:
-            return float(src["rate"])
+            return Decimal(str(src["rate"]))
     user = users.get(entry.get("user_id"))
     if user and user.get("default_rate") is not None:
-        return float(user["default_rate"])
-    return float(default_rate)
+        return Decimal(str(user["default_rate"]))
+    return Decimal(str(default_rate))
 
 
 def week_target_and_worked(user: dict, entries: list[dict], absences: list[dict], today: date) -> tuple[float, float]:
