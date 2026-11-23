@@ -251,7 +251,8 @@ settled. The issue entry of 9.1 is the same rule evaluated from the empty state 
 notes incl. write-offs, minus write-off reversals); current `C_r = G_r − K_r`, `CV_r = V_r − KV_r`,
 `CN_r = C_r − CV_r`; `C = Σ C_r`. Cash kept `P` = Σ payments − Σ refunds (reversal rows included); `P < 0` is refused.
 `T = min(P, G)`; `P − T` is an overpayment. An invoice whose gross is zero or negative (a legacy credit invoice)
-keeps `T = 0`: all its cash is customer credit. A snapshot whose rate groups have mixed signs (one positive, one
+keeps `T = 0`: all its cash is customer credit, and under Soll its due VAT is the current VAT (`D_r = CV_r`,
+`B_r = CN_r`, the negative VAT is reduced at issue); under Ist it stays 0. A snapshot whose rate groups have mixed signs (one positive, one
 negative gross) is refused at issue (422), so the allocation always works on groups of one sign.
 
 **Cash allocation** (cumulative):
