@@ -142,7 +142,8 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
    (`core/accounting/postings*.py`, pure functions) turns the event into lines.
 4. **Idempotent.** Each entry has a unique `event_key` (`issue:<invoice id>`, `payment:<payment id>`,
    `expense:<expense id>:bill:r<bill_rev>`, `expense:<expense id>:pay:r<pay_rev>`,
-   `credit:<doc id>`, `trip:<id>:r<revision>`, `manual:<uuid>`, `open:<year>:<item>`, ...). Re-delivering
+   `credit:<doc id>`, `trip:<id>:r<revision>`, `vat:<id>` (VAT payments, refunds, special prepayment and its credit),
+   `manual:<uuid>`, `open:<year>:<item>`, ...; a reversal entry has the key of the entry it reverses plus `:rev`). Re-delivering
    an event with an existing key is a no-op that returns the existing entry.
 5. **Gapless numbers.** `entry_no` is gapless per fiscal year, allocated through `number_sequences` (doc type
    `journal`) in the same transaction as the entry.
