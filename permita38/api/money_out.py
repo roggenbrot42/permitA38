@@ -141,3 +141,47 @@ def incoming_offer_lines(rec: Any) -> Any:
     if not isinstance(rec, dict) or not isinstance(rec.get("lines"), list):
         return rec
     return {**rec, "lines": [money_strings(ln, {"unit_price"}) if isinstance(ln, dict) else ln for ln in rec["lines"]]}
+
+
+# warnings (money in ``details`` as decimal strings; hours, counts and ids stay numbers) -----------------------------
+# One entry per warning code that carries money in ``details``. Built from every warning constructor in
+# core/service/planning_warnings.py, sanity_rules.py, procurement.py, allocations.py and planner/*. A code that is not
+# listed has no money (e.g. incoming_offer.hours_mismatch: ``difference`` is hours) and is left untouched.
+WARNING_MONEY_KEYS: dict[str, frozenset[str]] = {
+    "rate.below_minimum": frozenset({"price", "minimum"}),
+    "rate.below_reference": frozenset({"price", "reference"}),
+    "rate.effective_below_minimum": frozenset({"effective_rate", "minimum"}),
+    "expense.vat_mismatch": frozenset({"expected", "entered"}),
+    "offer.total_outlier": frozenset({"median"}),
+    "invoice.total_outlier": frozenset({"median"}),
+    "expense.amount_outlier": frozenset({"median"}),
+    "allocation.invoiced_exceeds_planned": frozenset({"planned_net", "invoiced_net", "excess"}),
+    "allocation.cost_differs_from_offer": frozenset({"planned_net", "net_total", "difference"}),
+    "assignment.differs_from_offer": frozenset({"planned_net", "offer_net"}),
+}
+
+
+def warning_list(items: list[Any]) -> list[Any]:
+    out: list[Any] = []
+    for w in items:
+        keys = WARNING_MONEY_KEYS.get(str(w.get("code"))) if isinstance(w, dict) else None
+        if keys and isinstance(w.get("details"), dict):
+            details = {
+                k: money.to_decimal_str(x) if k in keys and _is_number(x) else x for k, x in w["details"].items()
+            }
+            w = {**w, "details": details}
+        out.append(w)
+    return out
+
+
+def convert_warnings(obj: Any) -> Any:
+    """A copy of a response (dict / list) where the money in the ``details`` of every list under a key ending in
+    ``warnings`` is a decimal string, according to ``WARNING_MONEY_KEYS``."""
+    if isinstance(obj, dict):
+        return {
+            k: warning_list(v) if k.endswith("warnings") and isinstance(v, list) else convert_warnings(v)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [convert_warnings(v) for v in obj]
+    return obj
