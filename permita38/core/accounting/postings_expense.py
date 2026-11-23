@@ -77,11 +77,6 @@ def _suffix(rate: Decimal) -> str:
     return text if text in ("19", "7") else "x"
 
 
-def _income_date(day: date, booking: date, first_open_day: date) -> date:
-    """The income date follows the document date within an open fiscal year, else the booking date (spec 11)."""
-    return day if day.year >= first_open_day.year else booking
-
-
 def tax_date_13b(expense: Expense) -> date:
     """§ 13b tax date: EU service = ``service_date``; third country = ``min(date, last day of the next month)``."""
     service = expense.service_date or expense.date
@@ -145,7 +140,7 @@ def _standard_split(expense: Expense) -> _StdSplit:
 
 
 @dataclass(frozen=True)
-class _RcGroup:
+class _RcLine:
     rate: Decimal
     net: Cents
     tax: Cents
@@ -153,20 +148,40 @@ class _RcGroup:
     cost: _Cost  # accrual: net plus the non-deductible tax
 
 
-def _rc_groups(expense: Expense) -> list[_RcGroup]:
-    """Per (rate, VAT share, income share, category) group: ``t = q2(n x r)``, ``ri = q2(t x vp)`` (0: small business)."""
-    keyed: dict[tuple[Decimal, Decimal, Decimal, str, Role], int] = defaultdict(int)
+def _apportion(total: int, weights: list[int]) -> list[int]:
+    """Split ``total`` over the weights by largest remainder (ties to the first); exact, sign of ``total`` kept."""
+    sign = -1 if total < 0 else 1
+    absolute = abs(total)
+    weight = sum(abs(w) for w in weights)
+    if not absolute or not weight:
+        return [0] * len(weights)
+    floors = [absolute * abs(w) // weight for w in weights]
+    rests = [absolute * abs(w) % weight for w in weights]
+    order = sorted(range(len(weights)), key=lambda i: (-rests[i], i))
+    for i in order[: absolute - sum(floors)]:
+        floors[i] += 1
+    return [sign * f for f in floors]
+
+
+def _rc_lines(expense: Expense) -> list[_RcLine]:
+    """Per rate group of the document ``t = q2(sum n x r)``, split over its lines by largest remainder; per line
+    ``ri = q2(t x vp)`` (0: small business) and the cost ``n + t - ri``."""
+    nets: dict[Decimal, int] = defaultdict(int)
     for ln in expense.lines:
-        keyed[(ln.rate, ln.vat_pct, ln.pct, ln.category, _role_of(ln))] += ln.net
-    out: list[_RcGroup] = []
-    for (rate, vp, pct, category, role), net in keyed.items():
-        tax = _share(net, rate)
-        ri = Cents(0) if expense.small_business else _share(tax, vp)
-        out.append(_RcGroup(rate, Cents(net), tax, ri, _Cost(role, category == _MEALS, Cents(net + tax - ri), pct)))
-    return out
+        nets[ln.rate] += ln.net
+    tax_by_rate = {rate: _share(net, rate) for rate, net in nets.items()}
+    out: dict[int, _RcLine] = {}
+    for rate, tax in tax_by_rate.items():
+        idx = [i for i, ln in enumerate(expense.lines) if ln.rate == rate]
+        for i, t in zip(idx, _apportion(tax, [expense.lines[i].net for i in idx]), strict=True):
+            ln = expense.lines[i]
+            ri = Cents(0) if expense.small_business else _share(Cents(t), ln.vat_pct)
+            cost = _Cost(_role_of(ln), ln.category == _MEALS, Cents(ln.net + t - ri), ln.pct)
+            out[i] = _RcLine(rate, ln.net, Cents(t), ri, cost)
+    return [out[i] for i in sorted(out)]
 
 
-def _rc_tax_lines(expense: Expense, groups: list[_RcGroup], vat_date: date) -> list[Line]:
+def _rc_tax_lines(expense: Expense, groups: list[_RcLine], vat_date: date) -> list[Line]:
     """Per rate: C ``rc_vat_out_*`` t (base n) and D ``rc_input_vat`` ri, both on the § 13b tax date."""
     eu = expense.treatment == "reverse_charge_eu_service"
     key = TaxKey("RC_EU_SVC" if eu else "RC_3C_SVC")
@@ -223,10 +238,11 @@ def _input_vat_lines(split: _StdSplit, vat_date: date) -> list[Line]:
 
 
 def _entry(lines: list[Line], booking: date, doc_date: date, key: str) -> Entry | None:
-    return Entry(tuple(lines), booking, doc_date, key) if lines else None
+    kept = tuple(ln for ln in lines if ln.amount_cents)  # zero amounts are never posted
+    return Entry(kept, booking, doc_date, key) if kept else None
 
 
-def _rc_bill_eur_lines(groups: list[_RcGroup], booking: date) -> list[Line]:
+def _rc_bill_eur_lines(groups: list[_RcLine], booking: date) -> list[Line]:
     """EÜR: the non-deductible tax waits in ``rc_vat_nondeductible``; its private share is corrected via
     ``vat_paid_private`` (spec 9.4)."""
     lines: list[Line] = []
@@ -240,15 +256,18 @@ def _rc_bill_eur_lines(groups: list[_RcGroup], booking: date) -> list[Line]:
     return lines
 
 
-def expense_bill_entry(expense: Expense, bases: Bases, first_open_day: date) -> Entry | None:
-    """The bill entry (``expense:<id>:bill:r<n>``); ``None`` when nothing is posted (EÜR ``no_input_vat``, all zero)."""
+def expense_bill_entry(expense: Expense, bases: Bases, first_open_day: date, year_closed: bool) -> Entry | None:
+    """The bill entry (``expense:<id>:bill:r<n>``); ``None`` when nothing is posted (EÜR ``no_input_vat``, all zero).
+
+    ``year_closed``: the fiscal year of the expense date is closed (from ``fiscal_years.closed_at``, passed in by the
+    caller; a locked month never closes a year): the income date is then the booking date, else the document date."""
     eur = bases.income == "eur"
     booking = max(expense.date, first_open_day)
     key = f"expense:{expense.id}:bill:r{expense.bill_rev}"
-    income = _income_date(expense.date, booking, first_open_day)
+    income = booking if year_closed else expense.date
     lines: list[Line] = []
     if expense.treatment in _RC:
-        groups = _rc_groups(expense)
+        groups = _rc_lines(expense)
         lines.extend(_rc_tax_lines(expense, groups, tax_date_13b(expense)))
         if eur:
             lines.extend(_rc_bill_eur_lines(groups, booking))
@@ -272,18 +291,20 @@ def expense_bill_entry(expense: Expense, bases: Bases, first_open_day: date) -> 
     return _entry(lines, booking, expense.date, key)
 
 
-def expense_pay_entry(expense: Expense, bases: Bases, first_open_day: date) -> Entry | None:
-    """The payment entry (``expense:<id>:pay:r<n>``); ``None`` for an unpaid expense under accrual."""
+def expense_pay_entry(expense: Expense, bases: Bases, first_open_day: date, year_closed: bool) -> Entry | None:
+    """The payment entry (``expense:<id>:pay:r<n>``); ``None`` for an unpaid expense under accrual.
+
+    ``year_closed``: the fiscal year of the payment date is closed (see ``expense_bill_entry``)."""
     eur = bases.income == "eur"
     paid = expense.paid_on or (expense.date if eur else None)
     if paid is None:
         return None
     booking = max(paid, first_open_day)
-    income = _income_date(paid, booking, first_open_day)
+    income = booking if year_closed else paid
     key = f"expense:{expense.id}:pay:r{expense.pay_rev}"
     lines: list[Line] = []
     if expense.treatment in _RC:
-        groups = _rc_groups(expense)
+        groups = _rc_lines(expense)
         net = Cents(sum(g.net for g in groups))
         if eur:
             # the non-deductible tax was booked on the bill entry, so the cost here is the net only
@@ -301,6 +322,5 @@ def expense_pay_entry(expense: Expense, bases: Bases, first_open_day: date) -> E
             lines.append(Line(Role("input_vat_clearing"), Cents(clearing), income_date=income))
     else:
         lines.append(Line(Role("payables"), split.gross, open_item_id=expense.id))
-    if lines:
-        lines.append(Line(Role("bank"), Cents(-split.gross)))
+    lines.append(Line(Role("bank"), Cents(-split.gross)))
     return _entry(lines, booking, paid, key)
