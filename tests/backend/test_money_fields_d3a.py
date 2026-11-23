@@ -143,3 +143,26 @@ def test_incoming_offer_money_strings(boss_client, project):  # noqa: F811
     assert u.status_code == 200, u.text
     _dec(u.json()["net_total"], "6400.00")
     _dec(u.json()["gross_total"], "7616.00")
+
+
+def test_incoming_offer_line_unit_price_is_a_decimal_string_everywhere(boss_client, project):  # noqa: F811
+    c = boss_client
+    s = capacity_supplier(c)
+    made = post_offer(c, offer_w1(s["id"], project["id"]))
+    oid = made["id"]
+    seen = [made, c.get(f"/api/incoming-offers/{oid}").json(), c.get("/api/incoming-offers").json()[0]]
+    u = c.put(f"/api/incoming-offers/{oid}", json=offer_w1(s["id"], project["id"], title="Frontend capacity II"))
+    assert u.status_code == 200, u.text
+    seen.append(u.json())
+    r = c.post(f"/api/incoming-offers/{oid}/review")
+    assert r.status_code == 200, r.text
+    seen.append(r.json())
+    for o in seen:
+        assert o["lines"], o
+        for line in o["lines"]:
+            assert isinstance(line["unit_price"], str) and DEC.match(line["unit_price"]), line
+            _num(line["quantity"])
+        _dec(o["lines"][0]["unit_price"], "80.00")
+    acc = c.post(f"/api/incoming-offers/{oid}/accept", json={})
+    assert acc.status_code == 200, acc.text
+    _dec(acc.json()["offer"]["lines"][0]["unit_price"], "80.00")

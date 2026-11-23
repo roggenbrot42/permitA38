@@ -5,6 +5,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Path, Query, Response
 
+from permita38.api import money_out
 from permita38.api.deps import Needs, ServicesDep
 from permita38.api.responses import StoredJSON, present, stored, with_defaults
 from permita38.core import models
@@ -61,7 +62,7 @@ def create_supplier(body: models.SupplierIn, _: Writer, services: ServicesDep):
     summary="expense vendors without a supplier, grouped by a normalised name",
 )
 def vendor_suggestions(_: Writer, services: ServicesDep) -> Any:
-    return services.suppliers.vendor_suggestions()
+    return money_out.money_strings(services.suppliers.vendor_suggestions(), {"net_total"})
 
 
 @router.post(

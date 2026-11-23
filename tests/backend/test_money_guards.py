@@ -14,8 +14,6 @@ import ast
 from datetime import date, timedelta
 from pathlib import Path
 
-import pytest
-
 from .test_rbac import _routes
 
 DECIMAL_SCHEMA = {"type": "string", "format": "decimal", "pattern": r"^-?[0-9]+\.[0-9]{2,6}$"}
@@ -100,7 +98,6 @@ SWEEP_NUMERIC_KEYS = dict(SCHEMA_NUMERIC_ALLOWLIST) | {
     "week": "calendar week number",
     "weeks": "number of weeks",
     "day": "day number",
-    "total": "count or hours total",
     "capacity": "hours",
     "booked": "hours",
     "free": "hours",
@@ -153,19 +150,25 @@ SWEEP_NUMERIC_KEYS = dict(SCHEMA_NUMERIC_ALLOWLIST) | {
 # exact (route, key) pairs for names that are money elsewhere
 SWEEP_NUMERIC_PAIRS = {
     ("/api/finance", "rate"): "tax rate in percent (tax_actual / tax_projected)",
+    ("/api/plan", "total"): "projects[].supply.total: hours of supply",
 }
+# ambiguous names (money in some places, not in others) may NEVER be allowlisted by bare key: only as a (route, key)
+# pair above, with a reason, so that a new money field with such a name is caught.
+AMBIGUOUS_KEYS = frozenset({"rate", "total", "value", "amount", "net", "vat", "gross", "price", "cost", "margin"})
+
+
+def test_ambiguous_key_names_are_not_allowlisted_by_bare_key():
+    bare = AMBIGUOUS_KEYS & (set(SCHEMA_NUMERIC_ALLOWLIST) | set(SWEEP_NUMERIC_KEYS))
+    assert not bare, f"allowlist these only as (route, key) / (schema, key) pairs with a reason: {sorted(bare)}"
+
+
 # routes whose numbers are all non-money; reason each
 SWEEP_ROUTE_ALL_NUMERIC = {
     "/api/data/export/info": "record counts and byte sizes",
 }
 # REAL money still sent as a JSON number (found by this guard, not allowlisted): (route, key) -> where it comes from.
-# test_known_money_numbers_are_fixed is xfail until the fix lands; then remove the entry here.
-KNOWN_MONEY_NUMBERS = {
-    ("/api/bootstrap", "default_rate"): "settings.default_rate (UnitPrice) in the bootstrap dict",
-    ("/api/bootstrap", "planning_min_rate"): "settings.planning_min_rate (UnitPrice) in the bootstrap dict",
-    ("/api/incoming-offers", "unit_price"): "lines[].unit_price of the incoming-offer list",
-    ("/api/suppliers/vendor-suggestions", "net_total"): "groups[].net_total of the vendor suggestions",
-}
+# Empty: all four findings are fixed. An entry here is a bug to fix, never a permanent allowance.
+KNOWN_MONEY_NUMBERS: dict[tuple[str, str], str] = {}
 
 # routes not swept; reason each
 SWEEP_SKIP: dict[str, str] = {}
@@ -426,15 +429,8 @@ def test_parameterless_get_responses_carry_no_money_numbers(app, boss_client):
     assert not new, "numbers at keys that are not on the allowlist (money must be a decimal string):\n" + "\n".join(new)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="money still sent as a JSON number: GET /api/bootstrap settings.default_rate and planning_min_rate, "
-    "GET /api/incoming-offers lines[].unit_price, GET /api/suppliers/vendor-suggestions groups[].net_total",
-)
-def test_known_money_numbers_are_fixed(app, boss_client):
-    offenders = _sweep_offenders(app, boss_client)
-    left = sorted({text for path, key, text in offenders if (path, key) in KNOWN_MONEY_NUMBERS})
-    assert not left, "\n".join(left)
+def test_known_money_numbers_is_empty():
+    assert not KNOWN_MONEY_NUMBERS, "fix the money leak instead of listing it"
 
 
 # ======================================================================================================================

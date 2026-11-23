@@ -3,6 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
+from permita38.api.responses import present
 from permita38.core import rights
 from permita38.core.models import PersonalTax, PersonalTaxIn, Settings, SettingsIn, WorkLimits, WorkLimitsIn
 
@@ -13,6 +14,8 @@ routers = [router]
 @router.get("/bootstrap", summary="everything the web app needs after sign-in")
 def bootstrap(user: CurrentUser, services: ServicesDep) -> dict:
     out = services.settings.bootstrap(user, services.time.get_timer(user))
+    if isinstance(out.get("settings"), dict):
+        out["settings"] = present(Settings, out["settings"])
     out["features"] = {"impressum_lookup": services.config.features.impressum_lookup}
     # the server's folder path is for a boss signed in with a password, never for an API token
     if not rights.is_token(user) and rights.scope_for(user, "settings", "write") == rights.Scope.ALL:

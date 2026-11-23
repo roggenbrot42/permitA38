@@ -131,3 +131,13 @@ PLAN_KEYS = frozenset(
 
 def plan_response(result: dict[str, Any]) -> dict[str, Any]:
     return money_strings(result, PLAN_KEYS)
+
+
+# incoming offers (lines are untyped dicts) -------------------------------------------------------------------------
+def incoming_offer_lines(rec: Any) -> Any:
+    """A copy of an incoming-offer record (or list of records) whose ``lines[].unit_price`` are decimal strings."""
+    if isinstance(rec, list):
+        return [incoming_offer_lines(r) for r in rec]
+    if not isinstance(rec, dict) or not isinstance(rec.get("lines"), list):
+        return rec
+    return {**rec, "lines": [money_strings(ln, {"unit_price"}) if isinstance(ln, dict) else ln for ln in rec["lines"]]}
