@@ -18,7 +18,7 @@ h1 { font-size: 24px; margin: 0 0 4px; } h2 { font-size: 17px; margin: 0 0 12px;
 a { color: var(--accent); text-decoration: none; cursor: pointer; }
 .muted { color: var(--muted); } .small { font-size: 13px; } .right { text-align: right; } .nowrap { white-space: nowrap; }
 .shell { display: flex; min-height: 100vh; }
-.side { width: 216px; background: var(--card); border-right: 1px solid var(--line); padding: 16px 10px; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+.side { width: 216px; background: var(--card); border-right: 1px solid var(--line); padding: 16px 10px; position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
 .brand { font-weight: 700; font-size: 19px; padding: 4px 10px 14px; display: flex; align-items: center; gap: 8px; }
 .brand i { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); display: inline-block; }
 .side a.nav { padding: 9px 12px; border-radius: 9px; color: var(--ink); display: flex; gap: 10px; align-items: center; }
@@ -87,7 +87,7 @@ tr.click { cursor: pointer; } tr.click:hover td { background: var(--bg); } td.nu
 .hint { background: var(--accent-soft); border-radius: 10px; padding: 12px 14px; font-size: 14px; margin-bottom: 14px; }
 .lines input, .lines select { padding: 6px 8px; } .lines td { padding: 4px; border: 0; }
 .free-good { color: var(--good); font-weight: 600; } .free-bad { color: var(--bad); font-weight: 600; }
-@media (max-width: 800px) { .shell { flex-direction: column; } .side { width: 100%; height: auto; position: static; flex-direction: row; overflow-x: auto; padding: 8px; } .brand { padding: 4px 8px; } .side .spacer, .side .me { display: none; } main { padding: 16px; } table { display: block; overflow-x: auto; } }
+@media (max-width: 800px) { .shell { flex-direction: column; } .side { width: 100%; height: auto; position: static; flex-direction: row; overflow-x: auto; overflow-y: visible; padding: 8px; } .brand { padding: 4px 8px; } .side .spacer, .side .me { display: none; } main { padding: 16px; } table { display: block; overflow-x: auto; } }
 @media print { .side, button { display: none; } }
 
 /* ---- login / setup ---- */
