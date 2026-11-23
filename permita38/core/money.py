@@ -68,14 +68,15 @@ def to_float(value: Decimal) -> float:
     return float(q2(value))
 
 
-def to_decimal_str(value: Any, max_decimals: int = 6) -> str:
-    """Decimal string for JSON output: at least two and up to ``max_decimals`` (default 6) decimals.
+def to_decimal_str(value: Any) -> str:
+    """Decimal string for JSON output: at least two and up to six decimals.
 
     All stored significant decimals are kept (``118.09`` -> ``"118.09"``, ``0`` -> ``"0.00"``, ``0.125`` ->
-    ``"0.125"``); only digits beyond ``max_decimals`` are rounded half-up (ties away from zero). ``max_decimals=2``
-    gives whole cents. A negative zero is written ``"0.00"``. Raises ``ValueError`` for a non-number.
+    ``"0.125"``, ``-0.005`` -> ``"-0.005"``); a stored value is never rounded to cents. Only digits beyond the sixth
+    decimal are rounded half-up (ties away from zero). A zero value (also ``-0.0`` or one that becomes zero at the
+    sixth decimal) is written ``"0.00"``. Raises ``ValueError`` for a non-number.
     """
-    q = dec(value, default=None).quantize(Decimal(1).scaleb(-max_decimals), rounding=ROUND_HALF_UP)
+    q = dec(value, default=None).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
     if q == 0:
         return "0.00"
     whole, _, frac = format(q, "f").partition(".")

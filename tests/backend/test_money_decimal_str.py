@@ -21,6 +21,9 @@ DECIMAL_SCHEMA = {"type": "string", "format": "decimal", "pattern": r"^-?[0-9]+\
         (0.125, "0.125"),
         (0.1234567, "0.123457"),
         (-0.0, "0.00"),
+        (-0.005, "-0.005"),
+        (-0.004, "-0.004"),
+        (-0.0000001, "0.00"),
         ("12.5", "12.50"),
         (1e7, "10000000.00"),
         (1_000_000_000, "1000000000.00"),
@@ -28,14 +31,6 @@ DECIMAL_SCHEMA = {"type": "string", "format": "decimal", "pattern": r"^-?[0-9]+\
 )
 def test_to_decimal_str(value, expected):
     assert money.to_decimal_str(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [(-0.004, "0.00"), (-0.005, "-0.01"), (0.005, "0.01"), (0.125, "0.13"), (2.675, "2.68"), (-0.0, "0.00")],
-)
-def test_to_decimal_str_whole_cents(value, expected):
-    assert money.to_decimal_str(value, max_decimals=2) == expected
 
 
 @pytest.mark.parametrize("bad", ["abc", None, float("nan")])
