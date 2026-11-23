@@ -377,7 +377,7 @@ are expenses and post as 9.4.
 | Case | Lines |
 |---|---|
 | Gewerbesteuer prepayment / final payment | D `trade_tax_expense` / C `bank` (`income_date` = payment). For EÜR this is the whole treatment. Not deductible for income tax (§ 4 Abs. 5b EStG): the EÜR report shows it on its own line and adds it back *(verify line)* |
-| Gewerbesteuer provision (accrual, at year closing) | D `trade_tax_expense` / C `trade_tax_provision` with the estimate from `core/tax.py` (the user confirms or edits the amount); next year's payment D `trade_tax_provision` / C `bank` |
+| Gewerbesteuer provision (accrual, at year closing) | D `trade_tax_expense` (`income_date` = the closing date, so the year's P&L carries it) / C `trade_tax_provision`, amount = the estimate from `core/tax.py` **minus the trade-tax prepayments already expensed in that year** (the user confirms or edits it); next year's payment D `trade_tax_provision` / C `bank` (no `income_date`) up to the provision; a payment above the provision posts the difference D `trade_tax_expense` (`income_date` = payment date), a payment below it releases the rest D `trade_tax_provision` / C `tax_refunds` (`income_date` = payment date), so the provision account ends at 0 |
 | Income tax, Soli, church tax of a sole proprietor | D `private_withdrawal` / C `bank` (never an expense) |
 | Corporate tax (GmbH) | D `corporate_tax_expense` / C `bank`; provision like the trade tax |
 | Tax refunds | the reverse lines; GewSt refunds to `tax_refunds` |
@@ -386,6 +386,9 @@ These are offered as **entry templates** in the manual entry dialog (prefilled r
 The Money page's reserve keeps working from `core/tax.py`; it additionally shows prepayments already booked.
 
 ### 9.8 Manual entries
+
+Reversals of trips, manual entries and template entries follow 7.8: booked on `max(original booking date, first open
+day)`, with the original `income_date` while that year is open and the booking date once it is closed.
 
 Free, balanced entries on any account of the year's chart (`accounts` list), boss and accountant. Rules: at least two
 lines; text required; each line's account must be in the chart; a line with a `tax_key` needs `tax_kind`, `vat_date`
@@ -457,7 +460,10 @@ template); open receivables come from the backfill (section 16).
    year. Each `eur_line` in the chart file carries `deductible: true|false`: **profit = Σ of the income lines on
    deductible lines**; non-deductible business expenses (`meals_nondeductible`, `trade_tax_expense`) are shown on
    their own lines below the profit as "not deductible, added back", and GewSt refunds (`tax_refunds`) likewise as
-   non-taxable. Private shares (`private_withdrawal`) are never in the EÜR. *(verify)* the line list against the
+   non-taxable. Private shares (`private_withdrawal`) are never in the EÜR. Lines on `vat_prepayments` with an
+   `income_date` are split by sign into "VAT paid to the tax office" (debit) and "VAT refunded" (credit);
+   `vat_special_prepayment` payments belong to "VAT paid"; lines without `income_date` (the December credit of the
+   special prepayment) are ignored. *(verify)* the line list against the
    form of the year; the app does not file the Anlage EÜR.
 5. **P&L and balance sheet** (accrual): by account class of the chart; simple form (no HGB layout in v1).
 6. **Open items**: receivables and payables per document (gross − credit notes − payments), age.
