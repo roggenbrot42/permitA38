@@ -88,20 +88,44 @@ SCHEMA_NUMERIC_PAIRS = {
     ("Line", "vat"): "VAT rate in percent of a line (elsewhere `vat` is an amount)",
 }
 
+# response properties typed as an untyped dict / Any: (schema, property) -> why no money can hide in it
+# (the generated ``...records___result___locals___Result__N`` names are normalised to ``Result``)
+SCHEMA_UNTYPED_ALLOWLIST: dict[tuple[str, str], str] = {
+    ("Result", "planning_warnings"): "warning details: money converted by money_out.warning_list / convert_warnings",
+    ("Result", "sanity_warnings"): "warning details: money converted by money_out.warning_list / convert_warnings",
+    ("Result", "extensions"): "project extensions: dates and a reason, no money",
+    ("Allocation", "planning_warnings"): "warning details, see Result.planning_warnings",
+    ("Allocation", "days"): "per-day hours of an allocation, no money",
+    ("ConfirmExpense", "sanity_warnings"): "warning details, see Result.sanity_warnings",
+    ("DocumentResult", "planning_warnings"): "warning details, see Result.planning_warnings",
+    ("DocumentResult", "sanity_warnings"): "warning details, see Result.sanity_warnings",
+    ("IncomingOffer", "lines"): "unit_price converted by money_out.incoming_offer_lines",
+    ("IncomingOffer", "plan"): "start, end and hours per week, no money",
+    ("IncomingOffer", "planning_warnings"): "warning details, see Result.planning_warnings",
+    ("Project", "extensions"): "project extensions: dates and a reason, no money",
+    ("ScanOut", "flags"): "scan flags: texts and ids, no money",
+    ("ScanOut", "notes"): "scan notes: texts",
+    ("ScanOut", "draft"): "scan draft: money converted by money_strings (test_money_scan_drafts)",
+    ("ScanOut", "doc"): "scanned document: money converted by money_strings (test_money_scan_drafts)",
+    ("ScanResult", "draft"): "scan draft: money converted by money_strings (test_money_scan_drafts)",
+    ("ScanResult", "doc"): "scanned document: money converted by money_strings (test_money_scan_drafts)",
+    ("ScanResult", "flags"): "scan flags: texts and ids, no money",
+    ("SettingsResult", "sanity_warnings"): "warning details, see Result.sanity_warnings",
+    ("Supplier", "unavailable"): "date ranges, no money",
+    ("SupplierResult", "unavailable"): "date ranges, no money",
+    ("SupplierResult", "sanity_warnings"): "warning details, see Result.sanity_warnings",
+    ("UserOut", "planning_warnings"): "warning details, see Result.planning_warnings",
+    ("ValidationError", "input"): "echo of the rejected request input (422), not a computed amount",
+    ("ValidationError", "ctx"): "validation error context (limits), not money",
+}
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Guard (b): keys that may be numbers in the swept GET responses (untyped dict endpoints add hours, counts, ratios).
 # ---------------------------------------------------------------------------------------------------------------------
 SWEEP_NUMERIC_KEYS = dict(SCHEMA_NUMERIC_ALLOWLIST) | {
     "worked": "dashboard hours",
     "month": "calendar month number",
-    "week": "calendar week number",
-    "weeks": "number of weeks",
-    "day": "day number",
     "capacity": "hours",
-    "percent": "percent",
-    "ratio": "ratio",
-    "version": "schema version",
-    "size": "bytes",
     # dashboard (hours and days)
     "per_day_needed": "hours per day",
     "remaining_days": "days",
@@ -133,6 +157,16 @@ SWEEP_NUMERIC_KEYS = dict(SCHEMA_NUMERIC_ALLOWLIST) | {
     "over_assigned": "hours",
     "subcontractor_hours": "hours",
     "vacation_hours": "hours",
+    # supply and demand of the planner, supplier dependency, offer plan warnings (all hours, weeks, counts)
+    "demand": "hours of demand per week",
+    "supply": "hours of supply per week",
+    "line": "line number in a warning",
+    "line_hours": "hours of an offer line",
+    "plan_hours": "hours of an offer plan",
+    "average_hours_per_week": "hours",
+    "longest_run_weeks": "weeks",
+    "threshold_hours_per_week": "hours",
+    "threshold_weeks": "weeks",
     # lines and numbering
     "quantity": "quantity of an incoming offer line",
     "highest_in_period": "highest document number counter",
@@ -142,6 +176,16 @@ SWEEP_NUMERIC_KEYS = dict(SCHEMA_NUMERIC_ALLOWLIST) | {
 SWEEP_NUMERIC_PAIRS = {
     ("/api/finance", "rate"): "tax rate in percent (tax_actual / tax_projected)",
     ("/api/plan", "total"): "projects[].supply.total: hours of supply",
+    ("/api/dashboard", "target"): "target hours of the week and of a day",
+    ("/api/dashboard", "overtime"): "overtime hours",
+    ("/api/dashboard", "remaining"): "hours left to the weekly target",
+    ("/api/plan", "assigned"): "people[].assigned: hours",
+    ("/api/plan", "booked"): "hours booked on a project",
+    ("/api/plan", "covered"): "hours covered by supply",
+    ("/api/plan", "remaining"): "hours still to staff (also in warning details)",
+    ("/api/plan", "shortfall"): "hours missing (also in warning details and weekly_shortfalls)",
+    ("POST /api/contracts", "shortfall"): "capacity warning details: hours missing",
+    ("POST /api/offers/{id}/accept", "shortfall"): "capacity warning details: hours missing",
 }
 # ambiguous names (money in some places, not in others) may NEVER be allowlisted by bare key: only as a (route, key)
 # pair above, with a reason, so that a new money field with such a name is caught.
@@ -224,6 +268,23 @@ def _numeric_kind(node) -> bool:
     return isinstance(ap, dict) and _numeric_kind(ap)
 
 
+def _untyped(node) -> bool:
+    """True if the (sub)schema is an untyped dict / ``Any``: an object without declared properties and without a typed
+    value schema, or no type at all. Arrays are looked into, a $ref points at a schema whose properties are visited."""
+    if not isinstance(node, dict) or "$ref" in node or "enum" in node or "const" in node:
+        return False
+    for key in ("anyOf", "oneOf", "allOf"):
+        if key in node:
+            return any(_untyped(x) for x in node[key])
+    t = node.get("type")
+    if t == "array":
+        return _untyped(node.get("items", {}))
+    if t == "object":
+        ap = node.get("additionalProperties", True)
+        return not node.get("properties") and (ap is True or ap == {})
+    return t is None
+
+
 def _response_schema_names(spec) -> list[str]:
     found: set[str] = set()
 
@@ -258,8 +319,14 @@ def test_response_schema_numbers_are_allowlisted_and_money_is_decimal(app):
     spec = app.openapi()
     schemas = spec["components"]["schemas"]
     bad, numeric_seen, decimal_fields = [], set(), 0
+    untyped, untyped_seen = [], set()
     for name in _response_schema_names(spec):
+        short = re.sub(r"^permita38__.*___Result__\d+$", "Result", name)
         for prop, node in schemas[name].get("properties", {}).items():
+            if _untyped(node):
+                untyped_seen.add((short, prop))
+                if (short, prop) not in SCHEMA_UNTYPED_ALLOWLIST:
+                    untyped.append(f"{name}.{prop}")
             if _is_decimal_string(node) or any(_is_decimal_string(x) for x in node.get("anyOf", [])):
                 decimal_fields += 1
                 continue
@@ -267,6 +334,14 @@ def test_response_schema_numbers_are_allowlisted_and_money_is_decimal(app):
                 numeric_seen.add(prop)
                 if prop not in SCHEMA_NUMERIC_ALLOWLIST and (name, prop) not in SCHEMA_NUMERIC_PAIRS:
                     bad.append(f"{name}.{prop}")
+    assert not untyped, (
+        "response properties typed as an untyped dict / Any can hide money (type them, or allowlist them in "
+        f"SCHEMA_UNTYPED_ALLOWLIST with a reason): {untyped}"
+    )
+    stale_untyped = set(SCHEMA_UNTYPED_ALLOWLIST) - untyped_seen
+    assert not stale_untyped, (
+        f"SCHEMA_UNTYPED_ALLOWLIST entries that are typed now (remove them): {sorted(stale_untyped)}"
+    )
     assert not bad, f"numeric response properties that are not on the allowlist (money must be a decimal string): {bad}"
     assert decimal_fields > 40, decimal_fields  # the walker really sees the Money/UnitPrice fields
     stale = set(SCHEMA_NUMERIC_ALLOWLIST) - numeric_seen
@@ -331,7 +406,12 @@ def _seed(c):
     ok(c.post(f"/api/invoices/{inv['id']}/finalize"))
     exp = ok(c.post("/api/expenses", json={"date": today.isoformat(), "net": 50, "vat": 9.5, "category": "Software"}))
     ids["expense"] = exp["id"]
-    ok(c.put(f"/api/expenses/{exp['id']}", json={"date": today.isoformat(), "net": 52, "vat": 9.88, "category": "Software"}))
+    ok(
+        c.put(
+            f"/api/expenses/{exp['id']}",
+            json={"date": today.isoformat(), "net": 52, "vat": 9.88, "category": "Software"},
+        )
+    )
     ok(c.put(f"/api/customers/{cust['id']}", json={"name": "Demo Client GmbH", "rate": 105}))
     ok(
         c.post(
@@ -566,7 +646,10 @@ def test_sweep_allowlists_have_no_stale_entries(app, boss_client):
     stale_pairs = [pair for pair in SWEEP_NUMERIC_PAIRS if pair not in seen]
     stale_routes = [p for p in SWEEP_ROUTE_ALL_NUMERIC if p not in routes]
     stale_known = [pair for pair in KNOWN_MONEY_NUMBERS if pair not in seen]
-    assert not (stale or stale_pairs or stale_routes or stale_known), (stale, stale_pairs, stale_routes, stale_known)
+    assert not (stale or stale_pairs or stale_routes or stale_known), (
+        "allowlist entries no swept response uses any more (remove them):\n"
+        f"keys {sorted(stale)}\npairs {sorted(stale_pairs)}\nroutes {stale_routes}\nknown {sorted(stale_known)}"
+    )
     assert not (set(SWEEP_ID_SKIP) - routes), sorted(set(SWEEP_ID_SKIP) - routes)
 
 

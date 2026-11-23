@@ -538,7 +538,13 @@ def test_flat_commitment_of_an_accepted_plain_supplier_offer(boss_client, projec
     assert len(flat) == 1 and flat[0]["planned_net"] == "3091.88" and flat[0]["invoiced_net"] is None
     assert com["totals"] == {"planned_net": "3091.88", "invoiced_net": "0.00", "open_net": "3091.88"}
     assert com["by_project"] == [
-        {"project_id": None, "name": "No project", "planned_net": "3091.88", "invoiced_net": None, "open_net": "3091.88"}
+        {
+            "project_id": None,
+            "name": "No project",
+            "planned_net": "3091.88",
+            "invoiced_net": None,
+            "open_net": "3091.88",
+        }
     ]
 
 

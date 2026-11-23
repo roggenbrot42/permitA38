@@ -175,8 +175,8 @@ def test_paid_on_null_gives_todays_figures(boss_client, accounting):
     boss_client.put("/api/settings", json={"accounting": accounting})
     book(boss_client)
     dec = month(boss_client, 2026, 12)
-    assert (dec["expenses"], dec["vat_in"]) == ('100.00', '19.00')
-    assert (month(boss_client, 2027, 1)["expenses"], month(boss_client, 2027, 1)["vat_in"]) == ('0.00', '0.00')
+    assert (dec["expenses"], dec["vat_in"]) == ("100.00", "19.00")
+    assert (month(boss_client, 2027, 1)["expenses"], month(boss_client, 2027, 1)["vat_in"]) == ("0.00", "0.00")
     assert boss_client.get("/api/finance", params={"year": 2026}).json()["categories"] == {"Other": "100.00"}
 
 
@@ -184,8 +184,8 @@ def test_eur_cost_follows_the_paid_date_and_input_vat_the_bill_date_across_the_y
     boss_client.put("/api/settings", json={"accounting": "eur"})
     book(boss_client, paid_on="2027-01-03")
     dec26, jan27 = month(boss_client, 2026, 12), month(boss_client, 2027, 1)
-    assert (dec26["expenses"], dec26["vat_in"]) == ('0.00', '19.00')
-    assert (jan27["expenses"], jan27["vat_in"]) == ('100.00', '0.00')
+    assert (dec26["expenses"], dec26["vat_in"]) == ("0.00", "19.00")
+    assert (jan27["expenses"], jan27["vat_in"]) == ("100.00", "0.00")
     cats26 = boss_client.get("/api/finance", params={"year": 2026}).json()["categories"]
     cats27 = boss_client.get("/api/finance", params={"year": 2027}).json()["categories"]
     assert cats26 == {} and cats27 == {"Other": "100.00"}
@@ -195,15 +195,15 @@ def test_accrual_books_both_on_the_bill_date(boss_client):
     boss_client.put("/api/settings", json={"accounting": "accrual"})
     book(boss_client, paid_on="2027-01-03")
     dec26, jan27 = month(boss_client, 2026, 12), month(boss_client, 2027, 1)
-    assert (dec26["expenses"], dec26["vat_in"]) == ('100.00', '19.00')
-    assert (jan27["expenses"], jan27["vat_in"]) == ('0.00', '0.00')
+    assert (dec26["expenses"], dec26["vat_in"]) == ("100.00", "19.00")
+    assert (jan27["expenses"], jan27["vat_in"]) == ("0.00", "0.00")
 
 
 def test_paid_on_in_the_same_year_moves_only_the_cost_month(boss_client):
     boss_client.put("/api/settings", json={"accounting": "eur"})
     book(boss_client, date="2026-03-30", paid_on="2026-04-02")
     mar, apr = month(boss_client, 2026, 3), month(boss_client, 2026, 4)
-    assert (mar["expenses"], mar["vat_in"], apr["expenses"], apr["vat_in"]) == ('0.00', '19.00', '100.00', '0.00')
+    assert (mar["expenses"], mar["vat_in"], apr["expenses"], apr["vat_in"]) == ("0.00", "19.00", "100.00", "0.00")
 
 
 def test_a_damaged_paid_date_falls_back_to_the_bill_date(app, boss_client, unguarded):
@@ -214,12 +214,12 @@ def test_a_damaged_paid_date_falls_back_to_the_bill_date(app, boss_client, ungua
         "format.date",
     )
     dec = month(boss_client, 2026, 12)
-    assert (dec["expenses"], dec["vat_in"]) == ('100.00', '19.00')
+    assert (dec["expenses"], dec["vat_in"]) == ("100.00", "19.00")
 
 
 def test_kleinunternehmer_cost_is_gross_on_the_paid_date(boss_client):
     boss_client.put("/api/settings", json={"accounting": "eur", "kleinunternehmer": True})
     book(boss_client, paid_on="2027-01-03")
-    assert month(boss_client, 2026, 12)["expenses"] == '0.00'
+    assert month(boss_client, 2026, 12)["expenses"] == "0.00"
     jan = month(boss_client, 2027, 1)
-    assert (jan["expenses"], jan["vat_in"]) == ('119.00', '0.00')
+    assert (jan["expenses"], jan["vat_in"]) == ("119.00", "0.00")
