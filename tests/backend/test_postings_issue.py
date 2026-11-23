@@ -1,7 +1,8 @@
 """Issue postings (accounting.md 9.1) against the hand-computed oracle ``fixtures/accounting_oracle.json``."""
 
+import io
 import json
-import re
+import tokenize
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -12,7 +13,7 @@ import pytest
 from permita38.core import calc
 from permita38.core.accounting import postings_issue
 from permita38.core.accounting.postings_issue import issue_entry, snapshot_from_document
-from permita38.core.accounting.types import Bases, Cents, Entry, IssuedSnapshot, RateGroup
+from permita38.core.accounting.types import Bases, Cents, Entry, IssuedSnapshot, RateGroup, Treatment
 from permita38.core.vat_rules import TaxKey
 
 ORACLE: dict[str, Any] = json.loads(
@@ -44,7 +45,7 @@ def _snapshot(event: dict[str, Any]) -> IssuedSnapshot:
         regime="small_business" if event["treatment"] == "small_business" else "regular",
         treatment=event["treatment"],
         rates=tuple(groups),
-        perf=_d(event.get("service_to")) or date.fromisoformat(event["date"]),
+        perf=_d(event.get("service_to")) or _d(event.get("service_from")) or date.fromisoformat(event["date"]),
     )
 
 
@@ -53,7 +54,7 @@ def _run(case: dict[str, Any]) -> Entry | None:
     snap = _snapshot(event)
     inv = date.fromisoformat(event["date"])
     bases = Bases(case["bases"]["income_basis"], case["bases"]["vat_basis"])
-    return issue_entry(snap, bases, event["treatment"], snap.perf, inv)
+    return issue_entry(snap, bases, inv)
 
 
 def _oracle_lines(entry: dict[str, Any]) -> list[tuple[Any, ...]]:
@@ -69,13 +70,15 @@ def _oracle_lines(entry: dict[str, Any]) -> list[tuple[Any, ...]]:
                 opts.get("tax_base"),
                 opts.get("vat_date"),
                 opts.get("income_date"),
+                opts.get("tax_rate"),
             )
         )
     return out
 
 
-def _actual_lines(entry: Entry) -> list[tuple[Any, ...]]:
-    return [
+def _actual_lines(entry: Entry, oracle: list[tuple[Any, ...]] | None = None) -> list[tuple[Any, ...]]:
+    """Lines as tuples; the oracle lists ``tax_rate`` only where the case is about it, so elsewhere it is not compared."""
+    rows = [
         (
             ln.role,
             ln.amount_cents,
@@ -84,9 +87,13 @@ def _actual_lines(entry: Entry) -> list[tuple[Any, ...]]:
             ln.tax_base_cents,
             ln.vat_date.isoformat() if ln.vat_date else None,
             ln.income_date.isoformat() if ln.income_date else None,
+            ln.tax_rate,
         )
         for ln in entry.lines
     ]
+    if oracle is not None:
+        rows = [r if o[7] is not None else (*r[:7], None) for r, o in zip(rows, oracle, strict=True)]
+    return rows
 
 
 ISSUE_CASES = [
@@ -108,6 +115,14 @@ ISSUE_CASES = [
     "A16-late-ist-payment-after-lock",
     "A18-credit-moves-cash-accrual-ist",
     "A18-credit-moves-cash-eur-soll",
+    "I1-mixed-rates-accrual-soll",
+    "I1-mixed-rates-eur-soll",
+    "I2-other-rate-accrual-soll",
+    "I2-other-rate-accrual-ist",
+    "I3-negative-invoice-accrual-soll",
+    "I4-eu-b2b-accrual-soll",
+    "I4-eu-b2b-accrual-ist",
+    "I5-small-business-accrual",
 ]
 
 
@@ -121,7 +136,11 @@ def test_issue_entry_matches_oracle(case_id: str) -> None:
         return
     expected = next(e for e in case["entries"] if e["event"] == 0)
     assert entry is not None
-    assert _actual_lines(entry) == _oracle_lines(expected)
+    oracle = _oracle_lines(expected)
+    assert _actual_lines(entry, oracle) == oracle
+    invoice_id = _events(case)[0]["id"]
+    for ln in entry.lines:
+        assert ln.open_item_id == (invoice_id if ln.role == "receivables" else None), (case_id, ln.role)
     assert entry.booking_date.isoformat() == expected["booking_date"]
     assert entry.document_date == entry.booking_date
     assert entry.balance == 0
@@ -165,72 +184,83 @@ def test_eu_b2b_eur_is_a_statistical_zero_line() -> None:
     assert line.income_date is None
 
 
-@pytest.mark.parametrize("vat", ["soll", "ist"])
-def test_eu_b2b_accrual_follows_performance_for_both_vat_bases(vat: str) -> None:
-    snap = _snapshot(_events(CASES["A7-eu-b2b-ist-unpaid"])[0])
-    entry = issue_entry(snap, Bases("accrual", vat), "eu_b2b_service", date(2026, 3, 10), date(2026, 3, 15))  # type: ignore[arg-type]
-    assert entry is not None
-    assert _actual_lines(entry) == [
-        ("receivables", 400000, None, None, None, None, None),
-        ("revenue_eu_svc", -400000, "EU_SVC", "base_only", 400000, "2026-03-10", "2026-03-15"),
-    ]
+NO_ENTRY = [
+    ("eur", "ist", "standard"),
+    ("eur", "soll", "small_business"),
+    ("eur", "ist", "small_business"),
+]
 
 
-def test_small_business() -> None:
-    snap = IssuedSnapshot(
-        "k1", "small_business", "small_business", (RateGroup(Decimal(0), Cents(5000), Cents(0)),), date(2026, 5, 1)
+def test_i6_none_table_matches_the_fixture() -> None:
+    case = CASES["I6-none-table"]
+    assert {(r["income_basis"], r["vat_basis"], r["treatment"]) for r in case["no_issue_entry"]} == set(NO_ENTRY)
+    assert case["every_other_combination_posts_an_entry"] is True
+
+
+def _snap_for(treatment: Treatment) -> IssuedSnapshot:
+    rates = (
+        (RateGroup(Decimal(19), Cents(33333), Cents(6333)), RateGroup(Decimal(7), Cents(1001), Cents(70)))
+        if treatment == "standard"
+        else (RateGroup(Decimal(0), Cents(12345), Cents(0)),)
     )
-    inv = date(2026, 5, 3)
-    entry = issue_entry(snap, Bases("accrual", "ist"), "small_business", snap.perf, inv)
-    assert entry is not None
-    assert _actual_lines(entry) == [
-        ("receivables", 5000, None, None, None, None, None),
-        ("revenue_ku", -5000, "KU", "base_only", 5000, "2026-05-03", "2026-05-03"),
-    ]
-    assert entry.balance == 0
-    assert issue_entry(snap, Bases("eur", "ist"), "small_business", snap.perf, inv) is None
-
-
-def test_rate_zero_on_a_standard_invoice_posts_on_revenue_s0() -> None:
-    snap = IssuedSnapshot(
-        "z1",
-        "regular",
-        "standard",
-        (
-            RateGroup(Decimal(19), Cents(100000), Cents(19000)),
-            RateGroup(Decimal(0), Cents(2000), Cents(0)),
-        ),
-        date(2026, 4, 1),
-    )
-    inv = date(2026, 4, 2)
-    soll = issue_entry(snap, Bases("accrual", "soll"), "standard", snap.perf, inv)
-    assert soll is not None
-    assert _actual_lines(soll) == [
-        ("receivables", 121000, None, None, None, None, None),
-        ("revenue_s19", -100000, None, None, None, None, "2026-04-02"),
-        ("vat_out_s19", -19000, "S19", "tax", 100000, "2026-04-01", None),
-        ("revenue_s0", -2000, "NONE", None, None, None, "2026-04-02"),
-    ]
-    assert soll.balance == 0
-    eur = issue_entry(snap, Bases("eur", "soll"), "standard", snap.perf, inv)
-    assert eur is not None
-    assert [ln.role for ln in eur.lines] == ["vat_soll_clearing_s19", "vat_out_s19"]
-    assert issue_entry(snap, Bases("eur", "ist"), "standard", snap.perf, inv) is None
+    regime = "small_business" if treatment == "small_business" else "regular"
+    return IssuedSnapshot("b1", regime, treatment, rates, date(2026, 1, 1))
 
 
 @pytest.mark.parametrize("income", ["accrual", "eur"])
 @pytest.mark.parametrize("vat", ["soll", "ist"])
 @pytest.mark.parametrize("treatment", ["standard", "eu_b2b_service", "small_business"])
-def test_every_entry_balances(income: str, vat: str, treatment: str) -> None:
-    rates = (
-        (RateGroup(Decimal(19), Cents(33333), Cents(6333)), RateGroup(Decimal("7"), Cents(1001), Cents(70)))
-        if treatment == "standard"
-        else (RateGroup(Decimal(0), Cents(12345), Cents(0)),)
-    )
-    snap = IssuedSnapshot("b1", "regular", treatment, rates, date(2026, 1, 1))  # type: ignore[arg-type]
-    entry = issue_entry(snap, Bases(income, vat), treatment, snap.perf, date(2026, 1, 2))  # type: ignore[arg-type]
-    if entry is not None:
+def test_none_exactly_in_the_none_table_and_every_entry_balances(income: str, vat: str, treatment: Treatment) -> None:
+    entry = issue_entry(_snap_for(treatment), Bases(income, vat), date(2026, 1, 2))  # type: ignore[arg-type]
+    if (income, vat, treatment) in NO_ENTRY:
+        assert entry is None
+    else:
+        assert entry is not None
+        assert entry.lines
         assert entry.balance == 0
+        assert entry.event_key == "issue:b1"
+
+
+def test_treatment_and_perf_come_from_the_snapshot() -> None:
+    snap = IssuedSnapshot(
+        "p1", "regular", "eu_b2b_service", (RateGroup(Decimal(0), Cents(1000), Cents(0)),), date(2026, 3, 10)
+    )
+    entry = issue_entry(snap, Bases("accrual", "ist"), date(2026, 3, 15))
+    assert entry is not None
+    assert [ln.role for ln in entry.lines] == ["receivables", "revenue_eu_svc"]
+    assert entry.lines[1].vat_date == date(2026, 3, 10)
+
+
+@pytest.mark.parametrize("treatment", ["standard", "eu_b2b_service", "small_business"])
+@pytest.mark.parametrize("income", ["accrual", "eur"])
+@pytest.mark.parametrize("vat", ["soll", "ist"])
+def test_zero_amount_invoice_posts_nothing(income: str, vat: str, treatment: Treatment) -> None:
+    snap = IssuedSnapshot("zero", "regular", treatment, (RateGroup(Decimal(19), Cents(0), Cents(0)),), date(2026, 1, 1))
+    assert issue_entry(snap, Bases(income, vat), date(2026, 1, 2)) is None  # type: ignore[arg-type]
+    empty = IssuedSnapshot("zero", "regular", treatment, (), date(2026, 1, 1))
+    assert issue_entry(empty, Bases(income, vat), date(2026, 1, 2)) is None  # type: ignore[arg-type]
+
+
+def test_i1_through_snapshot_from_document_rounds_per_rate_group() -> None:
+    """I1 built from document lines: perf = service_from (no service_to), VAT rounded once per rate group."""
+    event = _events(CASES["I1-mixed-rates-accrual-soll"])[0]
+    doc = {
+        "service_from": event["service_from"],
+        "lines": [{"qty": ln["qty"], "price": ln["price"], "vat": ln["rate"]} for ln in event["lines"]],
+    }
+    inv = date.fromisoformat(event["date"])
+    snap = snapshot_from_document(doc, {}, document_id=event["id"], treatment="standard", invoice_date=inv)
+    assert snap.perf == date(2026, 3, 1)
+    expected = sorted(
+        ((Decimal(r), v["net"], v["vat"]) for r, v in event["rates"].items()), key=lambda t: t[0], reverse=True
+    )
+    assert [(g.rate, g.net, g.vat) for g in snap.rates] == expected
+    for income in ("accrual", "eur"):
+        case = CASES["I1-mixed-rates-" + income + "-soll"]
+        entry = issue_entry(snap, Bases(income, "soll"), inv)  # type: ignore[arg-type]
+        assert entry is not None
+        oracle = _oracle_lines(next(e for e in case["entries"] if e["event"] == 0))
+        assert _actual_lines(entry, oracle) == oracle
 
 
 def test_snapshot_rounds_vat_per_rate_group_like_doc_totals() -> None:
@@ -271,7 +301,19 @@ def test_snapshot_small_business_forces_rate_zero_and_perf_date() -> None:
 
 
 def test_accounting_modules_use_no_float() -> None:
+    """No ``float`` name anywhere under the accounting package (comments and docstrings are not code)."""
     folder = Path(postings_issue.__file__).parent
-    for path in folder.glob("*.py"):
-        text = path.read_text(encoding="utf-8")
-        assert not re.search(r"\bfloat\b|to_float", text), path.name
+    files = sorted(folder.rglob("*.py"))
+    assert files
+    for path in files:
+        source = path.read_text(encoding="utf-8")
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type == tokenize.NAME:
+                assert tok.string != "float" and "to_float" not in tok.string, (path.name, tok.start)
+            elif tok.type == tokenize.NUMBER:
+                assert not (
+                    ("." in tok.string or "e" in tok.string.lower()) and not tok.string.lower().startswith("0x")
+                ), (
+                    path.name,
+                    tok.start,
+                )

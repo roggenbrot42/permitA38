@@ -109,15 +109,16 @@ def _vat_out_line(grp: RateGroup, vat_date: date) -> Line:
     )
 
 
-def issue_entry(
-    snapshot: IssuedSnapshot,
-    bases: Bases,
-    treatment: Treatment,
-    perf_date: date,
-    invoice_date: date,
-) -> Entry | None:
-    """The entry of ``finalize`` for the basis combinations of spec 9.1; ``None`` when nothing is posted."""
+def issue_entry(snapshot: IssuedSnapshot, bases: Bases, invoice_date: date) -> Entry | None:
+    """The entry of ``finalize`` for the basis combinations of spec 9.1; ``None`` when nothing is posted.
+
+    Treatment and performance date come from the snapshot only; an invoice whose every amount is 0 posts nothing.
+    """
+    if all(g.net == 0 and g.vat == 0 for g in snapshot.rates):
+        return None
     item = snapshot.document_id
+    treatment = snapshot.treatment
+    perf_date = snapshot.perf
     lines: list[Line] = []
     accrual = bases.income == "accrual"
 
