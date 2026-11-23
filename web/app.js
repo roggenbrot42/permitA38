@@ -179,7 +179,9 @@ function timeSync(p, changed) {
 }
 /* Reads and validates the five fields for saving: start date, start, stop and minutes (stop minus start when both are set). */
 function timeRead(p) {
-  const [sd, st, ed, en, du] = timeEls(p);
+  const els = timeEls(p), [sd, st, ed, en, du] = els;
+  const ai = els.indexOf(document.activeElement);   // saved with Enter / a click before any change event: the focused field counts as edited
+  if (ai >= 0) timeSync(p, ['date', 'start', 'end_date', 'end', 'dur'][ai]);
   if (!sd.value) throw new Error('Pick a date');
   if (sd.value > todayISO()) throw new Error('Time cannot be added for a future date');
   if (!ed.value) ed.value = sd.value;

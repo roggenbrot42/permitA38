@@ -399,29 +399,85 @@ def test_duration_only_entry_is_saved_without_times(pg, srv):
     assert (e["date"], e.get("start"), e.get("end"), e["minutes"]) == ("2026-11-20", None, None, 90)
 
 
+@pytest.mark.xfail(strict=True, reason="WP2 review: at 1400 px the mode buttons' top is 131.5 but the description field's top is 122.5 (input top 145.4, button 39.75 high, input 34.8); needs a CSS decision")
 def test_card_is_one_row_in_both_modes(browser, srv):
+    api(srv, "POST", "timer/start", {})
+    api(srv, "POST", "timer/stop", {"discard": True})
     for width in (1400, 1920):
-        ctx = browser.new_context(viewport={"width": width, "height": 900})
-        ctx.add_init_script(f"localStorage.setItem('permita38.token', '{srv.token}')")
-        page = ctx.new_page()
-        page.goto(srv.base + "/#/today")
-        page.wait_for_selector("#t_proj")
-        for mode in ("manual", "tracker"):
-            page.click(f"[data-a=timeMode][data-mode={mode}]")
-            tops = page.evaluate(
-                """() => [...document.querySelectorAll('.timer > *, #t_mode_area > *')]
-                    .filter(e => e.id !== 't_mode_area' && e.offsetParent && e.getBoundingClientRect().width)
-                    .map(e => [Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2),
-                               Math.round(e.getBoundingClientRect().right)])"""
-            )
-            mid = [t for t, _ in tops]
-            assert max(mid) - min(mid) <= 30, (width, mode, tops)  # all centres on one line
-            if mode == 'manual':
-                assert page.evaluate("['#t_date', '#t_end_date', '#t_start', '#t_end', '#t_dur'].every(q => { const e = document.querySelector(q); return e.scrollWidth <= e.clientWidth; })"), (width, 'input clipped')
-            assert page.locator('#t_note').bounding_box()['width'] >= 100, (width, mode, page.locator('#t_note').bounding_box())  # the description still has room
-            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-            assert page.evaluate("document.querySelector('[data-a=timeMode][data-mode=tracker]').getBoundingClientRect().right <= document.querySelector('main').getBoundingClientRect().right")
-        ctx.close()
+        for running in (False, True):
+            ctx = browser.new_context(viewport={"width": width, "height": 900})
+            ctx.add_init_script(f"localStorage.setItem('permita38.token', '{srv.token}')")
+            page = ctx.new_page()
+            page.goto(srv.base + "/#/today")
+            page.wait_for_selector("#t_proj")
+            if running:
+                page.click("[data-a=timeMode][data-mode=tracker]")
+                page.click("[data-a=timerStart]")
+                page.wait_for_selector("[data-a=timerStop]")
+            heights = []
+            for mode in ("manual", "tracker", "manual"):
+                page.click(f"[data-a=timeMode][data-mode={mode}]")
+                where = (width, running, mode)
+                note_top = page.locator(".t-note").bounding_box()["y"]  # the field box: label and input tops differ by design
+                for m in ("manual", "tracker"):
+                    top = page.locator(f"[data-a=timeMode][data-mode={m}]").bounding_box()["y"]
+                    assert abs(top - note_top) <= 2, (where, m, top, note_top)
+                heights.append(page.locator(".timer").first.evaluate("e => e.closest('.card').getBoundingClientRect().height"))
+                if mode == "manual":
+                    assert page.evaluate("['#t_date', '#t_end_date', '#t_start', '#t_end', '#t_dur'].every(q => { const e = document.querySelector(q); return e.scrollWidth <= e.clientWidth; })"), (where, "input clipped")
+                assert page.locator("#t_note").bounding_box()["width"] >= 100, where
+                assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+            assert max(heights) - min(heights) <= 2, (width, running, heights)
+            if running:
+                page.click("[data-a=timeMode][data-mode=tracker]")
+                page.click("[data-a=timerStop]")
+                page.wait_for_selector("[data-a=timerStart]")
+            ctx.close()
+
+
+def test_add_after_typing_duration_over_start_and_stop_counts_as_edit(pg, srv):
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "09:00")
+    _set(pg, "#t_end", "12:30")
+    pg.fill("#t_dur", "1:00")  # no change event
+    pg.click("[data-a=timerAdd]")
+    pg.wait_for_function("() => document.querySelector('#toast').textContent === 'Saved'")
+    (e,) = api(srv, "GET", "entries")
+    assert (e["start"], e["end"], e["minutes"]) == ("09:00", "10:00", 60)
+
+
+def test_add_after_typing_stop_with_start_set_counts_as_edit(pg, srv):
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "09:00")
+    _set(pg, "#t_end", "12:30")
+    pg.fill("#t_end", "11:00")  # no change event
+    pg.click("[data-a=timerAdd]")
+    pg.wait_for_function("() => document.querySelector('#toast').textContent === 'Saved'")
+    (e,) = api(srv, "GET", "entries")
+    assert (e["start"], e["end"], e["minutes"]) == ("09:00", "11:00", 120)
+
+
+def _prefill(pg, started_local, now_local):
+    """timerPrefill() with S.timer.started and the clock set to the given local times (ISO strings)."""
+    return pg.evaluate(
+        """([a, n]) => {
+            const RealDate = Date, fixed = new RealDate(n).getTime();
+            globalThis.Date = class extends RealDate { constructor(...x) { super(...(x.length ? x : [fixed])); } static now() { return fixed; } };
+            try { S.timer = { running: true, started: new RealDate(a).getTime() / 1000 }; return timerPrefill(); }
+            finally { globalThis.Date = RealDate; }
+        }""",
+        [started_local, now_local],
+    )
+
+
+def test_timer_prefill_across_midnight(pg):
+    v = _prefill(pg, "2026-11-20T22:00:00", "2026-11-21T01:30:00")
+    assert (v["date"], v["start"], v["endDate"], v["end"], v["dur"]) == ("2026-11-20", "22:00", "2026-11-21", "01:30", "3:30")
+
+
+def test_timer_prefill_over_24_hours_stops_at_2359_of_the_start_day(pg):
+    v = _prefill(pg, "2026-11-20T09:00:00", "2026-11-22T10:00:00")
+    assert (v["date"], v["start"], v["endDate"], v["end"]) == ("2026-11-20", "09:00", "2026-11-20", "23:59")
 
 
 def _stop_requests(pg):
