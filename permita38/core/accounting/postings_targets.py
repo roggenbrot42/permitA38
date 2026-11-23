@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from decimal import Decimal
 
 from permita38.core.accounting.postings_credit import CreditState, credit_split
-from permita38.core.accounting.postings_issue import _NONE, _rate_str, _role, _tax_key
+from permita38.core.accounting.postings_issue import TAX_EU_SVC, TAX_KU, TAX_NONE, rate_str, role_for, tax_key_for
 from permita38.core.accounting.types import (
     Bases,
     Cents,
@@ -26,13 +26,10 @@ from permita38.core.accounting.types import (
     Role,
     TargetLine,
     Targets,
-    TaxKey,
 )
 
 __all__ = ["allocate", "apply_event", "div_half_up", "event_entry", "event_key", "targets"]
 
-_EU_SVC = TaxKey("EU_SVC")
-_KU = TaxKey("KU")
 _Slot = tuple[Role, str]
 
 
@@ -88,6 +85,8 @@ def apply_event(state: InvoiceState, event: Event) -> InvoiceState:
             raise ValueError("cash kept would become negative")
         return dataclasses.replace(state, kept=Cents(kept))
     by_rate = {g.rate: g for g in event.rates}
+    if len(by_rate) != len(event.rates):
+        raise ValueError("credit note names a rate group twice")
     unknown = set(by_rate) - {g.rate for g in state.snapshot.rates}
     if unknown:
         raise ValueError("credit note names a rate group the invoice does not have")
@@ -193,7 +192,7 @@ def targets(state: InvoiceState, bases: Bases) -> Targets:
     if accrual:
         _merge(acc, TargetLine(Role("receivables"), "", Cents(c_total - t_total), open_item=True))
     _merge(acc, TargetLine(Role("customer_credit"), "", Cents(-overpayment)))
-    if accrual and standard:  # the net of a discount / write-off is a credit on its own account, not on revenue_r
+    if accrual:  # the net of a discount / write-off is a credit on its own account (every treatment), not on revenue
         if discount_net != 0:
             _merge(acc, TargetLine(Role("cash_discount_granted"), "", discount_net, income=True))
         if write_off_net != 0:
@@ -202,27 +201,27 @@ def targets(state: InvoiceState, bases: Bases) -> Targets:
         net_cur = cur.net
         if standard:
             rate = grp.rate
-            rev_key = _NONE if rate == 0 else None
+            rev_key = TAX_NONE if rate == 0 else None
             revenue = Cents(-(net_cur + d.net + w.net)) if accrual else Cents(-grp.cash_net)
-            _merge(acc, TargetLine(_role("revenue", rate), "", revenue, tax_key=rev_key, income=True))
+            _merge(acc, TargetLine(role_for("revenue", rate), "", revenue, tax_key=rev_key, income=True))
             if rate == 0:
                 continue
             soll = bases.vat == "soll"
             if not accrual and soll:
-                _merge(acc, TargetLine(_role("vat_soll_clearing", rate), "cash", Cents(-grp.cash_vat), income=True))
-                _merge(acc, TargetLine(_role("vat_soll_clearing", rate), "declaration", grp.due_vat))
+                _merge(acc, TargetLine(role_for("vat_soll_clearing", rate), "cash", Cents(-grp.cash_vat), income=True))
+                _merge(acc, TargetLine(role_for("vat_soll_clearing", rate), "declaration", grp.due_vat))
             if accrual:
                 balancing = Cents(-(cur.vat - grp.due_vat))
-                _merge(acc, TargetLine(_role("vat_not_due", rate), "", balancing))
+                _merge(acc, TargetLine(role_for("vat_not_due", rate), "", balancing))
             _merge(
                 acc,
                 TargetLine(
-                    _role("vat_out", rate),
+                    role_for("vat_out", rate),
                     "",
                     Cents(-grp.due_vat),
-                    tax_key=_tax_key(rate),
+                    tax_key=tax_key_for(rate),
                     tax_kind="tax",
-                    tax_rate=_rate_str(rate),
+                    tax_rate=rate_str(rate),
                     base_cents=grp.base,
                     income=not accrual and bases.vat == "ist",
                     perf_at_issue=True,
@@ -230,23 +229,36 @@ def targets(state: InvoiceState, bases: Bases) -> Targets:
             )
         elif snap.treatment == "eu_b2b_service":
             role = Role("revenue_eu_svc")
-            if accrual:
+            if (
+                accrual
+            ):  # a write-off / discount keeps the amount (bad_debts carries it) but lowers the base: a stat. line
                 line = TargetLine(
-                    role, "", Cents(-net_cur), _EU_SVC, "base_only", base_cents=net_cur, income=True, perf_at_issue=True
+                    role,
+                    "",
+                    Cents(-(net_cur + d.net + w.net)),
+                    TAX_EU_SVC,
+                    "base_only",
+                    base_cents=net_cur,
+                    income=True,
+                    perf_at_issue=True,
                 )
                 _merge(acc, line)
-            else:
+            else:  # EÜR: no cash moves with a write-off / discount, so the statistic does not change either
                 _merge(acc, TargetLine(role, "cash", Cents(-grp.cash_net), income=True))
-                stat = TargetLine(role, "stat", Cents(0), _EU_SVC, "base_only", base_cents=net_cur, perf_at_issue=True)
+                base = Cents(net_cur + d.net + w.net)
+                stat = TargetLine(role, "stat", Cents(0), TAX_EU_SVC, "base_only", base_cents=base, perf_at_issue=True)
                 _merge(acc, stat)
         else:
             role = Role("revenue_ku")
             if accrual:
-                _merge(acc, TargetLine(role, "", Cents(-net_cur), _KU, "base_only", base_cents=net_cur, income=True))
+                amount = Cents(-(net_cur + d.net + w.net))
+                _merge(acc, TargetLine(role, "", amount, TAX_KU, "base_only", base_cents=net_cur, income=True))
             else:
                 _merge(
                     acc,
-                    TargetLine(role, "", Cents(-grp.cash_net), _KU, "base_only", base_cents=grp.cash_net, income=True),
+                    TargetLine(
+                        role, "", Cents(-grp.cash_net), TAX_KU, "base_only", base_cents=grp.cash_net, income=True
+                    ),
                 )
     return Targets(tuple(acc.values()), tuple(groups), state.kept, t_total, overpayment)
 
@@ -277,7 +289,7 @@ def event_entry(before: InvoiceState | None, after: InvoiceState, bases: Bases, 
                 tax_rate=tgt.tax_rate,
                 tax_base_cents=Cents(d_base) if has_tax else None,
                 vat_date=(snap.perf if is_issue and tgt.perf_at_issue else event.date) if has_tax else None,
-                income_date=event.date if tgt.income else None,
+                income_date=event.date if tgt.income and not (d_amount == 0 and tgt.tax_kind == "base_only") else None,
                 open_item_id=snap.document_id if tgt.open_item else None,
             )
         )

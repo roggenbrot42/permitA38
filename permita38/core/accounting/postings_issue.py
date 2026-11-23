@@ -18,9 +18,21 @@ from permita38.core.accounting.types import (
 )
 from permita38.core.money import ZERO, dec, line_amount, q2, vat_amount
 
-_NONE = TaxKey("NONE")
-_KU = TaxKey("KU")
-_EU_SVC = TaxKey("EU_SVC")
+__all__ = [
+    "TAX_EU_SVC",
+    "TAX_KU",
+    "TAX_NONE",
+    "issue_entry",
+    "performance_date",
+    "rate_str",
+    "role_for",
+    "snapshot_from_document",
+    "tax_key_for",
+]
+
+TAX_NONE = TaxKey("NONE")
+TAX_KU = TaxKey("KU")
+TAX_EU_SVC = TaxKey("EU_SVC")
 _S_KEYS: dict[str, TaxKey] = {"19": TaxKey("S19"), "7": TaxKey("S7")}
 
 
@@ -62,6 +74,11 @@ def snapshot_from_document(
         RateGroup(rate=r, net=_cents(net), vat=_cents(vat_amount(net, r)))
         for r, net in sorted(by_rate.items(), key=lambda kv: kv[0], reverse=True)
     )
+    if any(g.gross > 0 for g in groups) and any(g.gross < 0 for g in groups):
+        raise ValueError(
+            "an invoice whose rate groups have mixed signs (one positive, one negative gross) cannot be issued; "
+            "split it into separate documents"
+        )
     return IssuedSnapshot(
         document_id=document_id,
         regime="small_business" if klein else "regular",
@@ -71,39 +88,39 @@ def snapshot_from_document(
     )
 
 
-def _rate_str(rate: Decimal) -> str:
+def rate_str(rate: Decimal) -> str:
     return format(rate.normalize(), "f")
 
 
 def _suffix(rate: Decimal) -> str:
-    text = _rate_str(rate)
+    text = rate_str(rate)
     return text if text in ("19", "7", "0") else "x"
 
 
-def _role(prefix: str, rate: Decimal) -> Role:
+def role_for(prefix: str, rate: Decimal) -> Role:
     return Role(f"{prefix}_s{_suffix(rate)}")
 
 
-def _tax_key(rate: Decimal) -> TaxKey:
-    return _S_KEYS.get(_rate_str(rate), TaxKey("SX"))
+def tax_key_for(rate: Decimal) -> TaxKey:
+    return _S_KEYS.get(rate_str(rate), TaxKey("SX"))
 
 
 def _revenue_line(grp: RateGroup, invoice_date: date) -> Line:
     return Line(
-        _role("revenue", grp.rate),
+        role_for("revenue", grp.rate),
         Cents(-grp.net),
-        tax_key=_NONE if grp.rate == 0 else None,
+        tax_key=TAX_NONE if grp.rate == 0 else None,
         income_date=invoice_date,
     )
 
 
 def _vat_out_line(grp: RateGroup, vat_date: date) -> Line:
     return Line(
-        _role("vat_out", grp.rate),
+        role_for("vat_out", grp.rate),
         Cents(-grp.vat),
-        tax_key=_tax_key(grp.rate),
+        tax_key=tax_key_for(grp.rate),
         tax_kind="tax",
-        tax_rate=_rate_str(grp.rate),
+        tax_rate=rate_str(grp.rate),
         tax_base_cents=grp.net,
         vat_date=vat_date,
     )
@@ -131,7 +148,7 @@ def issue_entry(snapshot: IssuedSnapshot, bases: Bases, invoice_date: date) -> E
             Line(
                 Role("revenue_ku"),
                 Cents(-g),
-                tax_key=_KU,
+                tax_key=TAX_KU,
                 tax_kind="base_only",
                 tax_base_cents=g,
                 vat_date=invoice_date,
@@ -146,7 +163,7 @@ def issue_entry(snapshot: IssuedSnapshot, bases: Bases, invoice_date: date) -> E
             Line(
                 Role("revenue_eu_svc"),
                 Cents(-n) if accrual else Cents(0),
-                tax_key=_EU_SVC,
+                tax_key=TAX_EU_SVC,
                 tax_kind="base_only",
                 tax_base_cents=n,
                 vat_date=perf_date,
@@ -162,12 +179,12 @@ def issue_entry(snapshot: IssuedSnapshot, bases: Bases, invoice_date: date) -> E
             if bases.vat == "soll":
                 lines.append(_vat_out_line(grp, perf_date))
             else:
-                lines.append(Line(_role("vat_not_due", grp.rate), Cents(-grp.vat)))
+                lines.append(Line(role_for("vat_not_due", grp.rate), Cents(-grp.vat)))
     elif bases.vat == "soll":
         for grp in snapshot.rates:
             if grp.rate == 0:
                 continue
-            lines.append(Line(_role("vat_soll_clearing", grp.rate), grp.vat))
+            lines.append(Line(role_for("vat_soll_clearing", grp.rate), grp.vat))
             lines.append(_vat_out_line(grp, perf_date))
     else:
         return None

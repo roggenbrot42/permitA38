@@ -9,7 +9,7 @@ write-off. The amount helpers say what such a credit document has to contain.
 from dataclasses import dataclass
 from decimal import Decimal
 
-from permita38.core.accounting.types import Bases, Cents, InvoiceState, RateGroup
+from permita38.core.accounting.types import Bases, Cents, InvoiceState, PaymentEvent, RateGroup
 
 __all__ = [
     "CreditState",
@@ -93,25 +93,33 @@ def discount_amounts(state: InvoiceState, amount_paid: Cents) -> tuple[RateGroup
     return _groups(rates, gross, vat)
 
 
-def write_off_reversal_amounts(state_after_payment: InvoiceState) -> tuple[RateGroup, ...]:
-    """The (negative) write-off reversal a payment triggers, given the state *including* that payment (9.2).
+def write_off_reversal_amounts(before: InvoiceState, payment: PaymentEvent) -> tuple[RateGroup, ...]:
+    """The (negative) write-off reversal ``payment`` triggers, given the state *before* it (9.2).
 
-    The reversal is ``min(T - C, remaining written-off gross)``, split over the rate groups by largest remainder on
-    the written-off gross (ties to the larger rate); the VAT of a group is its written-off VAT in proportion, so a
-    full recovery gives every group exactly its written-off net and VAT back. Zeros when no reversal is due.
+    The reversal is ``min(T_after - max(C, T_before), remaining written-off gross)``: only what this payment adds above
+    the current gross ``C`` (cash owed back after a credit note never reverses a write-off), at most the payment itself.
+    It is split over the rate groups by largest remainder on the written-off gross (ties to the larger rate); the VAT of
+    a group is its written-off VAT in proportion, so a full recovery gives every group exactly its written-off net and
+    VAT back. Zeros when no reversal is due (also for a payment that is not positive).
     """
-    from permita38.core.accounting.postings_targets import allocate, div_half_up
+    from permita38.core.accounting.postings_targets import allocate, apply_event, div_half_up
 
-    state = state_after_payment
-    rates = tuple(g.rate for g in state.snapshot.rates)
-    _, written = credit_split(state)
+    rates = tuple(g.rate for g in before.snapshot.rates)
+    zeros = _groups(rates, [Cents(0)] * len(rates), [Cents(0)] * len(rates))
+    if payment.amount <= 0:
+        return zeros
+    after = apply_event(before, payment)
+    _, written = credit_split(before)
     wo_gross = [g.gross for g in written]
-    cur, _ = _current(state)
-    total_gross = state.snapshot.gross
-    settled = min(state.kept, total_gross) if total_gross > 0 else 0
-    amount = min(settled - sum(cur), sum(wo_gross))
+    cur, _ = _current(before)
+    total_gross = before.snapshot.gross
+
+    def settled(state: InvoiceState) -> int:
+        return min(state.kept, total_gross) if total_gross > 0 else 0
+
+    amount = min(settled(after) - max(sum(cur), settled(before)), sum(wo_gross), payment.amount)
     if amount <= 0:
-        return _groups(rates, [Cents(0)] * len(rates), [Cents(0)] * len(rates))
+        return zeros
     gross = allocate(Cents(amount), list(zip(rates, wo_gross, strict=True)))
     vat = [
         Cents(div_half_up(w.vat * g, wg) if wg != 0 else 0) for w, g, wg in zip(written, gross, wo_gross, strict=True)

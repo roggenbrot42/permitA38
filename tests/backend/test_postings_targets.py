@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from permita38.core.accounting.postings_issue import _role, issue_entry
+from permita38.core.accounting.postings_issue import issue_entry, role_for
 from permita38.core.accounting.postings_targets import (
     allocate,
     apply_event,
@@ -700,7 +700,7 @@ def test_random_sequences_keep_the_invariants(seed: int, bases: Bases) -> None:
             assert (tg.due_vat, tg.base) == (0, 0), (seed, bases)
             continue
         assert (tg.due_vat, tg.base) == (cur_vat, cur_net), (seed, bases, grp.rate)
-        booked = sum(-ln.amount_cents for e in entries for ln in e.lines if ln.role == _role("vat_out", rate))
-        base = sum(ln.tax_base_cents or 0 for e in entries for ln in e.lines if ln.role == _role("vat_out", rate))
+        booked = sum(-ln.amount_cents for e in entries for ln in e.lines if ln.role == role_for("vat_out", rate))
+        base = sum(ln.tax_base_cents or 0 for e in entries for ln in e.lines if ln.role == role_for("vat_out", rate))
         assert (booked, base) == (cur_vat, cur_net), (seed, bases, rate)
     assert tgt.overpayment == 0
