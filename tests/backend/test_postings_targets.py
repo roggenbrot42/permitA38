@@ -31,8 +31,10 @@ from permita38.core.accounting.types import (
     InvoiceState,
     IssuedSnapshot,
     IssueEvent,
+    Line,
     PaymentEvent,
     RateGroup,
+    Role,
     Treatment,
 )
 
@@ -55,6 +57,16 @@ REPLAY_CASES = [
     "A12-storno-after-payment-soll",
     "A18-credit-moves-cash-accrual-ist",
     "A18-credit-moves-cash-eur-soll",
+    "A2-accrual-soll-vat-only",
+    "A7-eu-b2b-ist-unpaid",
+    "I1-mixed-rates-accrual-soll",
+    "I1-mixed-rates-eur-soll",
+    "I2-other-rate-accrual-soll",
+    "I2-other-rate-accrual-ist",
+    "I3-negative-invoice-accrual-soll",
+    "I4-eu-b2b-accrual-soll",
+    "I4-eu-b2b-accrual-ist",
+    "I5-small-business-accrual",
 ]
 
 
@@ -159,10 +171,10 @@ def _vat_sums(entries: list[Entry]) -> dict[str, dict[str, dict[str, int]]]:
         for ln in entry.lines:
             if ln.tax_kind is None or ln.tax_key is None or ln.vat_date is None:
                 continue
-            slot = sums.setdefault(ln.vat_date.strftime("%Y-%m"), {}).setdefault(ln.tax_key, {"base": 0, "tax": 0})
-            slot["base"] += ln.tax_base_cents or 0
-            if ln.tax_kind == "tax":
-                slot["tax"] += -ln.amount_cents
+            slot = sums.setdefault(ln.vat_date.strftime("%Y-%m"), {}).setdefault(ln.tax_key, {})
+            slot["base"] = slot.get("base", 0) + (ln.tax_base_cents or 0)
+            if ln.tax_kind == "tax":  # a base_only key (EU_SVC, KU) has no tax figure, as in the fixture
+                slot["tax"] = slot.get("tax", 0) - ln.amount_cents
     return sums
 
 
@@ -171,9 +183,12 @@ def test_events_replay_to_the_oracle_entries(case_id: str) -> None:
     case = CASES[case_id]
     results = _replay(case)
     invoice = _events(case)[0]["id"]
-    expected = {e["event"]: e for e in case["entries"]}
-    assert set(case.get("no_entry_events", [])) | set(expected) == set(range(len(results)))
+    expected = {e["event"]: e for e in case.get("entries", [])}
+    if "entries" in case:
+        assert set(case.get("no_entry_events", [])) | set(expected) == set(range(len(results)))
     for index, entry in enumerate(results):
+        if "entries" not in case:  # a vat-only fixture case: only the VAT sums are hand-computed
+            continue
         if index not in expected:
             assert entry is None, (case_id, index)
             continue
@@ -220,7 +235,7 @@ def test_allocate_largest_remainder_ties_to_the_larger_rate() -> None:
     assert allocate(Cents(1), [(Decimal(19), Cents(100)), (Decimal(7), Cents(100))]) == (1, 0)
     assert allocate(Cents(0), [(Decimal(19), Cents(100))]) == (0,)
     assert allocate(Cents(5), [(Decimal(19), Cents(0)), (Decimal(7), Cents(10))]) == (0, 5)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="cannot allocate over weights that do not sum to a positive amount"):
         allocate(Cents(5), [(Decimal(19), Cents(0))])
 
 
@@ -228,6 +243,8 @@ def test_div_half_up_rounds_ties_away_from_zero() -> None:
     assert [div_half_up(n, 2) for n in (1, 3, -1, -3, 4)] == [1, 2, -1, -2, 2]
     assert div_half_up(19000 * 100000, 119000) == 15966  # 159.6639 -> 159.66
     assert div_half_up(1, -2) == -1
+    with pytest.raises(ZeroDivisionError, match="div_half_up by zero"):
+        div_half_up(1, 0)
 
 
 def test_a11_over_branch_values() -> None:
@@ -263,7 +280,7 @@ def test_other_credit_kinds_are_f7(kind: Any) -> None:
     snap = IssuedSnapshot(
         "x", "regular", "standard", (RateGroup(Decimal(19), Cents(1000), Cents(190)),), date(2026, 1, 1)
     )
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(NotImplementedError, match=f"credit kind '{kind}' is posted by F7"):
         apply_event(InvoiceState.issued(snap), CreditEvent("c", date(2026, 1, 2), kind, snap.rates))
 
 
@@ -272,14 +289,17 @@ def test_invalid_events_are_refused() -> None:
         "x", "regular", "standard", (RateGroup(Decimal(19), Cents(1000), Cents(190)),), date(2026, 1, 1)
     )
     state = InvoiceState.issued(snap)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="cash kept would become negative"):
         apply_event(state, PaymentEvent("p", date(2026, 1, 2), Cents(-1)))
     too_much = (RateGroup(Decimal(19), Cents(1001), Cents(190)),)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="credit note exceeds the current gross of a rate group"):
         apply_event(state, CreditEvent("c", date(2026, 1, 2), "partial", too_much))
     other_rate = (RateGroup(Decimal(7), Cents(10), Cents(1)),)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="credit note names a rate group the invoice does not have"):
         apply_event(state, CreditEvent("c", date(2026, 1, 2), "partial", other_rate))
+    negative = (RateGroup(Decimal(19), Cents(-1), Cents(0)),)
+    with pytest.raises(ValueError, match="credit note exceeds the current gross of a rate group"):
+        apply_event(state, CreditEvent("c", date(2026, 1, 2), "partial", negative))
 
 
 def test_event_keys_and_dates() -> None:
@@ -433,6 +453,99 @@ def test_overpayment_goes_to_customer_credit_and_back() -> None:
         ("bank", 100, None),
         ("customer_credit", -100, None),
     ]
+
+
+# ---- directed: the T > C branch with a VAT share that rounds to 0, and the cash role -----------------------------------
+
+
+def _small_invoice() -> IssuedSnapshot:
+    """19 % invoice: net 1.00, VAT 0.19, gross 1.19."""
+    return IssuedSnapshot("d1", "regular", "standard", (RateGroup(Decimal(19), Cents(100), Cents(19)),), date(2026, 1, 5))
+
+
+def _lines_by_role(entry: Entry | None) -> dict[str, Line]:
+    assert entry is not None
+    assert len({ln.role for ln in entry.lines}) == len(entry.lines)
+    assert entry.balance == 0
+    return {ln.role: ln for ln in entry.lines}
+
+
+@pytest.mark.parametrize(
+    ("bases", "vat_out_base_delta"),
+    [
+        (Bases("accrual", "soll"), -1),
+        (Bases("eur", "soll"), -1),
+        (Bases("accrual", "ist"), None),
+        (Bases("eur", "ist"), None),
+    ],
+    ids=lambda v: f"{v.income}-{v.vat}" if isinstance(v, Bases) else str(v),
+)
+def test_partial_credit_with_a_zero_vat_share_over_paid_invoice_picks_the_right_base(
+    bases: Bases, vat_out_base_delta: int | None
+) -> None:
+    """Invoice 1.00 + 0.19, paid 1.19, then a partial credit net 0.01 / VAT 0.00 (not refunded).
+
+    By hand: G = 119, P = T = 119, after the credit C = 118, CV = 19, CN = 99, K = 1, KV = 0.
+    T > C: T_r = C_r + allocate(T - C = 1 over K_r = 1) = 119; TV = CV + q2(KV * 1 / K) = 19 + 0 = 19; TN = 100.
+    Soll: D = max(CV, TV) = 19; CV >= TV, so B = CN = 99 (not TN = 100).  Ist: D = TV = 19, B = TN = 100.
+    Deltas of the credit entry (before: C = 119, CV = 19, CN = 100, T = 119):
+      accrual: receivables C - T = -1 (before 0), revenue = -CN = -99 (before -100): +1, vat_out amount 0, base:
+               Soll 99 - 100 = -1 (a base-only change line), Ist 100 - 100 = 0 (no vat_out line).
+      EUR:     revenue = -TN = -100 unchanged, vat_soll_clearing cash -TV and declaration +D unchanged (19 - 19),
+               vat_out base: Soll 99 - 100 = -1, Ist 0; so EUR/Ist has no entry at all.
+    """
+    snap = _small_invoice()
+    paid = apply_event(InvoiceState.issued(snap), PaymentEvent("p", date(2026, 1, 6), Cents(119)))
+    credit = CreditEvent("c", date(2026, 2, 3), "partial", (RateGroup(Decimal(19), Cents(1), Cents(0)),))
+    after = apply_event(paid, credit)
+    [grp] = targets(after, bases).groups
+    assert (grp.cash, grp.cash_vat, grp.cash_net, grp.due_vat) == (119, 19, 100, 19)
+    assert grp.base == (99 if bases.vat == "soll" else 100)
+    entry = event_entry(paid, after, bases, credit)
+    if bases == Bases("eur", "ist"):
+        assert entry is None
+        return
+    by_role = _lines_by_role(entry)
+    if bases.income == "accrual":
+        assert (by_role["receivables"].amount_cents, by_role["revenue_s19"].amount_cents) == (-1, 1)
+        assert by_role["revenue_s19"].income_date == date(2026, 2, 3)
+        assert by_role["receivables"].open_item_id == "d1"
+        assert set(by_role) == {"receivables", "revenue_s19"} | ({"vat_out_s19"} if vat_out_base_delta else set())
+    else:
+        assert set(by_role) == {"vat_out_s19"}
+    if vat_out_base_delta is not None:
+        vat_out = by_role["vat_out_s19"]
+        assert (vat_out.amount_cents, vat_out.tax_base_cents, vat_out.tax_kind, vat_out.tax_key) == (
+            0,
+            vat_out_base_delta,
+            "tax",
+            "S19",
+        )
+        assert vat_out.vat_date == date(2026, 2, 3)  # the period of the change, never the original period
+
+
+def test_refund_with_cash_role_posts_to_the_cash_account() -> None:
+    """Invoice 100.00 + 19.00 paid in full, then 50.00 refunded in cash (EUR / Ist).
+
+    By hand: P = 6900, C = 11900 = T + 5000; TV = q2(1900 * 6900 / 11900) = 1101.68 -> 1102, TN = 5798.
+    Before: TV = 1900, TN = 10000.  Delta: cash -5000, revenue_s19 +4202, vat_out_s19 +798 with base -4202.
+    """
+    snap = IssuedSnapshot(
+        "d2", "regular", "standard", (RateGroup(Decimal(19), Cents(10000), Cents(1900)),), date(2026, 1, 5)
+    )
+    bases = Bases("eur", "ist")
+    paid = apply_event(InvoiceState.issued(snap), PaymentEvent("p", date(2026, 1, 6), Cents(11900)))
+    refund = PaymentEvent("r", date(2026, 3, 1), Cents(-5000), Role("cash"))
+    entry = event_entry(paid, apply_event(paid, refund), bases, refund)
+    by_role = _lines_by_role(entry)
+    assert "bank" not in by_role
+    assert by_role["cash"].amount_cents == -5000
+    assert (by_role["revenue_s19"].amount_cents, by_role["vat_out_s19"].amount_cents) == (4202, 798)
+    assert by_role["vat_out_s19"].tax_base_cents == -4202
+    pay = PaymentEvent("p2", date(2026, 3, 2), Cents(5000), Role("cash"))
+    again = apply_event(apply_event(paid, refund), pay)
+    back = _lines_by_role(event_entry(apply_event(paid, refund), again, bases, pay))
+    assert back["cash"].amount_cents == 5000 and "bank" not in back
 
 
 # ---- invariants on random event sequences ------------------------------------------------------------------------
