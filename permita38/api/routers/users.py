@@ -29,12 +29,12 @@ def list_users(user: Annotated[dict, Needs("team")], services: ServicesDep):
 def create_user(body: UserIn, _: Annotated[dict, Needs("team", "write")], services: ServicesDep):
     data = _dump(body)
     data.pop("id", None)
-    return _with_warnings(services.auth.save_user(data))
+    return stored(UserOut, _with_warnings(services.auth.save_user(data)))
 
 
 @router.put("/{user_id}", response_model=UserOut)
 def update_user(user_id: str, body: UserIn, _: Annotated[dict, Needs("team", "write")], services: ServicesDep):
-    return _with_warnings(services.auth.save_user({**_dump(body), "id": user_id}))
+    return stored(UserOut, _with_warnings(services.auth.save_user({**_dump(body), "id": user_id})))
 
 
 @router.delete("/{user_id}", status_code=204)
