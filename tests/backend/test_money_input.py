@@ -1,5 +1,7 @@
 """Money input: a JSON number or a decimal string, same bounds (decimal-money-api spec, rule 2)."""
 
+import math
+
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
@@ -60,6 +62,13 @@ def test_number_and_string_give_the_same_float(tp, lo, hi):
         "1.1234567",
         "12345678901",
         "--1",
+        "12.50\n",
+        "\n12.5",
+        "1.5\n",
+        "0x10",
+        "1_000",
+        "\u0661\u0662",
+        "+1.00",
         True,
         False,
         None,
@@ -95,14 +104,35 @@ def test_negative_string_where_allowed():
     assert TypeAdapter(Amount).validate_python("-0.000001") == -0.000001
 
 
-def test_json_schema_offers_number_or_string():
-    schema = TypeAdapter(Amount).json_schema()
-    kinds = {b["type"] for b in schema["anyOf"]}
-    assert kinds == {"number", "string"}
+@pytest.mark.parametrize(("tp", "lo", "hi"), PARAMS)
+def test_json_schema_offers_number_or_string(tp, lo, hi):
+    schema = TypeAdapter(tp).json_schema()
+    assert {b["type"] for b in schema["anyOf"]} == {"number", "string"}
     string = next(b for b in schema["anyOf"] if b["type"] == "string")
     assert string["pattern"] == r"^-?[0-9]{1,10}(\.[0-9]{1,6})?$"
     number = next(b for b in schema["anyOf"] if b["type"] == "number")
-    assert number["minimum"] == -1e9 and number["maximum"] == 1e9
+    assert number["minimum"] == lo and number["maximum"] == hi
+
+
+@pytest.mark.parametrize(("tp", "lo", "hi"), PARAMS)
+def test_accepted_edge_forms(tp, lo, hi):
+    ta = TypeAdapter(tp)
+    assert ta.validate_python("0.000000") == 0.0
+    assert ta.validate_python("007.5") == 7.5
+    if lo == 0:
+        zero = ta.validate_python("-0")
+        assert zero == 0.0 and math.copysign(1, zero) == -1.0
+    top = f"{int(hi)}.000000"
+    assert ta.validate_python(top) == hi
+    assert ta.validate_json(f'"{top}"') == hi
+    assert ta.validate_json(f'"{int(hi)}"') == hi
+    with pytest.raises(ValidationError):
+        ta.validate_json(f'"{int(hi)}.000001"')
+
+
+def test_minus_zero_string_where_negatives_are_allowed():
+    zero = TypeAdapter(Amount).validate_python("-0")
+    assert zero == 0.0 and math.copysign(1, zero) == -1.0
 
 
 class Body(CheckedBody):
@@ -117,3 +147,30 @@ def test_checked_body_lets_money_strings_through():
         Body.model_validate({"amount": "12,50"})
     with pytest.raises(ValidationError):  # the text checks still apply to every string
         Body.model_validate({"amount": "1", "note": "a\x00b"})
+
+
+def test_money_in_the_openapi_of_an_app():
+    from fastapi import FastAPI
+    from pydantic import BaseModel
+
+    from permita38.core.validation import Money, UnitPrice
+
+    class Out(BaseModel):
+        net: Money
+        price: UnitPrice
+
+    class In(BaseModel):
+        amount: Amount
+
+    app = FastAPI()
+
+    @app.post("/x", response_model=Out)
+    def x(body: In) -> Out:  # pragma: no cover - never called
+        raise NotImplementedError
+
+    schemas = app.openapi()["components"]["schemas"]
+    for name in ("net", "price"):
+        prop = schemas["Out"]["properties"][name]
+        assert prop["type"] == "string" and prop["format"] == "decimal" and prop["pattern"] == r"^-?[0-9]+\.[0-9]{2,6}$"
+    amount = schemas["In"]["properties"]["amount"]
+    assert {b["type"] for b in amount["anyOf"]} == {"number", "string"}

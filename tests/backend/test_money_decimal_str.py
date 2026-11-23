@@ -1,5 +1,8 @@
 """Decimal-string output of money: money.to_decimal_str, Money/UnitPrice and present() (decimal-money-api spec)."""
 
+import json
+import math
+
 import pytest
 from pydantic import BaseModel, TypeAdapter
 
@@ -27,13 +30,15 @@ DECIMAL_SCHEMA = {"type": "string", "format": "decimal", "pattern": r"^-?[0-9]+\
         ("12.5", "12.50"),
         (1e7, "10000000.00"),
         (1_000_000_000, "1000000000.00"),
+        (1e-6, "0.000001"),
+        (0.1 + 0.2, "0.30"),
     ],
 )
 def test_to_decimal_str(value, expected):
     assert money.to_decimal_str(value) == expected
 
 
-@pytest.mark.parametrize("bad", ["abc", None, float("nan")])
+@pytest.mark.parametrize("bad", ["abc", None, float("nan"), float("inf"), float("-inf"), True, False])
 def test_to_decimal_str_rejects_non_numbers(bad):
     with pytest.raises(ValueError):
         money.to_decimal_str(bad)
@@ -110,7 +115,74 @@ def test_present_passes_unparsable_values_through(bad):
 
 
 def test_present_nan_does_not_raise():
-    assert present(Rec, {"net": float("nan")})["net"] != 0
+    assert math.isnan(present(Rec, {"net": float("nan")})["net"])
+
+
+def test_serializer_leaves_nan_and_inf_alone():
+    from permita38.core.validation import _decimal_out
+
+    assert math.isnan(_decimal_out(float("nan")))
+    assert _decimal_out(float("inf")) == float("inf")
+
+
+def test_present_does_not_convert_unknown_dicts_in_lines():
+    out = present(Rec, {"lines": [{"gross": 1, "other": {"gross": 2}}, {"unknown_dict": {"net": 3}}]})
+    assert out["lines"][0] == {"gross": "1.00", "other": {"gross": 2}}
+    assert out["lines"][1] == {"unknown_dict": {"net": 3}}
+
+
+def test_present_returns_the_record_itself_without_money_fields():
+    class Plain(BaseModel):
+        a: float = 0
+        names: list[str] = []
+
+    rec = {"a": 1.5}
+    assert present(Plain, rec) is rec
+
+
+class Deep(BaseModel):
+    grid: list[list[Money]] = []
+    opt: Inner | None = None
+    by: dict[str, Inner] = {}
+    lines: list[Inner] = []
+    net: Money = 0.0
+
+
+NESTED = {
+    "grid": [[1, 2.5], [0.125]],
+    "opt": {"gross": 3, "qty": 2},
+    "by": {"k": {"gross": -1.5}},
+    "lines": [{"gross": 4}, {"gross": 5.25, "qty": 3}],
+    "net": 9,
+}
+
+
+def test_json_dump_equals_present_on_nested_records():
+    model = Deep.model_validate(NESTED)
+    dumped = json.loads(model.model_dump_json())
+    assert dumped == {
+        "grid": [["1.00", "2.50"], ["0.125"]],
+        "opt": {"gross": "3.00", "qty": 2.0},
+        "by": {"k": {"gross": "-1.50", "qty": 1.0}},
+        "lines": [{"gross": "4.00", "qty": 1.0}, {"gross": "5.25", "qty": 3.0}],
+        "net": "9.00",
+    }
+    assert present(Deep, NESTED) == {
+        "grid": [["1.00", "2.50"], ["0.125"]],
+        "opt": {"gross": "3.00", "qty": 2},
+        "by": {"k": {"gross": "-1.50"}},
+        "lines": [{"gross": "4.00"}, {"gross": "5.25", "qty": 3}],
+        "net": "9.00",
+    }
+
+
+def test_python_dump_keeps_floats_on_nested_records():
+    dumped = Deep.model_validate(NESTED).model_dump()
+    assert dumped["grid"] == [[1.0, 2.5], [0.125]]
+    assert dumped["opt"]["gross"] == 3.0 and isinstance(dumped["opt"]["gross"], float)
+    assert dumped["by"]["k"]["gross"] == -1.5
+    assert dumped["lines"][1]["gross"] == 5.25
+    assert dumped["net"] == 9.0 and isinstance(dumped["net"], float)
 
 
 def test_present_list_and_non_dict():

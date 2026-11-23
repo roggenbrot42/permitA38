@@ -74,8 +74,10 @@ def to_decimal_str(value: Any) -> str:
     All stored significant decimals are kept (``118.09`` -> ``"118.09"``, ``0`` -> ``"0.00"``, ``0.125`` ->
     ``"0.125"``, ``-0.005`` -> ``"-0.005"``); a stored value is never rounded to cents. Only digits beyond the sixth
     decimal are rounded half-up (ties away from zero). A zero value (also ``-0.0`` or one that becomes zero at the
-    sixth decimal) is written ``"0.00"``. Raises ``ValueError`` for a non-number.
+    sixth decimal) is written ``"0.00"``. Raises ``ValueError`` for a non-number (also a bool).
     """
+    if isinstance(value, bool):
+        raise ValueError(f"not a valid number: {value!r}")
     q = dec(value, default=None).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
     if q == 0:
         return "0.00"

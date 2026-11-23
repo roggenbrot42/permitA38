@@ -136,11 +136,16 @@ def test_invalid_bodies_are_422_and_store_nothing(boss_client, body):
         {"children": {"pv_children_under_25": True}},
         {"health": {"krankengeld": 1}},
         {"church_tax_percent": "9"},
-        {"employment": {"gross_year": "1000"}},
+        {"employment": {"gross_year": "1,000"}},
     ],
 )
 def test_numeric_strings_and_bool_counts_are_rejected(boss_client, body):
     assert boss_client.put(URL, json=body).status_code == 422
+
+
+def test_money_decimal_string_is_accepted(boss_client):
+    r = boss_client.put(URL, json={"employment": {"gross_year": "1000.00"}})
+    assert r.status_code == 200 and r.json()["employment"]["gross_year"] == 1000
 
 
 def test_basis_equal_to_premium_is_accepted(boss_client):

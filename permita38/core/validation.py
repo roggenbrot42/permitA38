@@ -184,7 +184,7 @@ Keyword = Annotated[str, StringConstraints(max_length=100), AfterValidator(_keyw
 
 
 # ---- money input: a JSON number (as before) or a decimal string "12.50" (docs/specs/decimal-money-api.md rule 2) ----
-MONEY_STR_PATTERN = r"^-?[0-9]{1,10}(\.[0-9]{1,6})?$"
+MONEY_STR_PATTERN = r"^-?[0-9]{1,10}(\.[0-9]{1,6})?$"  # matched with fullmatch: no trailing newline either
 _MONEY_STR_RE = re.compile(MONEY_STR_PATTERN)
 
 
@@ -194,7 +194,7 @@ def _money_input(value: Any) -> Any:
     if isinstance(value, bool):
         raise ValueError("must be a number or a decimal string like 12.50")
     if isinstance(value, str):
-        if not _MONEY_STR_RE.match(value):
+        if not _MONEY_STR_RE.fullmatch(value):
             raise ValueError("must be a number or a decimal string like 12.50 (dot as decimal separator)")
         try:
             return float(Decimal(value))
@@ -203,10 +203,8 @@ def _money_input(value: Any) -> Any:
     return value
 
 
-def _money_in(ge: float | None, le: float) -> Any:
-    number: dict[str, Any] = {"type": "number", "maximum": le}
-    if ge is not None:
-        number["minimum"] = ge
+def _money_in(ge: float, le: float) -> Any:
+    number: dict[str, Any] = {"type": "number", "minimum": ge, "maximum": le}
     schema = {"anyOf": [number, {"type": "string", "pattern": MONEY_STR_PATTERN}]}
     return Annotated[
         float, Field(ge=ge, le=le, allow_inf_nan=False), BeforeValidator(_money_input), WithJsonSchema(schema)
@@ -289,12 +287,15 @@ class DecimalOutput:
 def _lenient_money(value: Any) -> Any:
     """Stored float, int or decimal string -> float (the Python value keeps its stored type). Anything else is left
     for the float validation to judge."""
-    if isinstance(value, str) and _MONEY_STR_RE.match(value):
+    if isinstance(value, str) and _MONEY_STR_RE.fullmatch(value):
         return float(Decimal(value))
     return value
 
 
-def _decimal_out(value: Any) -> str:
+def _decimal_out(value: Any) -> Any:
+    """Decimal string for JSON; a NaN/inf value (damaged row) is returned unchanged instead of raising."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return value
     return money.to_decimal_str(value)
 
 
@@ -305,7 +306,7 @@ def _money_out(kind: str) -> Any:
     return Annotated[
         float,
         BeforeValidator(_lenient_money),
-        PlainSerializer(_decimal_out, return_type=str, when_used="json"),
+        PlainSerializer(_decimal_out, return_type=Any, when_used="json"),
         WithJsonSchema(_MONEY_OUT_SCHEMA),
         DecimalOutput(kind),
     ]

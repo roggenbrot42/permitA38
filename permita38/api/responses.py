@@ -1,6 +1,7 @@
 """Responses for data that was read back from the database."""
 
 import copy
+import functools
 import json
 import types
 import typing
@@ -77,17 +78,46 @@ def _convert(annotation: Any, value: Any, metadata: tuple[Any, ...] = ()) -> Any
     return value
 
 
+def _has_money(annotation: Any, metadata: tuple[Any, ...] = ()) -> bool:
+    if any(isinstance(m, DecimalOutput) for m in metadata):
+        return True
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if origin is typing.Annotated:
+        return _has_money(args[0], tuple(args[1:]))
+    if origin in (typing.Union, types.UnionType, list, dict):
+        return any(_has_money(a) for a in args)
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return bool(_field_plan(annotation))
+    return False
+
+
+@functools.lru_cache(maxsize=None)
+def _field_plan(model: type[BaseModel]) -> tuple[tuple[str, Any, tuple[Any, ...]], ...]:
+    """The fields of ``model`` that can hold money (directly or nested), as (name, annotation, metadata)."""
+    plan: list[tuple[str, Any, tuple[Any, ...]]] = []
+    for name, field in model.model_fields.items():
+        meta = tuple(field.metadata)
+        if _has_money(field.annotation, meta):
+            plan.append((name, field.annotation, meta))
+    return tuple(plan)
+
+
 def present(model: type[BaseModel], data: Any) -> Any:
     """Convert the ``Money`` / ``UnitPrice`` fields of stored record(s) to decimal strings, recursively into nested
-    models. Unknown fields, ``None`` and unparsable values are left alone (never an error); the input is not changed."""
+    models. Unknown fields, ``None`` and unparsable values are left alone (never an error); the input is not changed.
+    A model without money fields returns the record object itself."""
     if isinstance(data, list):
         return [present(model, r) for r in data]
     if not isinstance(data, dict):
         return data
+    plan = _field_plan(model)
+    if not plan:
+        return data
     out = dict(data)
-    for name, field in model.model_fields.items():
+    for name, annotation, meta in plan:
         if name in out:
-            out[name] = _convert(field.annotation, out[name], tuple(field.metadata))
+            out[name] = _convert(annotation, out[name], meta)
     return out
 
 
