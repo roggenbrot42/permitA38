@@ -364,6 +364,8 @@ class PostgresDialect(Dialect):
                 f"  RAISE EXCEPTION 'permita38:{guard.code}' USING ERRCODE = '23000';\nEND;\n$$;",
                 f"CREATE TRIGGER {q(guard.name + '_upd')} BEFORE UPDATE ON {t} FOR EACH ROW EXECUTE FUNCTION {fn}();",
                 f"CREATE TRIGGER {q(guard.name + '_del')} BEFORE DELETE ON {t} FOR EACH ROW EXECUTE FUNCTION {fn}();",
+                # TRUNCATE fires no row triggers, so it needs its own statement-level trigger
+                f"CREATE TRIGGER {q(guard.name + '_trunc')} BEFORE TRUNCATE ON {t} FOR EACH STATEMENT EXECUTE FUNCTION {fn}();",
             ]
         cols = [q(c) for c in guard.columns]
         c = cols[0]

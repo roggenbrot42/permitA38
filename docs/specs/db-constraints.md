@@ -191,3 +191,9 @@ every UPDATE and DELETE, INSERT stays allowed. The dialects emit a `BEFORE UPDAT
 no per-row exception. The SQLite upsert (`ON CONFLICT DO UPDATE`) fires the update trigger, so re-saving an existing
 row is refused as well. The only intended exception is the transfer importer's replace-restore, which drops and
 recreates the triggers inside its transaction (a later work package). No table carries the guard yet.
+
+PostgreSQL additionally gets a `BEFORE TRUNCATE ... FOR EACH STATEMENT` trigger (`<name>_trunc`) calling the same function,
+because TRUNCATE fires no row triggers. Caveats: SQLite `INSERT OR REPLACE` deletes the old row without firing delete
+triggers (recursive triggers are off), so it would bypass the guard; the repository never uses it (it writes with
+`ON CONFLICT DO UPDATE`, which is refused). Services must therefore only INSERT into append-only tables: a re-save of an
+existing id is refused, not merged.
