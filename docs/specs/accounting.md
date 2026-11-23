@@ -290,7 +290,9 @@ Both columns balance by construction: accrual P + (C − T) − (P − T) − CN
 
 **Write-off reversal.** A payment that raises `P` above `C` while write-offs exist first creates a write-off reversal
 record (a credit document with `credit_kind = write_off_reversal`, negative amounts, `corrects_id` = the invoice,
-dated the payment date; event key `credit:<id>`) for `min(P − C, remaining written-off gross)`, allocated over the
+dated the payment date; event key `credit:<id>`) for `min(T_after − max(C, T_before), remaining written-off gross)`
+— bounded by what **this payment** adds above the current gross, so cash owed back to the customer after a credit
+note never reverses a write-off — allocated over the
 remaining written-off gross per rate group (largest remainder in cents, ties to the larger rate), its VAT in
 proportion, so a full recovery restores exactly the written-off net and VAT; then the payment posts. Reversing that payment later does
 **not** restore the write-off: the receivable reopens and the user writes it off again if needed. Recovered cash is revenue again (accrual:
@@ -301,6 +303,10 @@ cash rule handles it.
 * `eu_b2b_service`: no VAT (`V_r = 0`). The Kz 21 / ZM base is a `base_only` line with `tax_key` EU_SVC whose target is
   `CN` (accrual: on `revenue_eu_svc`; EÜR: a statistical line, amount 0), `vat_date` = performance date for the issue
   and the credit note date for credits. Under EÜR revenue follows cash (`revenue_eu_svc` = −T, no tax key).
+* Write-offs and discounts under accrual always post their net to `bad_debts` / `cash_discount_granted`, for every
+  treatment; for `eu_b2b_service` and `small_business` the Kz 21 / KU statistic is reduced by a separate statistical
+  line (amount 0, base −net) on `revenue_eu_svc` / `revenue_ku`, dated the credit date. Under EÜR they post no
+  revenue line (no cash moved).
 * `small_business`: accrual `revenue_ku` = −CN with `tax_key` KU (`base_only`, `vat_date` = event date); EÜR
   `revenue_ku` = −T at cash events with `tax_key` KU, `base_only`, base ΔT.
 * A line at rate 0 on a `standard` invoice (e.g. pass-through costs) posts on `revenue_s0` with `tax_key` NONE and
