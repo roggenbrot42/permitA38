@@ -14,7 +14,8 @@
     "ustva_cases": "journal-line sums in -> boxes out (form figures; booked figures where they differ)",
     "customers": "customer ids are symbolic; tests give them format-valid fake VAT ids",
     "open_item_id": "receivables and payables lines implicitly carry open_item_id = the id of the invoice or expense of their event; every other line has open_item_id null",
-    "tax_key NONE": "a line with tax_key NONE has no tax_kind, tax_base or vat_date; it is not part of any VAT sum"
+    "tax_key NONE": "a line with tax_key NONE has no tax_kind, tax_base or vat_date; it is not part of any VAT sum",
+    "line order": "the order of the lines inside one entry is not significant; compare them as a multiset"
   },
   "journal_cases": [
     {
