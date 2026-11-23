@@ -460,7 +460,9 @@ def test_overpayment_goes_to_customer_credit_and_back() -> None:
 
 def _small_invoice() -> IssuedSnapshot:
     """19 % invoice: net 1.00, VAT 0.19, gross 1.19."""
-    return IssuedSnapshot("d1", "regular", "standard", (RateGroup(Decimal(19), Cents(100), Cents(19)),), date(2026, 1, 5))
+    return IssuedSnapshot(
+        "d1", "regular", "standard", (RateGroup(Decimal(19), Cents(100), Cents(19)),), date(2026, 1, 5)
+    )
 
 
 def _lines_by_role(entry: Entry | None) -> dict[str, Line]:
@@ -560,7 +562,7 @@ def _vat(net: int, rate: int) -> int:
 
 def _random_snapshot(rng: random.Random) -> IssuedSnapshot:
     groups = []
-    for rate in rng.sample([19, 7, 5], rng.randint(1, 3)):
+    for rate in rng.sample([19, 7, 5, 0], rng.randint(1, 4)):
         net = rng.randint(1, 500000)
         groups.append(RateGroup(Decimal(rate), Cents(net), Cents(_vat(net, rate))))
     groups.sort(key=lambda g: g.rate, reverse=True)
@@ -568,17 +570,71 @@ def _random_snapshot(rng: random.Random) -> IssuedSnapshot:
 
 
 def _random_credit(rng: random.Random, state: InvoiceState, when: date, n: int) -> CreditEvent | None:
+    """A partial credit (some of them with VAT 0.00) or a storno of everything still open."""
+    storno = rng.random() < 0.2
     parts = []
     for grp, done in zip(state.snapshot.rates, state.credited, strict=True):
         left_net, left_vat = grp.net - done.net, grp.vat - done.vat
+        if storno:
+            if left_net > 0 or left_vat > 0:
+                parts.append(RateGroup(grp.rate, Cents(left_net), Cents(left_vat)))
+            continue
         if left_net <= 0 or rng.random() < 0.4:
             continue
         net = left_net if rng.random() < 0.3 else rng.randint(1, left_net)
-        vat = left_vat if net == left_net else min(left_vat, _vat(net, int(grp.rate)))
+        if net == left_net:
+            vat = left_vat
+        elif rng.random() < 0.25:
+            vat = 0  # a credit whose VAT share is zero
+        else:
+            vat = min(left_vat, _vat(net, int(grp.rate)))
         parts.append(RateGroup(grp.rate, Cents(net), Cents(vat)))
     if not parts:
         return None
-    return CreditEvent(f"c{n}", when, "partial", tuple(parts))
+    return CreditEvent(f"c{n}", when, "storno" if storno else "partial", tuple(parts))
+
+
+_Slot = tuple[str, str, bool]  # (role, tax kind, carries an income date): the EUR clearing cash part has one
+
+
+def _journal_slots(entries: list[Entry]) -> dict[_Slot, tuple[int, int]]:
+    """Cumulative (amount, VAT base) of all posted lines per slot; slots that sum to nothing are dropped."""
+    sums: dict[_Slot, tuple[int, int]] = {}
+    for entry in entries:
+        for ln in entry.lines:
+            key = (ln.role, ln.tax_kind or "", ln.income_date is not None)
+            amount, base = sums.get(key, (0, 0))
+            sums[key] = (amount + ln.amount_cents, base + (ln.tax_base_cents or 0))
+    return {k: v for k, v in sums.items() if v != (0, 0)}
+
+
+def _target_slots(state: InvoiceState, bases: Bases) -> dict[_Slot, tuple[int, int]]:
+    sums: dict[_Slot, tuple[int, int]] = {}
+    for tl in targets(state, bases).lines:
+        key = (tl.role, tl.tax_kind or "", tl.income)
+        amount, base = sums.get(key, (0, 0))
+        sums[key] = (amount + tl.amount_cents, base + (tl.base_cents if tl.tax_kind else 0))
+    return {k: v for k, v in sums.items() if v != (0, 0)}
+
+
+def _check_journal_equals_targets(state: InvoiceState, bases: Bases, entries: list[Entry], where: object) -> None:
+    """After every event: the journal of the invoice is exactly ``targets(state)``, plus independent checks."""
+    result = targets(state, bases)
+    assert _journal_slots(entries) == _target_slots(state, bases), where
+    assert sum(ln.amount_cents for e in entries for ln in e.lines) == 0, where
+    gross = sum(g.gross for g in state.snapshot.rates)
+    paid = state.kept
+    settled = min(paid, gross) if gross > 0 else 0
+    current = sum(g.gross - k.gross for g, k in zip(state.snapshot.rates, state.credited, strict=True))
+    journal = _journal_slots(entries)
+    assert sum(v[0] for k, v in journal.items() if k[0] == "bank") == paid, where  # bank == P
+    assert (result.kept, result.settled, result.overpayment) == (paid, settled, paid - settled), where
+    credit = sum(v[0] for k, v in journal.items() if k[0] == "customer_credit")
+    assert credit == -(paid - settled), where  # customer_credit == -(P - T)
+    if bases.income == "accrual":
+        assert sum(v[0] for k, v in journal.items() if k[0] == "receivables") == current - settled, where
+    if bases.vat == "soll":  # sum D_r >= sum TV_r: the VAT declared never falls below the VAT in the cash kept
+        assert sum(g.due_vat for g in result.groups) >= sum(g.cash_vat for g in result.groups), where
 
 
 def _random_run(seed: int, bases: Bases) -> tuple[InvoiceState, list[Entry]]:
@@ -587,13 +643,22 @@ def _random_run(seed: int, bases: Bases) -> tuple[InvoiceState, list[Entry]]:
     state = InvoiceState.issued(snap)
     entries: list[Entry] = []
     first = event_entry(None, state, bases, IssueEvent(snap.perf))
-    assert (first is None) == (bases == Bases("eur", "ist"))
+    nothing_yet = bases == Bases("eur", "ist") or (
+        bases == Bases("eur", "soll") and all(g.rate == 0 for g in snap.rates)
+    )
+    assert (first is None) == nothing_yet  # EUR posts the VAT only (Soll) or nothing at all (Ist); rate 0 has no VAT
     if first is not None:
         entries.append(first)
+    _check_journal_equals_targets(state, bases, entries, (seed, "issue"))
     day = 10
-    for n in range(rng.randint(1, 12)):
+    for n in range(rng.randint(1, 14)):
         day += 1
         when = date(2026, 1 + day // 28, 1 + day % 28)
+        if rng.random() < 0.15:  # a refund below zero cash is refused and changes nothing
+            too_much = PaymentEvent(f"x{n}", when, Cents(-(state.kept + rng.randint(1, 5000))))
+            with pytest.raises(ValueError, match="cash kept would become negative"):
+                apply_event(state, too_much)
+            continue
         event: Event | None
         roll = rng.random()
         if roll < 0.3:
@@ -615,6 +680,7 @@ def _random_run(seed: int, bases: Bases) -> tuple[InvoiceState, list[Entry]]:
         if entry is not None:
             entries.append(entry)
         state = after
+        _check_journal_equals_targets(state, bases, entries, (seed, bases, n, event))
     return state, entries
 
 
@@ -624,8 +690,6 @@ def test_random_sequences_keep_the_invariants(seed: int, bases: Bases) -> None:
     state, entries = _random_run(seed, bases)
     assert all(e.balance == 0 for e in entries)
     result = targets(state, bases)
-    if bases.vat == "soll":
-        assert sum(g.due_vat for g in result.groups) >= sum(g.cash_vat for g in result.groups)
     for g in result.groups:
         assert g.cash_vat + g.cash_net == g.cash
     assert sum(g.cash for g in result.groups) == result.settled
@@ -640,8 +704,11 @@ def test_random_sequences_keep_the_invariants(seed: int, bases: Bases) -> None:
     tgt = targets(final, bases)
     for grp, cred, tg in zip(final.snapshot.rates, final.credited, tgt.groups, strict=True):
         cur_vat, cur_net = grp.vat - cred.vat, grp.net - cred.net
-        assert (tg.due_vat, tg.base) == (cur_vat, cur_net), (seed, bases, grp.rate)
         rate = grp.rate
+        if rate == 0:  # no VAT line at rate 0
+            assert (tg.due_vat, tg.base) == (0, 0), (seed, bases)
+            continue
+        assert (tg.due_vat, tg.base) == (cur_vat, cur_net), (seed, bases, grp.rate)
         booked = sum(-ln.amount_cents for e in entries for ln in e.lines if ln.role == _role("vat_out", rate))
         base = sum(ln.tax_base_cents or 0 for e in entries for ln in e.lines if ln.role == _role("vat_out", rate))
         assert (booked, base) == (cur_vat, cur_net), (seed, bases, rate)
