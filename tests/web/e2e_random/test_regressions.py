@@ -47,7 +47,7 @@ def test_vat_rounding_is_half_up(api):
     inv["status"], inv["paid_date"] = "paid", date.today().isoformat()
     r = api.http.put(f"/invoices/{inv['id']}", json=inv)
     assert r.status_code == 200, r.text
-    assert api.get("/finance", year=date.today().year)["totals"]["vat_out"] == 118.09
+    assert api.get("/finance", year=date.today().year)["totals"]["vat_out"] == "118.09"
 
 
 def test_unknown_document_shows_not_found(make_page, live_server, api):
@@ -82,7 +82,7 @@ def test_negative_expense_is_rejected_and_credit_notes_do_not_break_money_page(m
 
     api.setup_boss()
     today = date.today().isoformat()
-    r = api.http.post("/expenses", json={"date": today, "net": -5000.0, "vat": 0, "vendor": "Gutschrift"})
+    r = api.http.post("/expenses", json={"date": today, "net": "-5000.00", "vat": "0.00", "vendor": "Gutschrift"})
     assert r.status_code == 422, r.text
     cust = api.post("/customers", {"name": "Gutschrift GmbH"})
     inv = api.post(
