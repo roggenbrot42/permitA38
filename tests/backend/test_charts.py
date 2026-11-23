@@ -179,3 +179,87 @@ def test_chart_for_missing_chart_raises(tmp_path: Path, monkeypatch: pytest.Monk
     _install(tmp_path, monkeypatch, (2026,))
     with pytest.raises(ChartMissing):
         chart_for("skr04", 2026)
+
+
+def _set(path: tuple[str, ...], value: Any) -> Callable[[dict[str, Any]], None]:
+    def mutate(d: dict[str, Any]) -> None:
+        node: Any = d
+        for key in path[:-1]:
+            node = node[key]
+        node[path[-1]] = value
+
+    return mutate
+
+
+def _del_top(key: str) -> Callable[[dict[str, Any]], None]:
+    def mutate(d: dict[str, Any]) -> None:
+        del d[key]
+
+    return mutate
+
+
+def _dup_account(d: dict[str, Any]) -> None:
+    d["accounts"].append(copy.deepcopy(d["accounts"][0]))
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (_del_top("source"), "lacks required key 'source'"),
+        (_set(("chart",), "skr99"), "unknown chart 'skr99'"),
+        (_set(("status",), "done"), "status must be"),
+        (_set(("roles", "bank", "class"), "other"), "class must be 'pl' or 'balance'"),
+        (_set(("roles", "bank", "account"), "900"), "4-8 digit"),
+        (_set(("roles", "bank", "account"), "900000001"), "4-8 digit"),
+        (_set(("roles", "bank", "account"), 9001), "4-8 digit"),
+        (_set(("roles", "bank", "name"), ""), "name must be a non-empty string"),
+        (_set(("roles", "expense_other", "eur_line"), {"line": "", "deductible": True}), "eur_line.line"),
+        (_set(("shared",), [["bank"], "cash"]), "'shared' must be a list of role name lists"),
+        (_set(("shared",), [["bank", 5]]), "'shared' must be a list of role name lists"),
+        (_set(("shared",), [["bank", "no_such_role"]]), "'shared' names unknown role 'no_such_role'"),
+        (_set(("accounts",), {"a": 1}), "'accounts' must be a list"),
+        (_dup_account, "listed twice in 'accounts'"),
+        (_set(("roles", "vat_out_s19", "automatic"), ["S19"]), "is not a known tax key"),
+        (_set(("categories", "x"), ["bank"]), "maps to unknown role"),
+        (_set(("categories",), ["x"]), "'categories' must be an object"),
+        (_set(("roles", "bank"), "9001"), "must be an object"),
+    ],
+)
+def test_more_invalid_variants(tmp_path: Path, mutate: Callable[[dict[str, Any]], None], message: str) -> None:
+    with pytest.raises(ChartInvalid, match=message):
+        load_chart(_write(tmp_path, mutate))
+
+
+def test_broken_json_is_chart_invalid(tmp_path: Path) -> None:
+    path = tmp_path / "skr03-2026.json"
+    path.write_text("{not json", encoding="utf-8")
+    with pytest.raises(ChartInvalid, match="not valid JSON"):
+        load_chart(path)
+
+
+def test_extra_expense_role_is_accepted(tmp_path: Path) -> None:
+    def add(d: dict[str, Any]) -> None:
+        d["roles"]["expense_training"] = copy.deepcopy(d["roles"]["expense_other"])
+        d["roles"]["expense_training"]["account"] = "9901"
+        d["accounts"].append({**d["roles"]["expense_training"]})
+        d["categories"]["training"] = "expense_training"
+
+    c = load_chart(_write(tmp_path, add))
+    assert c.account(Role("expense_training")) == "9901"
+    assert c.role_for_category("training") == "expense_training"
+
+
+def test_duplicate_account_not_declared_in_shared_is_invalid(tmp_path: Path) -> None:
+    def share_other(d: dict[str, Any]) -> None:
+        d["roles"]["cash"]["account"] = d["roles"]["bank"]["account"]
+        d["shared"] = [["bank", "receivables"]]
+
+    with pytest.raises(ChartInvalid, match="used by both"):
+        load_chart(_write(tmp_path, share_other))
+
+
+def test_chart_name_differing_from_file_name_is_invalid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write(tmp_path, _set(("chart",), "skr04"), "skr03-2026.json")
+    monkeypatch.setattr(charts, "_DIR", tmp_path)
+    with pytest.raises(ChartInvalid, match="differs from the file name chart"):
+        chart_for("skr03", 2026)

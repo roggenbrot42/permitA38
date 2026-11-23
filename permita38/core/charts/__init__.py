@@ -12,6 +12,8 @@ from importlib import resources
 from pathlib import Path
 from typing import Literal, NewType, cast
 
+from permita38.core.vat_rules import TAX_KEYS
+
 _DIR = resources.files(__package__)
 
 Role = NewType("Role", str)
@@ -21,9 +23,6 @@ AccountClass = Literal["pl", "balance"]
 ChartStatus = Literal["to_verify", "verified"]
 
 CHART_NAMES: tuple[ChartName, ...] = ("skr03", "skr04")
-
-# Section 6: the stable tax-key vocabulary an account may imply (DATEV automatic accounts).
-KNOWN_TAX_KEYS: frozenset[str] = frozenset({"S19", "S7", "SX", "KU", "EU_SVC", "VST", "RC_EU_SVC", "RC_3C_SVC", "NONE"})
 
 # Section 5, "Roles used by the engine". The ``expense_*`` category roles are not enumerated by the spec; a chart may
 # add further ``expense_*`` roles (see EXPENSE_ROLE_PREFIX) for its category table.
@@ -155,7 +154,7 @@ class Chart:
 
 _TOP_KEYS = ("chart", "year", "source", "status", "roles", "categories", "accounts")
 _ACCOUNT_KEYS = ("account", "name", "class", "eur_line", "automatic")
-_ACCOUNT_NO = re.compile(r"^[0-9]{3,8}$")
+_ACCOUNT_NO = re.compile(r"^[0-9]{4,8}$")
 
 
 def _bad(name: str, msg: str) -> ChartInvalid:
@@ -170,7 +169,7 @@ def _parse_account(raw: object, where: str, name: str) -> ChartAccount:
             raise _bad(name, f"{where} lacks required key '{key}'")
     no, label, cls, eur, auto = raw["account"], raw["name"], raw["class"], raw["eur_line"], raw["automatic"]
     if not isinstance(no, str) or not _ACCOUNT_NO.match(no):
-        raise _bad(name, f"{where}: account must be a 3-8 digit string, got {no!r}")
+        raise _bad(name, f"{where}: account must be a 4-8 digit string, got {no!r}")
     if not isinstance(label, str) or not label:
         raise _bad(name, f"{where}: name must be a non-empty string")
     if cls not in ("pl", "balance"):
@@ -185,8 +184,8 @@ def _parse_account(raw: object, where: str, name: str) -> ChartAccount:
         if not isinstance(eur["line"], str) or not eur["line"]:
             raise _bad(name, f"{where}: eur_line.line must be a non-empty string")
         eur_line = EurLine(line=eur["line"], deductible=deductible)
-    if auto is not None and auto not in KNOWN_TAX_KEYS:
-        raise _bad(name, f"{where}: automatic '{auto}' is not a known tax key")
+    if auto is not None and (not isinstance(auto, str) or auto not in TAX_KEYS):
+        raise _bad(name, f"{where}: automatic {auto!r} is not a known tax key")
     return ChartAccount(
         account=AccountNo(no),
         name=label,
@@ -220,9 +219,11 @@ def _parse(raw: object, name: str, chart: ChartName | None, year: int | None) ->
     if not isinstance(raw["accounts"], list):
         raise _bad(name, "'accounts' must be a list")
     shared_raw = raw.get("shared", [])
-    if not isinstance(shared_raw, list) or not all(isinstance(g, list) for g in shared_raw):
-        raise _bad(name, "'shared' must be a list of role lists")
-    shared = [frozenset(str(r) for r in g) for g in shared_raw]
+    if not isinstance(shared_raw, list) or not all(
+        isinstance(g, list) and all(isinstance(r, str) for r in g) for g in shared_raw
+    ):
+        raise _bad(name, "'shared' must be a list of role name lists")
+    shared = [frozenset(g) for g in shared_raw]
 
     roles: list[tuple[Role, ChartAccount]] = []
     for role, entry in raw["roles"].items():
@@ -233,6 +234,10 @@ def _parse(raw: object, name: str, chart: ChartName | None, year: int | None) ->
     for needed in ENGINE_ROLES:
         if needed not in role_names:
             raise _bad(name, f"engine role '{needed}' is missing")
+    for group in shared:
+        for member in sorted(group):
+            if member not in role_names:
+                raise _bad(name, f"'shared' names unknown role '{member}'")
     owner: dict[AccountNo, Role] = {}
     for role, acc in roles:
         other = owner.get(acc.account)
@@ -241,11 +246,15 @@ def _parse(raw: object, name: str, chart: ChartName | None, year: int | None) ->
         owner.setdefault(acc.account, role)
     categories: list[tuple[str, Role]] = []
     for cat, target in raw["categories"].items():
-        if target not in role_names:
-            raise _bad(name, f"category '{cat}' maps to unknown role '{target}'")
+        if not isinstance(target, str) or target not in role_names:
+            raise _bad(name, f"category '{cat}' maps to unknown role {target!r}")
         categories.append((str(cat), Role(target)))
     accounts = tuple(_parse_account(a, f"accounts[{i}]", name) for i, a in enumerate(raw["accounts"]))
-    listed = {a.account for a in accounts}
+    listed: set[AccountNo] = set()
+    for a in accounts:
+        if a.account in listed:
+            raise _bad(name, f"account {a.account} is listed twice in 'accounts'")
+        listed.add(a.account)
     for role, acc in roles:
         if acc.account not in listed:
             raise _bad(name, f"account {acc.account} of role '{role}' is missing in 'accounts'")
@@ -262,10 +271,16 @@ def _parse(raw: object, name: str, chart: ChartName | None, year: int | None) ->
     )
 
 
+def _decode(text: str, name: str) -> object:
+    try:
+        return cast(object, json.loads(text))
+    except json.JSONDecodeError as exc:
+        raise _bad(name, f"is not valid JSON ({exc})") from exc
+
+
 def load_chart(path: Path) -> Chart:
     """Load and validate one chart file (used by tests and by :func:`chart_for`)."""
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    return _parse(raw, path.name, None, None)
+    return _parse(_decode(path.read_text(encoding="utf-8"), path.name), path.name, None, None)
 
 
 def available_years(chart: ChartName) -> tuple[int, ...]:
@@ -282,7 +297,7 @@ def available_years(chart: ChartName) -> tuple[int, ...]:
 @lru_cache(maxsize=None)
 def _load(chart: ChartName, year: int, base: str) -> Chart:
     text = _DIR.joinpath(f"{chart}-{year}.json").read_text(encoding="utf-8")
-    return _parse(json.loads(text), f"{chart}-{year}.json", chart, year)
+    return _parse(_decode(text, f"{chart}-{year}.json"), f"{chart}-{year}.json", chart, year)
 
 
 def chart_for(chart: ChartName, year: int) -> Chart:
