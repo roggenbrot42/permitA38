@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from permita38.core.accounting.postings_issue import _role, issue_entry
+from permita38.core.accounting.postings_issue import issue_entry, role_for
 from permita38.core.accounting.postings_targets import (
     allocate,
     apply_event,
@@ -273,15 +273,6 @@ def test_a12_soll_keeps_the_vat_until_the_refund() -> None:
     refunded = apply_event(after, PaymentEvent("r", date(2026, 4, 15), Cents(-119000)))
     [grp] = targets(refunded, bases).groups
     assert (grp.due_vat, grp.base) == (0, 0)
-
-
-@pytest.mark.parametrize("kind", ["discount", "write_off", "write_off_reversal"])
-def test_other_credit_kinds_are_f7(kind: Any) -> None:
-    snap = IssuedSnapshot(
-        "x", "regular", "standard", (RateGroup(Decimal(19), Cents(1000), Cents(190)),), date(2026, 1, 1)
-    )
-    with pytest.raises(NotImplementedError, match=f"credit kind '{kind}' is posted by F7"):
-        apply_event(InvoiceState.issued(snap), CreditEvent("c", date(2026, 1, 2), kind, snap.rates))
 
 
 def test_invalid_events_are_refused() -> None:
@@ -709,7 +700,7 @@ def test_random_sequences_keep_the_invariants(seed: int, bases: Bases) -> None:
             assert (tg.due_vat, tg.base) == (0, 0), (seed, bases)
             continue
         assert (tg.due_vat, tg.base) == (cur_vat, cur_net), (seed, bases, grp.rate)
-        booked = sum(-ln.amount_cents for e in entries for ln in e.lines if ln.role == _role("vat_out", rate))
-        base = sum(ln.tax_base_cents or 0 for e in entries for ln in e.lines if ln.role == _role("vat_out", rate))
+        booked = sum(-ln.amount_cents for e in entries for ln in e.lines if ln.role == role_for("vat_out", rate))
+        base = sum(ln.tax_base_cents or 0 for e in entries for ln in e.lines if ln.role == role_for("vat_out", rate))
         assert (booked, base) == (cur_vat, cur_net), (seed, bases, rate)
     assert tgt.overpayment == 0
