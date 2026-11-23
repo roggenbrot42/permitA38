@@ -368,7 +368,10 @@ def test_more_than_24_hours_is_invalid(pg, srv):
     _set(pg, "#t_end_date", "2026-11-21")
     _set(pg, "#t_end", "09:00")
     assert pg.input_value("#t_dur") == "" and pg.get_attribute("#t_end", "aria-invalid") == "true"
-    assert pg.get_attribute("#t_end_date", "max") == "2026-11-21" and pg.get_attribute("#t_end_date", "min") == "2026-11-20"
+    assert (
+        pg.get_attribute("#t_end_date", "max") == "2026-11-21"
+        and pg.get_attribute("#t_end_date", "min") == "2026-11-20"
+    )
 
 
 def test_moving_the_start_date_moves_the_stop_date(pg, srv):  # #121 example 6
@@ -377,7 +380,13 @@ def test_moving_the_start_date_moves_the_stop_date(pg, srv):  # #121 example 6
     _set(pg, "#t_end", "10:00")
     _set(pg, "#t_date", "2026-11-19")
     v = _vals(pg)
-    assert (v["date"], v["end_date"], v["start"], v["end"], v["dur"]) == ("2026-11-19", "2026-11-19", "08:00", "10:00", "2:00")
+    assert (v["date"], v["end_date"], v["start"], v["end"], v["dur"]) == (
+        "2026-11-19",
+        "2026-11-19",
+        "08:00",
+        "10:00",
+        "2:00",
+    )
 
 
 def test_overnight_entry_is_saved_with_end_before_start(pg, srv):
@@ -399,7 +408,6 @@ def test_duration_only_entry_is_saved_without_times(pg, srv):
     assert (e["date"], e.get("start"), e.get("end"), e["minutes"]) == ("2026-11-20", None, None, 90)
 
 
-@pytest.mark.xfail(strict=True, reason="WP2 review: at 1400 px the mode buttons' top is 131.5 but the description field's top is 122.5 (input top 145.4, button 39.75 high, input 34.8); needs a CSS decision")
 def test_card_is_one_row_in_both_modes(browser, srv):
     api(srv, "POST", "timer/start", {})
     api(srv, "POST", "timer/stop", {"discard": True})
@@ -418,13 +426,29 @@ def test_card_is_one_row_in_both_modes(browser, srv):
             for mode in ("manual", "tracker", "manual"):
                 page.click(f"[data-a=timeMode][data-mode={mode}]")
                 where = (width, running, mode)
-                note_top = page.locator(".t-note").bounding_box()["y"]  # the field box: label and input tops differ by design
-                for m in ("manual", "tracker"):
-                    top = page.locator(f"[data-a=timeMode][data-mode={m}]").bounding_box()["y"]
-                    assert abs(top - note_top) <= 2, (where, m, top, note_top)
-                heights.append(page.locator(".timer").first.evaluate("e => e.closest('.card').getBoundingClientRect().height"))
+                box = page.locator("#t_note").bounding_box()  # buttons are centred against label+input by design
+                lo, hi = box["y"], box["y"] + box["height"]
+                # manual mode always shows Add (a running timer is edited via the form); tracker shows Stop or Start
+                action = (
+                    "[data-a=timerAdd]"
+                    if mode == "manual"
+                    else ("[data-a=timerStop]" if running else "[data-a=timerStart]")
+                )
+                for sel in (
+                    "[data-a=timeMode][data-mode=manual]",
+                    "[data-a=timeMode][data-mode=tracker]",
+                    action,
+                ):
+                    b = page.locator(sel).bounding_box()
+                    centre = b["y"] + b["height"] / 2
+                    assert lo <= centre <= hi, (where, sel, centre, lo, hi)
+                heights.append(
+                    page.locator(".timer").first.evaluate("e => e.closest('.card').getBoundingClientRect().height")
+                )
                 if mode == "manual":
-                    assert page.evaluate("['#t_date', '#t_end_date', '#t_start', '#t_end', '#t_dur'].every(q => { const e = document.querySelector(q); return e.scrollWidth <= e.clientWidth; })"), (where, "input clipped")
+                    assert page.evaluate(
+                        "['#t_date', '#t_end_date', '#t_start', '#t_end', '#t_dur'].every(q => { const e = document.querySelector(q); return e.scrollWidth <= e.clientWidth; })"
+                    ), (where, "input clipped")
                 assert page.locator("#t_note").bounding_box()["width"] >= 100, where
                 assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
             assert max(heights) - min(heights) <= 2, (width, running, heights)
@@ -472,7 +496,13 @@ def _prefill(pg, started_local, now_local):
 
 def test_timer_prefill_across_midnight(pg):
     v = _prefill(pg, "2026-11-20T22:00:00", "2026-11-21T01:30:00")
-    assert (v["date"], v["start"], v["endDate"], v["end"], v["dur"]) == ("2026-11-20", "22:00", "2026-11-21", "01:30", "3:30")
+    assert (v["date"], v["start"], v["endDate"], v["end"], v["dur"]) == (
+        "2026-11-20",
+        "22:00",
+        "2026-11-21",
+        "01:30",
+        "3:30",
+    )
 
 
 def test_timer_prefill_over_24_hours_stops_at_2359_of_the_start_day(pg):
