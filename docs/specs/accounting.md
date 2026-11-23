@@ -306,7 +306,9 @@ cash rule handles it.
 * Write-offs and discounts under accrual always post their net to `bad_debts` / `cash_discount_granted`, for every
   treatment; for `eu_b2b_service` and `small_business` the Kz 21 / KU statistic is reduced by a separate statistical
   line (amount 0, base −net) on `revenue_eu_svc` / `revenue_ku`, dated the credit date. Under EÜR they post no
-  revenue line (no cash moved).
+  revenue amount (no cash moved), but an `eu_b2b_service` write-off or discount still posts the statistical
+  `EU_SVC` line (amount 0, base −net, credit date), because its Kz 21 / ZM base was reported at issue; the KU
+  statistic under EÜR follows cash and needs no line.
 * `small_business`: accrual `revenue_ku` = −CN with `tax_key` KU (`base_only`, `vat_date` = event date); EÜR
   `revenue_ku` = −T at cash events with `tax_key` KU, `base_only`, base ΔT.
 * A line at rate 0 on a `standard` invoice (e.g. pass-through costs) posts on `revenue_s0` with `tax_key` NONE and
