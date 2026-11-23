@@ -75,12 +75,95 @@ def test_add_bill_buttons_preselect_the_open_trip(browser, srv, n):
 
 
 def test_expenses_page_keeps_the_trip_select_free(browser, srv):
+    h = {"Authorization": "Bearer " + srv.token}
+    t2 = srv.trip_ids[1]
+    r = httpx.post(
+        srv.base + "/api/expenses",
+        headers=h,
+        json={"date": "2026-11-09", "vendor": "Demo Cafe", "category": "Other", "net": 10, "vat": 0, "trip_id": t2},
+    )
+    assert r.status_code == 200, r.text
+    bill_id = r.json()["id"]
     ctx, pg, _ = open_app(browser, srv)
     try:
         pg.goto(srv.base + "/#/expenses")
         pg.click("[data-a=editExpense]")
         pg.wait_for_selector("#f_trip_id")
         expect(pg.locator("#f_trip_id")).to_be_enabled()
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#f_trip_id", state="detached")
+        pg.locator(f"[data-a=editExpense][data-id='{bill_id}']").click()
+        pg.wait_for_selector("#f_trip_id")
+        assert pg.input_value("#f_trip_id") == t2
+        expect(pg.locator("#f_trip_id")).to_be_enabled()
+    finally:
+        ctx.close()
+
+
+def test_trip_option_labels_are_unique(browser, srv):
+    ctx, pg, _ = open_app(browser, srv)
+    try:
+        pg.goto(srv.base + "/#/expenses")
+        pg.click("[data-a=editExpense]")
+        pg.wait_for_selector("#f_trip_id")
+        labels = pg.locator("#f_trip_id option").all_inner_texts()
+        assert len(labels) == len(set(labels)) >= 2
+        assert any("02.11.2026–03.11.2026" in x and "Demo trip one" in x and "Germany" in x for x in labels)
+    finally:
+        ctx.close()
+
+
+def test_final_trip_shows_no_bill_buttons(browser, srv):
+    h = {"Authorization": "Bearer " + srv.token}
+    tid = srv.trip_ids[1]
+    t = httpx.get(srv.base + f"/api/trips/{tid}", headers=h).json()
+    body = {k: t[k] for k in ("purpose", "start", "end", "items") if k in t}
+    r = httpx.put(srv.base + f"/api/trips/{tid}?force=true", headers=h, json={**body, "status": "final"})
+    assert r.status_code == 200, r.text
+    ctx, pg, _ = open_app(browser, srv)
+    try:
+        pg.goto(srv.base + f"/#/trips/{tid}/expenses")
+        pg.wait_for_selector("#t_step tr[data-item]")
+        expect(pg.locator("#t_step [data-a=editExpense]")).to_have_count(0)
+    finally:
+        ctx.close()
+
+
+def test_superseded_trip_render_does_not_hijack_the_open_trip(browser, srv):
+    """A slow render of trip one that finishes after trip two is shown must not make trip one the open trip page."""
+    t1, t2 = srv.trip_ids
+    ctx, pg, problems = open_app(browser, srv)
+    try:
+        open_expenses_step(pg, srv, t2)
+        held = []
+        pg.route(f"**/api/trips/{t1}", lambda route: held.append(route))   # hold the GET of trip one until trip two is shown
+        pg.evaluate(f"location.hash = '#/trips/{t1}/expenses'")
+        pg.wait_for_timeout(200)
+        with pg.expect_response(f"**/api/trips/{t2}"):   # trip two is rendered again, after trip one's render started
+            pg.evaluate(f"location.hash = '#/trips/{t2}/expenses'")
+        pg.wait_for_timeout(300)
+        assert len(held) == 1
+        with pg.expect_response(f"**/api/trips/{t1}"):
+            held[0].continue_()
+        pg.wait_for_timeout(500)   # the slow trip one render has finished by now
+        # an inline edit writes through the open trip page state: it must hit trip two, not trip one
+        pg.fill("[data-item-exp=ithotel1]", "250")
+        pg.press("[data-item-exp=ithotel1]", "Tab")
+        h = {"Authorization": "Bearer " + srv.token}
+        for _ in range(30):
+            if httpx.get(srv.base + f"/api/trips/{t2}", headers=h).json()["items"][0]["expected"] != 100:
+                break
+            pg.wait_for_timeout(100)
+        exp = {t: httpx.get(srv.base + f"/api/trips/{t}", headers=h).json()["items"][0]["expected"] for t in (t1, t2)}
+        assert exp == {t1: 100, t2: 250}
+        btn = pg.locator("#t_step tr[data-item] [data-a=editExpense]").first
+        expect(btn).to_have_attribute("data-trip", t2)
+        btn.click()
+        pg.wait_for_selector("#f_trip_id")
+        assert pg.input_value("#f_trip_id") == t2
+        pg.keyboard.press("Escape")
+        pg.wait_for_selector("#f_trip_id", state="detached")
+        assert not problems
     finally:
         ctx.close()
 
