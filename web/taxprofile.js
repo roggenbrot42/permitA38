@@ -172,25 +172,34 @@ function tpCollect() {
     if (!Number.isFinite(n) || n < 0 || n > max || (int && !Number.isInteger(n))) throw new Error(`${label}: enter ${int ? 'a whole number' : 'a number'} from 0 to ${max}.`);
     return n;
   };
+  /* Money fields: the typed text goes to the API as a decimal string (Money.parseInput), compared via Money.cmp. */
+  const money = (id, label, max) => {
+    const r = Money.parseInput(el(id).value.trim());
+    if (!r.ok) throw new Error(`${label}: ${r.error}.`);
+    if (r.value === null) return '0';
+    if (Money.isNeg(r.value) || Money.cmp(r.value, String(max)) > 0) throw new Error(`${label}: enter a number from 0 to ${max}.`);
+    return r.value;
+  };
+  const optMoney = (id, label, max) => (el(id).value.trim() === '' ? null : money(id, label, max));
   const opt = (id, label, max) => (el(id).value.trim() === '' ? null : num(id, label, max));
   const mode = el('health_mode').value, pmode = el('pension_mode').value;
   const health = { mode };
   if (mode === 'gkv') { health.krankengeld = el('health_krankengeld').checked; health.zusatzbeitrag_percent = opt('health_zusatzbeitrag_percent', 'Zusatzbeitrag', 10); }
   if (mode === 'pkv') {
-    health.pkv_monthly = num('health_pkv_monthly', 'PKV premium', TP_MONTHLY_MAX);
-    health.pkv_basis_monthly = num('health_pkv_basis_monthly', 'PKV basic cover', TP_MONTHLY_MAX);
-    health.pkv_care_monthly = num('health_pkv_care_monthly', 'PKV care insurance', TP_MONTHLY_MAX);
-    health.pkv_employer_subsidy_monthly = num('health_pkv_employer_subsidy_monthly', 'Employer subsidy', TP_MONTHLY_MAX);
-    if (health.pkv_basis_monthly > health.pkv_monthly) throw new Error('The basic-cover share must not exceed the premium.');
+    health.pkv_monthly = money('health_pkv_monthly', 'PKV premium', TP_MONTHLY_MAX);
+    health.pkv_basis_monthly = money('health_pkv_basis_monthly', 'PKV basic cover', TP_MONTHLY_MAX);
+    health.pkv_care_monthly = money('health_pkv_care_monthly', 'PKV care insurance', TP_MONTHLY_MAX);
+    health.pkv_employer_subsidy_monthly = money('health_pkv_employer_subsidy_monthly', 'Employer subsidy', TP_MONTHLY_MAX);
+    if (Money.cmp(health.pkv_basis_monthly, health.pkv_monthly) > 0) throw new Error('The basic-cover share must not exceed the premium.');
   }
   const pension = { mode: pmode };
-  if (pmode === 'fixed') pension.fixed_monthly = num('pension_fixed_monthly', 'Pension amount', TP_MONTHLY_MAX);
+  if (pmode === 'fixed') pension.fixed_monthly = money('pension_fixed_monthly', 'Pension amount', TP_MONTHLY_MAX);
   const body = {
     assessment: el('assessment').value,
     church_tax_percent: num('church_tax_percent', 'Church tax %', 15),
-    other_income_year: num('other_income_year', 'Other income', TP_YEAR_MAX),
-    other_deductions_year: num('other_deductions_year', 'Other deductions', TP_YEAR_MAX),
-    other_insurance_year: num('other_insurance_year', 'Other insurance', TP_YEAR_MAX),
+    other_income_year: money('other_income_year', 'Other income', TP_YEAR_MAX),
+    other_deductions_year: money('other_deductions_year', 'Other deductions', TP_YEAR_MAX),
+    other_insurance_year: money('other_insurance_year', 'Other insurance', TP_YEAR_MAX),
     children: { count: num('children_count', 'Children', 15, true), full_allowance: el('children_full_allowance').checked, pv_parent: el('children_pv_parent').checked, pv_children_under_25: num('children_pv_under_25', 'Children under 25', 15, true) },
     health, pension,
     unemployment: { mode: el('unemployment_mode').value },
@@ -199,14 +208,14 @@ function tpCollect() {
   if (el('has_employment').checked) {
     const sk = el('employment_steuerklasse').value;
     body.employment = {
-      gross_year: num('employment_gross_year', 'Gross wage', TP_YEAR_MAX),
+      gross_year: money('employment_gross_year', 'Gross wage', TP_YEAR_MAX),
       sv_liable: el('employment_sv_liable').checked,
       steuerklasse: sk === '' ? null : Number(sk),
-      bav_employee_year: num('employment_bav_employee_year', 'bAV Entgeltumwandlung', 100000),
-      bav_employer_year: num('employment_bav_employer_year', 'bAV employer', 100000),
-      vwl_employer_year: num('employment_vwl_employer_year', 'VWL', 10000),
-      werbungskosten_year: num('employment_werbungskosten_year', 'Werbungskosten', TP_YEAR_MAX),
-      withheld_year: opt('employment_withheld_year', 'Tax withheld', TP_YEAR_MAX),
+      bav_employee_year: money('employment_bav_employee_year', 'bAV Entgeltumwandlung', 100000),
+      bav_employer_year: money('employment_bav_employer_year', 'bAV employer', 100000),
+      vwl_employer_year: money('employment_vwl_employer_year', 'VWL', 10000),
+      werbungskosten_year: money('employment_werbungskosten_year', 'Werbungskosten', TP_YEAR_MAX),
+      withheld_year: optMoney('employment_withheld_year', 'Tax withheld', TP_YEAR_MAX),
     };
   }
   return body;
