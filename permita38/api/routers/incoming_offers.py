@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Path, Query, Response
 
 from permita38.api.deps import Needs, ServicesDep
-from permita38.api.responses import StoredJSON, stored
+from permita38.api.responses import StoredJSON, present, stored, with_defaults
 from permita38.core import models
 from permita38.core import validation as v
 
@@ -44,7 +44,8 @@ def list_offers(
     name="create_incoming_offer",
 )
 def create_offer(body: models.IncomingOfferIn, _: Writer, services: ServicesDep):
-    return StoredJSON(services.procurement.create(body.model_dump(), date.today()), status_code=201)
+    created = services.procurement.create(body.model_dump(), date.today())
+    return StoredJSON(present(models.IncomingOffer, with_defaults(models.IncomingOffer, created)), status_code=201)
 
 
 @router.get(

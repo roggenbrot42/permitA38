@@ -111,10 +111,10 @@ class ExpenseLine(BaseModel):
 
     model_config = ConfigDict(extra="allow")
     description: str = ""
-    gross: float | None = None
+    gross: v.Money | None = None
     vat_rate: float | None = None
-    net: float | None = None
-    vat: float | None = None
+    net: v.Money | None = None
+    vat: v.Money | None = None
     deductible: float = 100
     vat_deductible: float | None = None
     category: str | None = None
@@ -122,8 +122,8 @@ class ExpenseLine(BaseModel):
 
 class Expense(Record):
     date: str
-    net: float
-    vat: float = 0
+    net: v.Money
+    vat: v.Money = 0
     vat_rate: float | None = None
     vendor: str | None = None
     description: str | None = None
@@ -1301,13 +1301,13 @@ class TripItem(BaseModel):
     from_: str | None = Field(None, alias="from")
     to: str | None = None
     text: str | None = None
-    expected: float | None = None
+    expected: v.Money | None = None
 
 
 class TripReduction(BaseModel):
     model_config = ConfigDict(extra="allow")
     meal: Literal["breakfast", "lunch", "dinner"]
-    amount: float
+    amount: v.Money
 
 
 class TripDay(BaseModel):
@@ -1318,9 +1318,9 @@ class TripDay(BaseModel):
     country: str  # the country whose rate row was used (LU after fallback)
     city: str | None = None  # omitted when the place has no city
     absence_hours: float
-    base: float
+    base: v.Money
     reductions: list[TripReduction] = []
-    amount: float
+    amount: v.Money
     note: str = ""
 
 
@@ -1328,8 +1328,8 @@ class TripBills(BaseModel):
     """The linked bills (expenses with this trip_id): count and sums of their net and VAT."""
 
     count: int = 0
-    net: float = 0
-    vat: float = 0
+    net: v.Money = 0
+    vat: v.Money = 0
 
 
 class TripChecklistItem(BaseModel):
@@ -1339,7 +1339,7 @@ class TripChecklistItem(BaseModel):
     hint: str
     state: Literal["added", "open", "not_needed"]
     count: int = 0
-    sum: float = 0
+    sum: v.Money = 0
 
 
 class TripFigures(BaseModel):
@@ -1347,10 +1347,10 @@ class TripFigures(BaseModel):
 
     model_config = ConfigDict(extra="allow")
     days: list[TripDay] = []
-    allowance_total: float = 0
+    allowance_total: v.Money = 0
     mileage_km: float = 0
-    mileage_rate: float | None = None
-    mileage_total: float = 0
+    mileage_rate: v.UnitPrice | None = None
+    mileage_total: v.Money = 0
     rules_version: str | None = None
 
 
@@ -1373,15 +1373,16 @@ class Trip(Record):
     not_needed: list[str] = []
     cost_centre: Literal["project", "general"] | None = None
     status: Literal["draft", "final"] = "draft"
-    allowance_total: float | None = None
+    allowance_total: v.Money | None = None
     mileage_km: float | None = None
-    mileage_total: float | None = None
+    mileage_total: v.Money | None = None
+    mileage_rate: v.UnitPrice | None = None
     rules_version: str | None = None
     days: list[TripDay] = []
     bills: TripBills | None = None  # response-only, computed on every read
     checklist: list[TripChecklistItem] | None = None  # response-only, computed on every read
-    items_expected_total: float | None = None  # response-only: sum of the items' expected (planning only)
-    items_actual_total: float | None = None  # response-only: gross of all linked bills (planned and unplanned)
+    items_expected_total: v.Money | None = None  # response-only: sum of the items' expected (planning only)
+    items_actual_total: v.Money | None = None  # response-only: gross of all linked bills (planned and unplanned)
 
 
 class TripPlaceIn(v.StrictRecord):
@@ -1744,10 +1745,10 @@ class IncomingOffer(Record):
     valid_until: str | None = None
     lines: list[dict] = []
     hours: float = 0.0
-    net_total: float | None = None
+    net_total: v.Money | None = None
     vat_rate: float | None = None
-    vat: float | None = None
-    gross_total: float | None = None
+    vat: v.Money | None = None
+    gross_total: v.Money | None = None
     vat_mode: str | None = None
     plan: dict | None = None
     project_id: str | None = None
