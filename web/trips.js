@@ -476,8 +476,9 @@ function itemRowHTML(i, bills, ro, canBill) {
     `<button type="button" class="ghost sm" data-a="tripItemEdit" data-id="${esc(i.id)}" aria-label="Edit ${esc(label)} ${esc(fmtDate(i.date))}">Edit</button>`,
     bills.length ? '' : `<button type="button" class="ghost sm" data-a="tripItemDel" data-id="${esc(i.id)}" aria-label="Remove ${esc(label)} ${esc(fmtDate(i.date))}">Remove</button>`,
   ].join(' ');
+  const editBills = canBill ? bills.map(b => `<button type="button" class="ghost sm" data-a="editExpense" data-id="${esc(b.id)}" data-trip="${esc(TRIP_PAGE.trip.id)}" aria-label="Edit bill ${esc(b.vendor || fmtDate(b.date))}">Edit bill</button>`).join(' ') : '';
   return `<tr data-item="${esc(i.id)}"><td class="nowrap">${esc(i.date_to ? `${fmtDate(i.date)} – ${fmtDate(i.date_to)}` : fmtDate(i.date))}</td>
-    <td>${esc(label)}</td><td>${esc(desc)}${outside}</td><td class="num">${exp}</td><td class="num">${esc(actual)}</td><td>${receiptHTML(bills)}</td><td>${acts}</td></tr>`;
+    <td>${esc(label)}</td><td>${esc(desc)}${outside}</td><td class="num">${exp}</td><td class="num">${esc(actual)}</td><td>${receiptHTML(bills)}</td><td>${editBills}${editBills && acts ? ' ' : ''}${acts}</td></tr>`;
 }
 function carRowHTML(m, k, ro) {
   const cost = TRIP_PAGE.rate != null ? eur(kmCost(m.km, TRIP_PAGE.rate)) : '—';
