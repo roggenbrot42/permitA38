@@ -44,7 +44,10 @@ const fmtDT = s => s ? `${fmtDate(s.slice(0, 10))} ${s.slice(11, 16)}` : '';
 const selOpts = (opts, cur) => opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur ?? '') ? 'selected' : ''}>${esc(l)}</option>`).join('');
 /** Trips for the bill dialog's trip select (newest first, as the server sends them). */
 const tripOptions = keep => {
-  const opts = (S.d.trips || []).map(t => [t.id, `${fmtDate(t.start.slice(0, 10))} ${t.title || t.purpose}`]);
+  const opts = (S.d.trips || []).map(t => {
+    const s = t.start.slice(0, 10), e = (t.end || '').slice(0, 10);
+    return [t.id, `${fmtDate(s)}${e && e !== s ? '–' + fmtDate(e) : ''} ${t.title || t.purpose} · ${destinationOf(t)}`];
+  });
   if (keep && !opts.some(o => o[0] === keep)) opts.push([keep, 'Other trip']);   // never drop a link the list does not know: saving would unlink the bill
   return opts;
 };
@@ -77,14 +80,17 @@ PAGES.trips = async (id, step) => {
     await loadAll(['trips', 'customers', 'projects', 'expenses']);
     return tripListHTML();
   }
+  const seq = render.seq;   // render() bumped it before calling us; a newer render makes this one stale
   await loadAll(['customers', 'projects', 'expenses', 'trips']);
   const trip = await api('GET', `trips/${encodeURIComponent(id)}`);
   const cur = TRIP_STEPS.some(s => s[0] === step) ? step : 'expenses';   // a stored trip opens on its expenses
-  TRIP_PAGE = { trip, step: cur, ro: !can('trips', 'write') || trip.status === 'final', legs: null, rate: null };
+  const page = { trip, step: cur, ro: !can('trips', 'write') || trip.status === 'final', legs: null, rate: null };
   // the private car rate comes from the server: only needed for the mileage rows of the expenses table
   if (cur === 'expenses' && trip.mileage?.length && can('trips', 'write')) {
-    try { TRIP_PAGE.rate = (await api('POST', 'trips/preview', tripIn(trip))).mileage_rate ?? null; } catch { TRIP_PAGE.rate = null; }
+    try { page.rate = (await api('POST', 'trips/preview', tripIn(trip))).mileage_rate ?? null; } catch { page.rate = null; }
   }
+  if (seq !== render.seq) return '';   // superseded: render() drops this HTML, and TRIP_PAGE must keep describing the page that is shown
+  TRIP_PAGE = page;
   render.after = tripAfter;
   return tripPageHTML();
 };
