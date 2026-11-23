@@ -2,12 +2,15 @@
 
 Pure functions, integer cents, no floats. ``targets(state, bases)`` says what the journal should hold for the invoice;
 ``event_entry(before, after, bases, event)`` posts ``targets(after) - targets(before)``. The issue entry is the same
-rule evaluated from the empty state (``before = None``). Write-offs, discounts and write-off reversals belong to F7.
+rule evaluated from the empty state (``before = None``). Discounts, write-offs and write-off reversals (F7) are credits
+whose net goes to ``cash_discount_granted`` / ``bad_debts``; see ``postings_credit``.
 """
 
+import dataclasses
 from collections.abc import Sequence
 from decimal import Decimal
 
+from permita38.core.accounting.postings_credit import CreditState, credit_split
 from permita38.core.accounting.postings_issue import _NONE, _rate_str, _role, _tax_key
 from permita38.core.accounting.types import (
     Bases,
@@ -68,29 +71,47 @@ def event_key(event: Event, document_id: str) -> str:
     return f"credit:{event.credit_id}"
 
 
+def _plus(grp: RateGroup, extra: RateGroup) -> RateGroup:
+    return RateGroup(grp.rate, Cents(grp.net + extra.net), Cents(grp.vat + extra.vat))
+
+
 def apply_event(state: InvoiceState, event: Event) -> InvoiceState:
-    """The state after ``event``; an issue leaves it unchanged. Credits above the current gross and ``P < 0`` raise."""
+    """The state after ``event``; an issue leaves it unchanged. Credits above the current gross and ``P < 0`` raise.
+
+    A ``write_off_reversal`` carries negative amounts and may not exceed what was written off per rate group.
+    """
     if isinstance(event, IssueEvent):
         return state
     if isinstance(event, PaymentEvent):
         kept = state.kept + event.amount
         if kept < 0:
             raise ValueError("cash kept would become negative")
-        return InvoiceState(state.snapshot, state.credited, Cents(kept))
-    if event.kind not in ("storno", "partial"):
-        raise NotImplementedError(f"credit kind {event.kind!r} is posted by F7")
+        return dataclasses.replace(state, kept=Cents(kept))
     by_rate = {g.rate: g for g in event.rates}
     unknown = set(by_rate) - {g.rate for g in state.snapshot.rates}
     if unknown:
         raise ValueError("credit note names a rate group the invoice does not have")
+    reversal = event.kind == "write_off_reversal"
+    disc, wo = credit_split(state)
     credited: list[RateGroup] = []
-    for grp, done in zip(state.snapshot.rates, state.credited, strict=True):
+    new_disc: list[RateGroup] = []
+    new_wo: list[RateGroup] = []
+    for grp, done, d, w in zip(state.snapshot.rates, state.credited, disc, wo, strict=True):
         extra = by_rate.get(grp.rate, RateGroup(grp.rate, Cents(0), Cents(0)))
-        net, vat = done.net + extra.net, done.vat + extra.vat
-        if extra.net < 0 or extra.vat < 0 or net > grp.net or vat > grp.vat:
+        if reversal:
+            if extra.net > 0 or extra.vat > 0 or -extra.net > w.net or -extra.vat > w.vat:
+                raise ValueError("write-off reversal exceeds the written-off amount of a rate group")
+        elif extra.net < 0 or extra.vat < 0:
             raise ValueError("credit note exceeds the current gross of a rate group")
-        credited.append(RateGroup(grp.rate, Cents(net), Cents(vat)))
-    return InvoiceState(state.snapshot, tuple(credited), state.kept)
+        total = _plus(done, extra)
+        if total.net > grp.net or total.vat > grp.vat:
+            raise ValueError("credit note exceeds the current gross of a rate group")
+        credited.append(total)
+        new_disc.append(_plus(d, extra) if event.kind == "discount" else d)
+        new_wo.append(_plus(w, extra) if event.kind in ("write_off", "write_off_reversal") else w)
+    if event.kind in ("storno", "partial") and not isinstance(state, CreditState):
+        return dataclasses.replace(state, credited=tuple(credited))
+    return CreditState(state.snapshot, tuple(credited), state.kept, tuple(new_disc), tuple(new_wo))
 
 
 def _group_targets(state: InvoiceState, bases: Bases) -> tuple[list[GroupTargets], list[RateGroup], Cents, Cents]:
@@ -164,17 +185,25 @@ def targets(state: InvoiceState, bases: Bases) -> Targets:
     accrual = bases.income == "accrual"
     standard = snap.treatment == "standard"
     overpayment = Cents(state.kept - t_total)
+    disc, wo = credit_split(state)
+    discount_net = Cents(sum(d.net for d in disc))
+    write_off_net = Cents(sum(w.net for w in wo))
     acc: dict[_Slot, TargetLine] = {}
     _merge(acc, TargetLine(Role("bank"), "", state.kept))
     if accrual:
         _merge(acc, TargetLine(Role("receivables"), "", Cents(c_total - t_total), open_item=True))
     _merge(acc, TargetLine(Role("customer_credit"), "", Cents(-overpayment)))
-    for grp, cur in zip(groups, current, strict=True):
+    if accrual and standard:  # the net of a discount / write-off is a credit on its own account, not on revenue_r
+        if discount_net != 0:
+            _merge(acc, TargetLine(Role("cash_discount_granted"), "", discount_net, income=True))
+        if write_off_net != 0:
+            _merge(acc, TargetLine(Role("bad_debts"), "", write_off_net, income=True))
+    for grp, cur, d, w in zip(groups, current, disc, wo, strict=True):
         net_cur = cur.net
         if standard:
             rate = grp.rate
             rev_key = _NONE if rate == 0 else None
-            revenue = Cents(-net_cur) if accrual else Cents(-grp.cash_net)
+            revenue = Cents(-(net_cur + d.net + w.net)) if accrual else Cents(-grp.cash_net)
             _merge(acc, TargetLine(_role("revenue", rate), "", revenue, tax_key=rev_key, income=True))
             if rate == 0:
                 continue

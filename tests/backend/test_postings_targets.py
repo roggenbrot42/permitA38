@@ -275,15 +275,6 @@ def test_a12_soll_keeps_the_vat_until_the_refund() -> None:
     assert (grp.due_vat, grp.base) == (0, 0)
 
 
-@pytest.mark.parametrize("kind", ["discount", "write_off", "write_off_reversal"])
-def test_other_credit_kinds_are_f7(kind: Any) -> None:
-    snap = IssuedSnapshot(
-        "x", "regular", "standard", (RateGroup(Decimal(19), Cents(1000), Cents(190)),), date(2026, 1, 1)
-    )
-    with pytest.raises(NotImplementedError, match=f"credit kind '{kind}' is posted by F7"):
-        apply_event(InvoiceState.issued(snap), CreditEvent("c", date(2026, 1, 2), kind, snap.rates))
-
-
 def test_invalid_events_are_refused() -> None:
     snap = IssuedSnapshot(
         "x", "regular", "standard", (RateGroup(Decimal(19), Cents(1000), Cents(190)),), date(2026, 1, 1)
