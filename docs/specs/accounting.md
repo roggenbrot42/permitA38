@@ -136,7 +136,9 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
    database level (new guard kind `append_only`: BEFORE UPDATE / BEFORE DELETE triggers in every dialect raising an
    error). The transfer importer's replace-restore of a whole data folder is the only exception and drops/recreates
    the triggers inside its transaction.
-3. **One writer.** Only `JournalService` inserts entries. Services call it with an *event*; the posting engine
+3. **One writer, insert only.** Only `JournalService` inserts entries, with a plain INSERT through an insert-only
+   repository method (a `Repository.save` of an existing id is an upsert and is refused by the append-only guard, so
+   idempotent retries check `event_key` first and never re-save). Services call it with an *event*; the posting engine
    (`core/accounting/postings*.py`, pure functions) turns the event into lines.
 4. **Idempotent.** Each entry has a unique `event_key` (`issue:<invoice id>`, `payment:<payment id>`,
    `expense:<expense id>:bill:r<bill_rev>`, `expense:<expense id>:pay:r<pay_rev>`,
