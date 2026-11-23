@@ -4,6 +4,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Query
 from pydantic import Field
 
+from permita38.api import money_out
 from permita38.api.deps import CurrentUser, Needs, ServicesDep
 from permita38.core import validation as v
 from permita38.core.errors import ServiceError
@@ -69,7 +70,7 @@ def plan(
     ] = None,
     user_id: Annotated[str | None, Query(pattern=OPT_ID_PATTERN)] = None,
 ) -> dict[str, Any]:
-    return services.planner.plan(weeks, user_id or None, project_id or None)
+    return money_out.plan_response(services.planner.plan(weeks, user_id or None, project_id or None))
 
 
 @router.post("/plan/simulate", summary="what-if: recompute the weeks for a change set (writes nothing)")
