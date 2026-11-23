@@ -773,7 +773,7 @@ maintainer's sign-off of these specs (PR #124).
 | E11 | Credit notes storno/partial, numbering settings + page | F | E10 |
 | E12 | Write-off, reversal record, settle-discount | F | E11, F7 |
 | E13 | Credit-note PDF | F | E11 |
-| E14 | Expense treatment mapping, `service_date`, bill/pay posting, repost/409 | F | E7, F8 |
+| E14 | Expense treatment mapping, `service_date`, bill/pay posting, repost/409; expense `net`/`vat` must be whole cents (today they accept sub-cent values, unlike line gross and trip amounts) | F | E7, F8 |
 | E15 | Trip posting | F | E7, F9 |
 | E16 | Manual entries, reverse, accounts API, templates | F | E7 |
 | E17 | VAT/tax bookings, opening balances | F | E16, F9 |
