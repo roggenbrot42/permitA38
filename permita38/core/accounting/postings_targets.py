@@ -243,10 +243,11 @@ def targets(state: InvoiceState, bases: Bases) -> Targets:
                     perf_at_issue=True,
                 )
                 _merge(acc, line)
-            else:  # EÜR: no cash moves with a write-off / discount, so the statistic does not change either
+            else:  # EÜR: no revenue amount for a write-off / discount (no cash), but the Kz 21 / ZM base reported at issue falls
                 _merge(acc, TargetLine(role, "cash", Cents(-grp.cash_net), income=True))
-                base = Cents(net_cur + d.net + w.net)
-                stat = TargetLine(role, "stat", Cents(0), TAX_EU_SVC, "base_only", base_cents=base, perf_at_issue=True)
+                stat = TargetLine(
+                    role, "stat", Cents(0), TAX_EU_SVC, "base_only", base_cents=net_cur, perf_at_issue=True
+                )
                 _merge(acc, stat)
         else:
             role = Role("revenue_ku")

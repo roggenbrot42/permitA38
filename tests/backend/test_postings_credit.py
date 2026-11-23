@@ -451,12 +451,28 @@ def test_discount_without_vat_posts_cash_discount_and_a_statistical_line() -> No
     )
 
 
-@pytest.mark.parametrize(("treatment", "regime"), [("eu_b2b_service", "regular"), ("small_business", "small_business")])
-def test_eur_write_off_without_vat_posts_no_revenue_line(treatment: str, regime: str) -> None:
-    bases = Bases("eur", "ist")
-    state = apply_event(_no_vat(treatment, regime), PaymentEvent("p", DAY, Cents(40000)))
+def test_eur_small_business_write_off_posts_nothing() -> None:
+    state = apply_event(_no_vat("small_business", "small_business"), PaymentEvent("p", DAY, Cents(40000)))
     credit = CreditEvent("wo", PAY_DAY, "write_off", write_off_amounts(state))
-    assert event_entry(state, apply_event(state, credit), bases, credit) is None
+    assert event_entry(state, apply_event(state, credit), Bases("eur", "ist"), credit) is None
+
+
+@pytest.mark.parametrize("vat", ["ist", "soll"])
+def test_eur_eu_b2b_write_off_posts_one_statistical_line(vat: Any) -> None:
+    bases = Bases("eur", vat)
+    snap = IssuedSnapshot("inv", "regular", "eu_b2b_service", (_rg(Decimal(0), 400000, 0),), date(2026, 1, 1))
+    issued = InvoiceState.issued(snap)
+    issue_entry = event_entry(None, issued, bases, IssueEvent(snap.perf))
+    state = apply_event(issued, PaymentEvent("p", DAY, Cents(100000)))
+    credit = CreditEvent("wo", PAY_DAY, "write_off", write_off_amounts(state))
+    entry = event_entry(state, apply_event(state, credit), bases, credit)
+    assert _lines(entry) == [("revenue_eu_svc", 0, "EU_SVC", -300000, PAY_DAY.isoformat(), "")]
+    assert entry is not None and entry.balance == 0
+    assert sum(ln.tax_base_cents or 0 for e in (issue_entry, entry) if e for ln in e.lines) == 100000
+    # a discount posts the same statistical line
+    disc = CreditEvent("d", PAY_DAY, "discount", discount_amounts(issued, Cents(390000)))
+    entry = event_entry(issued, apply_event(issued, disc), bases, disc)
+    assert _lines(entry) == [("revenue_eu_svc", 0, "EU_SVC", -10000, PAY_DAY.isoformat(), "")]
 
 
 def test_a_credit_naming_a_rate_twice_is_refused() -> None:
