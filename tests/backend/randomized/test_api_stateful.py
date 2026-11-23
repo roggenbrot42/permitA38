@@ -890,6 +890,21 @@ class ApiMachine(RuleBasedStateMachine):
             or any(t and t.get("project_id") == pid for t in self.timers.values())
         )
 
+    def day_total_exceeded(self, coll, body, old, me) -> bool:
+        """One person's entries on one date may not add up to more than 24 h; the entry being written replaces its old version."""
+        if coll != "entries":
+            return False
+        exp = self.expected(coll, body, old, me)
+        total = exp["minutes"] + sum(
+            e["minutes"]
+            for i, e in self.m["entries"].items()
+            if i != (old or {}).get("id") and e.get("user_id") == exp["user_id"] and e["date"] == exp["date"]
+        )
+        return total > 1440
+
+    def assert_refused_day_total(self, r):
+        assert r.status_code == 422 and "a day has only 24" in r.json()["detail"], r.text
+
     def assert_refused_by_rule(self, r):
         assert r.status_code == 422 and r.json() == {"detail": "Project belongs to another customer"}, r.text
 
@@ -990,6 +1005,9 @@ class ApiMachine(RuleBasedStateMachine):
         if self.mismatch(coll, body):
             self.assert_refused_by_rule(r)
             return
+        if self.day_total_exceeded(coll, body, None, self.m["users"][s.user_id]):
+            self.assert_refused_day_total(r)
+            return
         assert r.status_code == 200, r.text
         exp = self.expected(coll, body, None, self.m["users"][s.user_id]) | {"id": r.json()["id"]}
         self.check_record(coll, exp, r.json())
@@ -1036,6 +1054,9 @@ class ApiMachine(RuleBasedStateMachine):
             return
         if self.mismatch(coll, body, old):
             self.assert_refused_by_rule(r)
+            return
+        if self.day_total_exceeded(coll, body, old, me):
+            self.assert_refused_day_total(r)
             return
         assert r.status_code == 200, r.text
         exp = self.expected(coll, body, old, me) | {"id": rid}
