@@ -3,9 +3,13 @@ percent, hours and km stay numbers. Fake data only."""
 
 import re
 
-from .test_procurement import capacity_supplier, offer_w1, post_offer
+from .test_procurement import (
+    capacity_supplier,
+    offer_w1,
+    post_offer,
+    project,  # noqa: F401
+)
 from .test_procurement import frozen_today as _frozen  # noqa: F401
-from .test_procurement import project  # noqa: F401
 from .test_trips_api import trip_body
 
 DEC = re.compile(r"^-?[0-9]+\.[0-9]{2,6}$")
