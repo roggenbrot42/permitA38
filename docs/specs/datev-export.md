@@ -35,16 +35,22 @@ known differences between DATEV's derivation and the app are listed in the expor
 The journal is double-entry with explicit VAT lines; DATEV books **gross** amounts and derives VAT from automatic
 accounts or BU keys. The conversion per entry:
 
-1. **Anchor.** Each entry has one counter side: the line(s) on a money, open-item or clearing role (`bank`, `cash`,
-   `receivables`, `payables`, `payables_employee`, `customer_credit`, `opening_balance`, `vat_soll_clearing`,
-   `input_vat_clearing`, `private_*`). Every other line becomes a row against the anchor account. An entry with
-   several anchors (e.g. an overpayment) is split by matching amounts; if no exact split exists the entry is exported
-   with an interim account `datev_transfer` role and listed in the report.
+1. **Anchor.** Each entry has a counter side chosen by precedence: money (`bank`, `cash`) > open item
+   (`receivables`, `payables`, `payables_employee`, `customer_credit`) > clearing (`vat_soll_clearing`,
+   `input_vat_clearing`, `rc_vat_nondeductible`, `vat_not_due_*`) > `opening_balance` > `private_*`. The highest
+   ranking line is the anchor; every other line becomes a row against it, except lines of a lower-ranking anchor class
+   that only balance a VAT line (they pair with that VAT line, rule 2). When the remaining amounts cannot be matched
+   to the anchor exactly, the entry goes through the interim role `datev_transfer` (each side against it) and is
+   listed in the report.
 2. **VAT folding.** A `tax`/`input` line is added to the row of its partner line (same rate group, revenue or cost)
    so the row carries the gross amount; the partner account's `automatic` key (chart file) or the BU key from
    `datev/<year>.json` makes DATEV split it again. A VAT line without a partner in the entry (EÜR/Soll issue:
    `vat_soll_clearing` ↔ `vat_out`; Ist recognition: `vat_not_due` ↔ `vat_out`) is exported as a plain row between
    the two accounts without BU key.
+   **Unfolded rows on automatic accounts.** A row on an automatic account that must *not* be split (a net revenue row
+   whose VAT sits on `vat_not_due` — accrual/Ist issue and credit notes; the net revenue of an EÜR payment whose VAT
+   is cleared on `vat_soll_clearing`; reclassification rows) carries the BU key that switches the automatic off
+   (**BU 40** *(verify)*, from `datev/<year>.json`).
 3. **§ 13b.** The cost row carries the **net** amount with the § 13b BU key (EU service / third-country service,
    *(verify)* the key numbers in `datev/<year>.json`); the self-assessed tax lines are folded (DATEV creates both
    sides). The non-deductible part (cost) is a separate row without BU key.
@@ -55,14 +61,27 @@ accounts or BU keys. The conversion per entry:
    plus the VAT (so DATEV's split reproduces the VAT, see the self-check). Splits of that net (deductible /
    non-deductible meals, non-deductible § 13b VAT, cost shares) follow as **reclassification rows** between the two
    accounts without BU key, with the same `Belegfeld 1`. Itemised bills give one folded row per rate group.
-6. Rows are ordered by booking date and entry number; `Belegdatum` = booking date.
+6. **Fallback.** Folding reproduces the booked VAT exactly only when the folded row is a whole document rate group
+   (issue entries; see the proof below). For partial-payment rows (Ist: ΔV is a difference of rounded cumulative
+   values) and expense lines (the VAT was typed from the receipt) the export simulates DATEV's split first; when it
+   differs from the booked VAT by any cent, the line is exported **unfolded**: the net row with BU 40 plus a separate
+   VAT row on the tax account, and the case is listed in the report.
+7. Rows are ordered by booking date and entry number; `Belegdatum` = booking date (`DDMM`). A batch covers **one
+   fiscal year**: a range that crosses a year boundary is refused (422).
 
 ## Self-check (in the export and in tests)
 
 A **DATEV simulation** in the export module re-splits every row by its automatic account or BU key with the VAT rates
 of the rules file and sums per account. The result must equal the journal's balances per account for the range
-(cent-exact; DATEV rounds the derived VAT per row half-up *(verify)*, and per-row folding keeps the document's VAT, so
-any difference is a bug). Differences are listed in the report and fail the tests.
+(cent-exact; DATEV rounds the derived VAT per row half-up *(verify)*). Because of the fallback (rule 6) a remaining
+difference is a bug; it is listed in the report and fails the tests.
+
+**Known differences** listed in every `export-report.txt` (not bugs, the app's VAT return stays authoritative):
+* Kz 21 under EÜR: DATEV derives it from the revenue booking (payment date), the app from the performance date.
+* EÜR clearing accounts: DATEV's EÜR assigns whole accounts, so it counts output VAT at issue (Soll) and input VAT at
+  the bill date and ignores `vat_soll_clearing` / `input_vat_clearing`; totals agree over a full cycle but differ at
+  a year end with open items.
+* Every `datev_transfer` and every fallback row.
 
 ## API and UI
 
@@ -84,9 +103,9 @@ range with unlocked months is allowed; `Festschreibung` is 0 for those rows and 
   Simulation: 70,00 / 30,00 costs, 7,00 input VAT, payables −107,00. (Folding 77,00 into one row would make DATEV
   derive 5,04 VAT — wrong; hence rule 5.)
 
-Why the folded gross always reproduces the document VAT: for one rate group the document VAT is
+Why a folded issue row reproduces the document VAT: for one whole rate group of a document the VAT is
 `V = q2(N × r/100)`; DATEV derives `q2((N + V) × r/(100 + r))`, whose exact value differs from `V` by less than
-half a cent (`|V − N·r/100| ≤ 0.005` times `100/(100 + r)`), so it rounds back to `V`. The self-check proves it per
+half a cent (`|V − N·r/100| ≤ 0.005` times `100/(100 + r)`), so it rounds back to `V`. Other rows rely on the fallback (rule 6); the self-check proves the result per
 export anyway.
 
 ## Test plan

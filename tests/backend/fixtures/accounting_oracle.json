@@ -1,7 +1,7 @@
 {
   "_about": "Hand-computed oracle for docs/specs/accounting.md (A*), ustva.md (U*), zm.md (Z*), credit-notes-payments.md (P*). Written by hand from the specs on 2026-11-23 and cross-checked with fractions.Fraction; NEVER regenerate it from the code under test. All figures fake. Amounts are integer cents.",
   "_schema": {
-    "journal_cases": "events -> expected entries (in posting order, events without an entry are listed under no_entry_events) and booked VAT sums per month by tax key",
+    "journal_cases": "events -> expected entries (in posting order; events without an entry are listed under no_entry_events; an event that posts two entries names them with part: bill/pay or wo_reversal/payment; document_date is given where it differs from booking_date) and booked VAT sums per month by tax key",
     "event types": {
       "issue": "{id, date, service_to?, treatment, rates: {rate: {net, vat}}, customer?}",
       "payment": "{invoice, date, amount} (negative amount = refund)",
@@ -229,13 +229,21 @@
       "vat": {"2026-06": {"RC_3C_SVC": {"base": 20050, "tax": 3810, "input": 3810}}}
     },
     {
-      "id": "A5-rc-eu-small-business", "spec": "accounting.md A5 (small business) / ustva.md example 13",
+      "id": "A14-rc-eu-small-business-eur", "spec": "accounting.md A14 / ustva.md example 13",
       "bases": {"income_basis": "eur", "vat_basis": "ist", "small_business": true},
       "events": [
-        {"type": "expense", "id": "x5d", "date": "2026-06-02", "service_date": "2026-05-20", "paid_on": "2026-06-02", "treatment": "reverse_charge_eu_service", "lines": [{"net": 20050, "vat": 0, "rate": "19", "pct": 100, "vat_pct": 100, "category": "software"}]}
+        {"type": "expense", "id": "x14", "date": "2026-06-02", "service_date": "2026-05-20", "paid_on": "2026-06-10", "treatment": "reverse_charge_eu_service", "lines": [{"net": 20050, "vat": 0, "rate": "19", "pct": 100, "vat_pct": 100, "category": "software"}]}
       ],
-      "entries": "implementation-specific split between the bill and payment entries under EÜR; the test checks only: the RC tax line -3810 (base 20050, vat_date 2026-05-20), no input line, total cost 23860 with income_date 2026-06-02",
-      "vat": {"2026-05": {"RC_EU_SVC": {"base": 20050, "tax": 3810, "input": 0}}}
+      "entries": [
+        {"event": 0, "part": "bill", "booking_date": "2026-06-02", "lines": [
+          ["rc_vat_out_eu", -3810, {"tax_key": "RC_EU_SVC", "tax_kind": "tax", "tax_base": 20050, "vat_date": "2026-05-20"}],
+          ["rc_vat_nondeductible", 3810]]},
+        {"event": 0, "part": "pay", "booking_date": "2026-06-10", "lines": [
+          ["expense_software", 20050, {"income_date": "2026-06-10"}],
+          ["bank", -20050]]}
+      ],
+      "vat": {"2026-05": {"RC_EU_SVC": {"base": 20050, "tax": 3810}}},
+      "note": "no input line for a small business; the 38.10 becomes an EÜR expense only when paid with the May return (9.6)"
     },
     {
       "id": "A6-meal", "spec": "accounting.md A6 / ustva.md example 5",
@@ -333,6 +341,127 @@
       "vat": {"2026-08": {"S19": {"base": 50000, "tax": 9500}}}
     },
     {
+      "id": "A11-credit-then-refunds-eur-ist", "spec": "accounting.md A11 (rule 9.2, T > C)",
+      "bases": {"income_basis": "eur", "vat_basis": "ist"},
+      "events": [
+        {"type": "issue", "id": "inv11", "date": "2026-03-01", "treatment": "standard", "rates": {"19": {"net": 100000, "vat": 19000}}},
+        {"type": "payment", "invoice": "inv11", "date": "2026-03-05", "amount": 100000},
+        {"type": "credit_note", "id": "cn11", "invoice": "inv11", "date": "2026-04-01", "credit_kind": "partial", "rates": {"19": {"net": 50000, "vat": 9500}}},
+        {"type": "payment", "invoice": "inv11", "date": "2026-05-02", "amount": -20000},
+        {"type": "payment", "invoice": "inv11", "date": "2026-05-20", "amount": -20500}
+      ],
+      "no_entry_events": [0, 2],
+      "entries": [
+        {"event": 1, "booking_date": "2026-03-05", "lines": [
+          ["bank", 100000],
+          ["revenue_s19", -84034, {"income_date": "2026-03-05"}],
+          ["vat_out_s19", -15966, {"tax_key": "S19", "tax_kind": "tax", "tax_base": 84034, "vat_date": "2026-03-05", "income_date": "2026-03-05"}]]},
+        {"event": 3, "booking_date": "2026-05-02", "lines": [
+          ["bank", -20000],
+          ["revenue_s19", 16807, {"income_date": "2026-05-02"}],
+          ["vat_out_s19", 3193, {"tax_key": "S19", "tax_kind": "tax", "tax_base": -16807, "vat_date": "2026-05-02", "income_date": "2026-05-02"}]]},
+        {"event": 4, "booking_date": "2026-05-20", "lines": [
+          ["bank", -20500],
+          ["revenue_s19", 17227, {"income_date": "2026-05-20"}],
+          ["vat_out_s19", 3273, {"tax_key": "S19", "tax_kind": "tax", "tax_base": -17227, "vat_date": "2026-05-20", "income_date": "2026-05-20"}]]}
+      ],
+      "vat": {"2026-03": {"S19": {"base": 84034, "tax": 15966}}, "2026-05": {"S19": {"base": -34034, "tax": -6466}}},
+      "derivation": "p1: TV = q2(19000*100000/119000) = 15966; r1: P=80000 > C=59500 -> TV = 9500 + q2(9500*20500/59500) = 12773, TN = 67227; r2: P = C -> TV 9500, TN 50000"
+    },
+    {
+      "id": "A12-storno-after-payment-soll", "spec": "accounting.md A12",
+      "bases": {"income_basis": "accrual", "vat_basis": "soll"},
+      "events": [
+        {"type": "issue", "id": "inv12", "date": "2026-02-01", "treatment": "standard", "rates": {"19": {"net": 100000, "vat": 19000}}},
+        {"type": "payment", "invoice": "inv12", "date": "2026-02-10", "amount": 119000},
+        {"type": "credit_note", "id": "cn12", "invoice": "inv12", "date": "2026-03-02", "credit_kind": "storno", "rates": {"19": {"net": 100000, "vat": 19000}}},
+        {"type": "payment", "invoice": "inv12", "date": "2026-04-15", "amount": -119000}
+      ],
+      "entries": [
+        {"event": 0, "booking_date": "2026-02-01", "lines": [
+          ["receivables", 119000],
+          ["revenue_s19", -100000, {"income_date": "2026-02-01"}],
+          ["vat_out_s19", -19000, {"tax_key": "S19", "tax_kind": "tax", "tax_base": 100000, "vat_date": "2026-02-01"}]]},
+        {"event": 1, "booking_date": "2026-02-10", "lines": [["bank", 119000], ["receivables", -119000]]},
+        {"event": 2, "booking_date": "2026-03-02", "lines": [
+          ["revenue_s19", 100000, {"income_date": "2026-03-02"}],
+          ["vat_not_due_s19", 19000],
+          ["receivables", -119000]]},
+        {"event": 3, "booking_date": "2026-04-15", "lines": [
+          ["bank", -119000],
+          ["receivables", 119000],
+          ["vat_out_s19", 19000, {"tax_key": "S19", "tax_kind": "tax", "tax_base": -100000, "vat_date": "2026-04-15"}],
+          ["vat_not_due_s19", -19000]]}
+      ],
+      "vat": {"2026-02": {"S19": {"base": 100000, "tax": 19000}}, "2026-04": {"S19": {"base": -100000, "tax": -19000}}}
+    },
+    {
+      "id": "A13-payment-after-write-off-soll", "spec": "accounting.md A13",
+      "bases": {"income_basis": "accrual", "vat_basis": "soll"},
+      "events": [
+        {"type": "issue", "id": "inv13", "date": "2026-07-01", "treatment": "standard", "rates": {"19": {"net": 100000, "vat": 19000}}},
+        {"type": "payment", "invoice": "inv13", "date": "2026-08-01", "amount": 59500},
+        {"type": "credit_note", "id": "wo13", "invoice": "inv13", "date": "2026-09-30", "credit_kind": "write_off", "rates": {"19": {"net": 50000, "vat": 9500}}},
+        {"type": "payment", "invoice": "inv13", "date": "2026-11-15", "amount": 59500}
+      ],
+      "entries": [
+        {"event": 0, "booking_date": "2026-07-01", "lines": [
+          ["receivables", 119000],
+          ["revenue_s19", -100000, {"income_date": "2026-07-01"}],
+          ["vat_out_s19", -19000, {"tax_key": "S19", "tax_kind": "tax", "tax_base": 100000, "vat_date": "2026-07-01"}]]},
+        {"event": 1, "booking_date": "2026-08-01", "lines": [["bank", 59500], ["receivables", -59500]]},
+        {"event": 2, "booking_date": "2026-09-30", "lines": [
+          ["bad_debts", 50000, {"income_date": "2026-09-30"}],
+          ["vat_out_s19", 9500, {"tax_key": "S19", "tax_kind": "tax", "tax_base": -50000, "vat_date": "2026-09-30"}],
+          ["receivables", -59500]]},
+        {"event": 3, "part": "wo_reversal", "booking_date": "2026-11-15", "lines": [
+          ["bad_debts", -50000, {"income_date": "2026-11-15"}],
+          ["vat_out_s19", -9500, {"tax_key": "S19", "tax_kind": "tax", "tax_base": 50000, "vat_date": "2026-11-15"}],
+          ["receivables", 59500]]},
+        {"event": 3, "part": "payment", "booking_date": "2026-11-15", "lines": [["bank", 59500], ["receivables", -59500]]}
+      ],
+      "vat": {"2026-07": {"S19": {"base": 100000, "tax": 19000}}, "2026-09": {"S19": {"base": -50000, "tax": -9500}}, "2026-11": {"S19": {"base": 50000, "tax": 9500}}}
+    },
+    {
+      "id": "A15-late-bill-after-lock", "spec": "accounting.md A15",
+      "bases": {"income_basis": "accrual", "vat_basis": "soll"},
+      "locked_months": ["2026-01"],
+      "events": [
+        {"type": "expense", "id": "x15", "date": "2026-01-28", "entered": "2026-02-12", "treatment": "standard", "lines": [{"net": 10000, "vat": 1900, "rate": "19", "pct": 100, "vat_pct": 100, "category": "software"}]}
+      ],
+      "entries": [
+        {"event": 0, "part": "bill", "document_date": "2026-01-28", "booking_date": "2026-02-01", "lines": [
+          ["expense_software", 10000, {"income_date": "2026-01-28"}],
+          ["input_vat_s19", 1900, {"tax_key": "VST", "tax_kind": "input", "vat_date": "2026-02-01"}],
+          ["payables", -11900]]}
+      ],
+      "vat": {"2026-02": {"VST": {"input": 1900}}},
+      "note": "paid_on empty: the payment event is assumed on the bill date and booked on 2026-02-01 too (not listed); no drift"
+    },
+    {
+      "id": "A16-late-ist-payment-after-lock", "spec": "accounting.md A16",
+      "bases": {"income_basis": "accrual", "vat_basis": "ist"},
+      "events": [
+        {"type": "issue", "id": "inv16", "date": "2026-01-05", "treatment": "standard", "rates": {"19": {"net": 100000, "vat": 19000}}},
+        {"type": "lock", "month": "2026-01"},
+        {"type": "payment", "invoice": "inv16", "date": "2026-01-30", "entered": "2026-02-12", "amount": 119000}
+      ],
+      "no_entry_events": [1],
+      "entries": [
+        {"event": 0, "booking_date": "2026-01-05", "lines": [
+          ["receivables", 119000],
+          ["revenue_s19", -100000, {"income_date": "2026-01-05"}],
+          ["vat_not_due_s19", -19000]]},
+        {"event": 2, "document_date": "2026-01-30", "booking_date": "2026-02-01", "lines": [
+          ["bank", 119000],
+          ["receivables", -119000],
+          ["vat_not_due_s19", 19000],
+          ["vat_out_s19", -19000, {"tax_key": "S19", "tax_kind": "tax", "tax_base": 100000, "vat_date": "2026-01-30"}]]}
+      ],
+      "vat": {"2026-01": {"S19": {"base": 100000, "tax": 19000}}},
+      "drift": {"2026-01": 19000}
+    },
+    {
       "id": "A10-taxes-eur", "spec": "accounting.md A10",
       "bases": {"income_basis": "eur", "vat_basis": "ist"},
       "events": [
@@ -401,7 +530,7 @@
      "boxes": {"81": {"base": -300, "tax": -5700, "booked_tax": -5710}, "83": -5700}},
     {"id": "U13", "spec": "ustva.md example 13", "small_business": true,
      "periods": {"2026-04": {"lines": [{"tax_key": "KU", "base": 500000}], "not_required": true},
-                 "2026-05": {"lines": [{"tax_key": "RC_EU_SVC", "base": 20050, "tax": 3810}], "boxes": {"46": 200, "47": 3810, "83": 3810}, "no_box": ["67"]}}},
+                 "2026-Q2": {"lines": [{"tax_key": "RC_EU_SVC", "base": 20050, "tax": 3810}], "boxes": {"46": 200, "47": 3810, "83": 3810}, "no_box": ["67"]}}},
     {"id": "U14", "spec": "ustva.md example 14", "period": "2026-09", "lines": [], "boxes": {"83": 0}, "note": "trips post no tax lines"},
     {"id": "U15", "spec": "ustva.md example 15",
      "periods": {"2026-03": {"lines": [{"tax_key": "S19", "base": 57971, "tax": 11015}, {"tax_key": "S7", "base": 28985, "tax": 2029}],
@@ -433,11 +562,13 @@
      "zm": {"2026-Q1": {"cust_A": 3001, "cust_B": 4000}},
      "kz21": {"2026-01": 1000, "2026-03": 6000}},
     {"id": "Z2", "spec": "zm.md Z2",
-     "extra_line": {"customer": "cust_A", "base": -50000, "vat_date": "2026-05-05", "corrects_vat_date": "2026-03-02"},
-     "zm": {"2026-Q1-corrected": {"cust_A": 2501, "cust_B": 4000}, "2026-Q2": {}},
+     "extra_line": {"customer": "cust_A", "base": -50000, "vat_date": "2026-05-05"},
+     "zm": {"2026-Q1": {"cust_A": 3001, "cust_B": 4000}, "2026-Q2": {"cust_A": -500}},
+     "q1_drift": false,
      "kz21": {"2026-05": -500}},
     {"id": "Z3", "spec": "zm.md Z3",
-     "due": {"2026-Q1": "2026-04-27", "2026-Q2": "2026-07-27", "2026-Q3": "2026-10-26", "2026-Q4": "2027-01-25"}}
+     "due": {"2026-Q1": "2026-04-27", "2026-Q2": "2026-07-27", "2026-Q3": "2026-10-26", "2026-Q4": "2027-01-25"}},
+    {"id": "Z4", "spec": "zm.md Z4", "issue_eu_b2b_without_customer_vat_id": {"expect_status_code": 422}}
   ],
   "payment_cases": [
     {"id": "P1", "invoice_gross": 119000, "put": {"status": "paid", "paid_date": "2026-02-03"},
@@ -448,6 +579,11 @@
      "discount_credit_note": {"19": {"net": 2000, "vat": 380}}, "open_amount": 0},
     {"id": "P4", "invoice_rates": {"19": {"net": 200000, "vat": 38000}}, "partial_credit": {"19": {"net": 50000, "vat": 9500}},
      "storno_credits": {"19": {"net": 150000, "vat": 28500}}, "status": "cancelled"},
-    {"id": "P5", "invoice_rates": {"19": {"net": 200000, "vat": 38000}}, "partial_credit": {"19": {"net": 210000}}, "expect_status_code": 422}
+    {"id": "P5", "invoice_rates": {"19": {"net": 200000, "vat": 38000}}, "partial_credit": {"19": {"net": 210000}}, "expect_status_code": 422},
+    {"id": "P6", "issued_invoice_put": [
+      {"change": "lines", "expect_status_code": 409},
+      {"change": "unchanged record plus notes", "expect_status_code": 200},
+      {"change": "status cancelled", "expect_status_code": 409},
+      {"change": "status paid without paid_date", "expect_status_code": 422}]}
   ]
 }

@@ -87,7 +87,7 @@ Files `permita38/core/charts/skr03-<year>.json` and `skr04-<year>.json` (package
 * `roles` maps every role used by the posting engine to one account. `accounts` is the list offered for manual
   entries (it contains at least every role's account; the maintainer may add more from the chart).
 * `automatic` marks DATEV *automatic accounts* (the account implies a tax key); the DATEV export uses it, section 15.
-* `eur_line` maps P&L accounts to the lines of the Anlage EÜR (section 14.3).
+* `eur_line` maps P&L accounts to the lines of the Anlage EÜR, with `deductible: true|false` (section 14, item 4).
 * The `category → role` table replaces nothing in the expense model; an expense category without a mapping posts to
   `expense_other` and raises a sanity warning.
 * A test checks: every role the engine knows exists in both charts of every year file; no account appears twice in
@@ -99,9 +99,10 @@ Roles used by the engine (the spec names roles only):
 |---|---|
 | money | `bank`, `cash` |
 | open items | `receivables`, `payables`, `customer_credit` (overpayments), `payables_employee` |
-| revenue | `revenue_s19`, `revenue_s7`, `revenue_sx` (other rate), `revenue_ku` (small business), `revenue_eu_svc` |
+| revenue | `revenue_s19`, `revenue_s7`, `revenue_sx` (other rate), `revenue_s0` (rate 0 on a standard invoice), `revenue_ku` (small business), `revenue_eu_svc` |
 | VAT | `vat_out_s19`, `vat_out_s7`, `vat_out_sx`, `vat_not_due_s19/_s7/_sx` (Ist, accrual), `vat_soll_clearing` (Soll, EÜR), `input_vat_s19/_s7/_sx`, `rc_vat_out_eu`, `rc_vat_out_3c`, `rc_input_vat`, `vat_prepayments`, `vat_special_prepayment`, `vat_previous_year` |
-| purchase clearing | `input_vat_clearing` (EÜR: input VAT deducted before payment) |
+| purchase clearing | `input_vat_clearing` (EÜR: input VAT deducted before payment), `rc_vat_nondeductible` (EÜR: non-deductible § 13b tax, an expense only when paid with the return) |
+| export | `datev_transfer` (interim account for entries the DATEV export cannot split exactly, [`datev-export.md`](datev-export.md)) |
 | cost | the `expense_*` roles of the category table, `meals_deductible`, `meals_nondeductible`, `travel_costs`, `expense_other`, `bad_debts` (write-offs), `cash_discount_granted` |
 | taxes | `trade_tax_expense`, `trade_tax_provision`, `corporate_tax_expense`, `corporate_tax_provision`, `tax_refunds` |
 | owner | `private_withdrawal`, `private_deposit`, `equity` (capital), `opening_balance`, `closing_balance`, `profit_carryforward` |
@@ -138,7 +139,8 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
 3. **One writer.** Only `JournalService` inserts entries. Services call it with an *event*; the posting engine
    (`core/accounting/postings*.py`, pure functions) turns the event into lines.
 4. **Idempotent.** Each entry has a unique `event_key` (`issue:<invoice id>`, `payment:<payment id>`,
-   `expense:<expense id>:r<revision>`, `credit:<doc id>`, `manual:<uuid>`, `open:<year>:<item>`, ...). Re-delivering
+   `wo_reversal:<payment id>`, `expense:<expense id>:bill:r<revision>`, `expense:<expense id>:pay:r<revision>`,
+   `credit:<doc id>`, `trip:<id>:r<revision>`, `manual:<uuid>`, `open:<year>:<item>`, ...). Re-delivering
    an event with an existing key is a no-op that returns the existing entry.
 5. **Gapless numbers.** `entry_no` is gapless per fiscal year, allocated through `number_sequences` (doc type
    `journal`) in the same transaction as the entry.
@@ -149,9 +151,11 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
    synced folder").
 7. **Integer cents.** Lines store `amount_cents` and `tax_base_cents` as integers; services convert at the edge with
    `core/money.py` (`dec`, `q2`); responses carry decimals like the rest of the API.
-8. **Lock.** The booking date must lie in an unlocked month (section 11). `vat_date`/`income_date` may lie in a locked
-   month only where a rule demands it (late Soll invoice, § 13b tax date); such lines create **drift** on the filed
-   return of that period ([`ustva.md`](ustva.md)) and a warning on the entry.
+8. **Dates and the lock.** Every entry has a `document_date` (the date of the payment, bill, invoice, credit note)
+   and a `booking_date = max(document_date, first day of the first unlocked month)`: late documents are booked into
+   the first open month, never refused for being late (section 11). `vat_date` and `income_date` follow the rules of
+   section 9 and may lie in a locked month only in the **allowed drift cases** of section 11; such lines create drift
+   on the return of that period ([`ustva.md`](ustva.md)) and a warning on the entry.
 9. **Synced folders.** When accounting is on and the data folder looks synced (the existing sync detection, or a
    setting), the app shows "use permitA38 on one device at a time while accounting is on"; the hash chain detects a
    fork.
@@ -163,9 +167,9 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
 | Table | Columns (all NOT NULL unless marked) | Guards |
 |---|---|---|
 | `fiscal_years` | `id`, `year` int unique, `chart`, `income_basis`, `vat_basis`, `vat_frequency`, `dauerfrist` bool, `small_business` bool, `vat_regular_from` date null, `rules_version`, `opened_at`, `opened_by`, `closed_at` null, `closed_by` null | one_of for each enum; `closed_*` set once (update only from null) |
-| `journal_entries` | `id`, `fiscal_year` int, `entry_no` int, `booking_date` date, `event` text, `event_key` text unique, `source_coll` null, `source_id` null, `source_number` null, `reverses_id` null FK, `counterparty_id` null, `cp_vat_id` null, `cp_country` null, `text` (≤ 200), `origin` (`auto`/`manual`/`opening`), `created_at`, `created_by`, `prev_hash`, `hash` | unique (`fiscal_year`,`entry_no`); append_only |
+| `journal_entries` | `id`, `fiscal_year` int, `entry_no` int, `document_date` date, `booking_date` date, `event` text, `event_key` text unique, `source_coll` null, `source_id` null, `source_number` null, `reverses_id` null FK, `counterparty_id` null, `cp_vat_id` null, `cp_country` null, `text` (≤ 200), `origin` (`auto`/`manual`/`opening`), `created_at`, `created_by`, `prev_hash`, `hash` | unique (`fiscal_year`,`entry_no`); append_only |
 | `journal_lines` | `id`, `entry_id` FK, `line_no` int, `role` null, `account` text, `amount_cents` int, `tax_key` null, `tax_kind` null, `tax_rate` null text, `tax_base_cents` int null, `vat_date` date null, `income_date` date null, `open_item_id` null, `treatment` null | unique (`entry_id`,`line_no`); implies(`tax_kind` → `tax_key`), implies(`tax_key` ≠ NONE → `vat_date`); append_only |
-| `payments` | `id`, `document_id` FK, `date`, `amount_cents` int (≠ 0; negative = refund), `method` (`bank`/`cash`), `kind` (`payment`/`refund`/`discount`), `note` null (≤ 200), `entry_id` FK, `reverses_id` null, `created_at`, `created_by` | append_only |
+| `payments` | `id`, `document_id` FK, `date`, `amount_cents` int (≠ 0; positive = money received, negative = money paid back), `method` (`bank`/`cash`), `kind` (`payment` / `refund` / `reversal`; a `reversal` row has `reverses_id` and the opposite sign of the row it cancels, and cannot itself be reversed), `note` null (≤ 200), `reverses_id` null FK, `created_at`, `created_by` | append_only; no journal column: the entry finds its payment through `event_key = payment:<id>` / `source_id`, so payments recorded before initialisation need no update |
 | `period_locks` | `id`, `year`, `month` 1..12, `locked_at`, `locked_by`, `reason` (`vat_return:<id>` / `manual` / `year_close`) | unique (`year`,`month`); append_only |
 
 ### 8.2 Changed tables
@@ -206,79 +210,112 @@ Small-business status of the year forces `treatment = small_business` and rate 0
 | accrual, `small_business` | D `receivables` G; C `revenue_ku` G (`tax_key` KU, base_only, base G, `vat_date` = invoice date) |
 | EÜR, `small_business` | no entry |
 
-### 9.2 Payment received (`payments` row of `kind` payment; refunds are negative)
+### 9.2 Later events on an invoice: one target rule for payments, refunds, credit notes and write-offs
 
-Payments apply only to issued invoices (not to credit notes directly; a refund is a negative payment on the original
-invoice). Let `P_k` be the cumulative cash received after this payment (Σ of all payments incl. refunds) and `C` the
-**current** gross of the invoice (snapshot gross minus all issued credit notes against it), per rate group `C_r`.
+Every later event on an issued invoice (a payment, a refund, the reversal of a payment, a credit note, a write-off, a
+write-off reversal) is posted the same way: the engine computes **targets** for the invoice from its state *after*
+the event and posts the difference to what the invoice's earlier entries already posted. This is order-independent,
+idempotent and exact when the invoice is settled. The issue entry of 9.1 is the same rule evaluated with no cash and
+no credits.
 
-**Ist recognition (cumulative, order-independent).** On every cash event: `T = min(max(P_k, 0), C)`; allocate `T`
-over the rate groups by `C_r` with the largest-remainder method in cents (ties to the larger rate) giving `T_r` with
-`Σ T_r = T`; `TV_r = q2(CV_r × T_r / C_r)` (CV_r = current VAT of the group; 0 when `C_r = 0`); `TN_r = T_r − TV_r`.
-The entry recognises the difference to what earlier cash events recognised: `ΔV_r = TV_r − recognised V_r`,
-`ΔN_r = TN_r − recognised N_r`. When the invoice is fully paid, `T_r = C_r` and the recognised totals equal the
-document exactly. Credit notes never trigger recognition by themselves (section 9.3); the next cash event does.
-`P_k > C` leaves the excess on `customer_credit` without VAT and warns "overpayment".
+**State** per rate group `r`: original `G_r`, `V_r`, `N_r` (snapshot); credited `K_r`, `KV_r` (Σ of the issued credit
+notes incl. write-offs, minus write-off reversals); current `C_r = G_r − K_r`, `CV_r = V_r − KV_r`,
+`CN_r = C_r − CV_r`; `C = Σ C_r`. Cash kept `P` = Σ payments − Σ refunds (reversal rows included); `P < 0` is refused.
+`T = min(P, G)`; `P − T` is an overpayment.
 
-| Basis | Lines (booking date = payment date; amount `p` of this payment) |
-|---|---|
-| accrual, Soll | D `bank` p; C `receivables` p (open item) |
-| accrual, Ist | D `bank` p; C `receivables` p; per r: D `vat_not_due_r` ΔV_r, C `vat_out_r` ΔV_r (`tax_key`, tax, base ΔN_r, `vat_date` = payment date) |
-| EÜR, Soll | D `bank` p; per r: C `revenue_r` ΔN_r (`income_date` = payment date), C `vat_soll_clearing` ΔV_r (`income_date` = payment date, for the gross EÜR) — Δ computed with the same cumulative rule (Soll here only splits the cash; the VAT was declared at issue) |
-| EÜR, Ist | D `bank` p; per r: C `revenue_r` ΔN_r (`income_date` = payment date); C `vat_out_r` ΔV_r (tax line, base ΔN_r, `vat_date` = payment date, `income_date` = payment date) |
-| any, `eu_b2b_service` | accrual: D `bank` / C `receivables`. EÜR: D `bank` p; C `revenue_eu_svc` p (`income_date` = payment date, no tax key) |
-| any, `small_business` | accrual: D `bank` / C `receivables`. EÜR: D `bank` p; C `revenue_ku` p (`tax_key` KU, base_only, base p, `vat_date` = payment date) |
-| excess over `C` | the excess goes D `bank` / C `customer_credit` (no VAT); a later refund (negative payment) clears it first |
+**Cash allocation** (cumulative):
+* `T ≤ C`: `T_r` = allocation of `T` over `C_r` (largest remainder in cents, ties to the larger rate);
+  `TV_r = q2(CV_r × T_r / C_r)` (0 when `C_r = 0`).
+* `T > C` (cash kept above the current gross because a credit has not been refunded yet): `T_r = C_r` + allocation of
+  `T − C` over `K_r`; `TV_r = CV_r + q2(KV_r × (T_r − C_r) / K_r)`.
+* `TN_r = T_r − TV_r`. When `T = C` the allocation gives `T_r = C_r`, `TV_r = CV_r` exactly.
 
-### 9.3 Credit notes (storno, partial, discount, write-off)
+**Due VAT** `D_r` (the tax lines on `vat_out_r`) and its base `B_r`:
+* **Soll:** `D_r = max(CV_r, TV_r)`: the current VAT, plus the VAT on cash kept above the current gross. A credit
+  therefore reduces the VAT at once for the part not yet paid and, for the paid part, only when it is refunded (§ 17
+  Abs. 1, UStAE 17.1 Abs. 2 *(verify)*). `B_r = CN_r` when `CV_r ≥ TV_r`, else `TN_r`. Evaluated at every event.
+* **Ist:** `D_r = TV_r`, `B_r = TN_r`, evaluated **at cash events only** (payments, refunds, reversals); a credit note
+  or write-off leaves the due VAT unchanged until the next cash event (an unpaid rest that is written off was never
+  taxed).
 
-A credit note is an issued document of `kind = credit_note` with its own number (sequence `credit_note`), lines with
-**positive** amounts meaning "credited", `corrects_id` = the invoice, and its own snapshot. It may not exceed the
-invoice's current gross per rate group (422). `storno` credits all remaining lines; `partial` selected amounts;
-`discount` (Skonto) is created by the payment dialog ("settle with discount") pro rata over the rate groups;
-`write_off` (uncollectible) credits the open amount (§ 17 Abs. 2) and posts to `bad_debts` instead of revenue.
+**Targets and the lines that carry their differences:**
 
-Effect date (§ 17 Abs. 1 Satz 8): the **credit note date**, never the original period. Lines (booking date = credit
-note date, signs mirrored from 9.1):
+| Target | accrual | EÜR |
+|---|---|---|
+| cash | `bank` (or `cash`) = `P` | same |
+| revenue | `revenue_r` = −N_r; credits on `revenue_r` (storno, partial), `cash_discount_granted` (discount), `bad_debts` (write-off) = +their net; `income_date` = event date | `revenue_r` = −TN_r, evaluated at cash events, `income_date` = cash date |
+| due VAT | `vat_out_r` = −D_r: tax line, `tax_key` S19/S7/SX, `tax_base` = ΔB_r | same |
+| open item | `receivables` = C − T (negative = an unrefunded credit owed to the customer); `customer_credit` = −(P − T) | `customer_credit` = −(P − T), no `income_date` |
+| balancing | `vat_not_due_r` = −(CV_r − D_r): a credit balance is VAT not yet due (Ist), a debit balance a reduction not yet effective (Soll) | `vat_soll_clearing_r` = D_r − TV_r: VAT declared but not yet received (Soll; always 0 under Ist) |
 
-| Basis | Lines |
-|---|---|
-| accrual, Soll | per r: D `revenue_r` (or `bad_debts` / `cash_discount_granted`) N_r; D `vat_out_r` V_r (tax line, base −N_r, `vat_date` = credit date); C `receivables` G (open item = the invoice) |
-| accrual, Ist | per r: D `revenue_r` N_r; D `vat_not_due_r` V_r; C `receivables` G. VAT changes at the next cash event (a refund) via the recognition rule; a write-off/discount of an unpaid rest therefore never touches VAT under Ist |
-| EÜR, Soll | per r: D `vat_out_r` V_r (tax line, base −N_r, `vat_date` = credit date); C `vat_soll_clearing` V_r. The refund (negative payment) then posts revenue and clearing with the cumulative rule |
-| EÜR, Ist | no entry (the document exists; a refund posts) |
-| `eu_b2b_service` | accrual: D `revenue_eu_svc` N (base_only, base −N, `vat_date` = credit date); C `receivables` G. EÜR: statistical line base −N. The ZM correction belongs to the **original** period ([`zm.md`](zm.md)); the line carries `corrects_id` via the entry's source |
-| `small_business` | accrual: D `revenue_ku` / C `receivables`; EÜR: no entry |
+Dates on the lines: `vat_date` of a tax line = the performance date for the issue entry under Soll, the cash date for
+cash events, the credit note date for credit notes and write-offs (§ 17: the period of the change, never the original
+period). Under EÜR the change of `vat_soll_clearing` is posted as two lines: the cash part (−ΔTV_r, `income_date` =
+cash date: the "VAT received" of the gross EÜR) and the declaration part (+ΔD_r, no `income_date`). Under EÜR/Ist the
+`vat_out_r` line of a cash event carries `income_date` = cash date for the same reason.
 
-*(verify)* the Soll effect date of a credit note against an already paid invoice (agreement vs. refund), and Ist with
-a credit note that is never refunded (the app keeps the VAT until a refund and shows the customer credit).
+Both columns balance by construction: accrual P + (C − T) − (P − T) − CN − D − (CV − D) = 0; EÜR P − TN − D + (D − TV)
+− (P − T) = 0.
+
+**Write-off reversal.** A payment that raises `P` above `C` while write-offs exist first posts an internal write-off
+reversal (event key `wo_reversal:<payment id>`) for `min(P − C, remaining written-off gross)`, split over the rate
+groups as the complement of the cumulative allocation; then the payment. Recovered cash is revenue again (accrual:
+credit `bad_debts`) and under Soll the VAT is due again at the receipt date (§ 17 Abs. 2 Nr. 1 Satz 2); under Ist the
+cash rule handles it.
+
+**Treatments.**
+* `eu_b2b_service`: no VAT (`V_r = 0`). The Kz 21 / ZM base is a `base_only` line with `tax_key` EU_SVC whose target is
+  `CN` (accrual: on `revenue_eu_svc`; EÜR: a statistical line, amount 0), `vat_date` = performance date for the issue
+  and the credit note date for credits. Under EÜR revenue follows cash (`revenue_eu_svc` = −T, no tax key).
+* `small_business`: accrual `revenue_ku` = −CN with `tax_key` KU (`base_only`, `vat_date` = event date); EÜR
+  `revenue_ku` = −T at cash events with `tax_key` KU, `base_only`, base ΔT.
+* A line at rate 0 on a `standard` invoice (e.g. pass-through costs) posts on `revenue_s0` with `tax_key` NONE and
+  keeps the existing sanity warning `vat_zero_line`; exempt sales are a non-goal.
+
+### 9.3 Credit notes and write-offs (the documents; their postings follow 9.2)
+
+Credit notes are issued documents of `kind = credit_note` with their own number (sequence `credit_note`), lines
+with **positive** amounts meaning "credited", `corrects_id` = the invoice and their own snapshot; they may not exceed
+the current gross per rate group (422). `storno` credits all remaining lines; `partial` the given net per rate group;
+`discount` (Skonto) is created by "settle with discount" **before** the payment it settles, with the amounts
+`C_r − T'_r` (`T'` = the allocation of the cash after that payment over the current `C_r`), so the payment then
+settles exactly; `write_off` credits the open amount `C_r − T_r` per rate group (§ 17 Abs. 2). Write-offs and their
+reversals are internal vouchers (no PDF, `Belegfeld` = the journal entry number).
 
 ### 9.4 Expenses
 
 Per expense line (classic expense = one implicit line, itemised = `expense_lines()`): `n`, `v`, rate `r`, income share
 `pct` (`deductible`), VAT share `vp` (`vat_deductible`, else `pct`). `iv = q2(v × vp / 100)` is the deductible input
-VAT, `nd = v − iv` its non-deductible rest (§ 9b EStG: cost). Cost split: `c = n + nd`; deductible cost
-`cd = q2(c × pct / 100)` to the category role (meals: `meals_deductible`), the rest `c − cd` to `meals_nondeductible`
-(or the category's non-deductible role). Gross `g = n + v`. Input VAT date = expense `date` (proxy for the receipt of
-the invoice, *(verify)*; versioned in the rules file because of the change announced for 2028 *(verify)*).
+VAT, `nd = v − iv` its non-deductible rest (§ 9b EStG: part of the cost). Cost `c = n + nd`; the deductible cost
+`cd = q2(c × pct / 100)` goes to the category role; the rest `c − cd` goes to `meals_nondeductible` for meals (a
+business expense that is not deductible) and to `private_withdrawal` for every other category (the private share).
+Gross `g = n + v`.
 
-| Treatment / basis | Lines |
-|---|---|
-| `standard`, accrual | booking date = `date`: D category `cd`, D non-deductible `c − cd`, D `input_vat_r` iv (`tax_key` VST, input, `vat_date` = `date`), C `payables` g (open item). Payment at `paid_on` (separate entry): D `payables` g / C `bank` g |
-| `standard`, EÜR | at `date`: D `input_vat_r` iv (VST, `vat_date` = `date`), C `input_vat_clearing` iv. At `paid_on` (or `date` when `paid_on` is empty, as today; a hint says so): D category `cd`, D non-deductible `c − cd` (`income_date` = paid date), D `input_vat_clearing` iv (`income_date` = paid date, the "paid input VAT" line of the gross EÜR), C `bank` g |
-| `no_input_vat` | as `standard` with `iv = 0` and `c = g` |
-| `reverse_charge_eu_service` | the receipt shows no VAT; `n` = the supplier's net. Per rate group (default 19): `t = q2(n_r × r / 100)`; `ri = q2(t × vp / 100)` (0 for a small business). Booking date = expense `date`; the two tax lines carry the § 13b
-tax date as `vat_date`: C `rc_vat_out_eu` t (`tax_key` RC_EU_SVC, tax, base n_r, `vat_date` = tax date), D `rc_input_vat` ri (RC_EU_SVC, input, same `vat_date`), D cost `n + (t − ri)` split by `pct` as above, C `payables` n (accrual) or, under EÜR, the cost moves to the payment entry like `standard` and the tax lines stay at the tax date against `input_vat_clearing` |
-| `reverse_charge_third_country` | as above with `rc_vat_out_3c` and RC_3C_SVC |
+An expense posts **two events**: the bill (`expense:<id>:bill:r<n>`, document date = expense `date`) and the payment
+(`expense:<id>:pay:r<n>`, document date = `paid_on`; when `paid_on` is empty the payment is assumed on `date`, as
+today, with a hint). Setting or changing `paid_on` later posts (or reverses and reposts) only the payment event.
+Input VAT `vat_date` = the expense `date` (proxy for the receipt of the invoice *(verify)*; year-versioned in the rules
+file because of the change announced for 2028 *(verify)*); when that month is locked, `vat_date` = the booking date
+(a later deduction is allowed). Accrual `income_date` = the expense `date` (or the booking date when that year is
+closed); EÜR `income_date` = the payment date.
 
-§ 13b tax date *(verify)*: EU service (Abs. 1) = `service_date` (end of its period; any date in the period gives the
-same return); third country (Abs. 2 Nr. 1) = `min(date, last day of the month after service_date)`. `service_date`
-defaults to `date`.
+| Treatment / basis | Bill entry | Payment entry |
+|---|---|---|
+| `standard`, accrual | D category `cd`, D non-deductible/private `c − cd` (`income_date`), D `input_vat_r` iv (`tax_key` VST, input, `vat_date`), C `payables` g (open item) | D `payables` g / C `bank` g |
+| `standard`, EÜR | D `input_vat_r` iv (VST, input, `vat_date`), C `input_vat_clearing` iv | D category `cd`, D non-deductible/private `c − cd`, D `input_vat_clearing` iv (all with `income_date` = payment date; the clearing line is the "input VAT paid" of the gross EÜR), C `bank` g |
+| `no_input_vat` | as `standard` with `iv = 0`, `c = g` (EÜR: no bill entry) | as `standard` |
+| `reverse_charge_eu_service`, accrual | per rate group (default 19): `t = q2(n_r × r / 100)`, `ri = q2(t × vp / 100)` (0 for a small business): C `rc_vat_out_eu` t (`tax_key` RC_EU_SVC, tax, base n_r, `vat_date` = § 13b tax date), D `rc_input_vat` ri (RC_EU_SVC, input, same `vat_date`), D cost `n + (t − ri)` split by `pct` (`income_date`), C `payables` n | D `payables` n / C `bank` n |
+| `reverse_charge_eu_service`, EÜR | C `rc_vat_out_eu` t, D `rc_input_vat` ri (as accrual), D `rc_vat_nondeductible` `t − ri` (no `income_date`: under EÜR the non-deductible tax becomes an expense when it is paid to the tax office with the return, section 9.6, so it must not be counted twice) | D cost `n` split by `pct` (`income_date` = payment date) / C `bank` n |
+| `reverse_charge_third_country` | as the EU rows with `rc_vat_out_3c` and RC_3C_SVC | |
 
-Changing an expense while the booking month and every affected `vat_date` month are open: the service posts a
-reversal of all its entries (`reverses_id`) and new entries with `event_key` revision `r+1`. Deleting: reversal only.
-In a locked month: 409 "the period is locked; book a correction". The expense record itself stays editable as today
-only under these conditions.
+§ 13b tax date *(verify)*: EU service (Abs. 1) = `service_date` (any date in the period of performance gives the same
+return); third country (Abs. 2 Nr. 1) = `min(date, last day of the month after service_date)`. `service_date`
+defaults to `date`. When the tax date lies in a locked month the lines keep it (allowed drift, section 11): the tax
+arose in that period by law.
+
+Changing an expense: the service posts reversals of its current bill and payment entries (`reverses_id`) and new ones
+with revision `r+1`; deleting posts the reversals only. Both are refused (409 "the period is locked; book a
+correction") when an entry to be reversed has its booking date in a locked month.
 
 ### 9.5 Trips
 
@@ -323,8 +360,8 @@ plus a new entry. Templates: opening balance, private withdrawal/deposit, VAT pa
 | Record | Rule |
 |---|---|
 | invoice, draft | editable and deletable as today |
-| invoice, issued | **frozen**: PUT changing anything but `notes`, `reference`, attachments → 409; DELETE → 409; `status: cancelled` → 409 "issue a cancellation (credit note)"; legacy `status: paid` + `paid_date` → translated into one payment of the open amount on that date (contract: [`credit-notes-payments.md`](credit-notes-payments.md)); `status: paid` without a date → 422 |
-| invoice status | `sent` / `accepted` / `rejected` stay user-set labels; `paid` is **derived** (open amount 0) and stored for old clients; `cancelled` is derived for an invoice fully credited by a `storno` |
+| invoice, issued | **frozen**: PUT changing anything but the status labels, `due_date`, `notes`, `reference`, attachments → 409; DELETE → 409; `status: cancelled` → 409 "issue a cancellation (credit note)"; legacy `status: paid` + `paid_date` → translated into one payment of the open amount on that date (contract: [`credit-notes-payments.md`](credit-notes-payments.md)); `status: paid` without a date → 422 |
+| invoice status | `sent` / `accepted` / `rejected` stay user-set labels; derived values win in this order: `cancelled` (a `storno` credited everything), then `paid` (open amount ≤ 0 and some cash received), then the label; stored for old clients |
 | credit note | issued on creation (no draft in v1); frozen like an invoice |
 | expense, trip | section 9.4 / 9.5 (repost while open, 409 when locked) |
 | import (`importer/service.py`) | imported invoices are posted like issued ones on their dates; undo of a batch posts reversals while the months are open, else 409 |
@@ -338,10 +375,20 @@ postings start only after initialisation (section 16).
   the accounting start) to be locked. No unlock (GoBD *Festschreibung*).
 * Triggers: finalising a VAT return locks its months ([`ustva.md`](ustva.md)); manual "lock up to" (boss,
   accountant); the year closing locks December.
-* Effect: no entry with a booking date in a locked month (all services, the manual dialog, the importer). Source
-  records whose entries lie in a locked month cannot be changed (section 10). Lines with a `vat_date` in a locked
-  month are allowed only from automatic postings where the VAT rules demand it (late Soll invoice whose perf lies in a
-  filed period, § 13b third-country date) and show up as drift on that return.
+* Effect: no entry has a booking date in a locked month. A late document is **not refused**: its entry is booked on
+  the first day of the first unlocked month (section 7.8), so bills, payments and `paid_on` dates of a filed month can
+  still be entered. Reversing an entry whose booking date is in a locked month is refused (409); corrections are new
+  entries. Invoices and credit notes are issued with a date in an open month (a back-dated issue into a locked month
+  is refused, 409); the importer follows the same rules.
+* `vat_date` in a locked month — the **allowed drift cases** (automatic postings only; manual entries never):
+  1. a Soll issue whose performance date lies in a locked month (an invoice written after the return);
+  2. an Ist payment, refund or reversal whose cash date lies in a locked month;
+  3. a § 13b tax date (EU service period, third-country date) in a locked month;
+  4. an `eu_b2b_service` performance date in a locked month (Kz 21, ZM).
+  Input VAT (`VST`) never drifts: its `vat_date` moves to the booking date (a later deduction is allowed). Credit
+  notes and write-offs are dated in an open month and never drift. Drift lines are listed on the return of their
+  period and call for an amended return ([`ustva.md`](ustva.md)); ZM drift likewise ([`zm.md`](zm.md)).
+* `income_date` follows the document date within an open fiscal year; in a closed year it becomes the booking date.
 
 ## 12. Opening balances (accrual)
 
@@ -352,7 +399,9 @@ template); open receivables come from the backfill (section 16).
 ## 13. Year closing (accrual) and year end (EÜR)
 
 * Accrual: "close year" needs all 12 months locked except December (closing locks it). It posts the provisions the
-  user confirms (9.7), then the closing entry (balance accounts to `closing_balance`, P&L to `profit_carryforward` /
+  user confirms (9.7), transfers the balances of the VAT accounts (`vat_out_*`, `input_vat_*`, `rc_*`,
+  `vat_prepayments`, `vat_special_prepayment`) to `vat_previous_year` (settled by the annual return and its payment,
+  a manual template), then the closing entry (balance accounts to `closing_balance`, P&L to `profit_carryforward` /
   `equity`), sets `closed_at`, and creates the next year's `fiscal_years` row (same bases unless changed) and opening
   entry.
 * EÜR: no closing entry; "end year" locks December and creates the next year's row. Open items stay open.
@@ -364,7 +413,11 @@ template); open receivables come from the backfill (section 16).
 3. **Trial balance** (*Summen- und Saldenliste*) per month or year; shows the VAT rounding note (9.6).
 4. **EÜR** (EÜR basis), gross form like the Anlage EÜR: revenue (by tax key), VAT received, VAT refunds from the tax
    office; expenses by `eur_line`, input VAT paid, VAT paid to the tax office; profit. Lines with `income_date` in the
-   year. *(verify)* the line list against the form of the year; the app does not file the Anlage EÜR.
+   year. Each `eur_line` in the chart file carries `deductible: true|false`: **profit = Σ of the income lines on
+   deductible lines**; non-deductible business expenses (`meals_nondeductible`, `trade_tax_expense`) are shown on
+   their own lines below the profit as "not deductible, added back", and GewSt refunds (`tax_refunds`) likewise as
+   non-taxable. Private shares (`private_withdrawal`) are never in the EÜR. *(verify)* the line list against the
+   form of the year; the app does not file the Anlage EÜR.
 5. **P&L and balance sheet** (accrual): by account class of the chart; simple form (no HGB layout in v1).
 6. **Open items**: receivables and payables per document (gross − credit notes − payments), age.
 7. **VAT account reconciliation**: per period, the VAT account balances vs. the filed returns.
@@ -387,9 +440,24 @@ accounts and BU keys come from the chart and `datev/<year>.json`.
 2. Creates the `fiscal_years` row and, for accrual, the opening entry from the balances the user types.
 3. Writes the `issued` snapshot for every issued invoice that lacks one (rates from the document, regime from the
    `kleinunternehmer` setting unless `vat_regular_from` says otherwise, customer data as now).
-4. Invoices issued before the start and still open: accrual → opening receivable lines (D `receivables` / C
-   `opening_balance`; under Ist with D/C `vat_not_due_r` for their VAT); EÜR → nothing (their payments post later).
-5. Invoices issued on/after the start: the issue entry; legacy `paid` + `paid_date` → one payment of the gross.
+4. Invoices issued before the start and **open at the start date** (gross minus payments dated before the start):
+   one opening entry dated the start date that sets the 9.2 targets as if the invoice had been issued and its
+   pre-start payments received in the previous year, with every line against `opening_balance` and no `vat_date` or
+   `income_date` (that VAT and income belong to earlier returns): accrual → `receivables`, and under Ist
+   `vat_not_due_r` for the VAT not yet due; EÜR/Soll → `vat_soll_clearing_r` for the declared VAT not yet received;
+   EÜR/Ist → nothing. Their payments dated on/after the start then post normally (Ist VAT, EÜR income).
+5. Invoices issued on/after the start: the issue entry; payments and credit notes stored before the initialisation
+   post as their events in date order; legacy `paid` + `paid_date` → one payment of the open amount on that date.
+   Expenses dated before the start but paid on/after it: accrual → opening payable; EÜR → an opening entry D
+   `opening_balance` / C `input_vat_clearing` for their input VAT (already deducted in an earlier return), then the
+   payment event posts the cost and clears it.
+5a. Soll VAT lines whose `vat_date` lies before the accounting start (a January invoice for a December service) belong
+   to a return outside the app: they go to the **review list**, where the user confirms "declared outside the app";
+   they are then posted without `vat_date`.
+5b. **Returns already filed outside the app** for months on/after the start: the wizard asks per period for the filed
+   Kz 83 (and Kz 39) and the filing date and stores them as `vat_returns` with `status = final`, `filed_on`, `external =
+   true` and the entered figures; the months are locked after the backfill. Differences between the entered figures
+   and the journal show as drift on those returns, and the special-prepayment base uses the entered Kz 83.
 6. Expenses dated on/after the start: tax treatment, in order: an explicit `tax_treatment`; else `reverse_charge = true`
    with the supplier's `vat_mode` (`eu_reverse_charge` → `reverse_charge_eu_service`, `third_country_reverse_charge` →
    `reverse_charge_third_country`); `reverse_charge = true` without a supplier → **review list**; supplier
@@ -479,8 +547,8 @@ receipt, category software (100 %), `vat_deductible` 100: `t = q2(200.50 × 0.19
 **2026-05-20** (May): C rc_vat_out_eu 38.10 (RC_EU_SVC, base 200.50); D rc_input_vat 38.10; D expense_software
 200.50; C payables 200.50 (accrual). Net VAT effect 0. With `vat_deductible` 50: input `q2(19.05)` = **19.05**, cost
 200.50 + 19.05 = **219.55**, VAT payable +19.05. Same service from a non-EU supplier with the invoice dated 2026-07-10:
-vat_date = min(07-10, 06-30) = **2026-06-30** (June). A small business with the EU case: input 0, cost 238.60, VAT
-payable 38.10 in May (a return is due, [`ustva.md`](ustva.md)).
+vat_date = min(07-10, 06-30) = **2026-06-30** (June). A small business with the EU case: input 0, VAT payable 38.10
+in May (a return is due, [`ustva.md`](ustva.md)); accrual cost 238.60; EÜR see A14.
 
 **A6. Business meal 2026.** Restaurant bill 2026-02-10 gross 107.00 @ 7 % (food, 7 % from 2026 *(verify)*), `pct` 70,
 `vat_deductible` 100: `v` = 7.00, `n` = 100.00, `iv` = 7.00, `c` = 100.00, `cd` = 70.00 (meals_deductible), 30.00
@@ -504,20 +572,60 @@ was ever declared).
 02-15, own EÜR line, not deductible). Income-tax prepayment 2026-03-10 of 800.00: D private_withdrawal 800.00 / C bank
 800.00 (no income effect).
 
-The oracle fixture holds A1–A10 as event lists with the expected entries (lines incl. tax fields) and the expected
+**A11. Credit note after payment, then two refunds, EÜR/Ist** (rule 9.2, `T > C`). Invoice 2026-03-01 net 1,000.00 @
+19 % (gross 1,190.00); payment 1,000.00 on 03-05: `TV = q2(190.00 × 1,000.00 / 1,190.00) = q2(159.6639)` = **159.66**,
+`TN` = **840.34**: D bank 1,000.00; C revenue_s19 840.34; C vat_out_s19 159.66 (base 840.34, vat_date 03-05). Partial
+credit note 04-01 net 500.00 / VAT 95.00 (`C` = 595.00, `K` = 595.00): no entry (Ist, no cash). Refund 200.00 on 05-02
+(`P` = 800.00 > `C`): `TV = 95.00 + q2(95.00 × 205.00 / 595.00) = 95.00 + q2(32.731)` = **127.73**, `TN` = 672.27;
+Δ: C bank 200.00; D revenue_s19 **168.07**; D vat_out_s19 **31.93** (base −168.07, vat_date 05-02). Refund 205.00 on
+05-20 (`P` = 595.00 = `C`): `TV` = 95.00, `TN` = 500.00; Δ: C bank 205.00; D revenue_s19 **172.27**; D vat_out_s19
+**32.73** (base −172.27). In the end the kept 595.00 carry exactly the credited invoice's 500.00 / 95.00.
+
+**A12. Storno after payment, refund later, accrual/Soll** (§ 17: the paid part is reduced on repayment). Invoice
+2026-02-01 net 1,000.00 @ 19 %, issue entry as A1 (vat_date 02-01); payment 1,190.00 on 02-10: D bank / C receivables.
+Storno 03-02: `C` = 0, `T` = 1,190.00 > `C`, `TV` = 190.00, `D` = max(0, 190.00) = 190.00 → **no VAT change in
+March**: D revenue_s19 1,000.00; D vat_not_due_s19 190.00; C receivables 1,190.00. Refund 1,190.00 on 04-15: `T` = 0 →
+`D` = 0: C bank 1,190.00; D receivables 1,190.00; D vat_out_s19 190.00 (base −1,000.00, vat_date **04-15**); C
+vat_not_due_s19 190.00.
+
+**A13. Payment after a write-off, accrual/Soll** (§ 17 Abs. 2 Nr. 1 Satz 2). A9 (Soll) and then 595.00 received on
+2026-11-15: first the write-off reversal: C bad_debts 500.00 (income 11-15); C vat_out_s19 95.00 (base 500.00,
+vat_date 11-15); D receivables 595.00; then the payment: D bank 595.00; C receivables 595.00. VAT: July +190.00,
+September −95.00, November +95.00.
+
+**A14. Small business, § 13b EU service, EÜR.** The A5 service (net 200.50, service 2026-05-20, bill 2026-06-02), paid
+2026-06-10. Bill entry (booking 06-02): C rc_vat_out_eu 38.10 (RC_EU_SVC, base 200.50, vat_date 05-20); D
+rc_vat_nondeductible 38.10 (no income date). Payment entry (06-10): D expense_software 200.50 (income 06-10); C bank
+200.50. May return Kz 83 = 38.10; its payment (9.6) is the second expense, so the EÜR shows 200.50 + 38.10 = 238.60 =
+the cash paid, counted once.
+
+**A15. Late bill after the lock, accrual/Soll.** January is locked (its return is final). On 2026-02-12 a bill dated
+2026-01-28 (software, net 100.00, VAT 19.00, unpaid) is entered: document date 01-28, **booking date 02-01**; D
+expense_software 100.00 (income 01-28); D input_vat_s19 19.00 (VST, **vat_date 02-01**: the deduction moves to
+February, no drift); C payables 119.00.
+
+**A16. Late Ist payment after the lock, accrual/Ist.** Invoice 2026-01-05 net 1,000.00 @ 19 % (issue entry in
+January, before the lock); January is then locked; a payment dated 2026-01-30 is entered on 02-12: booking date 02-01;
+D bank 1,190.00; C receivables 1,190.00; D vat_not_due_s19 190.00; C vat_out_s19 190.00 (base 1,000.00, **vat_date
+01-30**) → drift +190.00 on the January return (allowed drift case 2), which calls for an amended return.
+
+The oracle fixture holds A1–A16 as event lists with the expected entries (lines incl. tax fields) and the expected
 VAT sums per period; [`ustva.md`](ustva.md) adds the box/form expectations.
 
 ## 20. Test plan
 
-* **Oracle:** A1–A10 from the fixture through the real services; expected entries compared line by line.
+* **Oracle:** A1–A16 from the fixture through the real services; expected entries compared line by line.
 * **Independent oracle:** a hypothesis test generates invoices (rates 0/7/19/16, cents), credit notes, partial
   payments and refunds in random order, under all four bases, and checks with `fractions.Fraction` and its own
-  rounding helpers (not `core/money.py`): every entry balances; after full payment the recognised VAT and base equal
-  the document; Σ VAT lines by `vat_date` equals the independently computed due VAT; order of payments does not
+  rounding helpers (not `core/money.py`): every entry balances; every cash event moves exactly its amount through
+  the 9.2 targets (ΔT = p), also after credit notes, partial refunds and write-off reversals; after full settlement the
+  recognised VAT and base equal the current document; under Soll a credit never reduces VAT on cash still kept; Σ VAT lines by `vat_date` equals the independently computed due VAT; order of payments does not
   change the totals.
 * **Guarantees:** UPDATE/DELETE refused by the database in every dialect (contract test); `event_key` idempotence;
   gapless `entry_no` under concurrent posting; hash chain detects a changed row and a forked sequence.
-* **Locks:** posting into a locked month refused for every event type; lock order; no unlock route.
+* **Locks:** no booking date in a locked month for any event type; late documents move to the first open month
+  (A15) and drift only in the four allowed cases (A16); reversals of locked entries refused; lock order; no unlock
+  route.
 * **Editing rules:** every 409/422 of section 10 incl. the legacy `paid` translation and `cancelled` refusal.
 * **Backfill:** each rule of section 16 incl. the review list; re-running init is a no-op.
 * **Reports:** trial balance sums to 0; EÜR profit equals Σ income lines; open items equal gross − credits − payments.

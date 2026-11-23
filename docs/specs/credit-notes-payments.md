@@ -41,8 +41,9 @@ unchanged value of a frozen field is not a change (old clients PUT whole records
 `kind` (`invoice` / `credit_note`), `credit_kind`, `corrects_id`, `tax_treatment`, `issued` (snapshot),
 `paid_amount`, `credited_amount`, `open_amount` (= gross − credited − paid, may be negative = customer credit),
 `payments` (list of `{id, date, amount, kind, method}`), `credit_notes` (list of `{id, number, date, credit_kind,
-gross}`), `paid_date` (date of the payment that brought `open_amount` to ≤ 0, else null), `status` (`paid` when
-`open_amount` ≤ 0 and paid_amount > 0; `cancelled` when a `storno` credited everything; else the stored label).
+gross}`), `paid_date` (date of the last cash event when `open_amount` ≤ 0 and `paid_amount` > 0, else null),
+`status` derived in this order: `cancelled` when a `storno` credited everything (also after a payment); else `paid`
+when `open_amount` ≤ 0 and `paid_amount` > 0; else the stored label.
 
 `DELETE` of an issued invoice or a credit note → 409.
 
@@ -52,19 +53,22 @@ gross}`), `paid_date` (date of the payment that brought `open_amount` to ≤ 0, 
 |---|---|
 | `GET /api/invoices/{id}/payments` | list |
 | `POST /api/invoices/{id}/payments` | `{date, amount, kind?: "payment"|"refund", method?: "bank"|"cash", note?}` → 201 the payment and the updated invoice |
-| `POST /api/payments/{id}/reverse` | `{date?, note?}` → 201 a counter-payment (`reverses_id`); a reversal cannot be reversed |
-| `POST /api/invoices/{id}/settle-discount` | `{date, amount_paid, note?}` → payment of `amount_paid` plus a `discount` credit note for the rest, pro rata over the rate groups (largest remainder in cents) |
+| `POST /api/payments/{id}/reverse` | `{date?, note?}` → 201 a row of `kind = reversal` with the opposite sign and `reverses_id` (for a payment entered by mistake; a returned transfer is a refund); a reversal cannot be reversed |
+| `POST /api/invoices/{id}/settle-discount` | `{date, amount_paid, note?}` → first a `discount` credit note for the rest, split per rate group as the complement of the cumulative allocation (accounting 9.3), then the payment of `amount_paid`, so the invoice settles exactly |
 
-Validation (strict `PaymentIn`): `amount` > 0 and ≤ 10,000,000.00 (cents exact), `kind` default `payment`; a
-refund is stored negative and may not exceed `paid_amount − refunded` (422); a payment beyond the open amount is
-allowed (overpayment → customer credit, warning in the response); `date` not before the invoice date (an advance
-payment is out of scope, 422 "advance payments are not supported"), not in a locked month (409); only issued invoices
+Validation (strict `PaymentIn`): `amount` > 0 and ≤ 10,000,000.00 (cents exact), `kind` `payment` (default) or
+`refund`; a refund is stored negative and may not exceed the cash kept (422); a payment beyond the open amount is
+allowed (overpayment → customer credit, warning in the response); a payment on a written-off invoice first reverses
+the write-off (accounting 9.2); `date` not before the invoice date (an advance payment is out of scope, 422 "advance
+payments are not supported") and not in the future; a date in a locked month is **accepted** and booked into the first
+open month (accounting 7.8; under Ist its VAT drifts onto the locked month's return, the response says so); only issued invoices
 of `kind = invoice` (credit notes are settled by refunds on their invoice); `note` ≤ 200, escaped on output.
 Rights: write on `invoices` **or** `accounting`. API tokens: session-only routes in v1 (added to the session-only
 table of `tests/backend/test_rbac.py`).
 
 Before accounting is initialised, payments are stored and drive the derived fields; their journal entries are
-written by the initialisation.
+written by the initialisation (accounting section 16, step 5). The legacy `paid` translation (2.2) follows the same
+date rules.
 
 ## 4. Credit notes
 
@@ -76,17 +80,20 @@ written by the initialisation.
 
 * `storno`: credits the whole **remaining** gross (all lines not yet credited); copies the invoice lines with the
   same quantities and prices. `partial`: one line per given rate group with the net amount and the `reason` as the
-  description. `write_off`: the open amount, pro rata over the rate groups, only when `open_amount` > 0. `discount`
-  only through `settle-discount`.
+  description. `write_off`: the open amount, per rate group the complement `C_r − T_r` of the cumulative allocation
+  (accounting 9.2), only when `open_amount` > 0. `discount` only through `settle-discount`.
 * The credited net per rate group may not exceed the invoice's remaining net of that group (422). `reason` is
   required (1–500 chars).
 * Credit notes are **issued on creation**: number from the new sequence `credit_note` (settings
   `credit_note_pattern`, default `"RK-{year}-{n:04d}"`, `credit_note_reset`, numbering page shows it), snapshot,
   date not in a locked month (409), in one transaction.
-* Write-offs are internal and get no PDF. The PDF of the others says "Stornorechnung" / "Cancellation invoice"
-  (storno) or "Rechnungskorrektur" / "Credit note" (partial, discount), names the original invoice number and
-  date, shows the credited lines with **positive** amounts and the credited VAT per rate, and keeps the regime text of
-  the original (small business, EU reverse-charge note for `eu_b2b_service`) *(verify wording with the adviser)*.
+* Write-offs (and their automatic reversals) are internal vouchers: no number from the sequence, no PDF; they are
+  identified by their journal entry number.
+* The PDF of storno, partial and discount credit notes says "Stornorechnung" / "Cancellation invoice" (storno) or
+  "Rechnungskorrektur" / "Credit note" (partial, discount), names the original invoice number and date, and shows the
+  credited lines and the VAT per rate as **negative** amounts ("Minderung"), so it cannot be read as a new invoice
+  with VAT shown (§ 14c); it keeps the regime text of the original (small business, EU reverse-charge note for
+  `eu_b2b_service`) *(verify wording with the adviser)*. The stored lines stay positive ("credited").
 * A credit note inherits `tax_treatment`, customer and project from the invoice.
 * Rights: write on `invoices` or `accounting`; API tokens: session-only in v1.
 

@@ -54,7 +54,8 @@ The VAT rules that decide `vat_date` (summary; details and postings in accountin
 | `standard` sale, Soll | performance date: `service_to`, else `service_from`, else invoice date *(verify: completion of the service)* |
 | `standard` sale, Ist | each payment's date, pro rata (cumulative rule, accounting 9.2) |
 | `eu_b2b_service` (Kz 21, ZM) | performance date, **under Soll and Ist** (§ 18b Satz 3) |
-| credit note, write-off, discount | the credit note date (§ 17); under Ist the VAT moves with the next refund |
+| credit note, write-off, discount | Soll: the credit note date for the part not yet paid; the paid part only when it is refunded (§ 17, UStAE 17.1 Abs. 2 *(verify)*); Ist: with the next refund. Never the original period (accounting 9.2) |
+| payment after a write-off | the receipt date: the VAT is due again (§ 17 Abs. 2 Nr. 1 Satz 2) |
 | input VAT (`standard`) | expense `date` (proxy for receipt of the invoice) *(verify; year-versioned because of the change announced for 2028)* |
 | § 13b EU service received | `service_date` (period of performance) |
 | § 13b third-country service received | `min(invoice date, last day of the month after service_date)` *(verify)* |
@@ -77,8 +78,9 @@ Unpaid invoices under Ist appear in the preview line "not yet taxed (open receiv
   *(verify)*; the app records `dauerfrist` per year and does not check the permission.
 * **Small business** (§ 19): no regular returns (`vat_frequency` is irrelevant). Exception: when the period contains
   § 13b tax lines (`RC_EU_SVC` / `RC_3C_SVC`), a return is due for that period (§ 18 Abs. 4a) with Kz 46/47 or 84/85
-  and **no** Kz 67 (no input VAT for a small business); the period is the calendar month *(verify)*. The return list
-  shows such periods on demand.
+  and **no** Kz 67 (no input VAT for a small business); the period is the calendar **quarter** (§ 18 Abs. 2 Satz 1,
+  *(verify)*), regardless of the `vat_frequency` setting (the frequency check of the API does not apply). The return
+  list shows such periods on demand.
 
 ## Boxes (Kennzahlen) and the form arithmetic
 
@@ -169,8 +171,10 @@ into the last period with the extension *(verify)*.
 * **Amended return**: `POST` with `amends_id` of a filed return of the same period; computed from the journal (which
   now contains the late lines), Kz 10 = 1; it replaces the original in the list and in the Sondervorauszahlung base.
 * **Drift**: the journal is append-only, so a final return differs from a recompute only through lines added later
-  (a late Soll invoice whose performance lies in the period, a § 13b third-country date, a credit note correction for
-  the ZM). The detail shows "N entries after finalising change the tax by x,xx" with the lines (`created_at >
+  — exactly the **allowed drift cases** of [`accounting.md`](accounting.md) section 11: a Soll invoice issued after
+  the return for a performance in the period, an Ist payment dated in the period but entered later, a § 13b tax date
+  in the period, an `eu_b2b_service` performance date in the period. Late bills never drift (their input VAT moves to
+  the booking month). The detail shows "N entries after finalising change the tax by x,xx" with the lines (`created_at >
   finalised_at`); the user files an amended return. Nothing is moved automatically.
 
 ## Data model (`vat_returns`, migration in the accounting migration)
@@ -186,6 +190,7 @@ into the last period with the extension *(verify)*.
 | `result` (Kz 83), `special_prepayment_credit` (Kz 39), `rounding_difference` | decimal | |
 | `filed_on`, `reference`, `note` | | bounded, escaped |
 | `amends_id`, `replaced_by` | id | |
+| `external` | bool | a return filed outside the app before the accounting start of the year was set up (accounting section 16 step 5b): `boxes` hold the entered figures (at least Kz 83), drift compares them with the journal |
 | `finalised_at`, `finalised_by` | | |
 
 Strict `*In` models, lenient responses, unknown fields round-trip; all dialects, `schema.py`, contract and drift
@@ -211,7 +216,8 @@ Rights: area `vat`; boss and accountant (A, A), employee (N, N) ([`accounting.md
 | `GET /api/vat-returns/{id}/export.pdf` / `.csv` / `.json` | exports |
 
 Errors: 404, 409 (finalise twice, change a final return, reopen after filing, amend an unfiled return), 422 (period
-out of range, `kind` not matching the year's frequency, accounting not initialised for the year), 403.
+out of range, `kind` not matching the year's frequency except the small-business § 13b quarters, accounting not
+initialised for the year), 403.
 
 **Exports.** CSV: UTF-8 with BOM, `;`, CRLF, **decimal comma** (a new formatter next to `transfer/csvout.py` that
 keeps its formula-injection guard), header `kz;label;base;tax`; a second file `export-lines.csv`
@@ -273,15 +279,15 @@ Everything escaped, keyboard operable, German and English.
     **545.45**.
 11. **Other rate.** Fake historic rate 16 %: net 1,000.00 (160.00): Kz 35 **1,000**, Kz 36 **160.00**.
 12. **Credit note in the period of the change.** Soll, March: invoice net 1,000.00 (190.00) and a credit note against
-    a January invoice, net 300.50 (VAT `−57.095` → −57.10): Kz 81 base 699.50 → **699**, form tax **132.81**, booked
+    an unpaid January invoice, net 300.50 (VAT `−57.095` → −57.10): Kz 81 base 699.50 → **699**, form tax **132.81**, booked
     132.90. A period with the credit note alone: base −300.50 → **−300** (toward zero *(verify)*), form tax
     **−57.00**. January is never changed.
 13. **Small business.** Invoices net 5,000.00 without VAT: no return, list marked `not_required`, preview 422. With the
-    § 13b EU service of example 6 in May: a May return with Kz 46 **200**, Kz 47 **38.10**, no Kz 67, Kz 83 **38.10**.
+    § 13b EU service of example 6 in May: a return for Q2 2026 with Kz 46 **200**, Kz 47 **38.10**, no Kz 67, Kz 83 **38.10**.
 14. **Trips.** Allowance 56.00 and mileage 71.25 change no box.
 15. **Partial payments, Ist** (accounting A2). March: Kz 81 base 579.71 → **579**, form **110.01** (booked 110.15);
     Kz 86 289.85 → **289**, form **20.23** (booked 20.29); Kz 83 **130.24**. April: Kz 81 **420** / **79.80** (79.85);
-    Kz 86 **210** / **14.70** (14.71).
+    Kz 86 **210** / **14.70** (14.71); Kz 83 **94.50**.
 16. **Drift and amended return.** January (Soll) filed with Kz 83 589.00. On 2026-02-20 an invoice with
     `service_to` 2026-01-28, net 100.00 @ 19 %, is issued: its VAT line has `vat_date` 2026-01-28 (January is locked,
     allowed for an automatic Soll posting), drift **+19.00**; the amended January return (Kz 10 = 1) has Kz 81 base
