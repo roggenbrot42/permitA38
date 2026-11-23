@@ -2,10 +2,15 @@
 
 import copy
 import json
+import types
+import typing
 from typing import Any
 
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+from permita38.core import money
+from permita38.core.validation import DecimalOutput
 
 
 class StoredJSON(JSONResponse):
@@ -39,5 +44,52 @@ def with_defaults(model: type[BaseModel], data: Any) -> Any:
     return [fill(r) for r in data] if isinstance(data, list) else fill(data)
 
 
+def _decimal_scalar(value: Any) -> Any:
+    """A stored amount as a decimal string; ``None``, empty, bool and unparsable values stay as they are."""
+    if value is None or value == "" or isinstance(value, bool):
+        return value
+    try:
+        return money.to_decimal_str(value)
+    except (ValueError, ArithmeticError):
+        return value
+
+
+def _convert(annotation: Any, value: Any, metadata: tuple[Any, ...] = ()) -> Any:
+    """Convert the money in ``value`` according to its type ``annotation`` (recursively); else return it unchanged."""
+    if any(isinstance(m, DecimalOutput) for m in metadata):
+        return _decimal_scalar(value)
+    origin = typing.get_origin(annotation)
+    args = typing.get_args(annotation)
+    if origin is typing.Annotated:
+        return _convert(args[0], value, tuple(args[1:]))
+    if origin in (typing.Union, types.UnionType):
+        for arg in args:
+            out = _convert(arg, value)
+            if out is not value:
+                return out
+        return value
+    if origin is list and isinstance(value, list) and args:
+        return [_convert(args[0], v) for v in value]
+    if origin is dict and isinstance(value, dict) and len(args) == 2:
+        return {k: _convert(args[1], v) for k, v in value.items()}
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel) and isinstance(value, dict):
+        return present(annotation, value)
+    return value
+
+
+def present(model: type[BaseModel], data: Any) -> Any:
+    """Convert the ``Money`` / ``UnitPrice`` fields of stored record(s) to decimal strings, recursively into nested
+    models. Unknown fields, ``None`` and unparsable values are left alone (never an error); the input is not changed."""
+    if isinstance(data, list):
+        return [present(model, r) for r in data]
+    if not isinstance(data, dict):
+        return data
+    out = dict(data)
+    for name, field in model.model_fields.items():
+        if name in out:
+            out[name] = _convert(field.annotation, out[name], tuple(field.metadata))
+    return out
+
+
 def stored(model: type[BaseModel], data: Any) -> StoredJSON:
-    return StoredJSON(with_defaults(model, data))
+    return StoredJSON(present(model, with_defaults(model, data)))
