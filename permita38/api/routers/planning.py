@@ -75,14 +75,18 @@ def plan(
 
 @router.post("/plan/simulate", summary="what-if: recompute the weeks for a change set (writes nothing)")
 def simulate(body: SimulateIn, _: Annotated[dict, Needs("planning")], services: ServicesDep) -> dict[str, Any]:
-    return services.planner.simulate(body.changes.model_dump(), body.weeks, body.user_id, body.project_id)
+    return money_out.plan_response(
+        services.planner.simulate(body.changes.model_dump(), body.weeks, body.user_id, body.project_id)
+    )
 
 
 @router.post("/plan/check-offer", summary="feasibility and consistency warnings for an offer draft")
 def check_offer(
     body: DocumentIn, _: Annotated[dict, Needs("planning")], services: ServicesDep, offer_id: v.OptId = None
 ) -> list[dict]:
-    return services.planner.check_offer(body.model_dump(exclude_none=True), offer_id)
+    return money_out.money_strings(
+        services.planner.check_offer(body.model_dump(exclude_none=True), offer_id), money_out.PLAN_KEYS
+    )
 
 
 @router.post("/plan/what-must-move", summary="smallest moves or trims that make a plan fit")

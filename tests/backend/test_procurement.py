@@ -98,12 +98,12 @@ def test_w1_offer_figures_and_accept_creates_the_external_allocation(boss_client
     assert body["offer"]["status"] == "accepted" and body["offer"]["allocation_id"] == alloc["id"]
     assert body["offer"]["status_changed_at"] == "2026-03-02"
     assert body["commitment"] is None
-    assert alloc["kind"] == "external" and alloc["status"] == "active" and alloc["rate"] == 80.0
+    assert alloc["kind"] == "external" and alloc["status"] == "active" and alloc["rate"] == "80.00"
     assert (alloc["planned_hours"], alloc["planned_net"], alloc["invoiced_net"], alloc["open_net"]) == (
         80.0,
-        6400.0,
-        0.0,
-        6400.0,
+        "6400.00",
+        "0.00",
+        "6400.00",
     )
     # the hand list of W1: 16 days of 5 h, Monday to Thursday of the four weeks
     days = boss_client.get(f"/api/allocations/{alloc['id']}").json()["days"]
@@ -167,7 +167,7 @@ def test_w3_total_hours_with_an_unavailable_window(boss_client, project):
     )
     body = accept(boss_client, offer["id"]).json()
     alloc = body["allocation"]
-    assert (alloc["planned_hours"], alloc["planned_net"]) == (100.0, 7500.0)
+    assert (alloc["planned_hours"], alloc["planned_net"]) == (100.0, "7500.00")
     outside = [w for w in body["planning_warnings"] if w["code"] == "allocation.outside_availability"]
     assert len(outside) == 1
     assert outside[0]["details"]["dropped_hours"] == 25.0
@@ -532,7 +532,7 @@ def test_flat_commitment_of_an_accepted_plain_supplier_offer(boss_client, projec
     r = accept(boss_client, offer["id"])
     assert r.status_code == 200
     assert r.json()["allocation"] is None
-    assert r.json()["commitment"] == {"kind": "flat", "planned_net": 3091.88, "open_net": 3091.88}
+    assert r.json()["commitment"] == {"kind": "flat", "planned_net": "3091.88", "open_net": "3091.88"}
     com = boss_client.get("/api/finance/commitments").json()
     flat = [i for i in com["items"] if i["kind"] == "flat"]
     assert len(flat) == 1 and flat[0]["planned_net"] == "3091.88" and flat[0]["invoiced_net"] is None

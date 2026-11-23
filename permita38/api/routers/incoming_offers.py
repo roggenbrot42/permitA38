@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Path, Query, Response
 
+from permita38.api import money_out
 from permita38.api.deps import Needs, ServicesDep
 from permita38.api.responses import StoredJSON, present, stored, with_defaults
 from permita38.core import models
@@ -93,7 +94,13 @@ def review_offer(incoming_offer_id: OfferId, user: Writer, services: ServicesDep
     summary="accept an offer: a capacity supplier gets an external allocation, others a flat commitment",
 )
 def accept_offer(incoming_offer_id: OfferId, body: models.AcceptIn, user: Writer, services: ServicesDep):
-    return services.procurement.accept(incoming_offer_id, body.model_dump(exclude_unset=True), user, date.today())
+    result = services.procurement.accept(incoming_offer_id, body.model_dump(exclude_unset=True), user, date.today())
+    out = dict(result)
+    if isinstance(out.get("allocation"), dict):
+        out["allocation"] = present(models.Allocation, out["allocation"])
+    if isinstance(out.get("commitment"), dict):
+        out["commitment"] = money_out.money_strings(out["commitment"], money_out.COMMITMENT_KEYS)
+    return out
 
 
 @router.post(
