@@ -47,6 +47,10 @@ def accountant(app, boss_client):
     return _login(app, "acc1")
 
 
+def D(value):
+    return Decimal(str(value))
+
+
 # ------------------------------------------------------------------ the rate tables themselves
 def test_rate_table_values_are_exact_decimals_and_documented():
     t = load_rates(2026)
@@ -138,10 +142,10 @@ def test_saved_trip_has_the_hand_computed_figures(boss_client):
         meals_provided=[{"date": "2026-11-10", "breakfast": True}],
         mileage=[{"date": "2026-11-09", "from": "Kiel", "to": "Hamburg", "km": 237.5}],
     )
-    assert made["allowance_total"] == 50.40  # 14 + (28 - 5,60) + 14
-    assert made["mileage_total"] == 71.25  # 237,5 x 0,30
+    assert made["allowance_total"] == "50.40"  # 14 + (28 - 5,60) + 14
+    assert made["mileage_total"] == "71.25"  # 237,5 x 0,30
     assert made["rules_version"] == "2025-12-05"
-    assert [d["amount"] for d in made["days"]] == [14.00, 22.40, 14.00]
+    assert [d["amount"] for d in made["days"]] == ["14.00", "22.40", "14.00"]
     assert made["status"] == "draft"
 
 
@@ -158,9 +162,9 @@ def test_preview_equals_the_saved_figures_and_saves_nothing(boss_client):
     saved = boss_client.post("/api/trips", json=body).json()
     assert pv.json()["days"] == saved["days"]
     assert pv.json()["allowance_total"] == saved["allowance_total"]
-    assert pv.json()["mileage_total"] == saved["mileage_total"] == 30.12  # 100,4 x 0,30
+    assert pv.json()["mileage_total"] == saved["mileage_total"] == "30.12"  # 100,4 x 0,30
     # 14 + (28 - 5,60 - 11,20) + 14 = 39,20
-    assert saved["allowance_total"] == 39.20
+    assert saved["allowance_total"] == "39.20"
 
 
 def test_preview_validates_like_save(boss_client):
@@ -220,7 +224,7 @@ def test_deleting_a_trip_keeps_its_bills_unlinked(boss_client):
     resp = boss_client.delete(f"/api/trips/{trip['id']}")
     assert resp.status_code == 204
     kept = boss_client.get(f"/api/expenses/{exp['id']}").json()
-    assert kept["id"] == exp["id"] and kept["net"] == 40
+    assert kept["id"] == exp["id"] and kept["net"] == "40.00"
     assert kept.get("trip_id") is None
 
 
@@ -314,7 +318,7 @@ def test_final_trip_is_locked_until_the_boss_reopens_it(boss_client):
 def test_final_trip_keeps_its_stored_figures(boss_client):
     trip = make_trip(boss_client)
     fin = boss_client.put(f"/api/trips/{trip['id']}", json=trip_body(**FINAL_OK, status="final")).json()
-    assert fin["allowance_total"] == trip["allowance_total"] == 56.00
+    assert fin["allowance_total"] == trip["allowance_total"] == "56.00"
 
 
 # ------------------------------------------------------------------ statement PDF
@@ -368,7 +372,7 @@ def test_finalising_a_trip_adds_exactly_the_expected_cents(boss_client):
     before = boss_client.get("/api/finance", params={"year": 2026}).json()
     nov_before = before["months"][10]
     trip = make_trip(boss_client, mileage=[{"date": "2026-11-09", "from": "Kiel", "to": "Hamburg", "km": 237.5}])
-    assert trip["allowance_total"] == 56.00 and trip["mileage_total"] == 71.25
+    assert trip["allowance_total"] == "56.00" and trip["mileage_total"] == "71.25"
     fin = boss_client.put(
         f"/api/trips/{trip['id']}",
         json=trip_body(
@@ -379,12 +383,12 @@ def test_finalising_a_trip_adds_exactly_the_expected_cents(boss_client):
     after = boss_client.get("/api/finance", params={"year": 2026}).json()
     nov = after["months"][10]
     # allowance 56,00 + mileage 71,25: deductible cost, no input VAT
-    assert round(nov["expenses"] - nov_before["expenses"], 2) == 127.25
-    assert round(nov["vat_in"] - nov_before["vat_in"], 2) == 0.00
-    assert round(after["totals"]["expenses"] - before["totals"]["expenses"], 2) == 127.25
-    assert after["categories"]["Meal allowance"] == 56.00
-    assert after["categories"]["Mileage"] == 71.25
-    assert round(after["totals"]["profit"] - before["totals"]["profit"], 2) == -127.25
+    assert D(nov["expenses"]) - D(nov_before["expenses"]) == Decimal("127.25")
+    assert D(nov["vat_in"]) - D(nov_before["vat_in"]) == Decimal("0.00")
+    assert D(after["totals"]["expenses"]) - D(before["totals"]["expenses"]) == Decimal("127.25")
+    assert D(after["categories"]["Meal allowance"]) == Decimal("56.00")
+    assert D(after["categories"]["Mileage"]) == Decimal("71.25")
+    assert D(after["totals"]["profit"]) - D(before["totals"]["profit"]) == Decimal("-127.25")
 
 
 def test_a_december_trip_changes_only_december(boss_client):
@@ -394,10 +398,10 @@ def test_a_december_trip_changes_only_december(boss_client):
         f"/api/trips/{made['id']}",
         json=trip_body(**FINAL_OK, status="final", start="2026-12-30T08:00", end="2026-12-30T18:00", places=[]),
     )
-    assert made["allowance_total"] == 14.00  # one day of 10 hours, domestic: 14,00
+    assert made["allowance_total"] == "14.00"  # one day of 10 hours, domestic: 14,00
     after = boss_client.get("/api/finance", params={"year": 2026}).json()
-    assert round(after["months"][11]["expenses"] - before["months"][11]["expenses"], 2) == 14.00
-    assert round(after["months"][10]["expenses"] - before["months"][10]["expenses"], 2) == 0.00
+    assert D(after["months"][11]["expenses"]) - D(before["months"][11]["expenses"]) == Decimal("14.00")
+    assert D(after["months"][10]["expenses"]) - D(before["months"][10]["expenses"]) == Decimal("0.00")
 
 
 # ------------------------------------------------------------------ checklist, bills, finalising (contract)
@@ -432,7 +436,7 @@ def test_checklist_states_and_bills_follow_the_linked_bills(boss_client):
             "/api/expenses", json={"date": "2026-11-09", "net": net, "vat": 0, "category": cat, "trip_id": trip["id"]}
         )
     got = boss_client.get(f"/api/trips/{trip['id']}").json()
-    assert got["bills"] == {"count": 2, "net": 150.0, "vat": 0.0}
+    assert got["bills"] == {"count": 2, "net": "150.00", "vat": "0.00"}
     rows = {r["id"]: r for r in got["checklist"]}
     assert [r["id"] for r in got["checklist"]] == [
         "allowance",
@@ -443,13 +447,13 @@ def test_checklist_states_and_bills_follow_the_linked_bills(boss_client):
         "cost_centre",
     ]
     assert rows["allowance"]["state"] == "added" and rows["allowance"]["count"] == 3
-    assert rows["allowance"]["sum"] == 56.0
-    assert rows["accommodation"] == {**rows["accommodation"], "state": "added", "count": 2, "sum": 150.0}
+    assert rows["allowance"]["sum"] == "56.00"
+    assert rows["accommodation"] == {**rows["accommodation"], "state": "added", "count": 2, "sum": "150.00"}
     assert rows["transportation"] == {
         **rows["transportation"],
         "state": "added",
         "count": 1,
-        "sum": 30.0,
+        "sum": "30.00",
     }  # 100 km x 0,30
     assert rows["material"]["state"] == "not_needed"
     assert rows["food"]["state"] == "added"
@@ -526,7 +530,7 @@ def test_preview_ignores_response_only_fields_in_the_body(boss_client):
         ),
     ).json()
     assert noisy["days"] == plain["days"]
-    assert noisy["allowance_total"] == plain["allowance_total"] == 56.00
+    assert noisy["allowance_total"] == plain["allowance_total"] == "56.00"
 
 
 def test_year_without_table_is_422_with_the_contract_message(boss_client):
@@ -584,13 +588,13 @@ def test_finance_across_a_year_boundary_books_allowance_per_day_and_mileage_at_s
     )
     made = boss_client.post("/api/trips", json=body)
     assert made.status_code == 200, made.text
-    assert [d["amount"] for d in made.json()["days"]] == [14.00, 28.00, 30.00, 15.00]
+    assert [d["amount"] for d in made.json()["days"]] == ["14.00", "28.00", "30.00", "15.00"]
     after26 = boss_client.get("/api/finance", params={"year": 2026}).json()
     after27 = boss_client.get("/api/finance", params={"year": 2027}).json()
     # 2026: allowance 14 + 28 and mileage 100 km x 0,30 (start year) = 72,00
-    assert round(after26["totals"]["expenses"] - before26["totals"]["expenses"], 2) == 72.00
+    assert D(after26["totals"]["expenses"]) - D(before26["totals"]["expenses"]) == Decimal("72.00")
     # 2027: allowance 30 + 15 = 45,00 and no mileage
-    assert round(after27["totals"]["expenses"] - before27["totals"]["expenses"], 2) == 45.00
+    assert D(after27["totals"]["expenses"]) - D(before27["totals"]["expenses"]) == Decimal("45.00")
 
 
 def test_statement_cells_are_cut_to_their_column_and_every_text_is_escaped(boss_client):
