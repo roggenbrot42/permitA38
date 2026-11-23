@@ -267,8 +267,8 @@ Everything escaped, keyboard operable, German and English.
    invoice is unpaid at the end of March and Kz 21 is still **4,000 in March**; the domestic one counts when paid.
 9. **Refund.** Sale net 500.00 @ 19 % (95.00); equipment net 1,578.95 (VAT `300.0005` → 300.00): Kz 83 **−205.00**.
 10. **Sondervorauszahlung.** First year with Dauerfrist: Σ Kz 83 of 2025 = 6,600.00, Kz 39 of 2025 = 0 → **600.00**
-    (due Tue 10 Feb 2026). December 2026: output 1,000.00, input 400.00, Kz 39 600 → Kz 83 **0.00**; with output
-    850.00 → **−150.00**. Second year: Σ Kz 83 of 2026 = 6,000.00 + Kz 39 of 2026 = 600.00 → base 6,600.00 →
+    (due Tue 10 Feb 2026). December 2026: output 1,000.00 (Kz 81 base 5,251 → 997.69; Kz 86 base 33 → 2.31), input
+    400.00, Kz 39 600 → Kz 83 **0.00**; with input 550.00 → **−150.00**. Second year: Σ Kz 83 of 2026 = 6,000.00 + Kz 39 of 2026 = 600.00 → base 6,600.00 →
     **600.00**. Partial year: business from 1 April 2025, Σ Kz 83 Apr–Dec = 4,500.00 → annualised 6,000.00 →
     **545.45**.
 11. **Other rate.** Fake historic rate 16 %: net 1,000.00 (160.00): Kz 35 **1,000**, Kz 36 **160.00**.
