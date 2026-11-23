@@ -26,6 +26,66 @@ class VatRulesMissing(ValueError):
     """No VAT rule table exists at all."""
 
 
+class VatRulesInvalid(VatRulesMissing):
+    """A rule table file is malformed (wrong year, missing key, unknown box reference)."""
+
+
+_TOP_KEYS = (
+    "form_year",
+    "source",
+    "status",
+    "base_rounding",
+    "boxes",
+    "map",
+    "result",
+    "klein_limit_prev",
+    "klein_limit_cur",
+    "input_vat_timing",
+)
+_BOX_KEYS = ("kz", "label_de", "label_en", "kind", "tax_kz", "computed_tax_rate")
+_MAP_KEYS = ("tax_key", "tax_kind", "base_kz", "tax_kz")
+_RESULT_KEYS = ("kz", "plus", "minus")
+
+
+def _require(obj: object, keys: tuple[str, ...], where: str, name: str) -> None:
+    if not isinstance(obj, dict):
+        raise VatRulesInvalid(f"{name}: {where} must be an object")
+    for key in keys:
+        if key not in obj:
+            raise VatRulesInvalid(f"{name}: {where} lacks required key '{key}'")
+
+
+def _validate(raw: object, year: int) -> None:
+    name = f"{year}.json"
+    _require(raw, _TOP_KEYS, "file", name)
+    assert isinstance(raw, dict)
+    if int(raw["form_year"]) != year:
+        raise VatRulesInvalid(f"{name}: form_year {raw['form_year']} differs from the file name year {year}")
+    for key in ("boxes", "map"):
+        if not isinstance(raw[key], list):
+            raise VatRulesInvalid(f"{name}: '{key}' must be a list")
+    for b in raw["boxes"]:
+        _require(b, _BOX_KEYS, "box", name)
+    for m in raw["map"]:
+        _require(m, _MAP_KEYS, "map row", name)
+    _require(raw["result"], _RESULT_KEYS, "result", name)
+    kzs = {b["kz"] for b in raw["boxes"]}
+    for b in raw["boxes"]:
+        if b["tax_kz"] is not None and b["tax_kz"] not in kzs:
+            raise VatRulesInvalid(f"{name}: box {b['kz']} refers to unknown box {b['tax_kz']}")
+    for m in raw["map"]:
+        for ref in (m["base_kz"], m["tax_kz"]):
+            if ref is not None and ref not in kzs:
+                raise VatRulesInvalid(f"{name}: map row {m['tax_key']}/{m['tax_kind']} refers to unknown box {ref}")
+    res = raw["result"]
+    if res["kz"] not in kzs:
+        raise VatRulesInvalid(f"{name}: result box {res['kz']} is unknown")
+    for token in (*res["plus"], *res["minus"]):
+        kz = token[:-1] if token.endswith("t") else token
+        if kz not in kzs:
+            raise VatRulesInvalid(f"{name}: result token {token} refers to unknown box {kz}")
+
+
 @dataclass(frozen=True)
 class Box:
     kz: str
@@ -78,6 +138,7 @@ def available_years() -> tuple[int, ...]:
 @lru_cache(maxsize=None)
 def _load(year: int) -> VatRules:
     raw = json.loads(_DIR.joinpath(f"{year}.json").read_text(encoding="utf-8"))
+    _validate(raw, year)
     boxes = tuple(
         Box(
             kz=b["kz"],
