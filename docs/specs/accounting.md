@@ -290,8 +290,9 @@ Both columns balance by construction: accrual P + (C − T) − (P − T) − CN
 
 **Write-off reversal.** A payment that raises `P` above `C` while write-offs exist first creates a write-off reversal
 record (a credit document with `credit_kind = write_off_reversal`, negative amounts, `corrects_id` = the invoice,
-dated the payment date; event key `credit:<id>`) for `min(P − C, remaining written-off gross)`, split over the rate
-groups as the complement of the cumulative allocation; then the payment posts. Reversing that payment later does
+dated the payment date; event key `credit:<id>`) for `min(P − C, remaining written-off gross)`, allocated over the
+remaining written-off gross per rate group (largest remainder in cents, ties to the larger rate), its VAT in
+proportion, so a full recovery restores exactly the written-off net and VAT; then the payment posts. Reversing that payment later does
 **not** restore the write-off: the receivable reopens and the user writes it off again if needed. Recovered cash is revenue again (accrual:
 credit `bad_debts`) and under Soll the VAT is due again at the receipt date (§ 17 Abs. 2 Nr. 1 Satz 2); under Ist the
 cash rule handles it.
@@ -332,7 +333,8 @@ assumption is a payment entry like any other. Setting or changing only `paid_on`
 event alone (the payment revision increases, the bill revision stays). A reversal entry has the event key of the
 entry it reverses plus `:rev`. Payment entries carry no VAT line, so reversing one whose booking date lies in a
 locked month is allowed: the reversal and the new entry are booked in the first open month.
-Input VAT `vat_date` = the expense `date` (proxy for the receipt of the invoice *(verify)*; year-versioned in the rules
+Whether a fiscal year is closed is passed in by the caller from `fiscal_years.closed_at` (section 13); a locked month
+never closes a year. Input VAT `vat_date` = the expense `date` (proxy for the receipt of the invoice *(verify)*; year-versioned in the rules
 file because of the change announced for 2028 *(verify)*); when that month is locked, `vat_date` = the booking date
 (a later deduction is allowed). Accrual `income_date` = the expense `date` (or the booking date when that year is
 closed); EÜR `income_date` = the payment date.
@@ -342,7 +344,7 @@ closed); EÜR `income_date` = the payment date.
 | `standard`, accrual | D category `cd` (`income_date`), D `meals_nondeductible` `c − cd` (`income_date`) or D `private_withdrawal` `c − cd` (no `income_date`: private shares never enter the P&L or the EÜR), D `input_vat_r` iv (`tax_key` VST, input, `vat_date`), C `payables` g (open item) | D `payables` g / C `bank` g |
 | `standard`, EÜR | D `input_vat_r` iv (VST, input, `vat_date`), C `input_vat_clearing` iv | D category `cd`, D `meals_nondeductible` or `private_withdrawal` `c − cd`, D `input_vat_clearing` iv (all with `income_date` = payment date except `private_withdrawal`; the clearing line is the "input VAT paid" of the gross EÜR), C `bank` g |
 | `no_input_vat` | as `standard` with `iv = 0`, `c = g` (EÜR: no bill entry) | as `standard` |
-| `reverse_charge_eu_service`, accrual | per rate group (default 19): `t = q2(n_r × r / 100)`, `ri = q2(t × vp / 100)` (0 for a small business): C `rc_vat_out_eu` t (`tax_key` RC_EU_SVC, tax, base n_r, `vat_date` = § 13b tax date), D `rc_input_vat` ri (RC_EU_SVC, input, same `vat_date`), D cost `n + (t − ri)` split by `pct` (`income_date`), C `payables` n | D `payables` n / C `bank` n |
+| `reverse_charge_eu_service`, accrual | per rate group of the **document** (default 19; `n_r` = the sum of the line nets at that rate): `t = q2(n_r × r / 100)`, split over the lines by largest remainder in proportion to their net for the input share and the cost; `ri = q2(t × vp / 100)` (0 for a small business): C `rc_vat_out_eu` t (`tax_key` RC_EU_SVC, tax, base n_r, `vat_date` = § 13b tax date), D `rc_input_vat` ri (RC_EU_SVC, input, same `vat_date`), D cost `n + (t − ri)` split by `pct` (`income_date`), C `payables` n | D `payables` n / C `bank` n |
 | `reverse_charge_eu_service`, EÜR | C `rc_vat_out_eu` t, D `rc_input_vat` ri (as accrual), D `rc_vat_nondeductible` `t − ri` (no `income_date`: under EÜR the non-deductible tax becomes an expense when it is paid to the tax office with the return, section 9.6, so it must not be counted twice) | D cost `n` split by `pct` (`income_date` = payment date) / C `bank` n |
 | `reverse_charge_*`, EÜR, `pct` < 100 | the bill entry above, plus the private share of the non-deductible tax `x = (t − ri) − q2((t − ri) × pct / 100)`: D `private_withdrawal` x / C `vat_paid_private` x (`income_date` = booking date; the role sits on the EÜR line "VAT paid to the tax office" and reduces it, because the return payment of 9.6 counts the whole `t − ri` as an expense) *(verify the timing)* | |
 | `reverse_charge_third_country` | as the EU rows with `rc_vat_out_3c` and RC_3C_SVC | |
