@@ -28,7 +28,7 @@ def test_boss_gets_defaults_then_the_stored_profile(boss_client):
     assert put.json()["warnings"] == []
     got = boss_client.get(URL).json()
     assert got["stored"] is True and got["assessment"] == "joint"
-    assert got["church_tax_percent"] == 9 and got["other_income_year"] == 1200
+    assert got["church_tax_percent"] == 9 and got["other_income_year"] == "1200.00"
 
 
 def test_put_replaces_and_ignores_stored_and_warnings_in_the_body(boss_client, app):
@@ -36,7 +36,7 @@ def test_put_replaces_and_ignores_stored_and_warnings_in_the_body(boss_client, a
     r = boss_client.put(URL, json={"church_tax_percent": 8, "stored": False, "warnings": ["x"]})
     assert r.status_code == 200 and r.json()["stored"] is True and r.json()["warnings"] == []
     got = boss_client.get(URL).json()
-    assert got["assessment"] == "single" and got["other_income_year"] == 0  # replaced, not merged
+    assert got["assessment"] == "single" and got["other_income_year"] == "0.00"  # replaced, not merged
     raw = app.state.services.store.settings()["personal_tax"]
     assert "stored" not in raw and "warnings" not in raw
 
@@ -145,12 +145,12 @@ def test_numeric_strings_and_bool_counts_are_rejected(boss_client, body):
 
 def test_money_decimal_string_is_accepted(boss_client):
     r = boss_client.put(URL, json={"employment": {"gross_year": "1000.00"}})
-    assert r.status_code == 200 and r.json()["employment"]["gross_year"] == 1000
+    assert r.status_code == 200 and r.json()["employment"]["gross_year"] == "1000.00"
 
 
 def test_basis_equal_to_premium_is_accepted(boss_client):
     r = boss_client.put(URL, json={"health": {"mode": "pkv", "pkv_monthly": 300, "pkv_basis_monthly": 300}})
-    assert r.status_code == 200 and r.json()["health"]["pkv_basis_monthly"] == 300
+    assert r.status_code == 200 and r.json()["health"]["pkv_basis_monthly"] == "300.00"
 
 
 def test_unknown_fields_are_accepted_and_round_trip(boss_client, app):
@@ -172,7 +172,7 @@ def test_explicit_none_is_accepted_where_the_field_is_nullable(boss_client):
     got = boss_client.get(URL).json()
     assert got["health"]["zusatzbeitrag_percent"] is None
     assert got["employment"]["steuerklasse"] is None and got["employment"]["withheld_year"] is None
-    assert got["employment"]["gross_year"] == 50000
+    assert got["employment"]["gross_year"] == "50000.00"
 
 
 def test_explicit_none_is_rejected_where_the_field_is_not_nullable(boss_client):
@@ -185,30 +185,30 @@ def test_the_full_profile_round_trips(boss_client):
     body = {
         "assessment": "joint",
         "church_tax_percent": 8,
-        "other_income_year": 100,
-        "other_deductions_year": 200,
-        "other_insurance_year": 300,
+        "other_income_year": "100.00",
+        "other_deductions_year": "200.00",
+        "other_insurance_year": "300.00",
         "children": {"count": 2, "full_allowance": True, "pv_parent": True, "pv_children_under_25": 1},
         "health": {
             "mode": "pkv",
             "krankengeld": False,
             "zusatzbeitrag_percent": 1.5,
-            "pkv_monthly": 400,
-            "pkv_basis_monthly": 300,
-            "pkv_care_monthly": 50,
-            "pkv_employer_subsidy_monthly": 100,
+            "pkv_monthly": "400.00",
+            "pkv_basis_monthly": "300.00",
+            "pkv_care_monthly": "50.00",
+            "pkv_employer_subsidy_monthly": "100.00",
         },
-        "pension": {"mode": "fixed", "fixed_monthly": 250},
+        "pension": {"mode": "fixed", "fixed_monthly": "250.00"},
         "unemployment": {"mode": "voluntary_half"},
         "employment": {
-            "gross_year": 60000,
+            "gross_year": "60000.00",
             "sv_liable": False,
             "steuerklasse": 3,
-            "bav_employee_year": 1000,
-            "bav_employer_year": 500,
-            "vwl_employer_year": 240,
-            "werbungskosten_year": 1500,
-            "withheld_year": 9000,
+            "bav_employee_year": "1000.00",
+            "bav_employer_year": "500.00",
+            "vwl_employer_year": "240.00",
+            "werbungskosten_year": "1500.00",
+            "withheld_year": "9000.00",
         },
     }
     assert boss_client.put(URL, json=body).status_code == 200

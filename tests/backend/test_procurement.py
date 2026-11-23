@@ -251,7 +251,7 @@ def test_w9_cancel_keeps_the_days_before_the_cut_and_w10_floors_the_open_net(bos
     cancelled = r.json()
     assert cancelled["status"] == "cancelled" and cancelled["cancelled_from"] == "2026-03-13"
     assert cancelled["cancel_reason"] == "project paused"
-    assert (cancelled["planned_hours"], cancelled["planned_net"]) == (40.0, 3200.0)
+    assert (cancelled["planned_hours"], cancelled["planned_net"]) == (40.0, "3200.00")
 
     e = boss_client.post(
         "/api/expenses",
@@ -266,7 +266,7 @@ def test_w9_cancel_keeps_the_days_before_the_cut_and_w10_floors_the_open_net(bos
     assert e.status_code == 200, e.text  # expenses answer 200 on create, as before
     assert e.json()["sanity_warnings"] == []  # 1600 is within the 3200 planned
     after = boss_client.get(f"/api/allocations/{alloc['id']}").json()
-    assert (after["invoiced_net"], after["open_net"]) == (1600.0, 1600.0)
+    assert (after["invoiced_net"], after["open_net"]) == ("1600.00", "1600.00")
 
     com = boss_client.get("/api/finance/commitments").json()
     assert len(com["items"]) == 1
@@ -293,7 +293,7 @@ def test_w9_cancel_keeps_the_days_before_the_cut_and_w10_floors_the_open_net(bos
         "excess": 100.0,
     }
     final = boss_client.get(f"/api/allocations/{alloc['id']}").json()
-    assert (final["invoiced_net"], final["open_net"]) == (3300.0, 0.0)
+    assert (final["invoiced_net"], final["open_net"]) == ("3300.00", "0.00")
 
 
 def test_cancel_errors(boss_client, project):

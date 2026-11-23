@@ -593,7 +593,7 @@ def test_subcontractor_row_roundtrip_with_planned_figures(boss_client, sam, proj
     )
     assert r.status_code == 200, r.text
     # 4 weeks (09.11.-04.12.) x 8 h at 90.00
-    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (32.0, 2880.0)
+    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (32.0, "2880.00")
     assert "total_hours" not in store.get("allocations", row["id"])
     r = boss_client.delete(f"/api/allocations/{row['id']}")
     assert r.status_code == 204
@@ -630,11 +630,11 @@ def test_e6_edit_to_30_hours_warns_with_the_literal_text(boss_client, sam, proje
     offer, row = offer_row
     r = boss_client.put(f"/api/allocations/{row['id']}", json=sup_body(sam, project))  # 24 h x 90.00 as booked
     assert r.status_code == 200, r.text
-    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (24.0, 2160.0)
+    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (24.0, "2160.00")
     assert r.json()["planning_warnings"] == []
     r = boss_client.put(f"/api/allocations/{row['id']}", json=sup_body(sam, project, total_hours=30.0))
     assert r.status_code == 200, r.text
-    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (30.0, 2700.0)
+    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (30.0, "2700.00")
     assert r.json()["incoming_offer_id"] == offer["id"]
     (w,) = r.json()["planning_warnings"]
     assert w["code"] == "assignment.differs_from_offer" and w["severity"] == "info"
@@ -653,7 +653,7 @@ def test_offer_linked_rows_can_be_cancelled_but_not_deleted(boss_client, offer_r
     r = boss_client.post(f"/api/allocations/{row['id']}/cancel", json={"effective_from": "2026-11-23"})
     assert r.status_code == 200 and r.json()["status"] == "cancelled"
     # 24 h over 16 days (Mon-Thu, 4 weeks) = 1.5 h a day; 8 lie before 23.11. -> 12 h, 12 x 90.00 = 1,080.00
-    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (12.0, 1080.0)
+    assert (r.json()["planned_hours"], r.json()["planned_net"]) == (12.0, "1080.00")
     r = boss_client.delete(f"/api/allocations/{row['id']}")
     assert r.status_code == 409  # cancelled rows stay
 
