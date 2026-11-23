@@ -17,7 +17,7 @@ def test_full_business_flow(boss_client):
     assert abs(dash["worked"] - 2.5) < 1e-9
 
     inv = c.post("/api/invoices/from-time", json={"customer_id": cust["id"]}).json()
-    assert inv["lines"][0]["price"] == 100.0 and inv["lines"][0]["amount"] == 250.0
+    assert inv["lines"][0]["price"] == "100.00" and inv["lines"][0]["amount"] == "250.00"
     fin = c.post(f"/api/invoices/{inv['id']}/finalize").json()
     assert fin["number"].startswith("RE-") and fin["number"].endswith("-0001")
     pdf = c.get(f"/api/invoices/{inv['id']}/pdf")

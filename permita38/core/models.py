@@ -231,8 +231,8 @@ class UserOut(Record):
     role: str | None = None
     weekly_hours: float | None = None
     workdays: list[int] | None = None
-    default_rate: float | None = None
-    cost_rate: float | None = None
+    default_rate: v.UnitPrice | None = None
+    cost_rate: v.UnitPrice | None = None
     color: str | None = None
     tracking_start: str | None = None
     active: bool | None = None
@@ -338,7 +338,7 @@ class Settings(BaseModel):
     vat_rate: float = 19
     state: str = ""
     hebesatz: float = 400
-    default_rate: float = 80
+    default_rate: v.UnitPrice = 80
     payment_days: int = 14
     offer_valid_days: int = 30
     default_template: str = "classic"
@@ -347,7 +347,7 @@ class Settings(BaseModel):
     invoice_reset: str = "yearly"  # never | yearly | monthly (see core/numbering.py)
     offer_reset: str = "yearly"
     numbering_shared: bool = False  # invoices and offers share one sequence
-    planning_min_rate: float = 0
+    planning_min_rate: v.UnitPrice = 0
     planning_default_win_probability: float = 100
     subcontractor_hint_hours_per_week: float = 30
     subcontractor_hint_weeks: int = 12
@@ -835,16 +835,16 @@ class PersonalTaxHealth(BaseModel):
     mode: str = "gkv"
     krankengeld: bool = True
     zusatzbeitrag_percent: float | None = None
-    pkv_monthly: float = 0
-    pkv_basis_monthly: float = 0
-    pkv_care_monthly: float = 0
-    pkv_employer_subsidy_monthly: float = 0
+    pkv_monthly: v.Money = 0
+    pkv_basis_monthly: v.Money = 0
+    pkv_care_monthly: v.Money = 0
+    pkv_employer_subsidy_monthly: v.Money = 0
 
 
 class PersonalTaxPension(BaseModel):
     model_config = ConfigDict(extra="allow")
     mode: str = "none"
-    fixed_monthly: float = 0
+    fixed_monthly: v.Money = 0
 
 
 class PersonalTaxUnemployment(BaseModel):
@@ -854,14 +854,14 @@ class PersonalTaxUnemployment(BaseModel):
 
 class PersonalTaxEmployment(BaseModel):
     model_config = ConfigDict(extra="allow")
-    gross_year: float = 0
+    gross_year: v.Money = 0
     sv_liable: bool = True
     steuerklasse: int | None = None
-    bav_employee_year: float = 0
-    bav_employer_year: float = 0
-    vwl_employer_year: float = 0
-    werbungskosten_year: float = 0
-    withheld_year: float | None = None
+    bav_employee_year: v.Money = 0
+    bav_employer_year: v.Money = 0
+    vwl_employer_year: v.Money = 0
+    werbungskosten_year: v.Money = 0
+    withheld_year: v.Money | None = None
 
 
 class PersonalTax(BaseModel):
@@ -870,9 +870,9 @@ class PersonalTax(BaseModel):
     model_config = ConfigDict(extra="allow")
     assessment: str = "single"
     church_tax_percent: float = 0
-    other_income_year: float = 0
-    other_deductions_year: float = 0
-    other_insurance_year: float = 0
+    other_income_year: v.Money = 0
+    other_deductions_year: v.Money = 0
+    other_insurance_year: v.Money = 0
     children: PersonalTaxChildren = Field(default_factory=PersonalTaxChildren)
     health: PersonalTaxHealth = Field(default_factory=PersonalTaxHealth)
     pension: PersonalTaxPension = Field(default_factory=PersonalTaxPension)
@@ -1160,7 +1160,7 @@ class Allocation(BaseModel):
     end: str
     hours_per_week: float | None = None
     total_hours: float | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     status: str = "active"
     cancelled_from: str | None = None
     cancel_reason: str | None = None
@@ -1173,9 +1173,9 @@ class Allocation(BaseModel):
     planned_hours: float | None = None
     planning_warnings: list[dict] | None = None  # only in POST/PUT answers
     # external allocations only (docs/contracts/subcontractors.md)
-    planned_net: float | None = None
-    invoiced_net: float | None = None
-    open_net: float | None = None
+    planned_net: v.Money | None = None
+    invoiced_net: v.Money | None = None
+    open_net: v.Money | None = None
     offer_reference: str | None = None
     days: list[dict] | None = None  # GET /api/allocations/{allocation_id}
 
@@ -1665,7 +1665,7 @@ class Supplier(Record):
     tags: list[str] = []
     weekly_hours: float | None = None
     workdays: list[int] | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     unavailable: list[dict] | None = None
     login_user_id: str | None = None
     external_id: str | None = None
