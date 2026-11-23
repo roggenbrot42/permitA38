@@ -110,6 +110,9 @@ JSON number. The server already computes with `Decimal` (`core/money.py`); float
 | `GET /plan`, `POST /plan/simulate`, `POST /plan/check-offer` (`planner/views.py`), planner suggestions (`cover.py`) | `rate`, `value`, `invoiced`, `open`, `expected_value`, `planned_subcontractor_cost`, `contract_value`, `margin` (not `promised`, `booked`, `remaining`, `covered`, `shortfall`, `win_probability`) |
 | trip preview and save (`trips_calc.py`, `service/trips.py`) | `reductions[].amount`, `days[].base`, `days[].amount`, `allowance_total`, `mileage_rate`, `mileage_total`, `bills.net`, `bills.vat`, `items_expected_total`, `items_actual_total`, `checklist[].sum` |
 | expense itemise (`calc.itemise_expense`) | `lines[].net`, `lines[].vat`, `net`, `vat` |
+| warning details (`planning_warnings`, `sanity_warnings`, `warnings` in every response) | per warning code an explicit set of money detail keys (`WARNING_MONEY_KEYS` in `api/money_out.py`), because names like `difference`, `reference` or `rate` are hours in other codes (e.g. `incoming_offer.hours_mismatch`); unknown codes stay untouched |
+| `POST /import/preview`, `POST /import/run` | `rows[].totals` net, vat, gross |
+| write and action responses (`POST /offers/{id}/accept`, `POST /projects/{id}/extend`, `GET /projects/{id}/planning`, `/bootstrap` `me`) | the embedded records through `present()` |
 | receipt and document scans (`draft`, `doc`, `given_totals`, `totals_info`) | `gross`, `total`, `net`, `vat`, line `price`/`gross`, expense `net`/`vat` |
 
 **Money-name list for the guards** (rule 5): the union of the field and key names above, minus names that are also
