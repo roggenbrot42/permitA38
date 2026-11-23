@@ -39,13 +39,15 @@ const Money = (() => {
   /** Totals of an offer/invoice as BigInt cents: {lines:[…], net, vat:{rate: cents}, vatTotal, gross}. */
   function totals(doc, settings) {
     const klein = !!(settings && settings.kleinunternehmer);
-    const dv = klein ? 0 : ((doc.vat_rate ?? settings?.vat_rate ?? 19) || 0);
+    // like the server: null and the empty string both mean "use the default" (document rate, then settings, then 19)
+    const unset = x => x === null || x === undefined || x === '';
+    const dv = klein ? 0 : (unset(doc.vat_rate) ? (unset(settings?.vat_rate) ? 19 : settings.vat_rate) : doc.vat_rate);
     const lines = [], groups = {};
     let net = 0n;
     for (const l of doc.lines || []) {
       const c = lineCents(l.qty, l.price);
       lines.push(c); net += c;
-      const rate = String(klein ? 0 : (l.vat ?? dv));
+      const rate = String(klein ? 0 : (unset(l.vat) ? dv : l.vat));
       groups[rate] = (groups[rate] || 0n) + c;
     }
     const vat = {};

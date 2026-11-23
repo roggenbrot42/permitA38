@@ -59,7 +59,8 @@ def line_amount(line: dict) -> Decimal:
 
 
 def doc_totals(doc: dict, klein: bool) -> dict[str, Decimal]:
-    """net / vat / gross of an offer or invoice. Per-line VAT beats the document rate beats 19 %."""
+    """net / vat / gross of an offer or invoice. Per-line VAT beats the document rate beats 19 %. Line amounts and the
+    VAT of each rate group are rounded half-up to cents (the server rule), never summed unrounded."""
     doc_rate = doc.get("vat_rate")
     doc_rate = Decimal(DEFAULT_VAT) if doc_rate is None else Decimal(str(doc_rate))
     by_rate: dict[Decimal, Decimal] = {}
@@ -69,8 +70,18 @@ def doc_totals(doc: dict, klein: bool) -> dict[str, Decimal]:
         net += amt
         rate = Decimal(0) if klein else Decimal(str(ln["vat"] if ln.get("vat") is not None else doc_rate))
         by_rate[rate] = by_rate.get(rate, Decimal(0)) + amt
-    vat = sum((amt * r / 100 for r, amt in by_rate.items()), Decimal(0))
+    vat = sum((money(amt * r / 100) for r, amt in by_rate.items()), Decimal(0))  # rounded per rate group, half-up
     return {"net": net, "vat": vat, "gross": net + vat}
+
+
+def expense_shares(x: dict, klein: bool) -> tuple[Decimal, Decimal]:
+    """(deductible cost, reclaimed input VAT) of a classic single-amount expense, each rounded half-up to cents per
+    record. Share = ``deductible`` percent; a Kleinunternehmer cannot reclaim VAT, so the gross amount is the cost."""
+    pct = Decimal(str(x.get("deductible", 100))) / 100
+    net, vat = Decimal(str(x["net"])), Decimal(str(x.get("vat", 0)))
+    if klein:
+        return money((net + vat) * pct), Decimal(0)
+    return money(net * pct), money(vat * pct)
 
 
 def resolve_rate(

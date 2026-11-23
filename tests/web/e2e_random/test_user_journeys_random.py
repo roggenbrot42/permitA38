@@ -774,11 +774,10 @@ class Journey:
         revenue = sum((d.totals()[0] for d in m.paid_invoices()), Decimal(0))
         vat_out = sum((sum(d.totals()[1].values(), Decimal(0)) for d in m.paid_invoices()), Decimal(0))
         expenses = sum((Decimal(e.net) for e in m.expenses), Decimal(0))
-        # VAT on a half-cent tie (e.g. 19% of 621.50) is rounded differently by the backend (binary floats) than by
-        # the editor/Decimal half-up: allow one cent per VAT group (see test_regressions.py::test_vat_rounding...).
-        groups = sum(len(d.totals()[1]) for d in m.paid_invoices())
+        # exact: MDoc.totals() rounds the VAT of each rate group half-up like the server (lines are whole euros x whole
+        # units, so the line amounts need no rounding), and every expense here is a single classic record at 100 %.
         assert fin["revenue"] == money(revenue), (fin, revenue)
-        assert abs(Decimal(fin["vat_out"]) - vat_out) <= Decimal("0.01") * groups, (fin, vat_out)
+        assert fin["vat_out"] == money(vat_out), (fin, vat_out)
         assert fin["expenses"] == money(expenses) and fin["profit"] == money(revenue - expenses)
         assert fin["vat_in"] == money(sum((e.vat for e in m.expenses), Decimal(0)))
         fc = api.get("/plan", weeks=2)["weeks"][1]  # the plan counts only days after today: use the next week

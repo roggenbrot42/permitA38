@@ -268,3 +268,27 @@ def test_money_js_doc_gross_string_matches_the_totals():
     doc = {"vat_rate": 19, "lines": [{"qty": 1, "price": "621.50"}]}
     assert _helpers([["docGrossStr", doc, {}]]) == ["739.59"]
     assert _helpers([["splitGrossStr", "119.00", 19]]) == [{"net": "100.00", "vat": "19.00"}]
+
+
+@pytest.mark.parametrize(
+    ("doc", "settings"),
+    [
+        ({"vat_rate": "", "lines": [{"qty": 1, "price": "100.00"}]}, {}),  # '' = default 19 %, not 0 %
+        ({"vat_rate": "", "lines": [{"qty": 1, "price": "100.00"}]}, {"vat_rate": 7}),  # default = the settings rate
+        ({"vat_rate": None, "lines": [{"qty": 1, "price": "100.00"}]}, {"vat_rate": 7}),
+        ({"vat_rate": 7, "lines": [{"qty": 1, "price": "100.00", "vat": ""}]}, {}),  # line '' = the document rate
+        ({"vat_rate": "", "lines": [{"qty": 1, "price": "100.00", "vat": ""}, {"qty": 2, "price": 0.125, "vat": 0}]}, {}),
+        ({"vat_rate": 0, "lines": [{"qty": 1, "price": "100.00"}]}, {}),  # a real 0 stays 0 %
+        ({"vat_rate": "", "lines": [{"qty": 1, "price": "100.00", "vat": ""}]}, {"kleinunternehmer": True}),
+    ],
+)
+def test_money_js_empty_vat_means_the_default_like_the_server(doc, settings):
+    py = calc.doc_totals(json.loads(json.dumps(doc)), settings)
+    got = _helpers([["docGrossStr", doc, settings]])[0]
+    assert got == format(q2(dec(py["gross"])), "f")
+
+
+def test_money_js_empty_vat_hand_numbers():
+    doc = {"vat_rate": "", "lines": [{"qty": 1, "price": "100.00"}]}
+    assert _helpers([["docGrossStr", doc, {}]]) == ["119.00"]  # not 100.00 (0 %)
+    assert _helpers([["docGrossStr", doc, {"vat_rate": 7}]]) == ["107.00"]

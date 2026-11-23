@@ -123,6 +123,11 @@ def money_st(cents):
     return st.tuples(cents, st.booleans()).map(lambda t: Money(Decimal(t[0]).scaleb(-2), t[1]))
 
 
+def unit_price_st(thousandths):
+    """A unit price (line price, hourly rate) of up to three decimals, sent as a number or as a string at random."""
+    return st.tuples(thousandths, st.booleans()).map(lambda t: Money(Decimal(t[0]).scaleb(-3), t[1]))
+
+
 def wire(obj):
     """The JSON body as it goes over the wire: a Money goes as a number or a string, a plain Decimal as a string."""
     if isinstance(obj, Money) and not obj.as_str:
@@ -146,6 +151,8 @@ def dec(act, path="") -> Decimal:
 
 
 def approx(a, b) -> bool:
+    """Tolerant comparison for hours and other non-money numbers; money is always compared exactly."""
+    assert not isinstance(a, Decimal) and not isinstance(b, Decimal), f"money reached approx(): {a!r} vs {b!r}"
     if isinstance(a, bool) or isinstance(b, bool):
         return a == b
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
@@ -181,9 +188,13 @@ TEXT = st.text(alphabet=st.characters(blacklist_categories=("Cs", "Cc")), min_si
     lambda t: t.strip()
 )  # names must not be blank
 HOURS_BUDGET = st.sampled_from([0, 25, 60, 80, 95, 130, 42.5])  # hours, not money
-RATE = money_st(st.sampled_from([0, 2500, 6000, 8000, 9500, 13000, 4250]))
-QTY = st.integers(1, 160).map(lambda n: n / 4)  # quarter units: products are exact to the cent
-PRICE = money_st(st.integers(0, 30000))  # exact cents (whole euros and cents)
+# hourly rates and line prices are unit prices: whole cents or up to three decimals (decimal-money-api rule 1)
+RATE = st.one_of(
+    money_st(st.sampled_from([0, 2500, 6000, 8000, 9500, 13000, 4250])),
+    unit_price_st(st.sampled_from([24999, 59995, 80125, 129995, 42505])),
+)
+QTY = st.integers(1, 160).map(lambda n: n / 4)  # quarter units; qty x price is rounded half-up to cents per line
+PRICE = st.one_of(money_st(st.integers(0, 30000)), unit_price_st(st.integers(0, 300000)))
 VATS = st.sampled_from([0, 7, 19])
 # hour fields of a contract (exactly one is required: 0 < hpw <= 10000, 0 < total <= 100000) and of an offer plan (at
 # most one); the first entries are valid, the rest are what the API refuses with 422
@@ -2394,21 +2405,17 @@ class ApiMachine(RuleBasedStateMachine):
                     vat_out += t["vat"]
             for x in self.m["expenses"].values():
                 if x["date"].startswith(f"{year}-"):
-                    pct = Decimal(str(x["deductible"])) / 100
-                    exp_cost += (x["net"] + x["vat"]) * pct if klein else x["net"] * pct
-                    vat_in += 0 if klein else x["vat"] * pct
+                    cost, vat = oracle.expense_shares(x, klein)
+                    exp_cost += cost
+                    vat_in += vat
             f = self.call("GET", f"/finance?year={year}", boss).json()
             tot = f["totals"]
-            # the server rounds VAT per document and per rate group, the model sums exact decimals: a cent per record
-            tol = Decimal("0.02") + Decimal("0.011") * (len(self.m["invoices"]) + len(self.m["expenses"]))
+            # exact: the server rounds VAT per document and rate group and each expense's deductible share per record
+            # half-up; oracle.doc_totals / oracle.expense_shares do the same, so the sums must agree to the cent
             for key, want in dict(revenue=rev, vat_out=vat_out, expenses=exp_cost, vat_in=vat_in, profit=rev - exp_cost,
                                   vat_due=0 if klein else vat_out - vat_in).items():  # fmt: skip
-                assert abs(dec(tot[key], key) - Decimal(want)) <= tol, (year, key, tot[key], want, klein, accrual)
-            assert abs(dec(f["open_receivables"], "open_receivables") - recv) <= tol, (
-                year,
-                f["open_receivables"],
-                recv,
-            )
+                assert dec(tot[key], key) == Decimal(want), (year, key, tot[key], want, klein, accrual)
+            assert dec(f["open_receivables"], "open_receivables") == recv, (year, f["open_receivables"], recv)
             assert f["year"] == year and f["kleinunternehmer"] == klein
 
     @invariant()
