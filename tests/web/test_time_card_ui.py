@@ -368,7 +368,10 @@ def test_more_than_24_hours_is_invalid(pg, srv):
     _set(pg, "#t_end_date", "2026-11-21")
     _set(pg, "#t_end", "09:00")
     assert pg.input_value("#t_dur") == "" and pg.get_attribute("#t_end", "aria-invalid") == "true"
-    assert pg.get_attribute("#t_end_date", "max") == "2026-11-21" and pg.get_attribute("#t_end_date", "min") == "2026-11-20"
+    assert (
+        pg.get_attribute("#t_end_date", "max") == "2026-11-21"
+        and pg.get_attribute("#t_end_date", "min") == "2026-11-20"
+    )
 
 
 def test_moving_the_start_date_moves_the_stop_date(pg, srv):  # #121 example 6
@@ -377,7 +380,13 @@ def test_moving_the_start_date_moves_the_stop_date(pg, srv):  # #121 example 6
     _set(pg, "#t_end", "10:00")
     _set(pg, "#t_date", "2026-11-19")
     v = _vals(pg)
-    assert (v["date"], v["end_date"], v["start"], v["end"], v["dur"]) == ("2026-11-19", "2026-11-19", "08:00", "10:00", "2:00")
+    assert (v["date"], v["end_date"], v["start"], v["end"], v["dur"]) == (
+        "2026-11-19",
+        "2026-11-19",
+        "08:00",
+        "10:00",
+        "2:00",
+    )
 
 
 def test_overnight_entry_is_saved_with_end_before_start(pg, srv):
@@ -400,28 +409,105 @@ def test_duration_only_entry_is_saved_without_times(pg, srv):
 
 
 def test_card_is_one_row_in_both_modes(browser, srv):
+    api(srv, "POST", "timer/start", {})
+    api(srv, "POST", "timer/stop", {"discard": True})
     for width in (1400, 1920):
-        ctx = browser.new_context(viewport={"width": width, "height": 900})
-        ctx.add_init_script(f"localStorage.setItem('permita38.token', '{srv.token}')")
-        page = ctx.new_page()
-        page.goto(srv.base + "/#/today")
-        page.wait_for_selector("#t_proj")
-        for mode in ("manual", "tracker"):
-            page.click(f"[data-a=timeMode][data-mode={mode}]")
-            tops = page.evaluate(
-                """() => [...document.querySelectorAll('.timer > *, #t_mode_area > *')]
-                    .filter(e => e.id !== 't_mode_area' && e.offsetParent && e.getBoundingClientRect().width)
-                    .map(e => [Math.round(e.getBoundingClientRect().top + e.getBoundingClientRect().height / 2),
-                               Math.round(e.getBoundingClientRect().right)])"""
-            )
-            mid = [t for t, _ in tops]
-            assert max(mid) - min(mid) <= 30, (width, mode, tops)  # all centres on one line
-            if mode == 'manual':
-                assert page.evaluate("['#t_date', '#t_end_date', '#t_start', '#t_end', '#t_dur'].every(q => { const e = document.querySelector(q); return e.scrollWidth <= e.clientWidth; })"), (width, 'input clipped')
-            assert page.locator('#t_note').bounding_box()['width'] >= 100, (width, mode, page.locator('#t_note').bounding_box())  # the description still has room
-            assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
-            assert page.evaluate("document.querySelector('[data-a=timeMode][data-mode=tracker]').getBoundingClientRect().right <= document.querySelector('main').getBoundingClientRect().right")
-        ctx.close()
+        for running in (False, True):
+            ctx = browser.new_context(viewport={"width": width, "height": 900})
+            ctx.add_init_script(f"localStorage.setItem('permita38.token', '{srv.token}')")
+            page = ctx.new_page()
+            page.goto(srv.base + "/#/today")
+            page.wait_for_selector("#t_proj")
+            if running:
+                page.click("[data-a=timeMode][data-mode=tracker]")
+                page.click("[data-a=timerStart]")
+                page.wait_for_selector("[data-a=timerStop]")
+            heights = []
+            for mode in ("manual", "tracker", "manual"):
+                page.click(f"[data-a=timeMode][data-mode={mode}]")
+                where = (width, running, mode)
+                box = page.locator("#t_note").bounding_box()  # buttons are centred against label+input by design
+                lo, hi = box["y"], box["y"] + box["height"]
+                # manual mode always shows Add (a running timer is edited via the form); tracker shows Stop or Start
+                action = (
+                    "[data-a=timerAdd]"
+                    if mode == "manual"
+                    else ("[data-a=timerStop]" if running else "[data-a=timerStart]")
+                )
+                for sel in (
+                    "[data-a=timeMode][data-mode=manual]",
+                    "[data-a=timeMode][data-mode=tracker]",
+                    action,
+                ):
+                    b = page.locator(sel).bounding_box()
+                    centre = b["y"] + b["height"] / 2
+                    assert lo <= centre <= hi, (where, sel, centre, lo, hi)
+                heights.append(
+                    page.locator(".timer").first.evaluate("e => e.closest('.card').getBoundingClientRect().height")
+                )
+                if mode == "manual":
+                    assert page.evaluate(
+                        "['#t_date', '#t_end_date', '#t_start', '#t_end', '#t_dur'].every(q => { const e = document.querySelector(q); return e.scrollWidth <= e.clientWidth; })"
+                    ), (where, "input clipped")
+                assert page.locator("#t_note").bounding_box()["width"] >= 100, where
+                assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+            assert max(heights) - min(heights) <= 2, (width, running, heights)
+            if running:
+                page.click("[data-a=timeMode][data-mode=tracker]")
+                page.click("[data-a=timerStop]")
+                page.wait_for_selector("[data-a=timerStart]")
+            ctx.close()
+
+
+def test_add_after_typing_duration_over_start_and_stop_counts_as_edit(pg, srv):
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "09:00")
+    _set(pg, "#t_end", "12:30")
+    pg.fill("#t_dur", "1:00")  # no change event
+    pg.click("[data-a=timerAdd]")
+    pg.wait_for_function("() => document.querySelector('#toast').textContent === 'Saved'")
+    (e,) = api(srv, "GET", "entries")
+    assert (e["start"], e["end"], e["minutes"]) == ("09:00", "10:00", 60)
+
+
+def test_add_after_typing_stop_with_start_set_counts_as_edit(pg, srv):
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "09:00")
+    _set(pg, "#t_end", "12:30")
+    pg.fill("#t_end", "11:00")  # no change event
+    pg.click("[data-a=timerAdd]")
+    pg.wait_for_function("() => document.querySelector('#toast').textContent === 'Saved'")
+    (e,) = api(srv, "GET", "entries")
+    assert (e["start"], e["end"], e["minutes"]) == ("09:00", "11:00", 120)
+
+
+def _prefill(pg, started_local, now_local):
+    """timerPrefill() with S.timer.started and the clock set to the given local times (ISO strings)."""
+    return pg.evaluate(
+        """([a, n]) => {
+            const RealDate = Date, fixed = new RealDate(n).getTime();
+            globalThis.Date = class extends RealDate { constructor(...x) { super(...(x.length ? x : [fixed])); } static now() { return fixed; } };
+            try { S.timer = { running: true, started: new RealDate(a).getTime() / 1000 }; return timerPrefill(); }
+            finally { globalThis.Date = RealDate; }
+        }""",
+        [started_local, now_local],
+    )
+
+
+def test_timer_prefill_across_midnight(pg):
+    v = _prefill(pg, "2026-11-20T22:00:00", "2026-11-21T01:30:00")
+    assert (v["date"], v["start"], v["endDate"], v["end"], v["dur"]) == (
+        "2026-11-20",
+        "22:00",
+        "2026-11-21",
+        "01:30",
+        "3:30",
+    )
+
+
+def test_timer_prefill_over_24_hours_stops_at_2359_of_the_start_day(pg):
+    v = _prefill(pg, "2026-11-20T09:00:00", "2026-11-22T10:00:00")
+    assert (v["date"], v["start"], v["endDate"], v["end"]) == ("2026-11-20", "09:00", "2026-11-20", "23:59")
 
 
 def _stop_requests(pg):

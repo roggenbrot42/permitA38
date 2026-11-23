@@ -162,3 +162,31 @@ def test_dialog_overnight_entry_is_stored_and_edited_with_its_stop_date(browser,
     v = _vals(pg)
     assert (v["date"], v["end_date"], v["start"], v["end"], v["dur"]) == ("2026-11-20", "2026-11-21", "22:00", "06:00", "8:00")
     assert not problems
+
+
+def test_dialog_enter_after_typing_duration_over_start_and_stop_counts_as_edit(browser, srv):
+    ctx, pg, problems = open_as_boss(browser, srv)
+    _open(pg, srv)
+    _set(pg, "#f_date", "2026-11-20")
+    _set(pg, "#f_start", "09:00")
+    _set(pg, "#f_end", "12:30")
+    pg.fill("#f_dur", "1:00")  # no change event
+    pg.press("#f_dur", "Enter")
+    expect(pg.locator("#modal-root .modal")).to_have_count(0)
+    (e,) = srv_entries(srv)
+    assert (e["start"], e["end"], e["minutes"]) == ("09:00", "10:00", 60)
+    assert not problems
+
+
+def test_dialog_enter_after_typing_stop_with_start_set_counts_as_edit(browser, srv):
+    ctx, pg, problems = open_as_boss(browser, srv)
+    _open(pg, srv)
+    _set(pg, "#f_date", "2026-11-20")
+    _set(pg, "#f_start", "09:00")
+    _set(pg, "#f_end", "12:30")
+    pg.fill("#f_end", "11:00")  # no change event; the old 3:30 stays in Duration
+    pg.press("#f_end", "Enter")
+    expect(pg.locator("#modal-root .modal")).to_have_count(0)
+    (e,) = srv_entries(srv)
+    assert (e["start"], e["end"], e["minutes"]) == ("09:00", "11:00", 120)
+    assert not problems
