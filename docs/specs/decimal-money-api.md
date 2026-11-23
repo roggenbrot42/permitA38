@@ -39,7 +39,7 @@ JSON number. The server already computes with `Decimal` (`core/money.py`); float
 2. **Input types.** The money primitives of the strict `*In` models (`Amount`, `NonNegAmount`, `MonthlyAmount`, `Rate`,
    the `Strict*` variants, `Amount100k`/`Amount10k`) accept **either** a JSON number (as today, parsed exactly by
    `money.dec` via `repr`) **or** a decimal string `^-?[0-9]{1,10}(\.[0-9]{1,6})?$` (no exponent, comma, spaces or
-   thousands separators; bools refused). Both paths apply the same bounds, finiteness and the existing whole-cent
+   thousands separators, no leading/trailing whitespace or newline — the whole string must match; bools refused). Both paths apply the same bounds, finiteness and the existing whole-cent
    checks; the string path never accepts more decimals than the number path would. After validation the value keeps
    today's Python type (float), so existing services and storage are unchanged. (New accounting models use the
    Decimal-yielding `MoneyIn` instead, accounting 7a.) OpenAPI shows `anyOf: [number, string(pattern)]`;
@@ -132,7 +132,7 @@ per model/path instead of by name.
 
 ## Test plan
 
-* Unit: `to_decimal_str` (`0` → `"0.00"`, `-0.005` → `"-0.01"` half-up away from zero, `1e7` bound), the input
+* Unit: `to_decimal_str` (`0` → `"0.00"`, `-0.005` → `"-0.005"` (stored decimals kept), `0.1 + 0.2` → `"0.30"` (rounded at the sixth decimal only), `1e7` bound), the input
   primitives (number, string, comma/exponent/space refused, bool refused, bounds, whole cents), `present()` on nested
   records and unknown fields.
 * The three guards of rule 5.
