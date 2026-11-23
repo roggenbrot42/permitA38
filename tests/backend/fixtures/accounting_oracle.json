@@ -56,12 +56,12 @@
       "events": "same as A1-accrual-soll",
       "entries": [
         {"event": 0, "booking_date": "2026-01-14", "lines": [
-          ["vat_soll_clearing", 19000],
+          ["vat_soll_clearing_s19", 19000],
           ["vat_out_s19", -19000, {"tax_key": "S19", "tax_kind": "tax", "tax_base": 100000, "vat_date": "2026-01-10"}]]},
         {"event": 1, "booking_date": "2026-02-03", "lines": [
           ["bank", 119000],
           ["revenue_s19", -100000, {"income_date": "2026-02-03"}],
-          ["vat_soll_clearing", -19000, {"income_date": "2026-02-03"}]]}
+          ["vat_soll_clearing_s19", -19000, {"income_date": "2026-02-03"}]]}
       ],
       "vat": {"2026-01": {"S19": {"base": 100000, "tax": 19000}}}
     },
@@ -436,7 +436,7 @@
           ["payables", -11900]]}
       ],
       "vat": {"2026-02": {"VST": {"input": 1900}}},
-      "note": "paid_on empty: the payment event is assumed on the bill date and booked on 2026-02-01 too (not listed); no drift"
+      "note": "accrual: an empty paid_on means unpaid (open payable), so there is no payment entry; no drift"
     },
     {
       "id": "A16-late-ist-payment-after-lock", "spec": "accounting.md A16",
@@ -460,6 +460,84 @@
       ],
       "vat": {"2026-01": {"S19": {"base": 100000, "tax": 19000}}},
       "drift": {"2026-01": 19000}
+    },
+    {
+      "id": "A17-rc-eu-private-share-eur", "spec": "accounting.md A17",
+      "bases": {"income_basis": "eur", "vat_basis": "ist"},
+      "events": [
+        {"type": "expense", "id": "x17", "date": "2026-06-02", "service_date": "2026-05-20", "paid_on": "2026-06-10", "treatment": "reverse_charge_eu_service", "lines": [{"net": 20050, "vat": 0, "rate": "19", "pct": 50, "vat_pct": 50, "category": "software"}]}
+      ],
+      "entries": [
+        {"event": 0, "part": "bill", "booking_date": "2026-06-02", "lines": [
+          ["rc_vat_out_eu", -3810, {"tax_key": "RC_EU_SVC", "tax_kind": "tax", "tax_base": 20050, "vat_date": "2026-05-20"}],
+          ["rc_input_vat", 1905, {"tax_key": "RC_EU_SVC", "tax_kind": "input", "vat_date": "2026-05-20"}],
+          ["rc_vat_nondeductible", 1905],
+          ["private_withdrawal", 952],
+          ["vat_paid_private", -952, {"income_date": "2026-06-02"}]]},
+        {"event": 0, "part": "pay", "booking_date": "2026-06-10", "lines": [
+          ["expense_software", 10025, {"income_date": "2026-06-10"}],
+          ["private_withdrawal", 10025],
+          ["bank", -20050]]}
+      ],
+      "vat": {"2026-05": {"RC_EU_SVC": {"base": 20050, "tax": 3810, "input": 1905}}}
+    },
+    {
+      "id": "A18-credit-moves-cash-accrual-ist", "spec": "accounting.md A18",
+      "bases": {"income_basis": "accrual", "vat_basis": "ist"},
+      "events": [
+        {"type": "issue", "id": "inv18", "date": "2026-03-02", "treatment": "standard", "rates": {"19": {"net": 100000, "vat": 19000}, "7": {"net": 50000, "vat": 3500}}},
+        {"type": "payment", "invoice": "inv18", "date": "2026-03-05", "amount": 100000},
+        {"type": "credit_note", "id": "cn18", "invoice": "inv18", "date": "2026-03-20", "credit_kind": "partial", "rates": {"7": {"net": 50000, "vat": 3500}}}
+      ],
+      "entries": [
+        {"event": 0, "booking_date": "2026-03-02", "lines": [
+          ["receivables", 172500],
+          ["revenue_s19", -100000, {"income_date": "2026-03-02"}],
+          ["vat_not_due_s19", -19000],
+          ["revenue_s7", -50000, {"income_date": "2026-03-02"}],
+          ["vat_not_due_s7", -3500]]},
+        {"event": 1, "booking_date": "2026-03-05", "lines": [
+          ["bank", 100000],
+          ["receivables", -100000],
+          ["vat_not_due_s19", 11015],
+          ["vat_out_s19", -11015, {"tax_key": "S19", "tax_kind": "tax", "tax_base": 57971, "vat_date": "2026-03-05"}],
+          ["vat_not_due_s7", 2029],
+          ["vat_out_s7", -2029, {"tax_key": "S7", "tax_kind": "tax", "tax_base": 28985, "vat_date": "2026-03-05"}]]},
+        {"event": 2, "booking_date": "2026-03-20", "lines": [
+          ["revenue_s7", 50000, {"income_date": "2026-03-20"}],
+          ["vat_out_s19", -4951, {"tax_key": "S19", "tax_kind": "tax", "tax_base": 26063, "vat_date": "2026-03-20"}],
+          ["vat_out_s7", 2029, {"tax_key": "S7", "tax_kind": "tax", "tax_base": -28985, "vat_date": "2026-03-20"}],
+          ["receivables", -53500],
+          ["vat_not_due_s19", 4951],
+          ["vat_not_due_s7", 1471]]}
+      ],
+      "vat": {"2026-03": {"S19": {"base": 84034, "tax": 15966}, "S7": {"base": 0, "tax": 0}}}
+    },
+    {
+      "id": "A18-credit-moves-cash-eur-soll", "spec": "accounting.md A18",
+      "bases": {"income_basis": "eur", "vat_basis": "soll"},
+      "events": "same as A18-credit-moves-cash-accrual-ist",
+      "entries": [
+        {"event": 0, "booking_date": "2026-03-02", "lines": [
+          ["vat_soll_clearing_s19", 19000],
+          ["vat_out_s19", -19000, {"tax_key": "S19", "tax_kind": "tax", "tax_base": 100000, "vat_date": "2026-03-02"}],
+          ["vat_soll_clearing_s7", 3500],
+          ["vat_out_s7", -3500, {"tax_key": "S7", "tax_kind": "tax", "tax_base": 50000, "vat_date": "2026-03-02"}]]},
+        {"event": 1, "booking_date": "2026-03-05", "lines": [
+          ["bank", 100000],
+          ["revenue_s19", -57971, {"income_date": "2026-03-05"}],
+          ["vat_soll_clearing_s19", -11015, {"income_date": "2026-03-05"}],
+          ["revenue_s7", -28985, {"income_date": "2026-03-05"}],
+          ["vat_soll_clearing_s7", -2029, {"income_date": "2026-03-05"}]]},
+        {"event": 2, "booking_date": "2026-03-20", "lines": [
+          ["vat_out_s7", 3500, {"tax_key": "S7", "tax_kind": "tax", "tax_base": -50000, "vat_date": "2026-03-20"}],
+          ["revenue_s19", -26063, {"income_date": "2026-03-20"}],
+          ["revenue_s7", 28985, {"income_date": "2026-03-20"}],
+          ["vat_soll_clearing_s19", -4951, {"income_date": "2026-03-20"}],
+          ["vat_soll_clearing_s7", 2029, {"income_date": "2026-03-20"}],
+          ["vat_soll_clearing_s7", -3500]]}
+      ],
+      "vat": {"2026-03": {"S19": {"base": 100000, "tax": 19000}, "S7": {"base": 0, "tax": 0}}}
     },
     {
       "id": "A10-taxes-eur", "spec": "accounting.md A10",

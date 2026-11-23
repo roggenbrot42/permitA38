@@ -172,7 +172,8 @@ into the last period with the extension *(verify)*.
   now contains the late lines), Kz 10 = 1; it replaces the original in the list and in the Sondervorauszahlung base.
 * **Drift**: the journal is append-only, so a final return differs from a recompute only through lines added later
   — exactly the **allowed drift cases** of [`accounting.md`](accounting.md) section 11: a Soll invoice issued after
-  the return for a performance in the period, an Ist payment dated in the period but entered later, a § 13b tax date
+  the return for a performance in the period, a cash event dated in the period but entered later that changes the due
+  VAT (Ist; under Soll a refund of cash above the current gross or a write-off reversal), a § 13b tax date
   in the period, an `eu_b2b_service` performance date in the period. Late bills never drift (their input VAT moves to
   the booking month). The detail shows "N entries after finalising change the tax by x,xx" with the lines (`created_at >
   finalised_at`); the user files an amended return. Nothing is moved automatically.

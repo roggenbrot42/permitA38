@@ -61,7 +61,8 @@ Validation (strict `PaymentIn`): `amount` > 0 and ≤ 10,000,000.00 (cents exact
 allowed (overpayment → customer credit, warning in the response); a payment on a written-off invoice first reverses
 the write-off (accounting 9.2); `date` not before the invoice date (an advance payment is out of scope, 422 "advance
 payments are not supported") and not in the future; a date in a locked month is **accepted** and booked into the first
-open month (accounting 7.8; under Ist its VAT drifts onto the locked month's return, the response says so); only issued invoices
+open month (accounting 7.8; where it changes the due VAT — Ist, or Soll refunds of cash above the current gross —
+that VAT drifts onto the locked month's return, and the response says so); only issued invoices
 of `kind = invoice` (credit notes are settled by refunds on their invoice); `note` ≤ 200, escaped on output.
 Rights: write on `invoices` **or** `accounting`. API tokens: session-only routes in v1 (added to the session-only
 table of `tests/backend/test_rbac.py`).

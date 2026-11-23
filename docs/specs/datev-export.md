@@ -36,7 +36,7 @@ The journal is double-entry with explicit VAT lines; DATEV books **gross** amoun
 accounts or BU keys. The conversion per entry:
 
 1. **Anchor.** Each entry has a counter side chosen by precedence: money (`bank`, `cash`) > open item
-   (`receivables`, `payables`, `payables_employee`, `customer_credit`) > clearing (`vat_soll_clearing`,
+   (`receivables`, `payables`, `payables_employee`, `customer_credit`) > clearing (`vat_soll_clearing_*`,
    `input_vat_clearing`, `rc_vat_nondeductible`, `vat_not_due_*`) > `opening_balance` > `private_*`. The highest
    ranking line is the anchor; every other line becomes a row against it, except lines of a lower-ranking anchor class
    that only balance a VAT line (they pair with that VAT line, rule 2). When the remaining amounts cannot be matched
@@ -45,11 +45,11 @@ accounts or BU keys. The conversion per entry:
 2. **VAT folding.** A `tax`/`input` line is added to the row of its partner line (same rate group, revenue or cost)
    so the row carries the gross amount; the partner account's `automatic` key (chart file) or the BU key from
    `datev/<year>.json` makes DATEV split it again. A VAT line without a partner in the entry (EÜR/Soll issue:
-   `vat_soll_clearing` ↔ `vat_out`; Ist recognition: `vat_not_due` ↔ `vat_out`) is exported as a plain row between
+   `vat_soll_clearing_*` ↔ `vat_out`; Ist recognition: `vat_not_due` ↔ `vat_out`) is exported as a plain row between
    the two accounts without BU key.
    **Unfolded rows on automatic accounts.** A row on an automatic account that must *not* be split (a net revenue row
    whose VAT sits on `vat_not_due` — accrual/Ist issue and credit notes; the net revenue of an EÜR payment whose VAT
-   is cleared on `vat_soll_clearing`; reclassification rows) carries the BU key that switches the automatic off
+   is cleared on `vat_soll_clearing_*`; reclassification rows) carries the BU key that switches the automatic off
    (**BU 40** *(verify)*, from `datev/<year>.json`).
 3. **§ 13b.** The cost row carries the **net** amount with the § 13b BU key (EU service / third-country service,
    *(verify)* the key numbers in `datev/<year>.json`); the self-assessed tax lines are folded (DATEV creates both
@@ -79,7 +79,7 @@ difference is a bug; it is listed in the report and fails the tests.
 **Known differences** listed in every `export-report.txt` (not bugs, the app's VAT return stays authoritative):
 * Kz 21 under EÜR: DATEV derives it from the revenue booking (payment date), the app from the performance date.
 * EÜR clearing accounts: DATEV's EÜR assigns whole accounts, so it counts output VAT at issue (Soll) and input VAT at
-  the bill date and ignores `vat_soll_clearing` / `input_vat_clearing`; totals agree over a full cycle but differ at
+  the bill date and ignores `vat_soll_clearing_*` / `input_vat_clearing`; totals agree over a full cycle but differ at
   a year end with open items.
 * Every `datev_transfer` and every fallback row.
 
