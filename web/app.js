@@ -136,11 +136,75 @@ function refreshProjectSelect(sel, customerId, billable = false) {
 }
 const taskOptions = pid => [['', '— no task —'], ...(S.d.tasks || []).filter(t => t.project_id === pid).map(t => [t.id, t.name])];
 
+/* ---------- manual time entry: start, stop and duration always agree (docs/specs/alpha7-fixes.md, #121) ----------
+   One helper for the Today card (ids t_*) and the Add/Edit time dialog (ids f_*): date, start, end_date, end, dur.
+   A point is a day number (UTC midnight / 86400000, so DST never shifts anything) times 1440 plus the minute of the day. */
+const dayNo = s => { const [y, m, d] = s.split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / 86400000); };
+const dayIso = n => new Date(n * 86400000).toISOString().slice(0, 10);
+const pointOf = (d, t) => { const m = toMin(t); return d && m !== null ? dayNo(d) * 1440 + m : null; };
+const timeEls = p => ['date', 'start', 'end_date', 'end', 'dur'].map(k => $(`#${p}_${k}`));
+function timeSync(p, changed) {
+  const [sd, st, ed, en, du] = timeEls(p);
+  [st, en, ed, du].forEach(el => el.removeAttribute('aria-invalid'));
+  const bad = (el, msg) => { el.setAttribute('aria-invalid', 'true'); toast(msg, true); };
+  const setPt = (dEl, tEl, pt) => { dEl.value = dayIso(Math.floor(pt / 1440)); tEl.value = hhmm(pt % 1440); };
+  const limit = () => { if (sd.value) { ed.min = sd.value; ed.max = dayIso(dayNo(sd.value) + 1); } };
+  if (changed === 'date' && sd.value) {   // the stop date moves by the same number of days; an empty one follows the start date
+    if (ed.value && sd.dataset.prev) ed.value = dayIso(dayNo(ed.value) + dayNo(sd.value) - dayNo(sd.dataset.prev));
+    else if (!ed.value) ed.value = sd.value;
+  }
+  if (sd.value && !ed.value) ed.value = sd.value;
+  sd.dataset.prev = sd.value; limit();
+  const d = parseDur(du.value), dv = d !== null && !isNaN(d) && d > 0 && d <= 1440 ? d : null;
+  const s = pointOf(sd.value, st.value), e = pointOf(ed.value, en.value);
+  if (changed === 'dur') {
+    if (!du.value.trim()) return;
+    if (dv === null) return bad(du, d !== null && !isNaN(d) && d > 1440 ? 'An entry can be at most 24 hours' : 'Enter a duration like 1:30');
+    if (s !== null) setPt(ed, en, s + dv);
+    else if (e !== null) { setPt(sd, st, e - dv); sd.dataset.prev = sd.value; limit(); if (sd.value > todayISO()) return bad(st, 'Time cannot be added for a future date'); }
+    du.value = hm(dv / 60); return;
+  }
+  if (changed === 'start' && s !== null && e === null && dv !== null) { setPt(ed, en, s + dv); return; }
+  if ((changed === 'end' || changed === 'end_date') && e !== null && s === null && dv !== null) {
+    setPt(sd, st, e - dv); sd.dataset.prev = sd.value; limit();
+    if (sd.value > todayISO()) bad(st, 'Time cannot be added for a future date');
+    return;
+  }
+  if (s !== null && e !== null) {
+    const diff = e - s;
+    if (diff <= 0) { du.value = ''; bad(en, 'Stop must be after start'); }
+    else if (diff > 1440) { du.value = ''; bad(en, 'An entry can be at most 24 hours'); }
+    else du.value = hm(diff / 60);
+  }
+}
+/* Reads and validates the five fields for saving: start date, start, stop and minutes (stop minus start when both are set). */
+function timeRead(p) {
+  const [sd, st, ed, en, du] = timeEls(p);
+  if (!sd.value) throw new Error('Pick a date');
+  if (sd.value > todayISO()) throw new Error('Time cannot be added for a future date');
+  if (!ed.value) ed.value = sd.value;
+  if (!!st.value !== !!en.value && du.value.trim()) timeSync(p, 'dur');
+  const s = pointOf(sd.value, st.value), e = pointOf(ed.value, en.value);
+  if (s !== null && e !== null) {
+    if (e <= s) throw new Error('Stop must be after start');
+    if (e - s > 1440) throw new Error('An entry can be at most 24 hours');
+    return { date: sd.value, start: st.value, end: en.value, minutes: e - s };
+  }
+  if (st.value || en.value) throw new Error('Enter start and stop times, or only a duration');
+  const d = parseDur(du.value);
+  if (d === null || isNaN(d) || d <= 0) throw new Error('Enter start and stop times or a duration');
+  if (d > 1440) throw new Error('An entry can be at most 24 hours');
+  return { date: sd.value, start: null, end: null, minutes: d };
+}
+/* Stop date shown for a stored entry: the day after the start when the stop is not later than the start (night shift). */
+const storedEndDate = e => e.date && e.start && e.end && toMin(e.end) <= toMin(e.start) ? dayIso(dayNo(e.date) + 1) : e.date;
+
 function entryForm(e = {}, after) {
   const vals = { date: todayISO(), billable: true, user_id: S.me.id, ...e, dur: e.minutes ? hm(e.minutes / 60) : '' };
+  vals.end_date = storedEndDate(vals);
   const users = scopeOf('time', 'write') === 'all' ? [{ k: 'user_id', l: 'Who', t: 'select', o: (S.d.users || []).filter(u => u.active !== false).map(u => [u.id, u.name]), def: S.me.id }] : [];
   const fields = [...users,
-    { k: 'date', l: 'Date', t: 'date', row: 1, max: todayISO() }, { k: 'start', l: 'From', t: 'time', row: 1 }, { k: 'end', l: 'To', t: 'time', row: 1 }, { k: 'dur', l: 'or duration (1:30, 1.5, 90m)', row: 1 },
+    { k: 'date', l: 'Date', t: 'date', row: 1, max: todayISO() }, { k: 'start', l: 'From', t: 'time', row: 1 }, { k: 'end_date', l: 'To date', t: 'date', row: 1 }, { k: 'end', l: 'To', t: 'time', row: 1 }, { k: 'dur', l: 'Duration (1:30, 1.5, 90m)', row: 1 },
     { k: 'project_id', l: 'Project', t: 'select', o: projectOptions() },
     { k: 'task_id', l: 'Task', t: 'select', o: taskOptions(vals.project_id) },
     { k: 'note', l: 'What did you do?', t: 'area', rows: 2 },
@@ -148,18 +212,14 @@ function entryForm(e = {}, after) {
   openForm({
     title: e.id ? 'Edit time' : 'Add time', fields, vals,
     save: async v => {
-      let min = parseDur(v.dur);
-      if ((min === null || isNaN(min)) && v.start && v.end) { const [a, b] = [v.start, v.end].map(x => +x.slice(0, 2) * 60 + +x.slice(3)); min = b - a; if (min <= 0) min += 1440; }
-      if (!v.date) throw new Error('Pick a date');
-      if (v.date > todayISO()) throw new Error('Time cannot be added for a future date');
-      if (min === null || isNaN(min) || min <= 0) throw new Error('Enter from/to times or a duration');
-      if (min > 1440) throw new Error('A time entry can be at most 24 hours');
-      v.minutes = min; delete v.dur;
+      Object.assign(v, timeRead('f')); delete v.dur; delete v.end_date;
       await save('entries', { ...v, project_id: v.project_id || null, task_id: v.task_id || null });
       after && after(v);
     },
     del: e.id ? async () => { await api('DELETE', 'entries/' + e.id); await loadAll(['entries']); after && after(); } : null
   });
+  const [fd] = timeEls('f'); fd.dataset.prev = fd.value; timeSync('f', 'init');
+  ['date', 'start', 'end_date', 'end', 'dur'].forEach(k => { $('#f_' + k).onchange = () => timeSync('f', k); });
   $('#f_project_id').onchange = () => { $('#f_task_id').innerHTML = taskOptions($('#f_project_id').value).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join(''); };
   if (vals.task_id) $('#f_task_id').value = vals.task_id;
   // internal projects are never billable: the box is unticked and locked while one is chosen, ticked and free otherwise
@@ -428,18 +488,22 @@ const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,
 /* Date/start/stop of a running timer for the manual form: started (unix seconds) to now, or to 23:59 when it started on an earlier day. */
 function timerPrefill() {
   const a = new Date(S.timer.started * 1000), n = new Date(), m = d => d.getHours() * 60 + d.getMinutes();
-  const date = isoLocal(a), end = date === isoLocal(n) ? m(n) : 23 * 60 + 59;
-  return { date, start: hhmm(m(a)), end: hhmm(end), dur: m(a) < end ? hm((end - m(a)) / 60) : '' };
+  const date = isoLocal(a), s = dayNo(date) * 1440 + m(a);
+  let end = dayNo(isoLocal(n)) * 1440 + m(n);
+  if (end - s > 1440) end = dayNo(date) * 1440 + 23 * 60 + 59;   // more than 24 h: stop at 23:59 of the start day
+  return { date, start: hhmm(m(a)), endDate: dayIso(Math.floor(end / 1440)), end: hhmm(end % 1440), dur: end > s ? hm((end - s) / 60) : '' };
 }
 function timerModeHtml() {
   const run = !!S.timer?.running;   // a running timer shows its clock and Stop, unless ✎ was pressed meanwhile
   if ((run && manualWhileRunning) || (!run && localStorage.timeMode !== 'tracker')) {
-    const v = run ? timerPrefill() : { date: todayISO(), start: '', end: '', dur: '' };
-    return `<div class="field" style="margin:0"><label for="t_date">Date</label><input type="date" id="t_date" value="${v.date}"></div>
-    <div class="field" style="margin:0"><label for="t_start">Start</label><input type="time" id="t_start" value="${v.start}" data-change="timerTimes"></div>
-    <div class="field" style="margin:0"><label for="t_end">Stop</label><input type="time" id="t_end" value="${v.end}" data-change="timerTimes"></div>
-    <div class="field" style="margin:0"><label for="t_dur">Duration</label><input id="t_dur" value="${v.dur}" placeholder="hh:mm" style="width:90px" data-change="timerDur"></div>
-    <button class="primary" data-a="timerAdd">Add</button>`;
+    const v = run ? timerPrefill() : { date: todayISO(), start: '', endDate: todayISO(), end: '', dur: '' };
+    const f = (id, label, html) => `<div class="field t-${id}" style="margin:0"><label for="t_${id}">${label}</label>${html}</div>`;
+    return f('date', 'Date', `<input type="date" id="t_date" value="${v.date}" max="${todayISO()}" data-prev="${v.date}" data-change="timerSync">`)
+      + f('start', 'Start', `<input type="time" id="t_start" value="${v.start}" data-change="timerSync">`)
+      + f('end_date', 'Stop date', `<input type="date" id="t_end_date" value="${v.endDate}" min="${v.date}" max="${dayIso(dayNo(v.date) + 1)}" data-change="timerSync">`)
+      + f('end', 'Stop', `<input type="time" id="t_end" value="${v.end}" data-change="timerSync">`)
+      + f('dur', 'Duration', `<input id="t_dur" value="${v.dur}" placeholder="hh:mm" data-change="timerSync">`)
+      + '<button class="primary" data-a="timerAdd">Add</button>';
   }
   return `<button type="button" class="clock" id="clock" data-a="timerMoney" aria-label="Show time or money earned">${run ? clockStr(timerElapsed()) : '0:00'}</button>
     <div class="small muted" id="t_hint"></div>
@@ -450,7 +514,7 @@ function timerCard() {
   const pid = run ? t.project_id : (localStorage.lastProj || ''), tid = run ? t.task_id : '';
   const modeBtn = (m, glyph, label) => `<button type="button" class="ghost" data-a="timeMode" data-mode="${m}" aria-label="${label}" title="${label}" aria-pressed="${tracker === (m === 'tracker')}">${glyph}</button>`;
   return `<div class="card"><div class="timer">
-    <div class="field" style="flex:2;min-width:200px;margin:0"><label for="t_note">Description</label><input id="t_note" value="${esc(run ? t.note || '' : '')}" placeholder="What are you working on?"></div>
+    <div class="field t-note" style="margin:0"><label for="t_note">Description</label><input id="t_note" value="${esc(run ? t.note || '' : '')}" placeholder="What are you working on?"></div>
     <div class="field" style="margin:0"><label for="t_proj">Project</label><input id="t_proj" list="t_proj_list" value="${esc(labelById(pid))}" placeholder="Search projects" autocomplete="off" data-change="timerProj"><datalist id="t_proj_list">${projectOptions(false).map(([, l]) => `<option value="${esc(l)}"></option>`).join('')}</datalist></div>
     <div class="field" style="margin:0"><label for="t_task">Task</label><select id="t_task" data-change="timerTask">${taskOptions(pid).map(([v, l]) => `<option value="${esc(v)}" ${v === tid ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
     <div id="t_mode_area" class="timer" style="flex:none">${timerModeHtml()}</div>
@@ -465,27 +529,11 @@ A.timeMode = el => {
   timerUpd(); timerTick();
 };
 A.timerMoney = () => { if (rateOf(activePid()) === null) return; moneyView = !moneyView; timerUpd(); };
-A.timerTimes = () => { const s = toMin($('#t_start').value), e = toMin($('#t_end').value); $('#t_dur').value = s !== null && e !== null && e > s ? hm((e - s) / 60) : ''; };
-A.timerDur = () => {
-  const s = toMin($('#t_start').value), d = parseDur($('#t_dur').value);
-  if (!d || d <= 0 || isNaN(d)) { toast('Enter a duration like 1:30', true); return; }
-  if (s === null) {   // duration only: today ends now, another day starts at 09:00
-    let a, b;
-    if (($('#t_date').value || todayISO()) === todayISO()) { const n = new Date(); b = n.getHours() * 60 + n.getMinutes(); a = b - d; if (a < 0) { a = 0; b = d; } }
-    else { a = 540; b = 540 + d; }
-    if (b >= 1440) { toast('An entry must end on the same day', true); return; }
-    $('#t_start').value = hhmm(a); $('#t_end').value = hhmm(b); $('#t_dur').value = hm(d / 60); return;
-  }
-  if (s + d >= 1440) { toast('An entry must end on the same day', true); return; }
-  $('#t_end').value = hhmm(s + d); $('#t_dur').value = hm(d / 60);
-};
+A.timerSync = el => timeSync('t', el.id.slice(2));
 A.timerAdd = timerOnce('add', async () => {
-  const date = $('#t_date').value, s = toMin($('#t_start').value), e = toMin($('#t_end').value);
-  if (!date) throw new Error('Pick a date');
-  if (s === null || e === null) throw new Error('Enter start and stop times');
-  if (e <= s) throw new Error('Stop must be after start');
+  const r = timeRead('t');
   // no guard() wrapper here: a failed save throws to the click handler, which toasts it, and the form keeps the typed values
-  await api.upsert('entries', { user_id: S.me.id, date, start: $('#t_start').value, end: $('#t_end').value, minutes: e - s, project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: !projIsInternal(projIdOrThrow()) });
+  await api.upsert('entries', { user_id: S.me.id, ...r, project_id: projIdOrThrow() || null, task_id: $('#t_task').value || null, note: $('#t_note').value, billable: !projIsInternal(projIdOrThrow()) });
   toast('Saved');
   if (S.timer?.running) { await api('POST', 'timer/stop', { discard: true }); S.timer = { running: false }; moneyView = false; }   // the entry replaces the running timer
   manualWhileRunning = false;
