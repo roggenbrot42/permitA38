@@ -129,5 +129,66 @@ const Money = (() => {
     return { net: decNum(net), vat: decNum(vat), gross: decNum(sumDec([net, vat])), byRate };
   }
 
-  return { parse, roundDiv, lineCents, vatCents, totals, docGross, splitGross, toNumber, rateKey, splitLines, lineTotals };
+  /* ---- decimal-string helpers (docs/specs/decimal-money-api.md rule 6): the API sends money as decimal strings and the
+   * page never does float arithmetic on them. Every function accepts a decimal string, a number, null or ''. ---- */
+  /** {n, s} -> canonical decimal text with at least two decimals ("12.50", "-0.125", "0.00"). */
+  function decStr(d) {
+    const neg = d.n < 0n, a = neg ? -d.n : d.n, s = Math.max(d.s, 2);
+    const digits = (a * pow10(s - d.s)).toString().padStart(s + 1, '0');
+    return (neg ? '-' : '') + digits.slice(0, digits.length - s) + '.' + digits.slice(digits.length - s);
+  }
+  /** Canonical decimal text of any money value ("0.00" for null, '' and garbage). */
+  const str = x => decStr(parse(x));
+  /** Whole cents (BigInt), rounded half away from zero. */
+  const cents = x => { const d = parse(x); return roundDiv(d.n * 100n, pow10(d.s)); };
+  /** Whole cents (BigInt) -> "12.50". */
+  const fromCents = c => decStr({ n: BigInt(c), s: 2 });
+  /** Display text for the German UI ("1.234,50 €"); the value is rounded half-up to cents first. */
+  const fmt = x => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(toNumber(cents(x)));
+  /** Exact comparison: -1, 0 or 1. */
+  function cmp(a, b) {
+    const x = parse(a), y = parse(b), S = Math.max(x.s, y.s);
+    const l = x.n * pow10(S - x.s), r = y.n * pow10(S - y.s);
+    return l < r ? -1 : l > r ? 1 : 0;
+  }
+  const isZero = x => parse(x).n === 0n;
+  const isNeg = x => parse(x).n < 0n;
+  const abs = x => { const d = parse(x); return decStr({ n: d.n < 0n ? -d.n : d.n, s: d.s }); };
+  /** Exact sum of a list (array or arguments) as a decimal string. */
+  const sum = list => decStr(sumDec(list.map(parse)));
+  /** amount x percent / 100 in whole cents (BigInt), half-up: pct("10.00", 70) = 700n. */
+  const pct = (amount, percent) => { const a = parse(amount), p = parse(percent); return roundDiv(a.n * p.n, pow10(a.s + p.s)); };
+  /**
+   * Strict parser for what a person types into a money field (rule 6): one comma OR one dot as decimal separator,
+   * at most 10 integer and 6 decimal digits, an optional leading minus. Both separators, thousands separators
+   * ("1.234,56", "1,2,3"), exponents, letters and blank text are refused with a message.
+   * Returns {ok: true, value: "12.50"-style canonical text or null for an empty field} or {ok: false, error}.
+   */
+  function parseInput(text) {
+    const raw = text === null || text === undefined ? '' : String(text);
+    if (raw === '') return { ok: true, value: null };
+    const t = raw.trim();
+    if (t === '') return { ok: false, error: 'Enter a number' };
+    const seps = (t.match(/[.,]/g) || []).length;
+    if (t.includes('.') && t.includes(',')) return { ok: false, error: 'Use one decimal separator and no thousands separators (e.g. 1234,56)' };
+    if (seps > 1) return { ok: false, error: 'Use one decimal separator and no thousands separators (e.g. 1234,56)' };
+    const m = /^(-?)(\d*)(?:[.,](\d*))?$/.exec(t);
+    if (!m || (m[2] === '' && !m[3])) return { ok: false, error: 'Not a valid amount' };
+    if (m[2].length > 10) return { ok: false, error: 'The amount is too large' };
+    if ((m[3] || '').length > 6) return { ok: false, error: 'At most 6 decimals' };
+    const value = m[1] + (m[2] || '0') + (m[3] ? '.' + m[3] : '');
+    return { ok: true, value: value === '-0' ? '0' : value };
+  }
+  /** Split a gross amount into net and VAT as decimal strings (cent-exact, see splitGross). */
+  function splitGrossStr(gross, rate) {
+    const g = parse(gross), r = parse(rate);
+    const grossCents = roundDiv(g.n * 100n, pow10(g.s));
+    const netCents = roundDiv(grossCents * 100n * pow10(r.s), 100n * pow10(r.s) + r.n);
+    return { net: fromCents(netCents), vat: fromCents(grossCents - netCents) };
+  }
+  /** Gross of a stored document as a decimal string, for list views and sums. */
+  const docGrossStr = (doc, settings) => fromCents(totals(doc, settings).gross);
+
+  return { parse, roundDiv, lineCents, vatCents, totals, docGross, splitGross, toNumber, rateKey, splitLines, lineTotals,
+    decNum, sumDec, decStr, str, cents, fromCents, fmt, cmp, isZero, isNeg, abs, sum, pct, parseInput, splitGrossStr, docGrossStr };
 })();

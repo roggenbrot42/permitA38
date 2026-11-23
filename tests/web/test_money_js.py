@@ -143,3 +143,128 @@ def test_money_js_rounding_examples():
     )
     out = json.loads(run.stdout)[0]
     assert out["vat"] == {"19": 118.09} and out["gross"] == 739.59
+
+
+# ---- decimal-string helpers (docs/specs/decimal-money-api.md rule 6); expected values are literals ----
+
+HELPER_RUNNER = """
+const fs = require('fs');
+const Money = new Function(fs.readFileSync(process.argv[1], 'utf8') + '; return Money;')();
+const calls = JSON.parse(fs.readFileSync(0, 'utf8'));
+const out = calls.map(([fn, ...args]) => { const r = Money[fn](...args); return typeof r === 'bigint' ? r.toString() : r; });
+process.stdout.write(JSON.stringify(out));
+"""
+
+
+def _helpers(calls):
+    done = subprocess.run(
+        [NODE, "-e", HELPER_RUNNER, str(MONEY_JS)], input=json.dumps(calls), capture_output=True, text=True, timeout=30
+    )
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def test_money_js_input_parser_accepts_one_separator():
+    typed = ["12.50", "12,50", "7", "-3,5", ".5", "0", " 12.5 ", "1234567890.123456", "0,000001"]
+    got = _helpers([["parseInput", t] for t in typed])
+    assert got == [
+        {"ok": True, "value": "12.50"},
+        {"ok": True, "value": "12.50"},
+        {"ok": True, "value": "7"},
+        {"ok": True, "value": "-3.5"},
+        {"ok": True, "value": "0.5"},
+        {"ok": True, "value": "0"},
+        {"ok": True, "value": "12.5"},
+        {"ok": True, "value": "1234567890.123456"},
+        {"ok": True, "value": "0.000001"},
+    ]
+
+
+def test_money_js_input_parser_empty_field_is_null_not_an_error():
+    assert _helpers([["parseInput", ""], ["parseInput", None]]) == [{"ok": True, "value": None}] * 2
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "1.234,56",
+        "1,234.56",
+        "1,2,3",
+        "1.2.3",
+        " ",
+        "\t",
+        "abc",
+        "12abc",
+        "1e3",
+        "--1",
+        "+5",
+        "12 50",
+        ",",
+        "-",
+        "12345678901",
+        "1.1234567",
+    ],
+)
+def test_money_js_input_parser_refuses(typed):
+    got = _helpers([["parseInput", typed]])[0]
+    assert got["ok"] is False and got["error"]
+
+
+def test_money_js_string_pitfalls():
+    got = _helpers(
+        [
+            ["fmt", "0.00"],
+            ["fmt", None],
+            ["fmt", ""],
+            ["fmt", "1234.505"],  # half-up to cents, not float rounding
+            ["fmt", "-0.004"],
+            ["sum", ["0.10", "0.20", "19.99"]],  # `+` on strings would concatenate; floats give 0.30000000000000004
+            ["sum", []],
+            ["sum", ["0.1", 0.2, None]],
+            ["cmp", "9.00", "10.00"],  # text order would say 9.00 > 10.00
+            ["cmp", "-5.00", 0],
+            ["cmp", "1.10", "1.1"],
+            ["isNeg", "-0.01"],
+            ["isNeg", "0.00"],
+            ["isZero", "0.00"],  # "0.00" is truthy in JS: callers must use isZero
+            ["abs", "-12.5"],
+            ["str", 12.5],
+            ["str", "0.125"],
+            ["str", None],
+            ["cents", "1.005"],
+            ["fromCents", "-1205"],
+            ["pct", "10.00", 70],
+            ["pct", "0.05", 50],
+        ]
+    )
+    nbsp = " "
+    assert got == [
+        f"0,00{nbsp}€",
+        f"0,00{nbsp}€",
+        f"0,00{nbsp}€",
+        f"1.234,51{nbsp}€",
+        f"0,00{nbsp}€",
+        "20.29",
+        "0.00",
+        "0.30",
+        -1,
+        -1,
+        0,
+        True,
+        False,
+        True,
+        "12.50",
+        "12.50",
+        "0.125",
+        "0.00",
+        "101",
+        "-12.05",
+        "700",
+        "3",
+    ]
+
+
+def test_money_js_doc_gross_string_matches_the_totals():
+    doc = {"vat_rate": 19, "lines": [{"qty": 1, "price": "621.50"}]}
+    assert _helpers([["docGrossStr", doc, {}]]) == ["739.59"]
+    assert _helpers([["splitGrossStr", "119.00", 19]]) == [{"net": "100.00", "vat": "19.00"}]
