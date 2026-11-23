@@ -349,6 +349,10 @@ closed); EÜR `income_date` = the payment date.
 | `reverse_charge_*`, EÜR, `pct` < 100 | the bill entry above, plus the private share of the non-deductible tax `x = (t − ri) − q2((t − ri) × pct / 100)`: D `private_withdrawal` x / C `vat_paid_private` x (`income_date` = booking date; the role sits on the EÜR line "VAT paid to the tax office" and reduces it, because the return payment of 9.6 counts the whole `t − ri` as an expense) *(verify the timing)* | |
 | `reverse_charge_third_country` | as the EU rows with `rc_vat_out_3c` and RC_3C_SVC | |
 
+With `pct` below 100 a § 13b expense can differ by one cent between accrual and EÜR (accrual rounds `q2((n + nd) ×
+pct)`, EÜR rounds the cost `q2(n × pct)` and the non-deductible tax share separately, because they are posted at
+different times); reconciliation tests between the bases allow one cent per such expense.
+
 § 13b tax date *(verify)*: EU service (Abs. 1) = `service_date` (any date in the period of performance gives the same
 return); third country (Abs. 2 Nr. 1) = `min(date, last day of the month after service_date)`. `service_date`
 defaults to `date`. When the tax date lies in a locked month the lines keep it (allowed drift, section 11): the tax
