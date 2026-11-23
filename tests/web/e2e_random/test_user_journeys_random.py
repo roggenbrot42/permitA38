@@ -626,6 +626,7 @@ class Journey:
         self.nav(f"#/project/{p.id}")
         self.page.click(f"[data-a=allocations][data-project='{p.id}']")
         self.page.click("#modal-root [data-a=alNew]")
+        self.page.select_option("#al_mode", "week")  # "+ New" is prefilled in "in total" mode once the project has a contract
         self.page.fill("#al_hours", str(hours))
         self.page.fill("#al_start", start.isoformat())
         self.page.fill("#al_end", end.isoformat())
@@ -646,9 +647,13 @@ class Journey:
         page = self.rng.choice(NAV_PAGES)
         top = page.split("/")[0]
         if "/" not in page and self.page.locator(f'a.nav[href="#/{top}"]').count():
-            self.mark_old()
+            # clicking the link of the page you are on changes no hash, so the router does not re-render: nothing to wait for
+            rerenders = self.page.evaluate("h => location.hash !== h", f"#/{top}")
+            if rerenders:
+                self.mark_old()
             self.page.click(f'a.nav[href="#/{top}"]')
-            self.wait_render()
+            if rerenders:
+                self.wait_render()
         else:
             self.nav("#/" + page)
         text = self.main_text()
