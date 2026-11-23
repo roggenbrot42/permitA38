@@ -540,7 +540,10 @@ class ApiMachine(RuleBasedStateMachine):
             exp["user_id"] = actor_user["id"]
         elif coll == "entries" and not exp.get("user_id"):  # an entry without a person belongs to its writer
             exp["user_id"] = (old or {}).get("user_id") or actor_user["id"]
-        if coll == "entries" and self.is_internal(exp.get("project_id")):
+        # the service derives "internal, never billable" from the given project, else from the stored one (also when the
+        # update clears project_id, see test_known_bugs / PR notes); null fields never reach the service
+        pid = body.get("project_id") or (old or {}).get("project_id")
+        if coll == "entries" and self.is_internal(pid):
             exp["billable"] = False  # internal projects are never billed, whatever the request says
         if coll == "entries" and actor_user["role"] != "boss":
             # billing fields are boss/system-only: a member can neither set nor change them
@@ -890,23 +893,20 @@ class ApiMachine(RuleBasedStateMachine):
             or any(t and t.get("project_id") == pid for t in self.timers.values())
         )
 
-    def day_total_exceeded(self, coll, body, old, me) -> bool:
-        """One person's entries on one date may not add up to more than 24 h; the entry being written replaces its old version."""
-        if coll != "entries":
-            return False
-        exp = self.expected(coll, body, old, me)
-        total = exp["minutes"] + sum(
-            e["minutes"]
-            for i, e in self.m["entries"].items()
-            if i != (old or {}).get("id") and e.get("user_id") == exp["user_id"] and e["date"] == exp["date"]
-        )
+    def assert_refused_by_rule(self, r):
+        assert r.status_code == 422 and r.json() == {"detail": "Project belongs to another customer"}, r.text
+
+    def day_over_24h(self, body, old, actor_user, rid=None) -> bool:
+        """Mirror of the day-total rule: one person cannot book more than 24 hours on a day."""
+        exp = self.expected("entries", body, old, actor_user)
+        total = int(round(float(exp.get("minutes") or 0)))
+        for eid, e in self.m["entries"].items():
+            if eid != rid and e.get("user_id") == exp.get("user_id") and e.get("date") == exp.get("date"):
+                total += int(e.get("minutes") or 0)
         return total > 1440
 
     def assert_refused_day_total(self, r):
         assert r.status_code == 422 and "a day has only 24" in r.json()["detail"], r.text
-
-    def assert_refused_by_rule(self, r):
-        assert r.status_code == 422 and r.json() == {"detail": "Project belongs to another customer"}, r.text
 
     @staticmethod
     def project_kind_for(body, old) -> str:
@@ -1005,7 +1005,7 @@ class ApiMachine(RuleBasedStateMachine):
         if self.mismatch(coll, body):
             self.assert_refused_by_rule(r)
             return
-        if self.day_total_exceeded(coll, body, None, self.m["users"][s.user_id]):
+        if coll == "entries" and self.day_over_24h(body, None, self.m["users"][s.user_id]):
             self.assert_refused_day_total(r)
             return
         assert r.status_code == 200, r.text
@@ -1055,7 +1055,7 @@ class ApiMachine(RuleBasedStateMachine):
         if self.mismatch(coll, body, old):
             self.assert_refused_by_rule(r)
             return
-        if self.day_total_exceeded(coll, body, old, me):
+        if coll == "entries" and self.day_over_24h(body, old, me, rid):
             self.assert_refused_day_total(r)
             return
         assert r.status_code == 200, r.text
