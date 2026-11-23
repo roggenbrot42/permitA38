@@ -192,7 +192,7 @@ def test_flagged_upload_panel_and_confirm_new_customer(make_ui):
     pg.click("#ds_add")
     pg.wait_for_selector("#ds_add", state="detached")
     ((_, path, body),) = mock.calls("POST", "document-scans/d1/confirm")
-    assert body == {"kind": "invoice", "number": "RE-2024-007", "date": "2024-03-05", "due_date": "2024-03-19", "valid_until": None, "service_from": None, "service_to": None, "vat_rate": 19, "lines": [{"description": "Beratung", "quantity": 2, "unit": "h", "price": 50}], "customer": {"name": "Beispiel Kunde GmbH", "street": "Musterweg 1", "zip": "12345", "city": "Musterstadt", "country": "DE"}, "accept_totals_mismatch": False}  # fmt: skip
+    assert body == {"kind": "invoice", "number": "RE-2024-007", "date": "2024-03-05", "due_date": "2024-03-19", "valid_until": None, "service_from": None, "service_to": None, "vat_rate": 19, "lines": [{"description": "Beratung", "quantity": 2, "unit": "h", "price": "50.00"}], "customer": {"name": "Beispiel Kunde GmbH", "street": "Musterweg 1", "zip": "12345", "city": "Musterstadt", "country": "DE"}, "accept_totals_mismatch": False}  # fmt: skip
     pg.wait_for_selector("#ds_flagged", state="detached")
 
 
