@@ -132,3 +132,36 @@ def test_fiscal_year_closed_at_and_by_set_once(repo):
         repo.save("fiscal_years", {k: v for k, v in closed.items() if k != "closed_at"})
     both = {k: v for k, v in closed.items() if k not in ("closed_at", "closed_by")}
     refused(ONCE, repo.save, "fiscal_years", both)
+
+
+def test_clearing_replaced_by_on_final_original_then_deleting_draft_amendment(repo):
+    repo.save("vat_returns", vat())
+    draft = vat(
+        id="v2x000", amends_id="v1x000", amends_key="v1x000", status="draft", finalised_at=None, finalised_by=None
+    )
+    repo.save("vat_returns", draft)
+    r = repo.save("vat_returns", {**repo.get("vat_returns", "v1x000"), "replaced_by": "v2x000"})
+    refused(FROZEN, repo.delete, "vat_returns", "v1x000")
+    cleared = repo.save("vat_returns", {k: v for k, v in r.items() if k != "replaced_by"})  # replaced_by stays mutable
+    assert not repo.get("vat_returns", "v1x000").get("replaced_by")
+    assert cleared["boxes"] == BOXES and cleared["status"] == "final"
+    assert repo.delete("vat_returns", "v2x000")  # the draft amendment can go
+    assert repo.get("vat_returns", "v1x000")["boxes"] == BOXES  # the original is untouched
+
+
+def test_reopen_that_also_changes_filed_on_refused(repo):
+    r = repo.save("vat_returns", vat())
+    r = repo.save("vat_returns", {**r, "filed_on": "2026-02-09"})
+    gone = ("boxes", *CLEARED)
+    reopened = {k: v for k, v in r.items() if k not in gone}
+    refused(ONCE, repo.save, "vat_returns", {**reopened, "status": "draft", "filed_on": "2026-02-10"})
+    refused(ONCE, repo.save, "vat_returns", {**reopened, "status": "draft", "filed_on": ""})
+    got = repo.get("vat_returns", "v1x000")
+    assert got["status"] == "final" and got["filed_on"] == "2026-02-09" and got["boxes"] == BOXES
+
+
+def test_reopen_that_leaves_boxes_in_place_allowed(repo):
+    r = repo.save("vat_returns", vat())
+    repo.save("vat_returns", {**r, "status": "draft"})  # unfiled: the boxes may stay
+    got = repo.get("vat_returns", "v1x000")
+    assert got["status"] == "draft" and got["boxes"] == BOXES
