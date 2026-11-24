@@ -110,8 +110,18 @@ def return_json(ret: Mapping[str, Any]) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------ PDF
+# The PDF fonts are WinAnsi (cp1252): dashes and quotes outside it (U+2212 in the box 83 label) print as ASCII.
+_ASCII = str.maketrans(
+    {
+        "\u2212": "-", "\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2015": "-",
+        "\u2018": "'", "\u2019": "'", "\u201a": "'", "\u201b": "'",
+        "\u201c": '"', "\u201d": '"', "\u201e": '"', "\u201f": '"',
+    }
+)  # fmt: skip
+
+
 def _clean(value: object) -> str:
-    return _CTRL.sub(" ", _text(value))
+    return _CTRL.sub(" ", _text(value)).translate(_ASCII)
 
 
 def _fit(text: str, width: float, size: float, bold: bool = False) -> str:
@@ -207,6 +217,8 @@ def return_pdf(
     total = sum(len(g) for g in lines.values())
     lc = _LINE_COLS
     for kz, group in lines.items():
+        if printed >= MAX_PDF_LINES:
+            break
         if not group:
             continue
         p.line(f"Kz {kz}", size=9, bold=True, gap=12)
@@ -224,7 +236,7 @@ def return_pdf(
     if total == 0:
         p.line("No source lines.", size=9, gap=12)
     elif printed < total:
-        p.line(f"{total - printed} more lines: see the lines CSV (export.csv?lines=1).", size=9, gap=12)
+        p.line(f"... {total - printed} more lines in the lines CSV (export.csv?lines=true).", size=9, gap=12)
 
     for page in pdf.pages:  # footer and rules version on every page
         pdf.cur = page

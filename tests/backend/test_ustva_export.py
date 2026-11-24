@@ -1,6 +1,7 @@
 """VAT return exports (docs/specs/ustva.md "API", Exports): CSV golden files written by hand, JSON equals the GET
 response, PDF text, rights."""
 
+import dataclasses
 import re
 import shutil
 import zlib
@@ -181,3 +182,108 @@ def test_exports_follow_the_vat_read_right(app, clients, rid):
     tok = TestClient(app)
     tok.headers["Authorization"] = f"Bearer {token}"
     assert tok.get(f"/api/vat-returns/{rid}/export.csv").status_code == 200
+
+
+def _csv_text(data: bytes) -> str:
+    return data.decode("utf-8-sig")
+
+
+def test_pdf_prints_the_kz_83_label_with_an_ascii_minus(clients, rid):
+    joined = "\n".join(pdf_text(clients["boss"].get(f"/api/vat-returns/{rid}/export.pdf").content))
+    assert "Remaining prepayment (+) or refund (-)" in joined
+    assert "−" not in joined
+
+
+def test_banner_follows_the_rules_status_on_the_route(app, clients, rid, monkeypatch):
+    url = f"/api/vat-returns/{rid}/export.pdf"
+    on = "\n".join(pdf_text(clients["boss"].get(url).content))
+    assert ustva_export.BANNER in on
+    real = ustva_export._rules
+    monkeypatch.setattr(ustva_export, "_rules", lambda year: dataclasses.replace(real(year), status="confirmed"))
+    assert not ustva_export.rules_unconfirmed(YEAR)
+    off = "\n".join(pdf_text(clients["boss"].get(url).content))
+    assert ustva_export.BANNER not in off and ustva_export.FOOTER in off
+
+
+def _mk(n):
+    return [
+        {"entry_no": i, "booking_date": "2026-01-02", "document": f"D{i}", "base": "1.00", "tax": "0.19"}
+        for i in range(n)
+    ]
+
+
+def test_pdf_cap_stops_before_empty_headings_and_prints_one_note(monkeypatch):
+    monkeypatch.setattr(ustva_export, "MAX_PDF_LINES", 3)
+    ret = {"year": 2026, "boxes": {}, "rules_version": "v"}
+    joined = "\n".join(pdf_text(ustva_export.return_pdf(ret, {"81": _mk(2), "86": _mk(2), "66": _mk(2)})))
+    assert "Kz 81" in joined and "Kz 86" in joined  # 86 holds the third line
+    assert "Kz 66" not in joined  # cap reached: no empty heading
+    assert joined.count("more lines in the lines CSV") == 1 and "3 more lines" in joined
+    joined = "\n".join(pdf_text(ustva_export.return_pdf(ret, {"81": _mk(3), "86": _mk(2)})))  # cap ends a box
+    assert "Kz 86" not in joined and "2 more lines in the lines CSV" in joined
+
+
+def test_a_label_starting_with_equals_is_neutralised_in_the_boxes_csv(monkeypatch):
+    real = ustva_export._rules
+
+    def evil(year):
+        rules = real(year)
+        boxes = tuple(dataclasses.replace(b, label_en="=1+1") if b.kz == "81" else b for b in rules.boxes)
+        return dataclasses.replace(rules, boxes=boxes)
+
+    monkeypatch.setattr(ustva_export, "_rules", evil)
+    ret = {"year": 2026, "boxes": {"81": {"base": "100.00", "tax": "19.00"}}}
+    assert _csv_text(ustva_export.return_csv(ret)) == "kz;label;base;tax\r\n81;'=1+1;100,00;19,00\r\n"
+
+
+def test_negative_amount_and_amount_only_box_in_the_csv(app, clients):
+    journal = JournalService(app.state.services.store)
+    day = date(YEAR, 3, 12)
+    src = JournalSource(
+        event="issue", created_by="u1x000", source_coll="invoices", source_id="inv1abc", source_number="CN-1"
+    )
+    journal.post(
+        "cn", day, "cn", src,
+        [
+            PostLine(role="bank", amount_cents=-23800),
+            PostLine(role="revenue_s19", amount_cents=20000),
+            PostLine(
+                role="vat_out_s19", amount_cents=3800, tax_key="S19", tax_kind="tax", tax_rate="19",
+                tax_base_cents=-20000, vat_date=day,
+            ),
+        ],
+    )  # fmt: skip
+    journal.post(
+        "exp", day, "exp", src,
+        [
+            PostLine(role="expense_other", amount_cents=10000),
+            PostLine(role="input_vat_s19", amount_cents=2600, tax_key="VST", tax_kind="input", vat_date=day),
+            PostLine(role="bank", amount_cents=-12600),
+        ],
+    )  # fmt: skip
+    boss = clients["boss"]
+    r = boss.post("/api/vat-returns", json={"year": YEAR, "kind": "month", "no": 3})
+    assert r.status_code == 201, r.text
+    got = boss.get(f"/api/vat-returns/{r.json()['id']}/export.csv")
+    # 81: base -200 whole euros, tax -38.00; 66 has only an amount (tax column); 83 = -38.00 - 26.00
+    assert got.content == (
+        BOM
+        + b"kz;label;base;tax\r\n"
+        + b"81;Taxable sales at 19 % (base);-200,00;-38,00\r\n"
+        + b"66;Input VAT from invoices of other businesses;;26,00\r\n"
+        + "83;Remaining prepayment (+) or refund (−);;-64,00\r\n".encode()
+    )
+
+
+def test_a_final_return_export_ignores_a_later_drift_line(app, clients, rid):
+    boss = clients["boss"]
+    url = f"/api/vat-returns/{rid}/export"
+    assert boss.post(f"/api/vat-returns/{rid}/finalize?confirm_gap=true").status_code == 200
+    before = [boss.get(f"{url}.csv").content, boss.get(f"{url}.csv?lines=true").content]
+    pdf_before = "\n".join(pdf_text(boss.get(f"{url}.pdf").content))
+    _post_sale(JournalService(app.state.services.store), "late", "LATE-9", 5000, 950)
+    after = [boss.get(f"{url}.csv").content, boss.get(f"{url}.csv?lines=true").content]
+    pdf_after = "\n".join(pdf_text(boss.get(f"{url}.pdf").content))
+    assert after == before
+    assert b"LATE-9" not in after[1] and "LATE-9" not in pdf_after
+    assert pdf_after == pdf_before
