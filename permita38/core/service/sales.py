@@ -1,7 +1,6 @@
 """Offers and invoices: numbering, finalizing, conversion, billing tracked time, PDF."""
 
-import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -15,6 +14,7 @@ from permita38.core.settings import accounting_start, effective_settings
 
 from . import invoice_state
 from .numbering import NumberingService
+from .payments import PaymentService, _insert_row
 from .planner.service import PlannerService
 from .postings import IssuePostingService, build_snapshot
 from .project_customer import check_billable_project, check_project_customer, project_kind
@@ -69,40 +69,6 @@ def _user_id(user: Mapping[str, Any] | None) -> str:
     return str((user or {}).get("id") or "system")
 
 
-def record_payment_row(
-    store: Repository,
-    invoice_id: str,
-    *,
-    date: str,
-    amount_cents: int,
-    kind: str = "payment",
-    method: str = "bank",
-    note: str | None = None,
-    reverses_id: str | None = None,
-    user: Mapping[str, Any] | None = None,
-) -> dict:
-    """Insert one ``payments`` row (``amount_cents`` signed: refunds and reversals negative) and return it.
-
-    TODO(E10): when the accounting is initialised this must also post the payment event (accounting 9.2); the E8
-    postings adapter has no payment entry point yet, so before E10 only the row is written (the initialisation posts
-    stored payments, accounting 16 step 5).
-    """
-    row: dict[str, Any] = dict(
-        document_id=invoice_id,
-        date=date,
-        amount_cents=int(amount_cents),
-        method=method,
-        kind=kind,
-        created_at=int(time.time()),
-        created_by=_user_id(user),
-    )
-    if note:
-        row["note"] = note
-    if reverses_id:
-        row["reverses_id"] = reverses_id
-    return store.save("payments", row)
-
-
 def gross_cents_of(invoice: Mapping[str, Any], settings: Mapping[str, Any]) -> int:
     """The gross of an issued invoice in cents: the snapshot's, else the current totals (legacy invoice)."""
     issued = invoice.get("issued")
@@ -112,7 +78,11 @@ def gross_cents_of(invoice: Mapping[str, Any], settings: Mapping[str, Any]) -> i
 
 
 def materialize_legacy_payment(
-    store: Repository, invoice: dict, settings: Mapping[str, Any], user: Mapping[str, Any] | None = None
+    store: Repository,
+    invoice: dict,
+    settings: Mapping[str, Any],
+    user: Mapping[str, Any] | None = None,
+    post: Callable[[dict, dict], Any] | None = None,
 ) -> dict:
     """Before the first write that acts on payments or credits of an issued invoice (spec 2.3): write the missing
     ``issued`` snapshot, and turn a legacy virtual payment (stored ``paid``, no rows) into a real ``payments`` row,
@@ -125,7 +95,7 @@ def materialize_legacy_payment(
         if inv.get("status") == "paid" and not store.find("payments", document_id=inv["id"]):
             gross = int(inv["issued"]["gross"])
             if gross != 0:
-                record_payment_row(
+                row = _insert_row(
                     store,
                     inv["id"],
                     date=invoice_state.legacy_payment_date(inv),
@@ -133,6 +103,8 @@ def materialize_legacy_payment(
                     note=invoice_state.LEGACY_NOTE,
                     user=user,
                 )
+                if post is not None:  # the materialised payment posts like any other (once accounting runs)
+                    post(inv, row)
         return inv
 
 
@@ -146,6 +118,7 @@ class SalesService:
     ):
         self.store = store
         self.postings = postings or IssuePostingService(store)
+        self.payments = PaymentService(store, self.postings.journal)
         self.records = records
         records.invoice_hook = self  # the generic invoice routes go through this service
         self.numbering = numbering or NumberingService(store)
@@ -296,23 +269,18 @@ class SalesService:
                 changes[key] = value  # an unknown extra field round-trips; null clears it
         action = self._status_action(old, d0, data.get("status") if "status" in sent else None, data, sent)
         if action in ("pay", "reverse"):
-            old = materialize_legacy_payment(self.store, old, st, me)
+            old = self.payments.materialize(old, me)
             d0 = self._derived(old, st)
             if action == "pay" and d0.open_cents > 0:
-                paid_on = str(data["paid_date"])[:10]
-                record_payment_row(self.store, rid, date=paid_on, amount_cents=d0.open_cents, note=PAID_NOTE, user=me)
+                self.payments.record(
+                    rid,
+                    date=str(data["paid_date"])[:10],
+                    amount=Decimal(d0.open_cents) / 100,
+                    note=PAID_NOTE,
+                    user=me,
+                )
             elif action == "reverse":
-                for row in self.store.find("payments", document_id=rid):
-                    if row["kind"] == "payment":
-                        record_payment_row(
-                            self.store,
-                            rid,
-                            date=row["date"],
-                            amount_cents=-int(row["amount_cents"]),
-                            kind="reversal",
-                            reverses_id=row["id"],
-                            user=me,
-                        )
+                self.payments.reverse_legacy(rid, me)
                 changes["status"], changes["paid_date"] = data["status"], None
         elif action == "label":
             changes["status"] = data["status"]

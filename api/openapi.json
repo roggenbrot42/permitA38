@@ -3989,6 +3989,7 @@
           "sales"
         ],
         "summary": "Finalize Invoice",
+        "description": "Issue the invoice. The answer carries the derived payment fields; ``paid_date`` is always present (null while\nunpaid), so the response is sent without the ``exclude_none`` filter.",
         "operationId": "finalize_invoice_api_invoices__rid__finalize_post",
         "security": [
           {
@@ -10592,7 +10593,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response List Payments Api Invoices  Rid  Payments Get"
+                }
               }
             }
           },
@@ -10613,6 +10621,7 @@
           "accounting"
         ],
         "summary": "Create Payment",
+        "description": "Record a payment or refund; answers the payment, the updated invoice and warnings (overpayment, VAT drift).",
         "operationId": "create_payment_api_invoices__rid__payments_post",
         "security": [
           {
@@ -10645,7 +10654,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Payment Api Invoices  Rid  Payments Post"
+                }
               }
             }
           },
@@ -10700,7 +10713,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Reverse Payment Api Payments  Payment Id  Reverse Post"
+                }
               }
             }
           },
@@ -10756,7 +10773,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Reverse Legacy Payment Api Invoices  Rid  Payments Legacy Reverse Post"
+                }
               }
             }
           },

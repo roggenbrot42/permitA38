@@ -481,6 +481,10 @@ IMPLEMENTED = {
     ("GET", "/api/accounting/years/{year}"),
     ("GET", "/api/accounting/locks"),
     ("POST", "/api/accounting/locks"),
+    ("GET", "/api/invoices/{rid}/payments"),
+    ("POST", "/api/invoices/{rid}/payments"),
+    ("POST", "/api/payments/{payment_id}/reverse"),
+    ("POST", "/api/invoices/{rid}/payments/legacy/reverse"),
 }
 
 
@@ -553,6 +557,11 @@ def test_payment_dependency_is_the_either_or_rule(app):
                 assert err.value.status_code == 403
 
 
+_PAYMENT_IMPLEMENTED = {
+    "/api/invoices/{rid}/payments",
+    "/api/payments/{payment_id}/reverse",
+    "/api/invoices/{rid}/payments/legacy/reverse",
+}  # 404: dummy id
 PAYMENT_WRITE_ROUTES = [
     ("POST", "/api/invoices/{rid}/payments", _PAY),
     ("POST", "/api/payments/{payment_id}/reverse", {}),
@@ -576,13 +585,15 @@ def test_payment_routes_follow_invoices_or_accounting_write(app, clients, monkey
     for method, path, body in PAYMENT_WRITE_ROUTES:
         for who in ("employee", "accountant"):
             r = _call(clients[who], method, path, body, "")
-            assert r.status_code == 501, (who, method, path, r.status_code, r.text)
+            want = 404 if path in _PAYMENT_IMPLEMENTED else 501
+            assert r.status_code == want, (who, method, path, r.status_code, r.text)
     # neither right: the employee row without invoices and accounting write is refused, the accountant still passes
     monkeypatch.setitem(rights.MATRIX, "employee", {**base, "invoices": none, "accounting": none})
     for method, path, body in PAYMENT_WRITE_ROUTES:
         r = _call(clients["employee"], method, path, body, "")
         assert r.status_code == 403, (method, path, r.status_code, r.text)
-        assert _call(clients["accountant"], method, path, body, "").status_code == 501
+        want = 404 if path in _PAYMENT_IMPLEMENTED else 501
+        assert _call(clients["accountant"], method, path, body, "").status_code == want
 
 
 def test_accounting_and_vat_matrix_cells():

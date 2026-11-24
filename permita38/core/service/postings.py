@@ -6,21 +6,27 @@ turns the snapshot into the engine event (``core/accounting/postings_issue.py``,
 the accounting is initialised (settings key ``accounting.start``) or for an invoice dated before the start. No SQL here.
 """
 
+import dataclasses
 import time
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import date
 from decimal import Decimal
 from typing import Any, cast, get_args
 
 from permita38.core import models
+from permita38.core.accounting.postings_credit import CreditState
 from permita38.core.accounting.postings_issue import issue_entry, rate_str, snapshot_from_document
+from permita38.core.accounting.postings_targets import apply_event, event_entry
 from permita38.core.accounting.types import (
     Bases,
     Cents,
     IncomeBasis,
+    InvoiceState,
     IssuedSnapshot,
     Line,
+    PaymentEvent,
     RateGroup,
+    Role,
     Treatment,
     VatBasis,
 )
@@ -28,10 +34,10 @@ from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service.journal import JournalService, JournalSource, PostLine
-from permita38.core.service.locks import first_unlocked_from
+from permita38.core.service.locks import first_unlocked_from, vat_date_for
 from permita38.core.settings import accounting_start
 
-__all__ = ["IssuePostingService", "build_snapshot", "stored_snapshot"]
+__all__ = ["IssuePostingService", "PaymentPostingService", "build_snapshot", "invoice_state_of", "stored_snapshot"]
 
 SUPPORTED_TREATMENTS: tuple[str, ...] = get_args(Treatment)
 
@@ -105,7 +111,7 @@ def stored_snapshot(doc: Mapping[str, Any]) -> IssuedSnapshot | None:
     )
 
 
-def _post_line(ln: Line) -> PostLine:
+def post_line(ln: Line) -> PostLine:
     return PostLine(
         amount_cents=int(ln.amount_cents),
         role=str(ln.role),
@@ -165,5 +171,105 @@ class IssuePostingService:
         )
         text = f"Invoice {invoice.get('number') or invoice['id']}"[:200]
         return self.journal.post(
-            entry.event_key, entry.document_date, text, source, [_post_line(ln) for ln in entry.lines]
+            entry.event_key, entry.document_date, text, source, [post_line(ln) for ln in entry.lines]
         )
+
+
+def invoice_state_of(snap: IssuedSnapshot, credit_notes: Iterable[Mapping[str, Any]], kept_cents: int) -> InvoiceState:
+    """The 9.2 state of an invoice: its snapshot, the credited net and VAT per rate group summed from the credit
+    documents' own snapshots (``issued.rates``; a write-off reversal is stored negative) and the cash kept.
+    Discounts and write-offs are tracked separately (``CreditState``) because they post to their own accounts."""
+    index = {g.rate: i for i, g in enumerate(snap.rates)}
+    credited = [[0, 0] for _ in snap.rates]
+    disc = [[0, 0] for _ in snap.rates]
+    wo = [[0, 0] for _ in snap.rates]
+    for note in credit_notes:
+        raw = note.get("issued")
+        rates = raw.get("rates") if isinstance(raw, Mapping) else None
+        if not isinstance(rates, Mapping):
+            continue
+        kind = note.get("credit_kind")
+        for key, val in rates.items():
+            i = index.get(Decimal(str(key)))
+            if i is None:
+                continue
+            net, vat = int(val["net"]), int(val["vat"])
+            targets = [credited[i]]
+            if kind == "discount":
+                targets.append(disc[i])
+            if kind in ("write_off", "write_off_reversal"):
+                targets.append(wo[i])
+            for t in targets:
+                t[0] += net
+                t[1] += vat
+
+    def groups(rows: list[list[int]]) -> tuple[RateGroup, ...]:
+        return tuple(RateGroup(g.rate, Cents(r[0]), Cents(r[1])) for g, r in zip(snap.rates, rows, strict=True))
+
+    if any(v for row in (*disc, *wo) for v in row):
+        return CreditState(snap, groups(credited), Cents(kept_cents), groups(disc), groups(wo))
+    return InvoiceState(snap, groups(credited), Cents(kept_cents))
+
+
+class PaymentPostingService:
+    """Posts the payment events of an issued invoice with the target rule (accounting 9.2, 11)."""
+
+    def __init__(self, store: Repository, journal: JournalService | None = None):
+        self.store = store
+        self.journal = journal or JournalService(store)
+
+    def post_payment(
+        self, invoice: Mapping[str, Any], row: Mapping[str, Any], user: Mapping[str, Any] | None = None
+    ) -> models.JournalEntry | None:
+        """Post ``targets(after) - targets(before)`` for one stored ``payments`` row (a payment, refund or reversal;
+        ``amount_cents`` signed). ``before`` = every other row of the invoice. ``None`` when nothing posts: accounting
+        not initialised, the invoice is dated before the start or has no snapshot, or the delta has no lines.
+        A tax line keeps a locked VAT date only when the VAT itself changes (drift case 2); others move."""
+        start = accounting_start(self.store.settings())
+        if start is None or invoice.get("credit_kind"):
+            return None
+        invoice_date = date.fromisoformat(str(invoice["date"])[:10])
+        snap = stored_snapshot(invoice)
+        if invoice_date < start or snap is None:
+            return None
+        uid = str((user or {}).get("id") or "system")
+        fy = self.journal.ensure_year(invoice_date.year, uid)
+        bases = Bases(cast(IncomeBasis, fy["income_basis"]), cast(VatBasis, fy["vat_basis"]))
+        others = [r for r in self.store.find("payments", document_id=invoice["id"]) if r["id"] != row["id"]]
+        notes = [n for n in self.store.find("invoices", corrects_id=invoice["id"]) if n.get("kind") == "credit_note"]
+        before = invoice_state_of(snap, notes, sum(int(r["amount_cents"]) for r in others))
+        day = date.fromisoformat(str(row["date"])[:10])
+        role = Role("cash" if row.get("method") == "cash" else "bank")
+        event = PaymentEvent(str(row["id"]), day, Cents(int(row["amount_cents"])), role)
+        try:
+            after = apply_event(before, event)
+        except ValueError as exc:
+            raise ServiceError(422, str(exc)) from exc
+        entry = event_entry(before, after, bases, event)
+        if entry is None:
+            return None
+        first_open = first_unlocked_from(self.store.list("period_locks"))
+        lines: list[PostLine] = []
+        for ln in entry.lines:
+            post = post_line(ln)
+            if post.vat_date is not None and first_open is not None:
+                if ln.tax_kind == "tax":  # the VAT itself changes: keep the date, the journal flags the drift
+                    vat_day, _ = vat_date_for("cash_event", post.vat_date, first_open)
+                else:  # a statistical base never drifts
+                    vat_day = max(post.vat_date, first_open)
+                post = dataclasses.replace(post, vat_date=vat_day)
+            lines.append(post)
+        customer: Mapping[str, Any] = (invoice.get("issued") or {}).get("customer") or {}
+        source = JournalSource(
+            event="payment",
+            created_by=uid,
+            source_coll="payments",
+            source_id=str(row["id"]),
+            source_number=invoice.get("number"),
+            counterparty_id=customer.get("id"),
+            cp_vat_id=customer.get("vat_id"),
+            cp_country=customer.get("country"),
+        )
+        label = {"refund": "Refund", "reversal": "Reversal of payment"}.get(str(row.get("kind")), "Payment")
+        text = f"{label} {invoice.get('number') or invoice['id']}"[:200]
+        return self.journal.post(entry.event_key, entry.document_date, text, source, lines)

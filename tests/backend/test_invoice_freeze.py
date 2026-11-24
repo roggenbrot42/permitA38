@@ -8,7 +8,6 @@ from datetime import date
 import pytest
 
 from permita38.core import calc
-from permita38.core.service.sales import record_payment_row
 
 FROZEN = "The invoice is issued and cannot be changed; issue a credit note"
 TODAY = date.today().isoformat()
@@ -23,6 +22,15 @@ def store(app):
 @pytest.fixture
 def cust(boss_client):
     return boss_client.post("/api/customers", json={"name": "Demo Client GmbH", "country": "DE"}).json()
+
+
+def _fixture_payment(store, invoice_id, *, date, amount_cents):
+    """Private test fixture: a stored payments row without validation or posting."""
+    return store.save(
+        "payments",
+        {"document_id": invoice_id, "date": date, "amount_cents": amount_cents, "method": "bank", "kind": "payment",
+         "created_at": 0, "created_by": "system"},
+    )  # fmt: skip
 
 
 def make_invoice(c, cust, day="2026-02-01", **extra):
@@ -221,7 +229,7 @@ def test_hints_read_the_derived_paid_state_after_a_put_paid(boss_client, cust, s
 
 def test_paid_when_nothing_is_open_is_a_no_op(boss_client, cust, store):
     inv = issue(boss_client, cust)
-    record_payment_row(store, inv["id"], date="2026-02-02", amount_cents=119000)
+    _fixture_payment(store, inv["id"], date="2026-02-02", amount_cents=119000)
     r = put(boss_client, inv, status="paid", paid_date="2026-02-02")
     assert r.status_code == 200
     assert len(store.find("payments", document_id=inv["id"])) == 1
@@ -238,7 +246,7 @@ def test_paid_without_paid_date_is_422(boss_client, cust, store):
 
 def test_paid_on_an_invoice_with_a_partial_payment_pays_the_rest(boss_client, cust, store):
     inv = issue(boss_client, cust)
-    record_payment_row(store, inv["id"], date="2026-02-02", amount_cents=100000)
+    _fixture_payment(store, inv["id"], date="2026-02-02", amount_cents=100000)
     out = put(boss_client, inv, status="paid", paid_date="2026-02-05").json()
     assert [p["amount"] for p in out["payments"]] == ["1000.00", "190.00"]
     assert out["paid_date"] == "2026-02-05" and out["status"] == "paid"
@@ -463,3 +471,50 @@ def test_an_unknown_extra_field_of_an_issued_invoice_can_be_cleared_with_null(bo
     r = boss_client.put(f"/api/invoices/{inv['id']}", json={"my_flag": None})
     assert r.status_code == 200, r.text
     assert "my_flag" not in store.get("invoices", inv["id"])
+
+
+# -- legacy reversal: PUT paid -> sent and the legacy route ----------------------------------------------------------
+
+
+def test_put_paid_to_sent_on_a_legacy_invoice_reverses_the_virtual_payment(boss_client, cust, store):
+    inv = legacy(store, cust, paid_date="2026-02-10")
+    got = boss_client.get(f"/api/invoices/{inv['id']}").json()
+    r = put(boss_client, got, status="sent")
+    assert r.status_code == 200, r.text
+    rows = sorted(store.find("payments", document_id=inv["id"]), key=lambda p: p["amount_cents"])
+    assert [(p["kind"], p["amount_cents"], p["date"]) for p in rows] == [
+        ("reversal", -119000, "2026-02-10"),
+        ("payment", 119000, "2026-02-10"),
+    ]
+    assert rows[0]["reverses_id"] == rows[1]["id"]
+    out = boss_client.get(f"/api/invoices/{inv['id']}").json()
+    assert out["status"] == "sent" and out["paid_date"] is None and out["open_amount"] == "1190.00"
+    assert "paid_date" not in store.get("invoices", inv["id"])
+
+
+def test_put_paid_to_sent_with_real_payments_is_409(boss_client, cust, store):
+    inv = issue(boss_client, cust)
+    _fixture_payment(store, inv["id"], date="2026-02-02", amount_cents=119000)
+    got = boss_client.get(f"/api/invoices/{inv['id']}").json()
+    assert got["status"] == "paid"
+    assert put(boss_client, got, status="sent").status_code == 409
+    assert len(store.find("payments", document_id=inv["id"])) == 1
+
+
+def test_legacy_route_reverses_a_payment_dated_before_the_invoice(boss_client, cust, store):
+    inv = legacy(store, cust, paid_date="2026-01-15")  # before the invoice date 2026-02-01
+    url = f"/api/invoices/{inv['id']}/payments/legacy/reverse"
+    r = boss_client.post(url, json={})
+    assert r.status_code == 201, r.text
+    assert r.json()["payment"]["kind"] == "reversal" and r.json()["payment"]["date"] == "2026-01-15"
+    assert r.json()["invoice"]["open_amount"] == "1190.00" and r.json()["invoice"]["status"] == "sent"
+    assert len(store.find("payments", document_id=inv["id"])) == 2
+    assert boss_client.post(url, json={}).status_code == 409  # already reversed
+
+
+def test_legacy_route_is_409_without_a_legacy_payment(boss_client, cust, store):
+    inv = issue(boss_client, cust)
+    assert boss_client.post(f"/api/invoices/{inv['id']}/payments/legacy/reverse", json={}).status_code == 409
+    _fixture_payment(store, inv["id"], date="2026-02-02", amount_cents=119000)
+    assert boss_client.post(f"/api/invoices/{inv['id']}/payments/legacy/reverse", json={}).status_code == 409
+    assert len(store.find("payments", document_id=inv["id"])) == 1

@@ -6,9 +6,14 @@ Pure tests of ``core/service/invoice_state.py`` with literal numbers, plus the A
 import pytest
 
 from permita38.core.service import invoice_state as st
-from permita38.core.service.sales import record_payment_row
 
-from .test_invoice_freeze import cust, issue, make_invoice, store  # noqa: F401  (fixtures and helpers)
+from .test_invoice_freeze import (  # noqa: F401  (fixtures and helpers)
+    _fixture_payment,
+    cust,
+    issue,
+    make_invoice,
+    store,
+)
 
 
 def pay(amount, day, kind="payment", **extra):
@@ -152,14 +157,14 @@ def test_get_and_list_carry_the_derived_fields_as_decimal_strings(boss_client, c
     a = issue(boss_client, cust)
     b = issue(boss_client, cust, day="2026-02-02")
     draft = make_invoice(boss_client, cust, day="2026-02-03")
-    record_payment_row(store, a["id"], date="2026-02-03", amount_cents=100000)
+    _fixture_payment(store, a["id"], date="2026-02-03", amount_cents=100000)
     got = boss_client.get(f"/api/invoices/{a['id']}").json()
     assert (got["paid_amount"], got["credited_amount"], got["open_amount"]) == ("1000.00", "0.00", "190.00")
     assert got["payments"][0]["amount"] == "1000.00" and got["status"] == "sent" and got["paid_date"] is None
     rows = {r["id"]: r for r in boss_client.get("/api/invoices").json()}
     assert rows[a["id"]]["open_amount"] == "190.00" and rows[b["id"]]["open_amount"] == "1190.00"
     assert "open_amount" not in rows[draft["id"]] and rows[draft["id"]]["status"] == "draft"
-    record_payment_row(store, a["id"], date="2026-02-05", amount_cents=19000)
+    _fixture_payment(store, a["id"], date="2026-02-05", amount_cents=19000)
     got = boss_client.get(f"/api/invoices/{a['id']}").json()
     assert (got["status"], got["paid_date"], got["open_amount"]) == ("paid", "2026-02-05", "0.00")
     assert boss_client.get("/api/invoices").json()  # the list still serialises
@@ -167,14 +172,14 @@ def test_get_and_list_carry_the_derived_fields_as_decimal_strings(boss_client, c
 
 def test_overpayment_shows_a_negative_open_amount(boss_client, cust, store):  # noqa: F811
     a = issue(boss_client, cust)
-    record_payment_row(store, a["id"], date="2026-02-03", amount_cents=150000)
+    _fixture_payment(store, a["id"], date="2026-02-03", amount_cents=150000)
     got = boss_client.get(f"/api/invoices/{a['id']}").json()
     assert (got["open_amount"], got["status"]) == ("-310.00", "paid")
 
 
 def test_storno_row_cancels_the_invoice_in_the_api(boss_client, cust, store):  # noqa: F811
     a = issue(boss_client, cust)
-    record_payment_row(store, a["id"], date="2026-02-03", amount_cents=119000)
+    _fixture_payment(store, a["id"], date="2026-02-03", amount_cents=119000)
     store.save(
         "invoices",
         {

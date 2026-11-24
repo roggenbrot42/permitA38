@@ -5,11 +5,12 @@ API tokens: reads follow the owner's rights; every route that changes something 
 `accounting` or `vat` through tokens in v1).
 """
 
-from typing import Annotated, NoReturn
+from typing import Annotated, Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
+from permita38.api.responses import present
 from permita38.core import models, rights
 
 router = APIRouter(prefix="/accounting", tags=["accounting"])
@@ -167,21 +168,33 @@ def integrity(user: Read, services: ServicesDep):
 
 # ------------------------------------------------------------------ payments and credit notes on invoices
 # Write: `invoices` or `accounting` (accountants have the latter), session only for API tokens in v1.
+def _payment_result(services, result: dict) -> dict:
+    inv = services.store.get("invoices", result.pop("invoice_id"))
+    return {**result, "invoice": present(models.Document, services.sales.invoice_view(inv))}
+
+
 @payments_router.get("/invoices/{rid}/payments", name="list_payments")
-def list_payments(rid: str, user: InvoiceRead, services: ServicesDep):
-    not_implemented()
+def list_payments(rid: str, user: InvoiceRead, services: ServicesDep) -> list[dict[str, Any]]:
+    return services.sales.payments.list(rid)
 
 
 @payments_router.post("/invoices/{rid}/payments", status_code=201, dependencies=[SessionOnly], name="create_payment")
-def create_payment(rid: str, body: models.PaymentIn, user: PaymentWrite, services: ServicesDep):
-    not_implemented()
+def create_payment(rid: str, body: models.PaymentIn, user: PaymentWrite, services: ServicesDep) -> dict[str, Any]:
+    """Record a payment or refund; answers the payment, the updated invoice and warnings (overpayment, VAT drift)."""
+    result = services.sales.payments.record(
+        rid, date=body.date, amount=body.amount, kind=body.kind, method=body.method, note=body.note, user=user
+    )
+    return _payment_result(services, result)
 
 
 @payments_router.post(
     "/payments/{payment_id}/reverse", status_code=201, dependencies=[SessionOnly], name="reverse_payment"
 )
-def reverse_payment(payment_id: str, body: models.PaymentReverseIn, user: PaymentWrite, services: ServicesDep):
-    not_implemented()
+def reverse_payment(
+    payment_id: str, body: models.PaymentReverseIn, user: PaymentWrite, services: ServicesDep
+) -> dict[str, Any]:
+    result = services.sales.payments.reverse(payment_id, date=body.date, note=body.note, user=user)
+    return _payment_result(services, result)
 
 
 @payments_router.post(
@@ -190,9 +203,12 @@ def reverse_payment(payment_id: str, body: models.PaymentReverseIn, user: Paymen
     dependencies=[SessionOnly],
     name="reverse_legacy_payment",
 )
-def reverse_legacy_payment(rid: str, body: models.PaymentReverseIn, user: PaymentWrite, services: ServicesDep):
+def reverse_legacy_payment(
+    rid: str, body: models.PaymentReverseIn, user: PaymentWrite, services: ServicesDep
+) -> dict[str, Any]:
     """Reverse the virtual payment of a legacy paid invoice (credit-notes-payments.md 2.3)."""
-    not_implemented()
+    result = services.sales.payments.reverse_legacy(rid, user, date=body.date, note=body.note)
+    return _payment_result(services, result)
 
 
 @payments_router.post("/invoices/{rid}/settle-discount", dependencies=[SessionOnly], name="settle_discount")
