@@ -33,9 +33,9 @@ CREATE TABLE "vat_returns" (
     "rules_version" TEXT,
     "boxes" TEXT,
     "source_lines" TEXT,
-    "result" TEXT,
-    "special_prepayment_credit" TEXT,
-    "rounding_difference" TEXT,
+    "result_cents" INTEGER,
+    "special_prepayment_credit_cents" INTEGER,
+    "rounding_difference_cents" INTEGER,
     "filed_on" TEXT,
     "reference" TEXT,
     "note" TEXT,
@@ -46,7 +46,8 @@ CREATE TABLE "vat_returns" (
     "finalised_at" INTEGER,
     "finalised_by" TEXT,
     "extra" TEXT,
-    CONSTRAINT "vat_returns_amends_key" CHECK ("amends_key" IS NOT NULL AND "amends_key" = COALESCE("amends_id", ''))
+    CONSTRAINT "vat_returns_amends_key" CHECK ("amends_key" IS NOT NULL AND "amends_key" = COALESCE("amends_id", '')),
+    CONSTRAINT "vat_returns_quarter_no" CHECK ("period_kind" <> 'quarter' OR "period_no" BETWEEN 1 AND 4)
 );
 CREATE UNIQUE INDEX "idx_vat_returns_period" ON "vat_returns" ("year", "period_kind", "period_no", "amends_key");
 
@@ -99,6 +100,14 @@ CREATE TRIGGER "guard_invoices_credit_kind_one_of_upd" BEFORE UPDATE OF "credit_
 WHEN ((NEW."credit_kind" IS NOT NULL AND trim(NEW."credit_kind", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NEW."credit_kind" NOT IN ('storno', 'partial', 'discount', 'write_off', 'write_off_reversal'))
  AND (NEW."credit_kind" IS NOT OLD."credit_kind")
 BEGIN SELECT RAISE(ABORT, 'permita38:vocab.unknown'); END;
+CREATE TRIGGER "guard_invoices_credit_kind_credit_note_implies_ins" BEFORE INSERT ON "invoices"
+WHEN (COALESCE((NEW."credit_kind" IS NOT NULL AND trim(NEW."credit_kind", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0) AND NOT COALESCE(NEW."kind" = 'credit_note', 0))
+ AND NOT EXISTS (SELECT 1 FROM "invoices" WHERE "id" = NEW."id" AND "credit_kind" IS NEW."credit_kind" AND "kind" IS NEW."kind")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_invoices_credit_kind_credit_note_implies'); END;
+CREATE TRIGGER "guard_invoices_credit_kind_credit_note_implies_upd" BEFORE UPDATE OF "credit_kind", "kind" ON "invoices"
+WHEN (COALESCE((NEW."credit_kind" IS NOT NULL AND trim(NEW."credit_kind", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0) AND NOT COALESCE(NEW."kind" = 'credit_note', 0))
+ AND (NEW."credit_kind" IS NOT OLD."credit_kind" OR NEW."kind" IS NOT OLD."kind")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_invoices_credit_kind_credit_note_implies'); END;
 CREATE TRIGGER "guard_invoices_tax_treatment_one_of_ins" BEFORE INSERT ON "invoices"
 WHEN ((NEW."tax_treatment" IS NOT NULL AND trim(NEW."tax_treatment", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NEW."tax_treatment" NOT IN ('standard', 'eu_b2b_service', 'small_business'))
  AND NOT EXISTS (SELECT 1 FROM "invoices" WHERE "id" = NEW."id" AND "tax_treatment" IS NEW."tax_treatment")
@@ -286,6 +295,30 @@ CREATE TRIGGER "guard_vat_returns_period_no_range_upd" BEFORE UPDATE OF "period_
 WHEN (NEW."period_no" IS NOT NULL AND NEW."period_no" <> '' AND (NEW."period_no" < 1 OR NEW."period_no" > 12))
  AND (NEW."period_no" IS NOT OLD."period_no")
 BEGIN SELECT RAISE(ABORT, 'permita38:range.bounds'); END;
+CREATE TRIGGER "guard_vat_returns_period_order_ins" BEFORE INSERT ON "vat_returns"
+WHEN NEW."from_date" IS NOT NULL AND NEW."from_date" <> '' AND NEW."to_date" IS NOT NULL AND NEW."to_date" <> '' AND NEW."to_date" < NEW."from_date"
+ AND NOT EXISTS (SELECT 1 FROM "vat_returns" WHERE "id" = NEW."id" AND "from_date" IS NEW."from_date" AND "to_date" IS NEW."to_date")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.period_reversed'); END;
+CREATE TRIGGER "guard_vat_returns_period_order_upd" BEFORE UPDATE OF "from_date", "to_date" ON "vat_returns"
+WHEN NEW."from_date" IS NOT NULL AND NEW."from_date" <> '' AND NEW."to_date" IS NOT NULL AND NEW."to_date" <> '' AND NEW."to_date" < NEW."from_date"
+ AND (NEW."from_date" IS NOT OLD."from_date" OR NEW."to_date" IS NOT OLD."to_date")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.period_reversed'); END;
+CREATE TRIGGER "guard_vat_returns_final_finalised_at_implies_ins" BEFORE INSERT ON "vat_returns"
+WHEN (COALESCE(NEW."status" = 'final', 0) AND NOT COALESCE((NEW."finalised_at" IS NOT NULL AND trim(NEW."finalised_at", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+ AND NOT EXISTS (SELECT 1 FROM "vat_returns" WHERE "id" = NEW."id" AND "status" IS NEW."status" AND "finalised_at" IS NEW."finalised_at")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_vat_returns_final_finalised_at_implies'); END;
+CREATE TRIGGER "guard_vat_returns_final_finalised_at_implies_upd" BEFORE UPDATE OF "status", "finalised_at" ON "vat_returns"
+WHEN (COALESCE(NEW."status" = 'final', 0) AND NOT COALESCE((NEW."finalised_at" IS NOT NULL AND trim(NEW."finalised_at", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+ AND (NEW."status" IS NOT OLD."status" OR NEW."finalised_at" IS NOT OLD."finalised_at")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_vat_returns_final_finalised_at_implies'); END;
+CREATE TRIGGER "guard_vat_returns_final_finalised_by_implies_ins" BEFORE INSERT ON "vat_returns"
+WHEN (COALESCE(NEW."status" = 'final', 0) AND NOT COALESCE((NEW."finalised_by" IS NOT NULL AND trim(NEW."finalised_by", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+ AND NOT EXISTS (SELECT 1 FROM "vat_returns" WHERE "id" = NEW."id" AND "status" IS NEW."status" AND "finalised_by" IS NEW."finalised_by")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_vat_returns_final_finalised_by_implies'); END;
+CREATE TRIGGER "guard_vat_returns_final_finalised_by_implies_upd" BEFORE UPDATE OF "status", "finalised_by" ON "vat_returns"
+WHEN (COALESCE(NEW."status" = 'final', 0) AND NOT COALESCE((NEW."finalised_by" IS NOT NULL AND trim(NEW."finalised_by", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+ AND (NEW."status" IS NOT OLD."status" OR NEW."finalised_by" IS NOT OLD."finalised_by")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_vat_returns_final_finalised_by_implies'); END;
 CREATE TRIGGER "guard_vat_returns_amends_id_ref_ins" BEFORE INSERT ON "vat_returns"
 WHEN (NEW."amends_id" IS NOT NULL AND trim(NEW."amends_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "vat_returns" WHERE "id" = NEW."amends_id")
  AND NOT EXISTS (SELECT 1 FROM "vat_returns" WHERE "id" = NEW."id" AND "amends_id" IS NEW."amends_id")
@@ -380,6 +413,22 @@ CREATE TRIGGER "guard_zm_reports_quarter_range_upd" BEFORE UPDATE OF "quarter" O
 WHEN (NEW."quarter" IS NOT NULL AND NEW."quarter" <> '' AND (NEW."quarter" < 1 OR NEW."quarter" > 4))
  AND (NEW."quarter" IS NOT OLD."quarter")
 BEGIN SELECT RAISE(ABORT, 'permita38:range.bounds'); END;
+CREATE TRIGGER "guard_zm_reports_final_finalised_at_implies_ins" BEFORE INSERT ON "zm_reports"
+WHEN (COALESCE(NEW."status" = 'final', 0) AND NOT COALESCE((NEW."finalised_at" IS NOT NULL AND trim(NEW."finalised_at", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+ AND NOT EXISTS (SELECT 1 FROM "zm_reports" WHERE "id" = NEW."id" AND "status" IS NEW."status" AND "finalised_at" IS NEW."finalised_at")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_zm_reports_final_finalised_at_implies'); END;
+CREATE TRIGGER "guard_zm_reports_final_finalised_at_implies_upd" BEFORE UPDATE OF "status", "finalised_at" ON "zm_reports"
+WHEN (COALESCE(NEW."status" = 'final', 0) AND NOT COALESCE((NEW."finalised_at" IS NOT NULL AND trim(NEW."finalised_at", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+ AND (NEW."status" IS NOT OLD."status" OR NEW."finalised_at" IS NOT OLD."finalised_at")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_zm_reports_final_finalised_at_implies'); END;
+CREATE TRIGGER "guard_zm_reports_final_finalised_by_implies_ins" BEFORE INSERT ON "zm_reports"
+WHEN (COALESCE(NEW."status" = 'final', 0) AND NOT COALESCE((NEW."finalised_by" IS NOT NULL AND trim(NEW."finalised_by", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+ AND NOT EXISTS (SELECT 1 FROM "zm_reports" WHERE "id" = NEW."id" AND "status" IS NEW."status" AND "finalised_by" IS NEW."finalised_by")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_zm_reports_final_finalised_by_implies'); END;
+CREATE TRIGGER "guard_zm_reports_final_finalised_by_implies_upd" BEFORE UPDATE OF "status", "finalised_by" ON "zm_reports"
+WHEN (COALESCE(NEW."status" = 'final', 0) AND NOT COALESCE((NEW."finalised_by" IS NOT NULL AND trim(NEW."finalised_by", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+ AND (NEW."status" IS NOT OLD."status" OR NEW."finalised_by" IS NOT OLD."finalised_by")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_zm_reports_final_finalised_by_implies'); END;
 CREATE TRIGGER "guard_zm_reports_amends_id_ref_ins" BEFORE INSERT ON "zm_reports"
 WHEN (NEW."amends_id" IS NOT NULL AND trim(NEW."amends_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "zm_reports" WHERE "id" = NEW."amends_id")
  AND NOT EXISTS (SELECT 1 FROM "zm_reports" WHERE "id" = NEW."id" AND "amends_id" IS NEW."amends_id")

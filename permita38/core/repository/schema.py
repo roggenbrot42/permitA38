@@ -387,7 +387,8 @@ TABLES: dict[str, Table] = {
             _cols(
                 _BASE + "year:int period_kind:str period_no:int from_date:str to_date:str due_date:str status:str "
                 "basis:str frequency:str dauerfrist:bool small_business:bool rules_version:str boxes:json "
-                "source_lines:json result:str special_prepayment_credit:str rounding_difference:str filed_on:str "
+                "source_lines:json result_cents:int special_prepayment_credit_cents:int rounding_difference_cents:int "
+                "filed_on:str "
                 "reference:str note:text amends_id:id amends_key:str replaced_by:id external:bool finalised_at:int "
                 "finalised_by:id" + _EXTRA
             ),
@@ -837,9 +838,14 @@ def _accounting_document_guards() -> list[Guard]:
     def ref(table: str, col: str, target: str) -> Guard:
         return Guard(f"guard_{table}_{col}_ref", table, "reference", (col,), "ref.dangling", target=target)
 
+    def implies(table: str, stem: str, if_: Condition, then: Condition) -> Guard:
+        name = f"guard_{table}_{stem}_implies"
+        return Guard(name, table, "implies", (), f"state.implies:{name}", if_=if_, then=then)
+
     out: list[Guard] = [
         one_of("invoices", "kind", ("invoice", "credit_note")),
         one_of("invoices", "credit_kind", get_args(CreditKind)),
+        implies("invoices", "credit_kind_credit_note", IsSet("credit_kind"), Eq("kind", "credit_note")),
         one_of("invoices", "tax_treatment", get_args(Treatment)),  # the reserved treatments are refused
         ref("invoices", "corrects_id", "invoices"),
         one_of("expenses", "tax_treatment", get_args(ExpenseTreatment)),
@@ -856,6 +862,11 @@ def _accounting_document_guards() -> list[Guard]:
         one_of("vat_returns", "frequency", ("month", "quarter", "none")),
         bounds("vat_returns", "year", 2000, 2100),
         bounds("vat_returns", "period_no", 1, 12),
+        Guard(
+            "guard_vat_returns_period_order", "vat_returns", "order", ("from_date", "to_date"), "state.period_reversed"
+        ),
+        implies("vat_returns", "final_finalised_at", Eq("status", "final"), IsSet("finalised_at")),
+        implies("vat_returns", "final_finalised_by", Eq("status", "final"), IsSet("finalised_by")),
         ref("vat_returns", "amends_id", "vat_returns"),
         ref("vat_returns", "replaced_by", "vat_returns"),
     ]
@@ -865,6 +876,8 @@ def _accounting_document_guards() -> list[Guard]:
         one_of("zm_reports", "status", ("draft", "final")),
         bounds("zm_reports", "year", 2000, 2100),
         bounds("zm_reports", "quarter", 1, 4),
+        implies("zm_reports", "final_finalised_at", Eq("status", "final"), IsSet("finalised_at")),
+        implies("zm_reports", "final_finalised_by", Eq("status", "final"), IsSet("finalised_by")),
         ref("zm_reports", "amends_id", "zm_reports"),
         ref("zm_reports", "replaced_by", "zm_reports"),
     ]
@@ -955,6 +968,8 @@ CHECKS = {
         "vat_returns_amends_key",
         '"amends_key" IS NOT NULL AND "amends_key" = COALESCE("amends_id", \'\')',
     ),
+    # a quarter has the periods 1..4 (the guard range 1..12 covers the month)
+    "vat_returns.quarter_no": ("vat_returns_quarter_no", '"period_kind" <> \'quarter\' OR "period_no" BETWEEN 1 AND 4'),
     "zm_reports": ("zm_reports_amends_key", '"amends_key" IS NOT NULL AND "amends_key" = COALESCE("amends_id", \'\')'),
     "period_locks": (
         "period_locks_reason_vocab",

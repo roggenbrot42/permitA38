@@ -22,6 +22,7 @@ from pydantic import (
     model_validator,
 )
 
+from . import money
 from . import validation as v
 from .holidays import STATES
 from .numbering import PatternError, parse_pattern
@@ -1956,6 +1957,376 @@ class AdoptVendorsIn(v.CheckedBody):
     model_config = ConfigDict(extra="forbid")
     dry_run: bool = True
     items: Annotated[list[AdoptVendorItemIn], Field(min_length=1, max_length=200)]
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Accounting journal, fiscal years, VAT returns and ZM (docs/specs/accounting.md 4, 7a, 8.1, 9.8, 11, 16, 18;
+# ustva.md "Data model" and "API"; zm.md "Records" and "API"). Models only; the services follow.
+# Sign convention of every journal amount: DEBIT POSITIVE, CREDIT NEGATIVE (like ``amount_cents``), so an entry balances
+# when its amounts sum to 0. Responses carry money as decimal strings; the stored ``*_cents`` integers are converted.
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+def _cents_to_money(cents: Any) -> Decimal | None:
+    """A stored cents value (int, numeric string, float-like) as exact euros; only an unparseable value gives None."""
+    if isinstance(cents, bool) or cents is None:
+        return None
+    try:
+        return money.dec(cents, default=None).scaleb(-2)
+    except ValueError:
+        return None
+
+
+def _from_cents(data: Any, pairs: dict[str, str]) -> Any:
+    """Stored ``<name>_cents`` (int) -> ``<name>`` (Money). A value already given under the new name is kept."""
+    if not isinstance(data, dict) or not any(k in data for k in pairs):
+        return data
+    out = dict(data)
+    for old, new in pairs.items():
+        if old in out:
+            cents = out.pop(old)
+            if new not in out:
+                out[new] = _cents_to_money(cents)
+    return out
+
+
+class FiscalYearIn(v.CheckedBody):
+    """Open a fiscal year (accounting.md 4). Rules that need the company type (GmbH must use accrual) and 'a change only
+    before the first entry' are service rules."""
+
+    year: v.FiscalYearNo
+    chart: v.Chart
+    income_basis: v.IncomeBasis
+    vat_basis: v.VatBasis = "soll"
+    vat_frequency: v.VatFrequency = "month"
+    dauerfrist: StrictBool = False
+    small_business: StrictBool = False
+    vat_regular_from: v.OptDate = None
+
+    @model_validator(mode="after")
+    def _regular_from(self):
+        if self.vat_regular_from:
+            if not self.small_business:
+                raise ValueError("vat_regular_from needs small_business")
+            if int(self.vat_regular_from[:4]) != self.year:
+                raise ValueError("vat_regular_from must lie in the fiscal year")
+        return self
+
+
+class FiscalYear(Record):
+    year: int
+    chart: str | None = None
+    income_basis: str | None = None
+    vat_basis: str | None = None
+    vat_frequency: str | None = None
+    dauerfrist: bool | None = None
+    small_business: bool | None = None
+    vat_regular_from: str | None = None
+    rules_version: str | None = None
+    opened_at: int | None = None
+    opened_by: str | None = None
+    closed_at: int | None = None
+    closed_by: str | None = None
+
+
+class JournalLine(BaseModel):
+    """One debit (positive) or credit (negative) of an entry. ``amount_cents`` / ``tax_base_cents`` are accepted from
+    storage and answered as decimal strings ``amount`` / ``tax_base``."""
+
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    entry_id: str | None = None
+    line_no: int | None = None
+    role: str | None = None
+    account: str
+    amount: v.Money = 0
+    tax_key: str | None = None
+    tax_kind: str | None = None
+    tax_rate: str | None = None
+    tax_base: v.Money | None = None
+    vat_date: str | None = None
+    income_date: str | None = None
+    open_item_id: str | None = None
+    treatment: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _cents(cls, data: Any) -> Any:
+        return _from_cents(data, {"amount_cents": "amount", "tax_base_cents": "tax_base"})
+
+
+class JournalEntry(Record):
+    fiscal_year: int | None = None
+    entry_no: int | None = None
+    document_date: str | None = None
+    booking_date: str | None = None
+    event: str | None = None
+    event_key: str | None = None
+    source_coll: str | None = None
+    source_id: str | None = None
+    source_number: str | None = None
+    reverses_id: str | None = None
+    counterparty_id: str | None = None
+    cp_vat_id: str | None = None
+    cp_country: str | None = None
+    text: str | None = None
+    origin: str | None = None  # auto | manual | opening
+    created_at: int | None = None
+    created_by: str | None = None
+    prev_hash: str | None = None
+    hash: str | None = None
+    lines: list[JournalLine] = []
+
+
+class ManualLineIn(v.StrictRecord):
+    """One line of a manual entry. ``amount`` is signed: debit positive, credit negative; a zero amount is only allowed
+    on a ``base_only`` line (statistical). Exactly one of ``account`` and ``role``."""
+
+    account: v.AccountNo | None = None
+    role: v.RoleName | None = None
+    amount: v.MoneyIn
+    tax_key: v.TaxKeyName | None = None
+    tax_kind: v.TaxKind | None = None
+    tax_rate: v.TaxRateText | None = None
+    tax_base: v.MoneyIn | None = None  # in the sign of the VAT effect (accounting.md 6)
+    vat_date: v.OptDate = None
+    income_date: v.OptDate = None
+
+    @model_validator(mode="after")
+    def _rules(self):
+        if bool(self.account) == bool(self.role):
+            raise ValueError("give exactly one of account and role")
+        taxed = self.tax_key is not None and self.tax_key != "NONE"
+        if not taxed and (self.tax_kind or self.tax_base is not None or self.tax_rate or self.vat_date):
+            raise ValueError("tax_kind, tax_rate, tax_base and vat_date need a tax_key other than NONE")
+        if taxed:
+            if self.tax_kind is None:
+                raise ValueError("a line with a tax_key needs tax_kind")
+            if not self.vat_date:
+                raise ValueError("a line with a tax_key needs vat_date")
+            if self.tax_kind in ("tax", "base_only") and self.tax_base is None:
+                raise ValueError("a tax or base_only line needs tax_base")
+        if self.amount == 0 and self.tax_kind != "base_only":
+            raise ValueError("amount must not be 0 (except on a base_only line)")
+        return self
+
+
+class ManualEntryIn(v.CheckedBody):
+    """A free, balanced entry (accounting.md 9.8): at least two lines, amounts sum to 0, text required."""
+
+    date: v.ISODate  # document date; the service books it on max(date, first open day)
+    text: v.EntryText
+    lines: Annotated[list[ManualLineIn], Field(min_length=2, max_length=200)]
+
+    @model_validator(mode="after")
+    def _balanced(self):
+        if sum((line.amount for line in self.lines), Decimal(0)) != 0:
+            raise ValueError("the entry is not balanced: the amounts must sum to 0 (debit positive, credit negative)")
+        return self
+
+
+class EntryReverseIn(v.CheckedBody):
+    date: v.OptDate = None
+    text: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+class PeriodLockIn(v.CheckedBody):
+    """Lock a month (and, by the service's order rule, every earlier one)."""
+
+    year: v.FiscalYearNo
+    month: v.MonthNo
+
+
+class PeriodLock(Record):
+    year: int
+    month: int
+    locked_at: int | None = None
+    locked_by: str | None = None
+    reason: str | None = None
+
+
+class VatReturnCreateIn(v.CheckedBody):
+    year: v.FiscalYearNo
+    kind: v.VatPeriodKind
+    no: Annotated[int, Field(ge=1, le=12, strict=True)]
+    amends_id: v.OptId = None
+
+    @model_validator(mode="after")
+    def _no_in_range(self):
+        if self.kind == "quarter" and self.no > 4:
+            raise ValueError("no must be 1..4 for a quarter")
+        return self
+
+
+class VatReturnFiledIn(v.CheckedBody):
+    filed_on: v.ISODate
+    reference: v.Reference | None = None
+    note: v.LongNote | None = None
+
+
+class VatReturnPaymentIn(v.CheckedBody):
+    """Payment (to the tax office) or refund (from it) of Kz 83; the amount is positive, the kind gives the direction."""
+
+    date: v.ISODate
+    amount: v.PositiveMoneyIn
+    kind: Literal["payment", "refund"]
+
+
+class SpecialPrepaymentIn(v.CheckedBody):
+    year: v.FiscalYearNo
+    amount: v.NonNegMoneyIn
+    paid_on: v.OptDate = None
+
+
+class VatBox(BaseModel):
+    """One Kennzahl: base/tax (with booked figures) or a single amount, all decimal strings."""
+
+    model_config = ConfigDict(extra="allow")
+    base: v.Money | None = None
+    tax: v.Money | None = None
+    booked_base: v.Money | None = None
+    booked_tax: v.Money | None = None
+    amount: v.Money | None = None
+
+
+class VatReturn(Record):
+    year: int
+    period_kind: str | None = None
+    period_no: int | None = None
+    from_date: str | None = None
+    to_date: str | None = None
+    due_date: str | None = None
+    status: str = "draft"
+    basis: str | None = None
+    frequency: str | None = None
+    dauerfrist: bool | None = None
+    small_business: bool | None = None
+    rules_version: str | None = None
+    boxes: dict[str, VatBox] = {}
+    source_lines: list[str] | None = None
+    result: v.Money | None = None  # Kz 83
+    special_prepayment_credit: v.Money | None = None  # Kz 39
+    rounding_difference: v.Money | None = None
+    filed_on: str | None = None
+    reference: str | None = None
+    note: str | None = None
+    amends_id: str | None = None
+    amends_key: str | None = None
+    replaced_by: str | None = None
+    external: bool | None = None
+    finalised_at: int | None = None
+    finalised_by: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _cents(cls, data: Any) -> Any:
+        if isinstance(data, dict) and isinstance(data.get("boxes"), dict):
+            data = {**data, "boxes": {k: b for k, b in data["boxes"].items() if isinstance(b, dict)}}
+        return _from_cents(
+            data,
+            {
+                "result_cents": "result",
+                "special_prepayment_credit_cents": "special_prepayment_credit",
+                "rounding_difference_cents": "rounding_difference",
+            },
+        )
+
+
+class ZmCreateIn(v.CheckedBody):
+    year: v.FiscalYearNo
+    quarter: v.QuarterNo
+    amends_id: v.OptId = None
+
+
+class ZmFiledIn(v.CheckedBody):
+    filed_on: v.ISODate
+    reference: v.Reference | None = None
+    note: v.LongNote | None = None
+
+
+class ZmLine(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    vat_id: str
+    country: str
+    amount: v.Money = 0
+    kind: str = "S"
+
+
+class ZmReport(Record):
+    year: int
+    quarter: int
+    status: str = "draft"
+    due_date: str | None = None
+    lines: list[ZmLine] = []
+    source_lines: list[str] | None = None
+    rules_version: str | None = None
+    filed_on: str | None = None
+    reference: str | None = None
+    note: str | None = None
+    amends_id: str | None = None
+    amends_key: str | None = None
+    replaced_by: str | None = None
+    finalised_at: int | None = None
+    finalised_by: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _skip_bad_lines(cls, data: Any) -> Any:
+        if isinstance(data, dict) and isinstance(data.get("lines"), list):
+            data = {**data, "lines": [x for x in data["lines"] if isinstance(x, dict)]}
+        return data
+
+
+class OpeningBalanceIn(v.CheckedBody):
+    """One opening balance of an accrual start; ``amount`` signed like a journal line (debit positive)."""
+
+    account: v.AccountNo | None = None
+    role: v.RoleName | None = None
+    amount: v.MoneyIn
+
+    @model_validator(mode="after")
+    def _one_of(self):
+        if bool(self.account) == bool(self.role):
+            raise ValueError("give exactly one of account and role")
+        return self
+
+
+class ReviewResolutionIn(v.CheckedBody):
+    """The user's answer to one row of the initialisation review list (accounting.md 16 step 9)."""
+
+    key: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    action: Literal["treatment", "confirm", "credit_note"]
+    treatment: Annotated[str, StringConstraints(max_length=60)] | None = None
+
+    @model_validator(mode="after")
+    def _treatment(self):
+        if (self.action == "treatment") != (self.treatment is not None):
+            raise ValueError("treatment is required for, and only for, the action treatment")
+        return self
+
+
+class AccountingInitIn(v.CheckedBody):
+    """Initialisation request (accounting.md 16 step 1 and 9)."""
+
+    chart: v.Chart
+    income_basis: v.IncomeBasis
+    vat_basis: v.VatBasis = "soll"
+    frequency: v.VatFrequency = "month"
+    dauerfrist: StrictBool = False
+    small_business: StrictBool = False
+    accounting_start: v.OptDate = None  # null = 1 January of the current year (service)
+    opening_balances: Annotated[list[OpeningBalanceIn], Field(max_length=200)] = []
+    review_resolutions: Annotated[list[ReviewResolutionIn], Field(max_length=5000)] = []
+
+    @model_validator(mode="after")
+    def _no_duplicates(self):
+        keys = [r.key for r in self.review_resolutions]
+        if len(keys) != len(set(keys)):
+            raise ValueError("review_resolutions: duplicate key")
+        targets = [("account", b.account) if b.account else ("role", b.role) for b in self.opening_balances]
+        if len(targets) != len(set(targets)):
+            raise ValueError("opening_balances: duplicate account or role")
+        return self
 
 
 # collection -> (response model: lenient, request model: strict) of the typed CRUD collections
