@@ -11646,6 +11646,28 @@
             ],
             "title": "Invoice No"
           },
+          "tax_treatment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Treatment"
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date"
+          },
           "sanity_warnings": {
             "anyOf": [
               {
@@ -11936,6 +11958,65 @@
           "end"
         ],
         "title": "ContractIn"
+      },
+      "CreditNoteSummary": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "credit_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Kind"
+          },
+          "gross": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Gross",
+            "default": "0.00"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "CreditNoteSummary",
+        "description": "A credit note as listed on its invoice (``credit_notes`` of the invoice response)."
       },
       "Customer": {
         "properties": {
@@ -12664,6 +12745,129 @@
               }
             ],
             "title": "Original Pdf"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "credit_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Kind"
+          },
+          "corrects_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrects Id"
+          },
+          "tax_treatment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Treatment"
+          },
+          "issued": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued"
+          },
+          "paid_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid Amount"
+          },
+          "credited_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credited Amount"
+          },
+          "open_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Amount"
+          },
+          "payments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Payment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payments"
+          },
+          "credit_notes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CreditNoteSummary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Notes"
           }
         },
         "additionalProperties": true,
@@ -12919,6 +13123,22 @@
               }
             ],
             "title": "Offer Id"
+          },
+          "tax_treatment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "standard",
+                  "small_business",
+                  "eu_b2b_service"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Treatment"
           }
         },
         "additionalProperties": true,
@@ -13247,6 +13467,129 @@
               }
             ],
             "title": "Original Pdf"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "credit_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Kind"
+          },
+          "corrects_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrects Id"
+          },
+          "tax_treatment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Treatment"
+          },
+          "issued": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued"
+          },
+          "paid_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid Amount"
+          },
+          "credited_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credited Amount"
+          },
+          "open_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Amount"
+          },
+          "payments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Payment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payments"
+          },
+          "credit_notes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CreditNoteSummary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Notes"
           },
           "planning_warnings": {
             "anyOf": [
@@ -14213,6 +14556,28 @@
               }
             ],
             "title": "Invoice No"
+          },
+          "tax_treatment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Treatment"
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date"
           }
         },
         "additionalProperties": true,
@@ -14444,6 +14809,34 @@
               }
             ],
             "title": "Invoice No"
+          },
+          "tax_treatment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "standard",
+                  "no_input_vat",
+                  "reverse_charge_eu_service",
+                  "reverse_charge_third_country"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Treatment"
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date"
           }
         },
         "additionalProperties": true,
@@ -15903,6 +16296,97 @@
         ],
         "title": "PasswordPayload"
       },
+      "Payment": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "document_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Id"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Amount",
+            "default": "0.00"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "payment"
+          },
+          "method": {
+            "type": "string",
+            "title": "Method",
+            "default": "bank"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "reverses_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reverses Id"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "Payment",
+        "description": "One payment, refund or reversal of an invoice (docs/specs/credit-notes-payments.md 2.3 and 3). ``amount`` is\nsigned: positive = money received, negative = money paid back. ``id`` is null for a legacy virtual payment."
+      },
       "PensionIn": {
         "properties": {
           "mode": {
@@ -17004,6 +17488,34 @@
               }
             ],
             "title": "Invoice No"
+          },
+          "tax_treatment": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "standard",
+                  "no_input_vat",
+                  "reverse_charge_eu_service",
+                  "reverse_charge_third_country"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Treatment"
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date"
           },
           "accepted": {
             "items": {
@@ -23469,6 +23981,129 @@
             ],
             "title": "Original Pdf"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "credit_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Kind"
+          },
+          "corrects_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrects Id"
+          },
+          "tax_treatment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Treatment"
+          },
+          "issued": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued"
+          },
+          "paid_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid Amount"
+          },
+          "credited_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credited Amount"
+          },
+          "open_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Amount"
+          },
+          "payments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Payment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payments"
+          },
+          "credit_notes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CreditNoteSummary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Notes"
+          },
           "planning_warnings": {
             "anyOf": [
               {
@@ -23826,6 +24461,129 @@
             ],
             "title": "Original Pdf"
           },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "credit_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Kind"
+          },
+          "corrects_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corrects Id"
+          },
+          "tax_treatment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Treatment"
+          },
+          "issued": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued"
+          },
+          "paid_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid Amount"
+          },
+          "credited_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credited Amount"
+          },
+          "open_amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Amount"
+          },
+          "payments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Payment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payments"
+          },
+          "credit_notes": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CreditNoteSummary"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credit Notes"
+          },
           "planning_warnings": {
             "anyOf": [
               {
@@ -24107,6 +24865,28 @@
               }
             ],
             "title": "Invoice No"
+          },
+          "tax_treatment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tax Treatment"
+          },
+          "service_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service Date"
           },
           "planning_warnings": {
             "anyOf": [

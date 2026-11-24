@@ -10,11 +10,13 @@ from typing import Annotated, Any, Literal
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictBool,
     StrictInt,
     StringConstraints,
+    ValidationError,
     field_validator,
     model_serializer,
     model_validator,
@@ -182,6 +184,15 @@ class Payment(BaseModel):
     note: str | None = None
     reverses_id: str | None = None
     created: int | None = None
+
+    @field_validator("date", "amount", "created", mode="wrap")
+    @classmethod
+    def _lenient(cls, value: Any, handler: Any, info: Any) -> Any:
+        """A stored malformed value must never fail a read: it reads as empty (date, created) or 0 (amount)."""
+        try:
+            return handler(value)
+        except ValidationError:
+            return 0.0 if info.field_name == "amount" else None
 
 
 class CreditNoteSummary(BaseModel):
@@ -841,6 +852,11 @@ class SettleDiscountIn(v.CheckedBody):
     note: Annotated[str, StringConstraints(max_length=200)] | None = None
 
 
+RateAmounts = Annotated[
+    dict[v.RateKey, v.PositiveMoneyIn], BeforeValidator(v._unique_rate_keys), Field(max_length=v.MAX_CREDIT_RATES)
+]
+
+
 class CreditNoteIn(v.CheckedBody):
     """Issue a credit note on an invoice (docs/specs/credit-notes-payments.md 4). ``amounts`` maps a VAT rate to the
     net amount credited; it is required for ``partial`` and ignored by the service for the other kinds."""
@@ -848,7 +864,7 @@ class CreditNoteIn(v.CheckedBody):
     credit_kind: v.CreditNoteKindIn
     date: v.ISODate
     reason: Annotated[str, StringConstraints(min_length=1, max_length=500), AfterValidator(v._not_blank)]
-    amounts: Annotated[dict[v.RateKey, v.PositiveMoneyIn], Field(max_length=len(v.ALLOWED_VAT_RATES))] | None = None
+    amounts: RateAmounts | None = None
 
     @model_validator(mode="after")
     def _amounts_for_partial(self):

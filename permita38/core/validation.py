@@ -368,15 +368,69 @@ PositiveMoneyIn = money_in("0", "1000000000", exclusive_min=True)
 PaymentAmountIn = money_in("0", "10000000", exclusive_min=True)  # one payment: > 0 and <= 10,000,000.00
 
 # tax treatments (docs/specs/credit-notes-payments.md 5). Values reserved for later releases are refused with 422.
-SalesTreatment = Literal["standard", "small_business", "eu_b2b_service"]
-ExpenseTreatment = Literal["standard", "no_input_vat", "reverse_charge_eu_service", "reverse_charge_third_country"]
-RESERVED_SALES_TREATMENTS = ("eu_b2b_goods", "export_third_country", "reverse_charge_13b", "exempt")
-RESERVED_EXPENSE_TREATMENTS = ("eu_acquisition_goods", "import_goods", "reverse_charge_13b_domestic")
+RESERVED_SALES_TREATMENTS = (
+    "reverse_charge_domestic",
+    "eu_b2b_goods_exempt",
+    "export_exempt",
+    "non_taxable_other",
+    "exempt_with_deduction",
+    "exempt_no_deduction",
+)
+RESERVED_EXPENSE_TREATMENTS = ("reverse_charge_domestic", "import_vat")
+
+
+def _refuse_reserved(reserved: tuple[str, ...]) -> Callable[[Any], Any]:
+    def check(value: Any) -> Any:
+        if isinstance(value, str) and value in reserved:
+            raise ValueError("not supported in this release")
+        return value
+
+    return check
+
+
+SalesTreatment = Annotated[
+    Literal["standard", "small_business", "eu_b2b_service"],
+    BeforeValidator(_refuse_reserved(RESERVED_SALES_TREATMENTS)),
+]
+ExpenseTreatment = Annotated[
+    Literal["standard", "no_input_vat", "reverse_charge_eu_service", "reverse_charge_third_country"],
+    BeforeValidator(_refuse_reserved(RESERVED_EXPENSE_TREATMENTS)),
+]
 CreditKind = Literal["storno", "partial", "discount", "write_off", "write_off_reversal"]  # stored kinds
 CreditNoteKindIn = Literal["storno", "partial", "write_off"]  # the kinds a client may request
 PaymentKindIn = Literal["payment", "refund"]
 PaymentMethod = Literal["bank", "cash"]
-RateKey = Literal["0", "5", "7", "16", "19"]  # the allowed VAT rates (ALLOWED_VAT_RATES) as keys of an amounts map
+_RATE_KEY_RE = re.compile(r"[0-9]{1,2}(\.[0-9]{1,2})?")
+
+
+def _rate_key(value: Any) -> Any:
+    """A VAT rate as a map key, in its canonical form ("19.00" -> "19", "10.70" -> "10.7")."""
+    if not isinstance(value, str) or not _RATE_KEY_RE.fullmatch(value):
+        raise ValueError("must be a VAT rate such as 19 or 10.7")
+    return format(Decimal(value).normalize(), "f")
+
+
+RateKey = Annotated[
+    str,
+    BeforeValidator(_rate_key),
+    WithJsonSchema({"type": "string", "pattern": r"^[0-9]{1,2}(\.[0-9]{1,2})?$"}),
+]  # the service checks the rate against the invoice
+MAX_CREDIT_RATES = 20
+
+
+def _unique_rate_keys(value: Any) -> Any:
+    """Refuse two keys that name one rate after normalisation (so "19" and "19.00" cannot both be sent)."""
+    if not isinstance(value, dict):
+        return value
+    seen: set[Any] = set()
+    for key in value:
+        canonical = key
+        if isinstance(key, str) and _RATE_KEY_RE.fullmatch(key):
+            canonical = _rate_key(key)
+        if canonical in seen:
+            raise ValueError(f"the rate {canonical} is given twice")
+        seen.add(canonical)
+    return value
 
 
 def _check_value(value: Any, depth: int = 0) -> None:

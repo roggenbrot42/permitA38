@@ -175,7 +175,29 @@ def test_credit_note_refuses_bad_kind(kind):
         CreditNoteIn(**{**CN, "credit_kind": kind})
 
 
-@pytest.mark.parametrize("key", ["19.0", "21", "abc", "", "-19", "19%", "1e1"])
+def test_credit_note_rate_keys_are_normalised_and_unique():
+    def amounts(d):
+        return CreditNoteIn(**{**CN, "credit_kind": "partial", "amounts": d}).amounts
+
+    assert list(amounts({"19.00": "1"})) == ["19"]
+    assert list(amounts({"19.0": "1"})) == ["19"]
+    assert list(amounts({"10.70": "1"})) == ["10.7"]
+    assert list(amounts({"10.7": "1"})) == ["10.7"]
+    assert list(amounts({"0.0": "1"})) == ["0"]
+    assert list(amounts({"10": "1"})) == ["10"]
+    for dup in ({"19": "1", "19.00": "2"}, {"19.0": "1", "19.00": "2"}, {"7": "1", "07": "2"}):
+        with pytest.raises(ValidationError):
+            amounts(dup)
+
+
+def test_credit_note_amounts_bound_is_20():
+    ok = {str(i): "1" for i in range(20)}
+    assert len(CreditNoteIn(**{**CN, "credit_kind": "partial", "amounts": ok}).amounts) == 20
+    with pytest.raises(ValidationError):
+        CreditNoteIn(**{**CN, "credit_kind": "partial", "amounts": {**ok, "20": "1"}})
+
+
+@pytest.mark.parametrize("key", ["100", "19.", "-1", "1e1", "abc", "", "-19", "19%", "1.234", " 19", 19])
 def test_credit_note_refuses_bad_rate_key(key):
     with pytest.raises(ValidationError):
         CreditNoteIn(**{**CN, "credit_kind": "partial", "amounts": {key: "1.00"}})
@@ -225,12 +247,33 @@ def test_document_in_accepts_sales_treatment(value):
     assert DocumentIn(tax_treatment=value).tax_treatment == value
 
 
-@pytest.mark.parametrize(
-    "value", [*v.RESERVED_SALES_TREATMENTS, "no_input_vat", "reverse_charge_eu_service", "Standard", "", 1]
-)
-def test_document_in_refuses_other_sales_treatments(value):
-    with pytest.raises(ValidationError):
+RESERVED_SALES = [
+    "reverse_charge_domestic",
+    "eu_b2b_goods_exempt",
+    "export_exempt",
+    "non_taxable_other",
+    "exempt_with_deduction",
+    "exempt_no_deduction",
+]
+RESERVED_EXPENSE = ["reverse_charge_domestic", "import_vat"]
+
+
+def test_reserved_treatment_constants_match_the_contract():
+    assert list(v.RESERVED_SALES_TREATMENTS) == RESERVED_SALES
+    assert list(v.RESERVED_EXPENSE_TREATMENTS) == RESERVED_EXPENSE
+
+
+@pytest.mark.parametrize("value", RESERVED_SALES)
+def test_document_in_reserved_sales_treatment_message(value):
+    with pytest.raises(ValidationError, match="not supported in this release"):
         DocumentIn(tax_treatment=value)
+
+
+@pytest.mark.parametrize("value", ["no_input_vat", "reverse_charge_eu_service", "Standard", "", 1])
+def test_document_in_refuses_other_sales_treatments(value):
+    with pytest.raises(ValidationError) as e:
+        DocumentIn(tax_treatment=value)
+    assert "not supported in this release" not in str(e.value)
 
 
 EXP = {"date": "2026-02-03", "net": 10}
@@ -243,10 +286,17 @@ def test_expense_in_accepts_expense_treatment(value):
     assert ExpenseIn(**EXP, tax_treatment=value).tax_treatment == value
 
 
-@pytest.mark.parametrize("value", [*v.RESERVED_EXPENSE_TREATMENTS, "small_business", "eu_b2b_service", ""])
-def test_expense_in_refuses_other_expense_treatments(value):
-    with pytest.raises(ValidationError):
+@pytest.mark.parametrize("value", RESERVED_EXPENSE)
+def test_expense_in_reserved_treatment_message(value):
+    with pytest.raises(ValidationError, match="not supported in this release"):
         ExpenseIn(**EXP, tax_treatment=value)
+
+
+@pytest.mark.parametrize("value", ["small_business", "eu_b2b_service", ""])
+def test_expense_in_refuses_other_expense_treatments(value):
+    with pytest.raises(ValidationError) as e:
+        ExpenseIn(**EXP, tax_treatment=value)
+    assert "not supported in this release" not in str(e.value)
 
 
 def test_expense_service_date_bounds():
@@ -367,6 +417,14 @@ def test_payment_model_signs_and_virtual_payment():
     out = json.loads(p.model_dump_json())
     assert out["id"] is None and out["amount"] == "-23.80" and out["kind"] == "refund" and out["method"] == "bank"
     assert json.loads(Payment(amount="0").model_dump_json())["amount"] == "0.00"
+
+
+def test_payment_model_never_fails_on_malformed_stored_values():
+    p = Payment(date=["x"], amount="abc", created="soon", kind="payment")
+    out = json.loads(p.model_dump_json())
+    assert out["date"] is None and out["amount"] == "0.00" and out["created"] is None
+    doc = Document(payments=[{"date": 5, "amount": {"a": 1}, "created": "x"}])
+    assert doc.payments[0].date is None and doc.payments[0].amount == 0
 
 
 def test_credit_note_summary_write_off_has_no_number():
