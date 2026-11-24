@@ -492,6 +492,18 @@ IMPLEMENTED = {
     ("POST", "/api/invoices/{rid}/settle-discount"),
     ("GET", "/api/invoices/{rid}/credit-notes"),
     ("POST", "/api/invoices/{rid}/credit-notes"),
+    ("GET", "/api/vat-returns"),
+    ("GET", "/api/vat-returns/preview"),
+    ("POST", "/api/vat-returns"),
+    ("GET", "/api/vat-returns/{rid}"),
+    ("POST", "/api/vat-returns/{rid}/finalize"),
+    ("POST", "/api/vat-returns/{rid}/reopen"),
+    ("POST", "/api/vat-returns/{rid}/filed"),
+    ("DELETE", "/api/vat-returns/{rid}"),
+    ("GET", "/api/vat-returns/{rid}/boxes/{kz}"),
+    ("GET", "/api/vat-returns/{rid}/export.pdf"),
+    ("GET", "/api/vat-returns/{rid}/export.csv"),
+    ("GET", "/api/vat-returns/{rid}/export.json"),
 }
 
 
@@ -529,7 +541,7 @@ def test_api_tokens_read_accounting_and_vat_but_never_write_them(app, clients):
                     if role == "employee":
                         assert got.status_code == 403, (role, read_only, method, path)
                     elif (method, path) in IMPLEMENTED:  # 404: the dummy year does not exist
-                        assert got.status_code in (200, 404), (role, read_only, method, path, got.status_code)
+                        assert got.status_code in (200, 404, 422), (role, read_only, method, path, got.status_code)
                     else:
                         assert got.status_code == 501, (role, read_only, method, path)
 

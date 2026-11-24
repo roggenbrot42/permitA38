@@ -2233,6 +2233,7 @@ class VatBox(BaseModel):
     booked_base: v.Money | None = None
     booked_tax: v.Money | None = None
     amount: v.Money | None = None
+    flag: int | None = None  # Kz 10 (amended return): the marker 1
 
 
 class VatReturn(Record):

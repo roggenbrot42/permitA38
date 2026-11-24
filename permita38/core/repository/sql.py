@@ -627,6 +627,38 @@ class SQLRepository(Repository):
             entries = [self._decode(table, r) for r in self._rows(sql, params)]
             return self._with_lines(entries)
 
+    def journal_lines_by_vat_date(self, date_from: str, date_to: str) -> RecordList:
+        q, ph = self.dialect.quote, self.dialect.placeholder
+        with self.lock:
+            self._ensure()
+            lines_t = self._table("journal_lines")
+            sql = self.dialect.select_all(lines_t) + f" WHERE {q('vat_date')} >= {ph} AND {q('vat_date')} <= {ph}"
+            lines = [self._decode(lines_t, r) for r in self._rows(sql, [date_from, date_to])]
+            entries_t = self._table("journal_entries")
+            ids = builtins.list(dict.fromkeys(str(ln["entry_id"]) for ln in lines))
+            entries: dict[str, Record] = {}
+            for i in range(0, len(ids), 200):  # stay below the parameter limit of every driver
+                chunk = ids[i : i + 200]
+                esql = self.dialect.select_all(entries_t) + f" WHERE {q('id')} IN ({', '.join([ph] * len(chunk))})"
+                for r in self._rows(esql, chunk):
+                    e = self._decode(entries_t, r)
+                    entries[str(e["id"])] = e
+        out: RecordList = []
+        for ln in lines:
+            e = entries[str(ln["entry_id"])]
+            out.append(
+                {
+                    **ln,
+                    "fiscal_year": e.get("fiscal_year"),
+                    "entry_no": e.get("entry_no"),
+                    "booking_date": e.get("booking_date"),
+                    "source_number": e.get("source_number"),
+                    "entry_created_at": e.get("created_at"),
+                }
+            )
+        out.sort(key=lambda r: (int(r["fiscal_year"] or 0), int(r["entry_no"] or 0), int(r.get("line_no") or 0)))
+        return out
+
     # ------------------------------------------------------------------ settings
     def settings(self) -> Record:
         d, table = self.dialect, TABLES["settings"]
