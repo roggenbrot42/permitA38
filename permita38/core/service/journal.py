@@ -140,7 +140,7 @@ class JournalService:
         self.clock = clock
 
     # ---------- helpers
-    def _booking_date(self, document_date: date) -> date:
+    def booking_date(self, document_date: date) -> date:
         """``max(document_date, first day of the first unlocked month)`` (spec 7.8). Locks (``period_locks``, E7)
         lock whole months in order, so the first unlocked month follows the latest locked one; without locks: the
         document date. Closing-date exception: when that date falls into a later fiscal year while the document's
@@ -260,6 +260,18 @@ class JournalService:
             if first_open is not None and ln.vat_date is not None and ln.vat_date < first_open:
                 raise ServiceError(422, f"Line {i}: vat_date {ln.vat_date.isoformat()} lies in a locked month")
 
+    @staticmethod
+    def _check_accrual_income_dates(year_row: Record, year: int, lines: Sequence[PostLine]) -> None:
+        """Accrual years (P&L): every ``income_date`` lies in the entry's fiscal year (accounting 14.5). EÜR may
+        carry any income_date."""
+        if year_row.get("income_basis") != "accrual":
+            return
+        for i, ln in enumerate(lines, start=1):
+            if ln.income_date is not None and ln.income_date.year != year:
+                raise ServiceError(
+                    422, f"Line {i}: income_date {ln.income_date.isoformat()} lies outside fiscal year {year}"
+                )
+
     def _drift_warnings(self, lines: Sequence[PostLine]) -> list[str]:
         """Computed here, never by the caller (accounting 7.8): every line whose vat_date lies before the first
         unlocked day drifts."""
@@ -352,12 +364,13 @@ class JournalService:
             existing = self.store.get_journal_entry_by_event_key(event_key)
             if existing is not None:
                 return self._existing(existing, event_key, document_date, text, source, lines)
-            booking = self._booking_date(document_date)
+            booking = self.booking_date(document_date)
             year = booking.year
             rows = [self.ensure_year(year, source.created_by)]
             if rows[0].get("closed_at") is not None:
                 raise ServiceError(409, f"Fiscal year {year} is closed")
             self._check_manual_vat_dates(source, lines)
+            self._check_accrual_income_dates(rows[0], year, lines)
             resolved = self._resolve(self._chart(rows[0], year), lines)
             warnings = self._drift_warnings(lines)
             if warnings:

@@ -106,12 +106,12 @@ def journal(
 
 @router.post("/entries", status_code=201, dependencies=[SessionOnly], name="create_manual_entry")
 def create_entry(body: models.ManualEntryIn, user: Write, services: ServicesDep):
-    not_implemented()
+    return services.manual_entries.post(body, user)
 
 
 @router.post("/entries/{entry_id}/reverse", status_code=201, dependencies=[SessionOnly], name="reverse_entry")
 def reverse_entry(entry_id: str, body: models.EntryReverseIn, user: Write, services: ServicesDep):
-    not_implemented()
+    return services.manual_entries.reverse(entry_id, body.date, body.text, user)
 
 
 @router.get("/accounts", name="list_accounts")
