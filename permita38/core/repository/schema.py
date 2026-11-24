@@ -953,7 +953,15 @@ def _accounting_document_guards() -> list[Guard]:
 def _accounting_row_state_guards() -> list[Guard]:
     """Guards of migration accounting_row_state (docs/specs/accounting.md section 8.1, docs/specs/db-constraints.md)."""
     mutable = ("filed_on", "reference", "note", "replaced_by", "updated")
-    clears = ("finalised_at", "finalised_by", "boxes", "source_lines")
+    clears = (
+        "finalised_at",
+        "finalised_by",
+        "boxes",
+        "source_lines",
+        "result_cents",
+        "special_prepayment_credit_cents",
+        "rounding_difference_cents",
+    )
 
     def frozen(table: str, clears_: tuple[str, ...], **exempt: Any) -> Guard:
         return Guard(
