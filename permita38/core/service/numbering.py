@@ -235,6 +235,8 @@ class NumberingService:
             raise ServiceError(400, str(e)) from None
         if next_number is not None and not 1 <= next_number <= MAX_NUMBER:
             raise ServiceError(400, "The next number must be between 1 and 1000000000")
+        if pattern is not None:
+            self._refuse_credit_note_collision(cfg.coll, new_pattern_text)
         day = self.clock()
         new_cfg = NumberConfig(cfg.coll, new_pattern_text, new_reset, cfg.shared)
         period = period_key(new_reset, day)
@@ -281,6 +283,19 @@ class NumberingService:
             "highest_in_period": highest,
             "warnings": warnings,
         }
+
+    def _refuse_credit_note_collision(self, coll: str, pattern: str) -> None:
+        """A credit-note pattern must not produce the numbers of an invoice or offer (and vice versa): equal pattern
+        strings or an equal literal prefix before the first placeholder are refused (422)."""
+        st = effective_settings(self.store.settings())
+        prefix = pattern.split("{", 1)[0]
+        others = ("invoices", "offers") if coll == CREDIT_NOTE else (CREDIT_NOTE,)
+        for other in others:
+            theirs = st[f"{_SETTINGS_KEY[other]}_pattern"]
+            if pattern == theirs or prefix == theirs.split("{", 1)[0]:
+                raise ServiceError(
+                    422, f"The pattern {pattern} could produce the same numbers as the {_SETTINGS_KEY[other]} pattern"
+                )
 
     def update(
         self,

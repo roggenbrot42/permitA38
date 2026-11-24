@@ -158,3 +158,26 @@ def test_hints_net_the_credit_note_against_the_customers_revenue(repo, sales, cn
     assert [h["details"]["revenue_customer"] for h in svc.hints(today)] == [1000.0]  # 1000 / 1100 = 90.9 %
     cn.create(big["id"], credit_kind="partial", date="2026-04-05", reason="x", amounts={"19": "300.00"}, user=BOSS)
     assert svc.hints(today) == []  # 700 / 800 = 87.5 %; the credit note is not counted as revenue
+
+
+# ---------------------------------------------------------------- collision with the invoice / offer pattern
+@pytest.mark.parametrize(
+    "doc_type,pattern",
+    [
+        ("credit_note", "RE-{year}-{n:04d}"),  # the invoice pattern itself
+        ("credit_note", "RE-{n}"),  # same literal prefix as the invoice pattern
+        ("credit_note", "AN-{n:05d}"),  # same prefix as the offer pattern
+        ("invoice", "RK-{year}-{n:04d}"),  # an invoice pattern onto the credit-note pattern
+    ],
+)
+def test_a_pattern_colliding_with_another_type_is_422(repo, doc_type, pattern):
+    numbering = NumberingService(repo, clock=lambda: date(2026, 3, 7))
+    with pytest.raises(ServiceError) as e:
+        numbering.update(doc_type, pattern=pattern, confirm=True)
+    assert e.value.status == 422
+    assert numbering.config(doc_type).pattern != pattern
+
+
+def test_a_distinct_credit_note_pattern_is_accepted(repo):
+    numbering = NumberingService(repo, clock=lambda: date(2026, 3, 7))
+    assert numbering.update("credit_note", pattern="GS-{n:04d}", confirm=True)["applied"] is True
