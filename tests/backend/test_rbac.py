@@ -599,74 +599,26 @@ def test_role_change_takes_effect_on_the_next_request(boss_client, clients):
 
 # ------------------------------------------------------------------ migration roles
 def test_migration_renames_member_to_employee_and_keeps_boss(tmp_path):
+    # Build the database as it was before the roles migration: apply only the earlier migrations of the chain
+    # (their SQL, as the runner does), so later migrations never need to be undone by hand.
     data = tmp_path / "data"
-    repo = SQLiteRepository(data)
-    repo.startup()
-    repo.save("users", {"id": "user00000001", "username": "b", "name": "B", "role": "boss"})
-    repo.save("users", {"id": "user00000002", "username": "m", "name": "M", "role": "member", "future": 1})
-    repo.save("users", {"id": "user00000003", "username": "a", "name": "A", "role": "accountant"})
-    repo.close()
-    raw = sqlite3.connect(data / DB_FILENAME)
+    data.mkdir()
     chain = list_migrations("sqlite")
-    roles_mig = next(m for m in chain if m.name == "roles")
-    # as if this database had not applied the roles migration yet (and nothing after it)
-    later = [m.id for m in chain[chain.index(roles_mig) :]]
-    # an old database had no guard triggers (and they would block DROP COLUMN)
-    for (name,) in raw.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'guard_%'"
-    ).fetchall():
-        raw.execute(f'DROP TRIGGER "{name}"')
-    raw.executemany("DELETE FROM schema_migrations WHERE id = ?", [(i,) for i in later])
-    raw.execute(f"PRAGMA user_version = {len(chain) - len(later)}")
-    # undo the schema of the later migrations too, so that the runner can apply them again
-    if "calendars" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.executescript(
-            'DROP TABLE "calendar_events"; DROP TABLE "calendar_sources";'
-            ' ALTER TABLE "users" DROP COLUMN "work_start"; ALTER TABLE "users" DROP COLUMN "work_end";'
-            ' ALTER TABLE "users" DROP COLUMN "timezone";'
-        )
-    if "expense_lines" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.execute('ALTER TABLE "expenses" DROP COLUMN "lines"')
-    if "trips" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.executescript('DROP TABLE "trips"; ALTER TABLE "expenses" DROP COLUMN "trip_id";')
-    if "api_tokens" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.executescript('DROP TABLE "api_tokens"; DROP TABLE "audit_log";')
-    if "allocations" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.executescript('DROP TABLE "allocations";')
-    if "suppliers" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.executescript(
-            'DROP TABLE "suppliers"; DROP TABLE "incoming_offers";'
-            ' DROP INDEX "idx_expenses_supplier"; DROP INDEX "idx_expenses_allocation";'
-            ' ALTER TABLE "expenses" DROP COLUMN "supplier_id"; ALTER TABLE "expenses" DROP COLUMN "allocation_id";'
-            ' ALTER TABLE "expenses" DROP COLUMN "reverse_charge";'
-        )
-    if "trip_item_id" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.execute('ALTER TABLE "expenses" DROP COLUMN "trip_item_id"')
-    if "receipt_scans" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.executescript(
-            'DROP TABLE "receipt_scans"; ALTER TABLE "expenses" DROP COLUMN "paid_on";'
-            ' ALTER TABLE "expenses" DROP COLUMN "invoice_no";'
-        )
-    if "document_scans" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.execute('DROP TABLE "document_scans"')
-    if "guards" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.executescript('DROP INDEX "idx_invoices_number"; DROP INDEX "idx_offers_number";')
-    if "project_planning" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        raw.executescript(
-            'ALTER TABLE "projects" DROP COLUMN "kind"; ALTER TABLE "projects" ADD COLUMN "personal" INTEGER;'
-            ' ALTER TABLE "projects" ADD COLUMN "member_ids" TEXT;'
-        )
-    if "reference_guards" in [m.name for m in chain[chain.index(roles_mig) + 1 :]]:
-        for (trigger,) in raw.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'guard%_ref_%'"
-        ).fetchall():
-            raw.execute(f'DROP TRIGGER "{trigger}"')
-        raw.executescript(
-            'DROP INDEX "idx_contracts_project"; DROP INDEX "idx_offers_project"; DROP INDEX "idx_invoices_project";'
-            # the incoming_offers and trips tables (and their indexes) were dropped above already
-            ' DROP INDEX IF EXISTS "idx_incoming_offers_project"; DROP INDEX IF EXISTS "idx_trips_project";'
-            ' DROP INDEX "idx_timers_project";'
-        )
+    roles_index = next(i for i, m in enumerate(chain) if m.name == "roles")
+    raw = sqlite3.connect(data / DB_FILENAME)
+    raw.executescript(
+        "CREATE TABLE schema_migrations (id TEXT PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);"
+    )
+    for i, m in enumerate(chain[:roles_index], start=1):
+        raw.executescript(f"BEGIN IMMEDIATE;\n{m.sql()}\nPRAGMA user_version = {i};\nCOMMIT;")
+        raw.execute("INSERT INTO schema_migrations VALUES (?, ?, 'now')", (m.id, m.name))
+    raw.commit()
+    rows = [
+        ("user00000001", "b", "B", "boss", "{}"),
+        ("user00000002", "m", "M", "member", '{"future": 1}'),
+        ("user00000003", "a", "A", "accountant", "{}"),
+    ]
+    raw.executemany('INSERT INTO "users" ("id", "username", "name", "role", "extra") VALUES (?, ?, ?, ?, ?)', rows)
     raw.commit()
     raw.close()
     new = SQLiteRepository(data)
