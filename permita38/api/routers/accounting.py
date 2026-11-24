@@ -55,19 +55,21 @@ InvoiceRead = Annotated[dict, Needs("invoices", "read")]
 
 
 # ------------------------------------------------------------------ fiscal years, initialisation
-@router.get("/years", name="list_fiscal_years")
+@router.get("/years", name="list_fiscal_years", response_model=list[models.FiscalYear])
 def list_years(user: Read, services: ServicesDep):
-    not_implemented()
+    return [models.FiscalYear(**r) for r in services.fiscal_years.list()]
 
 
-@router.post("/years", status_code=201, dependencies=[SessionOnly], name="create_fiscal_year")
+@router.post(
+    "/years", status_code=201, dependencies=[SessionOnly], name="create_fiscal_year", response_model=models.FiscalYear
+)
 def create_year(body: models.FiscalYearIn, user: Write, services: ServicesDep):
-    not_implemented()
+    return models.FiscalYear(**services.fiscal_years.create(user, body))
 
 
-@router.get("/years/{year}", name="get_fiscal_year")
+@router.get("/years/{year}", name="get_fiscal_year", response_model=models.FiscalYear)
 def get_year(year: int, user: Read, services: ServicesDep):
-    not_implemented()
+    return models.FiscalYear(**services.fiscal_years.get(year))
 
 
 @router.post("/years/{year}/close", dependencies=[SessionOnly], name="close_fiscal_year")

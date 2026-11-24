@@ -475,13 +475,22 @@ def _call(client, method, path, body, query):
     return client.request(method, _concrete(path) + query, **kw)
 
 
+IMPLEMENTED = {
+    ("GET", "/api/accounting/years"),
+    ("POST", "/api/accounting/years"),
+    ("GET", "/api/accounting/years/{year}"),
+}
+
+
 def test_new_routes_answer_501_where_allowed_and_403_where_denied(app, clients):
     """Every route x every role with a valid request: 501 "not implemented yet" for boss and accountant, 403 for the
     employee; init and close year are 403 for the accountant too."""
     for method, path, _area, _op, boss_only, body, query in NEW_ROUTES:
         for role, c in clients.items():
             r = _call(c, method, path, body, query)
-            if role == "employee" or (boss_only and role != "boss"):
+            if (method, path) in IMPLEMENTED:  # answered by a service now (tests/backend/test_fiscal_years.py)
+                assert (r.status_code == 403) == (role == "employee"), (method, path, role, r.status_code)
+            elif role == "employee" or (boss_only and role != "boss"):
                 assert r.status_code == 403, (method, path, role, r.status_code)
             else:
                 assert r.status_code == 501 and r.json() == {"detail": "not implemented yet"}, (
@@ -504,7 +513,12 @@ def test_api_tokens_read_accounting_and_vat_but_never_write_them(app, clients):
                     assert got.status_code == 403, (role, read_only, method, path, got.status_code)
                     assert got.json() == {"detail": "This route cannot be used with an API token"}
                 else:
-                    assert got.status_code == (403 if role == "employee" else 501), (role, read_only, method, path)
+                    if role == "employee":
+                        assert got.status_code == 403, (role, read_only, method, path)
+                    elif (method, path) in IMPLEMENTED:  # 404: the dummy year does not exist
+                        assert got.status_code in (200, 404), (role, read_only, method, path, got.status_code)
+                    else:
+                        assert got.status_code == 501, (role, read_only, method, path)
 
 
 PAYMENT_DEP_PATHS = {

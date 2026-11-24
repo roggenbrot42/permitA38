@@ -19,6 +19,7 @@ from permita38.core.service.busy import BusyTimeProvider
 from permita38.core.service.calendar.busy_provider import CalendarBusyProvider
 from permita38.core.service.calendar.service import CalendarService, ResourceFetcher
 from permita38.core.service.document_scans import DocumentScanService
+from permita38.core.service.fiscal_years import FiscalYearService
 from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.integrity import Ctx, rule_numbering_duplicates
@@ -72,6 +73,7 @@ class Services:
     transfer: TransferService
     tokens: TokenService
     audit: AuditService
+    fiscal_years: FiscalYearService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
@@ -108,6 +110,7 @@ class Services:
             transfer=TransferService(store, config.data_dir / "tmp"),
             tokens=TokenService(store),
             audit=AuditService(store),
+            fiscal_years=FiscalYearService(store),
             impressum=ImpressumService(
                 SafeFetcher(user_agent),
                 enabled=config.features.impressum_lookup,
