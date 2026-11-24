@@ -1,5 +1,6 @@
 """UStVA box computation against the hand-computed oracle (accounting_oracle.json, ustva_cases)."""
 
+import dataclasses
 import json
 from datetime import date, timedelta
 from pathlib import Path
@@ -177,3 +178,84 @@ def test_none_ku_and_undated_lines_ignored() -> None:
 def test_special_prepayment_rejects_bad_months() -> None:
     with pytest.raises(ValueError):
         special_prepayment(100, 0, 0)
+
+
+def test_kz36_form_and_booked_tax_differ() -> None:
+    """SX 16 %: form tax is the booked tax (Kz 36 is entered), the base is truncated to whole euros."""
+    res = _check([{"tax_key": "SX", "base": 100050, "tax": 16008}], "2026-03", {"35": 1000, "36": 16008, "83": 16008})
+    box36 = res.box("36")
+    assert box36 is not None and box36.tax == 16008 and box36.booked_tax == 16008
+    box35 = res.box("35")
+    assert box35 is not None and box35.booked_base == 100050
+
+
+def test_input_lines_on_period_boundaries() -> None:
+    start, end = _period("2026-03")
+
+    def vst(amount: int, d: date) -> Line:
+        return Line(Role("vat_in"), Cents(amount), TaxKey("VST"), "input", None, None, d)
+
+    lines = [
+        vst(100, start),
+        vst(200, end),
+        vst(400, start - timedelta(days=1)),
+        vst(800, end + timedelta(days=1)),
+    ]
+    res = compute_boxes(lines, start, end, RULES)
+    box = res.box("66")
+    assert box is not None and box.amount == 300
+    assert res.result_cents == -300
+
+
+def test_out_of_period_lines_ignored_in_main_path() -> None:
+    spec = [
+        {"tax_key": "S19", "base": 100000, "tax": 19000},
+        {"tax_key": "VST", "input": 500},
+        {"tax_key": "S19", "base": 999900, "tax": 189981, "vat_date": "2026-04-01"},
+        {"tax_key": "VST", "input": 7000, "vat_date": "2026-02-28"},
+    ]
+    res = _check(spec, "2026-03", {"81": {"base": 1000, "tax": 19000}, "66": 500, "83": 18500})
+    assert res.rounding_difference == 0
+
+
+def test_special_prepayment_months_13_rejected() -> None:
+    with pytest.raises(ValueError):
+        special_prepayment(100, 0, 13)
+
+
+def test_special_prepayment_nine_months_with_previous_kz39() -> None:
+    # (450000 + 90000) * 12 / 9 / 11 = 65454.54... -> 65455
+    assert special_prepayment(450000, 90000, 9) == 65455
+
+
+def test_rounding_difference_oracle_cases() -> None:
+    def diff(case: dict[str, Any], period: str) -> int:
+        return _check(case["lines"], period, {}).rounding_difference
+
+    assert diff(_CASES["U2"], "2026-02") == 7
+    assert diff(_CASES["U12-alone"], "2026-04") == -10
+    periods = _CASES["U15"]["periods"]
+    assert diff(periods["2026-03"], "2026-03") == 20
+    assert diff(periods["2026-04"], "2026-04") == 6
+
+
+def test_special_prepayment_credit_validation() -> None:
+    start, end = _period("2026-12")
+    with pytest.raises(ValueError, match="special_prepayment_credit_cents"):
+        compute_boxes([], start, end, RULES, special_prepayment_credit_cents=-1)
+    with pytest.raises(ValueError, match="small business"):
+        compute_boxes([], start, end, RULES, special_prepayment_credit_cents=100, small_business=True)
+
+
+def test_unknown_base_rounding_rejected() -> None:
+    start, end = _period("2026-03")
+    rules = dataclasses.replace(RULES, base_rounding="round_half_up")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="base_rounding"):
+        compute_boxes([], start, end, rules)
+
+
+def test_unmapped_tax_key_kind_pair_raises() -> None:
+    start, end = _period("2026-03")
+    ln = Line(Role("v"), Cents(0), TaxKey("S19"), "input", None, None, start)
+    with pytest.raises(ValueError, match="S19.*input"):
+        compute_boxes([ln], start, end, RULES)

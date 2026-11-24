@@ -59,7 +59,7 @@ class _Acc:
 
 
 def _truncate_euros(cents: int) -> int:
-    """Whole euros, toward zero (also for negative totals)."""
+    """Whole euros, toward zero (also for negative totals); the mode comes from ``rules.base_rounding``."""
     return -(-cents // 100) if cents < 0 else cents // 100
 
 
@@ -77,6 +77,12 @@ def compute_boxes(
     small_business: bool = False,
 ) -> UstvaResult:
     """Boxes of the period ``[period_from, period_to]`` (inclusive) from journal ``lines``."""
+    if rules.base_rounding != "truncate_toward_zero":
+        raise ValueError(f"unknown base_rounding mode {rules.base_rounding!r}")
+    if special_prepayment_credit_cents < 0:
+        raise ValueError("special_prepayment_credit_cents must be >= 0")
+    if special_prepayment_credit_cents and small_business:
+        raise ValueError("a Sondervorauszahlung credit is not allowed for a small business")
     mapping = {(m.tax_key, m.tax_kind): m for m in rules.map}
     box_by_kz = {b.kz: b for b in rules.boxes}
     acc: dict[str, _Acc] = {}
@@ -88,10 +94,10 @@ def compute_boxes(
     for ln in lines:
         if ln.tax_key is None or ln.tax_key in _IGNORED_KEYS or ln.tax_kind is None:
             continue
-        if ln.vat_date is None or not period_from <= ln.vat_date <= period_to:
-            continue
         entry = mapping.get((ln.tax_key, ln.tax_kind))
         if entry is None:
+            raise ValueError(f"no VAT rules mapping for (tax_key, tax_kind) = ({ln.tax_key!r}, {ln.tax_kind!r})")
+        if ln.vat_date is None or not period_from <= ln.vat_date <= period_to:
             continue
         if ln.tax_kind == "input":
             if small_business or entry.tax_kz is None:
