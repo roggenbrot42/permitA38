@@ -3,12 +3,14 @@
 oracle cases Z1-Z4 come from fixtures/accounting_oracle.json (`zm_cases`)."""
 
 import json
+import shutil
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from permita38.core import charts
 from permita38.core.errors import ServiceError
 from permita38.core.service.journal import JournalService, JournalSource, PostLine
 from permita38.core.service.zm_reports import ZmReportService
@@ -19,7 +21,7 @@ from .test_vat_returns import USER, clients, fiscal_year, journal, repo
 ORACLE = json.loads((Path(__file__).parent / "fixtures" / "accounting_oracle.json").read_text(encoding="utf-8"))
 Z = {c["id"]: c for c in ORACLE["zm_cases"]}
 VAT_IDS = {"cust_A": "ATU00000001", "cust_B": "FR00000000001"}
-TODAY = date(2026, 6, 15)
+TODAY = date(2026, 7, 15)  # Q1 and Q2 have ended, Q3 has not
 BZST_HEAD = b"#v1.0\r\nLaenderkennzeichen,USt-IdNr.,Betrag(EUR),Art der Leistung\r\n"
 
 
@@ -215,10 +217,10 @@ def test_finalize_without_rows_is_refused_and_the_list_marks_quarters(svc, journ
     rid = svc.create_draft(2026, 3)["id"]
     with pytest.raises(ServiceError) as err:
         svc.finalize(rid, USER)
-    assert err.value.status == 422
+    assert err.value.status == 422 and "has not ended" in err.value.message
     post_case(journal, Z["Z1"])
     li = svc.list(2026)
-    assert (li[0]["state"], li[0]["total"], li[0]["rows"]) == ("overdue", 7001, 2)  # today 2026-06-15, due 04-27
+    assert (li[0]["state"], li[0]["total"], li[0]["rows"]) == ("overdue", 7001, 2)  # today 2026-07-15, due 04-27
     assert li[1]["state"] == "not_required" and li[2]["state"] == "open"
 
 
@@ -292,3 +294,123 @@ def test_zm_pdf_has_the_footer_and_the_rows(svc, journal):
     data = zm_export.zm_pdf(rep, business="Demo Studio", unconfirmed=True)
     assert data.startswith(b"%PDF") and len(data) > 800
     assert zm_export.ZM_FOOTER == "Not a filing. Enter or upload these figures in the BZSt online portal."
+
+
+# ------------------------------------------------------------------ review fixes
+def test_finalize_refuses_a_quarter_that_has_not_ended(svc, journal):
+    post_eu(journal, VAT_IDS["cust_A"], 100000, date(2026, 8, 3))
+    rid = svc.create_draft(2026, 3)["id"]  # today is 2026-07-15
+    assert amounts(svc.get(rid)) == {"ATU00000001": 1000}
+    with pytest.raises(ServiceError) as err:
+        svc.finalize(rid, USER)
+    assert err.value.status == 422 and "Q3 2026 has not ended" in err.value.message
+    assert svc.get(rid)["status"] == "draft"
+    last_day = ZmReportService(svc.store, today=lambda: date(2026, 9, 30))
+    with pytest.raises(ServiceError):  # the last day itself is not over yet
+        last_day.finalize(rid, USER)
+    next_day = ZmReportService(svc.store, today=lambda: date(2026, 10, 1))
+    assert next_day.finalize(rid, USER)["status"] == "final"
+
+
+def test_list_survives_a_line_without_a_vat_id_in_one_quarter(svc, journal):
+    post_case(journal, Z["Z1"])  # Q1 fine
+    post_eu(journal, None, 100000, date(2026, 5, 3))  # Q2: an EU service without a customer VAT id
+    li = svc.list(2026)
+    assert [x["state"] for x in li] == ["overdue", "error", "not_required", "not_required"]
+    assert li[0]["total"] == 7001 and li[0]["rows"] == 2 and li[0]["error"] is None
+    assert li[1]["total"] is None and li[1]["rows"] is None and "VAT id" in li[1]["error"] and "R-" in li[1]["error"]
+    for call in (
+        lambda: svc.preview(2026, 2),
+        lambda: svc.create_draft(2026, 2),
+    ):
+        with pytest.raises(ServiceError) as err:
+            call()
+        assert err.value.status == 422 and "R-" in err.value.message
+        assert [r["vat_id"] for r in err.value.body["rows"]] == [""] and "R-" in err.value.body["rows"][0]["reason"]
+
+
+def test_finalize_of_a_quarter_with_a_bad_line_is_422_listing_the_rows(svc, journal):
+    post_eu(journal, VAT_IDS["cust_A"], 100000, date(2026, 5, 3))
+    rid = svc.create_draft(2026, 2)["id"]
+    post_eu(journal, "  ", 5000, date(2026, 6, 3))  # the bad line arrives after the draft
+    with pytest.raises(ServiceError) as err:
+        svc.finalize(rid, USER)
+    assert err.value.status == 422 and len(err.value.body["rows"]) == 1
+    assert "R-" in err.value.body["rows"][0]["reason"]
+    assert svc.store.get("zm_reports", rid)["status"] == "draft"  # type: ignore[index]
+
+
+def test_a_correction_lists_zero_rows_only_for_reported_customers(svc, journal):
+    rid = file_q1(svc, journal)  # reports A (3001) and B (4000)
+    post_eu(journal, "DE00000009", 40, date(2026, 3, 5))  # a third customer at 0.40 EUR: never reported, rounds to 0
+    post_eu(journal, VAT_IDS["cust_B"], -400000, date(2026, 3, 20))  # B drops to 0: reported before
+    corr = svc.create_draft(2026, 1, amends_id=rid)
+    assert amounts(corr) == {"ATU00000001": 3001, "FR00000000001": 0}  # DE00000009 is not listed
+    fin = svc.finalize(corr["id"], USER)
+    assert [x["vat_id"] for x in fin["lines"]] == ["ATU00000001", "FR00000000001"]
+
+
+def test_a_correction_where_every_row_drops_to_zero_is_exported(svc, journal):
+    rid = file_q1(svc, journal)
+    post_eu(journal, VAT_IDS["cust_A"], -300110, date(2026, 3, 1))
+    post_eu(journal, VAT_IDS["cust_B"], -400000, date(2026, 3, 2))
+    corr = svc.create_draft(2026, 1, amends_id=rid)
+    assert amounts(corr) == {"ATU00000001": 0, "FR00000000001": 0}
+    fin = svc.finalize(corr["id"], USER)
+    assert [x["amount"] for x in fin["lines"]] == [0, 0]
+    svc.filed(corr["id"], "2026-07-16", None, None)
+    _rep, rows = svc.export_lines(corr["id"])
+    assert zm_export.bzst_csv(rows, correction=True) == BZST_HEAD + b"AT,U00000001,0,S\r\nFR,00000000001,0,S\r\n"
+    with pytest.raises(zm_export.ZmExportError):  # a first report would have nothing to write
+        zm_export.bzst_csv(rows, correction=False)
+
+
+@pytest.fixture
+def synthetic_charts(tmp_path, monkeypatch):
+    """The API app of a test has no chart files; point the chart loader at the synthetic SKR03 of the fixtures."""
+    d = tmp_path / "charts"
+    d.mkdir()
+    shutil.copy(Path(__file__).parent / "fixtures" / "chart_synthetic.json", d / "skr03-2026.json")
+    monkeypatch.setattr(charts, "_DIR", d)
+
+
+def test_responses_carry_money_as_decimal_strings_only(clients, app, synthetic_charts):
+    """The report, the list and the drift of the API: no raw cents and no integer totals (decimal-money-api.md)."""
+    from permita38.core.service.journal import JournalService
+
+    boss = clients["boss"]
+    store = app.state.services.store
+    journal = JournalService(store, clock=lambda: 1_800_000_000)
+    post_eu(journal, "ATU00000001", 300110, date(2024, 2, 5))
+    rid = boss.post("/api/zm", json={"year": 2024, "quarter": 1}).json()["id"]
+    assert boss.post(f"/api/zm/{rid}/finalize").status_code == 200
+    assert boss.post(f"/api/zm/{rid}/filed", json={"filed_on": "2024-04-20"}).status_code == 200
+    post_eu(journal, "ATU00000001", 50000, date(2024, 3, 5))  # late line: drift
+    rep = boss.get(f"/api/zm/{rid}").json()
+    assert rep["lines"] == [{"vat_id": "ATU00000001", "country": "AT", "amount": "3001.00", "kind": "S"}]
+    assert rep["drift"]["entries"] == 1 and rep["drift"]["lines"][0]["base"] == "500.00"
+    assert "base_cents" not in rep["drift"]["lines"][0]
+    q1 = boss.get("/api/zm?year=2024").json()[0]
+    assert (q1["total"], q1["rows"], q1["drift"], q1["state"]) == ("3001.00", 1, 1, "filed")
+    corr = boss.post("/api/zm", json={"year": 2024, "quarter": 1, "amends_id": rid}).json()
+    assert corr["lines"][0]["amount"] == "3501.00" and "cents" not in corr["lines"][0]
+    assert boss.get("/api/zm/preview?year=2024&quarter=1").json()["lines"][0]["amount"] == "3501.00"
+
+
+def test_tokens_cannot_call_the_zm_write_routes(app, clients):
+    from fastapi.testclient import TestClient
+
+    boss = clients["boss"]
+    for read_only in (True, False):
+        tok = boss.post("/api/tokens", json={"label": "zm", "read_only": read_only})
+        assert tok.status_code == 201, tok.text
+        t = TestClient(app)
+        t.headers["Authorization"] = f"Bearer {tok.json()['token']}"
+        for method, path in ZM_ROUTES:
+            if method == "GET":
+                continue
+            body = _body(method, path)
+            r = t.request(method, path, **({} if body is None else {"json": body}))
+            assert r.status_code == 403, (read_only, method, path, r.status_code)
+            assert r.json() == {"detail": "This route cannot be used with an API token"}
+        assert t.get("/api/zm?year=2024").status_code == 200  # reading stays possible

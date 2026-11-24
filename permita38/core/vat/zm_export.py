@@ -6,9 +6,10 @@ No I/O, no floats: amounts are integer euros (``ZmLine.amount``) or integer cent
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
-from permita38.core.vat.ustva_export import _M, _W, BANNER, _clean, _Page, _text
+from permita38.core.vat.pdf_common import _M, _W, BANNER, _clean, _Page, _text
 from permita38.core.vat.zm import ZmLine, normalize_vat_id
 
 __all__ = [
@@ -134,7 +135,7 @@ def zm_pdf(report: Mapping[str, Any], *, business: str = "", unconfirmed: bool =
     rows = [x for x in report.get("lines") or [] if isinstance(x, Mapping)]
     for x in rows:
         vid = normalize_vat_id(str(x.get("vat_id") or ""))
-        euros = int(float(x.get("amount") or 0))
+        euros = int(Decimal(str(x.get("amount") or 0)))
         total += euros
         cells = [_text(x.get("country") or vid[:2]), vid[2:], str(euros), _text(x.get("kind") or "S")]
         p.row([(c[0], c[1], t, "r" if i == 2 else "l") for i, (c, t) in enumerate(zip(_COLS, cells, strict=True))])

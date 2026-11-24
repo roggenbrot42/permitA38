@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from permita38.core import validation as v
 from permita38.core.accounting.types import Cents, Line, Role, TaxKey
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
@@ -39,10 +40,11 @@ class ZmListItem(BaseModel):
     to_date: str
     due_date: str
     id: str | None = None
-    total: int | None = None  # whole euros, sum of the listed amounts (the live list for a draft or an open quarter)
+    total: v.Money | None = None  # whole euros as a decimal string, sum of the listed amounts (live for a draft)
     rows: int | None = None
     drift: int = 0  # number of entries with late source lines of a final report
-    state: str
+    state: str  # ... or "error": the live list of the quarter cannot be built, see ``error``
+    error: str | None = None
 
 
 class _Src:
@@ -123,9 +125,30 @@ class ZmReportService:
     def _compute(
         self, year: int, quarter: int, *, corrected: bool, previous: list[dict[str, Any]] | None = None
     ) -> tuple[list[dict[str, Any]], list[_Src]]:
-        """The list rows (dicts) and the eligible source lines. A correction lists every customer of the quarter, also
-        those at 0 EUR, and a 0-row for each customer of the corrected report that has no line left."""
+        """The list rows (dicts) and the eligible source lines. A correction lists a customer at 0 EUR only when the
+        corrected report listed it (``previous``), also one that has no line left."""
         srcs = self._sources(year, quarter)
+        missing = [s for s in srcs if not zm_calc.normalize_vat_id(s.vat_id)]
+        if missing:
+            shown = "; ".join(
+                f"{s.row.get('source_number') or '-'} (entry {s.row.get('entry_no')}, {s.row.get('booking_date')})"
+                for s in missing[:20]
+            )
+            more = f" and {len(missing) - 20} more" if len(missing) > 20 else ""
+            raise ServiceError(
+                422,
+                f"Missing customer VAT id for EU services in Q{quarter} {year}: {shown}{more}",
+                body={
+                    "rows": [
+                        {
+                            "vat_id": "",
+                            "reason": f"missing customer VAT id: {s.row.get('source_number') or '-'}"
+                            f" (entry {s.row.get('entry_no')})",
+                        }
+                        for s in missing
+                    ]
+                },
+            )
         by_line = {id(s.line): s for s in srcs}
         try:
             zl = zm_calc.zm_lines(
@@ -137,6 +160,10 @@ class ZmReportService:
             )
         except ValueError as e:
             raise ServiceError(422, str(e)) from None
+        reported = {zm_calc.normalize_vat_id(str(o.get("vat_id") or "")) for o in previous or []}
+        reported.discard("")
+        if corrected:  # 0-rows only for customers of the corrected report (zm.md "API")
+            zl = [z for z in zl if z.amount != 0 or z.vat_id in reported]
         rows = [
             {
                 "vat_id": z.vat_id,
@@ -147,13 +174,10 @@ class ZmReportService:
             }
             for z in zl
         ]
-        if corrected and previous:
+        if corrected:
             have = {r["vat_id"] for r in rows}
-            for old in previous:
-                vid = zm_calc.normalize_vat_id(str(old.get("vat_id") or ""))
-                if vid and vid not in have:
-                    have.add(vid)
-                    rows.append({"vat_id": vid, "country": vid[:2], "amount": 0, "kind": "S", "cents": 0})
+            for vid in sorted(reported - have):
+                rows.append({"vat_id": vid, "country": vid[:2], "amount": 0, "kind": "S", "cents": 0})
             rows.sort(key=lambda r: str(r["vat_id"]))
         return rows, srcs
 
@@ -241,12 +265,18 @@ class ZmReportService:
                 item["total"] = sum(int(x.get("amount") or 0) for x in lines)
                 item["drift"] = self._drift(row)["entries"]
             else:
-                live, _s = self._compute(
-                    year,
-                    q,
-                    corrected=bool(row and row.get("amends_id")),
-                    previous=self._previous(row) if row else None,
-                )
+                try:
+                    live, _s = self._compute(
+                        year,
+                        q,
+                        corrected=bool(row and row.get("amends_id")),
+                        previous=self._previous(row) if row else None,
+                    )
+                except ServiceError as e:  # one bad quarter must not hide the others
+                    item["state"] = "error"
+                    item["error"] = e.message
+                    out.append(ZmListItem(**item).model_dump())
+                    continue
                 item["rows"] = len(live)
                 item["total"] = sum(int(x["amount"]) for x in live)
             if row is None and (small or not item["rows"]):
@@ -320,6 +350,8 @@ class ZmReportService:
             fy = self._year(year)
             if fy.get("small_business"):
                 raise ServiceError(422, "A small business files no ZM")
+            if self.today() <= period_bounds(year, "quarter", quarter)[1]:
+                raise ServiceError(422, f"Q{quarter} {year} has not ended yet: the ZM can be finalised afterwards")
             orig: Record | None = None
             if row.get("amends_id"):
                 orig = self._row(str(row["amends_id"]))

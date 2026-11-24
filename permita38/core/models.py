@@ -2254,6 +2254,31 @@ class ZmLine(BaseModel):
     kind: str = "S"
 
 
+class ZmDriftLine(BaseModel):
+    """A late ``EU_SVC`` line of a final report (zm.md "Drift"); the base is a decimal string."""
+
+    model_config = ConfigDict(extra="allow")
+    line_id: str
+    entry_id: str | None = None
+    entry_no: int | None = None
+    booking_date: str | None = None
+    document: str | None = None
+    vat_id: str = ""
+    vat_date: str | None = None
+    base: v.Money = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _cents(cls, data: Any) -> Any:
+        return _from_cents(data, {"base_cents": "base"})
+
+
+class ZmDrift(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    entries: int = 0
+    lines: list[ZmDriftLine] = []
+
+
 class ZmReport(Record):
     year: int
     quarter: int
@@ -2270,12 +2295,17 @@ class ZmReport(Record):
     replaced_by: str | None = None
     finalised_at: int | None = None
     finalised_by: str | None = None
+    drift: ZmDrift | None = None
 
     @model_validator(mode="before")
     @classmethod
     def _skip_bad_lines(cls, data: Any) -> Any:
         if isinstance(data, dict) and isinstance(data.get("lines"), list):
-            data = {**data, "lines": [x for x in data["lines"] if isinstance(x, dict)]}
+            # the stored exact ``cents`` of a line stay in storage; a response carries money as decimal strings only
+            data = {
+                **data,
+                "lines": [{k: x[k] for k in x if k != "cents"} for x in data["lines"] if isinstance(x, dict)],
+            }
         return data
 
 

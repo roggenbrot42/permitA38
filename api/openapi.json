@@ -27630,6 +27630,108 @@
         ],
         "title": "ZmCreateIn"
       },
+      "ZmDrift": {
+        "properties": {
+          "entries": {
+            "type": "integer",
+            "title": "Entries",
+            "default": 0
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ZmDriftLine"
+            },
+            "type": "array",
+            "title": "Lines",
+            "default": []
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "ZmDrift"
+      },
+      "ZmDriftLine": {
+        "properties": {
+          "line_id": {
+            "type": "string",
+            "title": "Line Id"
+          },
+          "entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Id"
+          },
+          "entry_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry No"
+          },
+          "booking_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Booking Date"
+          },
+          "document": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document"
+          },
+          "vat_id": {
+            "type": "string",
+            "title": "Vat Id",
+            "default": ""
+          },
+          "vat_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Date"
+          },
+          "base": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Base",
+            "default": "0.00"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "line_id"
+        ],
+        "title": "ZmDriftLine",
+        "description": "A late ``EU_SVC`` line of a final report (zm.md \"Drift\"); the base is a decimal string."
+      },
       "ZmFiledIn": {
         "properties": {
           "filed_on": {
@@ -27734,7 +27836,9 @@
           "total": {
             "anyOf": [
               {
-                "type": "integer"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -27761,6 +27865,17 @@
           "state": {
             "type": "string",
             "title": "State"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
           }
         },
         "additionalProperties": false,
@@ -27955,6 +28070,16 @@
               }
             ],
             "title": "Finalised By"
+          },
+          "drift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ZmDrift"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": true,

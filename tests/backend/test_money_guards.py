@@ -16,6 +16,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from .test_rbac import _routes
+from .test_vat_returns import clients  # noqa: F401  (fixture)
+from .test_zm_reports import post_eu, synthetic_charts  # noqa: F401  (fixture)
 
 DECIMAL_SCHEMA = {"type": "string", "format": "decimal", "pattern": r"^-?[0-9]+\.[0-9]{2,6}$"}
 
@@ -35,6 +37,12 @@ SCHEMA_NUMERIC_ALLOWLIST = {
     "status": "audit entry HTTP status code",
     "year": "calendar year of a record reference",
     "loc": "validation error path element (index)",
+    "quarter": "calendar quarter 1..4 (ZM)",
+    "rows": "number of ZM list rows",
+    "drift": "number of ZM entries with late lines",
+    "entries": "number of ZM drift entries",
+    "entry_no": "journal entry number",
+    "finalised_at": "finalising time, epoch seconds",
     # counts
     "count": "number of items",
     "event_count": "number of calendar events",
@@ -678,3 +686,72 @@ def test_no_to_float_or_bare_float_in_the_api_layer():
                 hits.append(f"{rel}:{node.lineno} (import)")
     assert not hits, f"money.to_float / float( in response builders (use money.to_decimal_str): {hits}"
     assert (API_DIR / "money_out.py").is_file()
+
+
+# ======================================================================================================================
+# ZM: no integer money in any /api/zm response (the whole-euro amounts and totals are decimal strings)
+# ======================================================================================================================
+# keys that may be integers in ZM responses; every other number (also a key named ``total`` or ending in ``_cents``)
+# is money in the wrong shape
+ZM_INT_ALLOWLIST = {
+    "year": "calendar year",
+    "quarter": "quarter 1..4",
+    "rows": "number of list rows",
+    "drift": "number of entries with late lines (list item)",
+    "entries": "number of entries with late lines (drift)",
+    "entry_no": "journal entry number",
+    "created": "epoch seconds",
+    "updated": "epoch seconds",
+    "finalised_at": "epoch seconds",
+}
+
+
+def _zm_number_offenders(label, body):
+    return [
+        f"{label} {'.'.join(kp)} = {value!r}"
+        for kp, key, value in _walk_numbers(body)
+        if key not in ZM_INT_ALLOWLIST or key == "total" or key.endswith("_cents")
+    ]
+
+
+def test_zm_sweep_detects_the_old_integer_money_shape():
+    old = {
+        "total": 7001,
+        "lines": [{"amount": "3001.00", "cents": 300110}],
+        "drift": {"entries": 1, "lines": [{"base_cents": 50000}]},
+    }
+    assert len(_zm_number_offenders("old", old)) == 3
+    assert (
+        _zm_number_offenders("new", {"total": "7001.00", "drift": {"entries": 1, "lines": [{"base": "500.00"}]}}) == []
+    )
+
+
+def test_zm_responses_carry_no_integer_money(app, clients, synthetic_charts):  # noqa: F811
+    from permita38.core.service.journal import JournalService
+
+    boss = clients["boss"]
+    journal = JournalService(app.state.services.store, clock=lambda: 1_800_000_000)
+    post_eu(journal, "ATU00000001", 300110, date(2024, 2, 5))
+    post_eu(journal, "FR00000000001", 400000, date(2024, 3, 5))
+    seen = []
+
+    def got(r, status):
+        assert r.status_code == status, (r.request.method, r.request.url, r.text)
+        seen.append((f"{r.request.method} {r.request.url.path}", r.json()))
+        return r.json()
+
+    got(boss.get("/api/zm?year=2024"), 200)
+    got(boss.get("/api/zm/preview?year=2024&quarter=1"), 200)
+    rid = got(boss.post("/api/zm", json={"year": 2024, "quarter": 1}), 201)["id"]
+    got(boss.post(f"/api/zm/{rid}/finalize"), 200)
+    got(boss.post(f"/api/zm/{rid}/filed", json={"filed_on": "2024-04-20"}), 200)
+    post_eu(journal, "ATU00000001", 50000, date(2024, 3, 6))  # late line: drift
+    final = got(boss.get(f"/api/zm/{rid}"), 200)
+    assert final["drift"]["entries"] == 1  # the drift lines are part of what is swept
+    got(boss.get("/api/zm?year=2024"), 200)
+    corr = got(boss.post("/api/zm", json={"year": 2024, "quarter": 1, "amends_id": rid}), 201)
+    got(boss.get(f"/api/zm/{corr['id']}"), 200)
+    got(boss.post(f"/api/zm/{corr['id']}/finalize"), 200)
+    offenders = [o for label, body in seen for o in _zm_number_offenders(label, body)]
+    assert not offenders, "money in a ZM response must be a decimal string:\n" + "\n".join(offenders)
+    assert any("total" in str(b) for _l, b in seen)  # the list was swept
