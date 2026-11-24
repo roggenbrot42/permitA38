@@ -2,7 +2,8 @@
 other devices survive a round-trip through this version."""
 
 import json
-from datetime import datetime
+from datetime import date as _date
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
@@ -142,6 +143,8 @@ class Expense(Record):
     reverse_charge: bool | None = None  # stored as sent; the VAT figures are not changed (open decision 6)
     paid_on: str | None = None  # docs/specs/receipt-scan.md: null = not given, counts as paid on the bill date `date`
     invoice_no: str | None = None  # the invoice number printed on the bill
+    tax_treatment: str | None = None  # docs/specs/accounting.md 8.2; null reads as derived (section 16)
+    service_date: str | None = None  # performance date (§ 13b); null reads as `date`
 
 
 class Line(BaseModel):
@@ -163,6 +166,33 @@ class Plan(BaseModel):
     user_ids: list[str] = []
     rate: v.UnitPrice | None = None
     win_probability: float | None = None
+
+
+class Payment(BaseModel):
+    """One payment, refund or reversal of an invoice (docs/specs/credit-notes-payments.md 2.3 and 3). ``amount`` is
+    signed: positive = money received, negative = money paid back. ``id`` is null for a legacy virtual payment."""
+
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    document_id: str | None = None
+    date: str | None = None
+    amount: v.Money = 0
+    kind: str = "payment"  # payment | refund | reversal
+    method: str = "bank"
+    note: str | None = None
+    reverses_id: str | None = None
+    created: int | None = None
+
+
+class CreditNoteSummary(BaseModel):
+    """A credit note as listed on its invoice (``credit_notes`` of the invoice response)."""
+
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    number: str | None = None  # null for write-offs (internal vouchers)
+    date: str | None = None
+    credit_kind: str | None = None
+    gross: v.Money = 0
 
 
 class Document(Record):
@@ -196,6 +226,17 @@ class Document(Record):
     import_batch: str | None = None
     totals_unverified: bool | None = None
     original_pdf: str | None = None
+    # docs/specs/credit-notes-payments.md 2.3: stored by the accounting services, derived on output
+    kind: str | None = None  # invoice | credit_note
+    credit_kind: str | None = None
+    corrects_id: str | None = None
+    tax_treatment: str | None = None  # null reads as `standard`
+    issued: dict[str, Any] | None = None  # the snapshot taken when the invoice is issued
+    paid_amount: v.Money | None = None
+    credited_amount: v.Money | None = None
+    open_amount: v.Money | None = None  # gross - credited - paid; negative = customer credit
+    payments: list[Payment] | None = None
+    credit_notes: list[CreditNoteSummary] | None = None
 
 
 class Template(Record):
@@ -560,6 +601,28 @@ class ExpenseLineIn(v.StrictRecord):
         return value
 
 
+# Fields the server owns: a client (also one that sends a whole record back) cannot set them. They are dropped
+# silently before validation, so a round-tripped response is accepted and the stored value is never overwritten.
+INTERNAL_EXPENSE_FIELDS = ("bill_rev", "pay_rev")
+INTERNAL_DOCUMENT_FIELDS = (
+    "issued",
+    "kind",
+    "credit_kind",
+    "corrects_id",
+    "paid_amount",
+    "credited_amount",
+    "open_amount",
+    "payments",
+    "credit_notes",
+)
+
+
+def _without(data: Any, names: tuple[str, ...]) -> Any:
+    if isinstance(data, dict) and any(name in data for name in names):
+        return {k: val for k, val in data.items() if k not in names}
+    return data
+
+
 class ExpenseIn(v.StrictRecord):
     date: v.ISODate
     net: v.NonNegAmount | None = None  # required without lines; with lines it is derived by the server
@@ -580,11 +643,22 @@ class ExpenseIn(v.StrictRecord):
     reverse_charge: bool = False
     paid_on: v.OptDate = None  # null/empty = same as the bill date
     invoice_no: Annotated[str, StringConstraints(max_length=60)] | None = None
+    tax_treatment: v.ExpenseTreatment | None = None  # docs/specs/accounting.md 8.2; null = derived by the server
+    service_date: v.OptDate = None  # performance date for § 13b; null = same as the bill date
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        return _without(data, INTERNAL_EXPENSE_FIELDS)
 
     @model_validator(mode="after")
     def _net_or_lines(self):
         if not self.lines and self.net is None:
             raise ValueError("net is required for a bill without lines")
+        if self.service_date and _date.fromisoformat(self.service_date) > _date.fromisoformat(self.date) + timedelta(
+            days=366
+        ):
+            raise ValueError("service_date must not be more than 366 days after the bill date")
         return self
 
 
@@ -728,10 +802,58 @@ class DocumentIn(v.StrictRecord):
     lines: list[LineIn] = Field(default=[], max_length=v.MAX_LINES)
     plan: PlanIn | None = None
     offer_id: v.OptId = None
+    tax_treatment: v.SalesTreatment | None = None  # null reads as `standard`; reserved values are refused
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        return _without(data, INTERNAL_DOCUMENT_FIELDS)
 
     @model_validator(mode="after")
     def _period(self):
         v.check_period(self.service_from, self.service_to, "service period end")
+        return self
+
+
+class PaymentIn(v.CheckedBody):
+    """A payment or refund on an issued invoice (docs/specs/credit-notes-payments.md 3). The amount is positive; a
+    refund is stored negative by the service."""
+
+    date: v.ISODate
+    amount: v.PaymentAmountIn
+    kind: v.PaymentKindIn = "payment"
+    method: v.PaymentMethod = "bank"
+    note: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+class PaymentReverseIn(v.CheckedBody):
+    """Reverse a payment entered by mistake; the date defaults to the payment date (service)."""
+
+    date: v.OptDate = None
+    note: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+class SettleDiscountIn(v.CheckedBody):
+    """Settle an invoice with a cash discount: a discount credit note for the rest, then the payment."""
+
+    date: v.ISODate
+    amount_paid: v.PaymentAmountIn
+    note: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+class CreditNoteIn(v.CheckedBody):
+    """Issue a credit note on an invoice (docs/specs/credit-notes-payments.md 4). ``amounts`` maps a VAT rate to the
+    net amount credited; it is required for ``partial`` and ignored by the service for the other kinds."""
+
+    credit_kind: v.CreditNoteKindIn
+    date: v.ISODate
+    reason: Annotated[str, StringConstraints(min_length=1, max_length=500), AfterValidator(v._not_blank)]
+    amounts: Annotated[dict[v.RateKey, v.PositiveMoneyIn], Field(max_length=len(v.ALLOWED_VAT_RATES))] | None = None
+
+    @model_validator(mode="after")
+    def _amounts_for_partial(self):
+        if self.credit_kind == "partial" and not self.amounts:
+            raise ValueError("amounts is required for a partial credit note")
         return self
 
 

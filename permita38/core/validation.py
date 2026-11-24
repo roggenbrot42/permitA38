@@ -11,7 +11,7 @@ import re
 from collections.abc import Mapping
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Annotated, Any, Callable
+from typing import Annotated, Any, Callable, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import (
@@ -315,6 +315,68 @@ def _money_out(kind: str) -> Any:
 # response amounts (net, VAT, gross, totals) and unit prices (EUR/h, EUR/km, price per unit): a decimal string in JSON
 Money = _money_out("money")
 UnitPrice = _money_out("unit_price")
+
+
+# ---- Decimal-yielding money input of the accounting models (docs/specs/accounting.md 7a) ----
+CENT_STEP = Decimal("0.01")
+
+
+def _decimal_money(value: Any) -> Any:
+    """Number or decimal string -> exact Decimal (floats via ``repr``, never float arithmetic). Bools, NaN/inf and every
+    other string form are refused."""
+    if isinstance(value, bool):
+        raise ValueError("must be a number or a decimal string like 12.50")
+    if isinstance(value, str):
+        if not _MONEY_STR_RE.fullmatch(value):
+            raise ValueError("must be a number or a decimal string like 12.50 (dot as decimal separator)")
+        return Decimal(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("must be a finite number")
+        return Decimal(repr(value))
+    if isinstance(value, int):
+        return Decimal(value)
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("must be a finite number")
+        return value
+    raise ValueError("must be a number or a decimal string like 12.50")
+
+
+def money_in(lo: str, hi: str, *, exclusive_min: bool = False) -> Any:
+    """A strict money input yielding ``Decimal`` in whole cents within ``[lo, hi]`` (``(lo, hi]`` when
+    ``exclusive_min``). Accepts a JSON number or a decimal string; more than two decimals are refused."""
+    low, high = Decimal(lo), Decimal(hi)
+
+    def check(value: Decimal) -> Decimal:
+        if value != value.quantize(CENT_STEP):
+            raise ValueError("must be a whole number of cents (at most two decimals)")
+        if (value <= low) if exclusive_min else (value < low):
+            raise ValueError(f"must be greater than {lo}" if exclusive_min else f"must be at least {lo}")
+        if value > high:
+            raise ValueError(f"must be at most {hi}")
+        return value.quantize(CENT_STEP)
+
+    number: dict[str, Any] = {"type": "number", "maximum": float(high)}
+    number["exclusiveMinimum" if exclusive_min else "minimum"] = float(low)
+    schema = {"anyOf": [number, {"type": "string", "pattern": MONEY_STR_PATTERN}]}
+    return Annotated[Decimal, BeforeValidator(_decimal_money), AfterValidator(check), WithJsonSchema(schema)]
+
+
+MoneyIn = money_in("-1000000000", "1000000000")
+PositiveMoneyIn = money_in("0", "1000000000", exclusive_min=True)
+PaymentAmountIn = money_in("0", "10000000", exclusive_min=True)  # one payment: > 0 and <= 10,000,000.00
+
+# tax treatments (docs/specs/credit-notes-payments.md 5). Values reserved for later releases are refused with 422.
+SalesTreatment = Literal["standard", "small_business", "eu_b2b_service"]
+ExpenseTreatment = Literal["standard", "no_input_vat", "reverse_charge_eu_service", "reverse_charge_third_country"]
+RESERVED_SALES_TREATMENTS = ("eu_b2b_goods", "export_third_country", "reverse_charge_13b", "exempt")
+RESERVED_EXPENSE_TREATMENTS = ("eu_acquisition_goods", "import_goods", "reverse_charge_13b_domestic")
+CreditKind = Literal["storno", "partial", "discount", "write_off", "write_off_reversal"]  # stored kinds
+CreditNoteKindIn = Literal["storno", "partial", "write_off"]  # the kinds a client may request
+PaymentKindIn = Literal["payment", "refund"]
+PaymentMethod = Literal["bank", "cash"]
+RateKey = Literal["0", "5", "7", "16", "19"]  # the allowed VAT rates (ALLOWED_VAT_RATES) as keys of an amounts map
 
 
 def _check_value(value: Any, depth: int = 0) -> None:
