@@ -5,6 +5,7 @@ The expected entries are read from the hand-computed oracle ``fixtures/accountin
 
 import json
 import shutil
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -351,3 +352,136 @@ def test_soll_issue_with_performance_in_a_locked_month_drifts(repo, sales):
     vat_line = next(ln for ln in entry.lines if ln.role == "vat_out_s19")
     assert vat_line.vat_date == "2026-01-20"  # keeps the locked date
     assert len(entry.warnings) == 1 and "drift" in entry.warnings[0]
+
+
+# ---------------------------------------------------------------- review fixes
+USER = {"id": "u7x000", "username": "mia"}
+
+
+def test_finalize_posts_with_the_acting_user(repo, sales):
+    init(repo)
+    inv = draft(repo, "2026-03-10", [line("100.00")])
+    sales.finalize("invoices", inv["id"], USER)
+    assert [e.created_by for e in entries(repo)] == ["u7x000"]
+
+
+def test_finalize_route_passes_the_user_to_the_journal(app, boss_client, tmp_path, monkeypatch):
+    charts_dir = tmp_path / "charts"
+    charts_dir.mkdir()
+    shutil.copy(FIXTURES / "chart_synthetic.json", charts_dir / "skr03-2026.json")
+    monkeypatch.setattr(charts, "_DIR", charts_dir)
+    store = app.state.services.store
+    init(store)
+    cust = customer(store)
+    inv = draft(store, "2026-03-10", [line("100.00")], customer=cust)
+    me = boss_client.get("/api/auth/me").json()
+    r = boss_client.post(f"/api/invoices/{inv['id']}/finalize")
+    assert r.status_code == 200, r.text
+    assert [e.created_by for e in entries(store)] == [me["id"]]
+
+
+def test_first_january_invoice_opens_the_new_year_in_the_same_transaction(repo, sales):
+    init(repo, income="accrual", vat="ist")
+    fy26 = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**fy26, "dauerfrist": True, "vat_frequency": "quarter"})
+    inv = draft(repo, "2027-01-05", [line("100.00")])
+    sales.finalize("invoices", inv["id"], USER)
+    fy = repo.find("fiscal_years", year=2027)[0]
+    assert (fy["chart"], fy["income_basis"], fy["vat_basis"]) == ("skr03", "accrual", "ist")
+    assert (fy["vat_frequency"], fy["dauerfrist"], fy["small_business"]) == ("quarter", True, False)
+    assert fy["opened_by"] == "u7x000"
+    posted = JournalService(repo).entries(2027)
+    assert len(posted) == 1 and posted[0].created_by == "u7x000"
+    assert repo.get("invoices", inv["id"])["issued"]["rules_version"] == fy["rules_version"]
+
+
+def test_new_year_copies_small_business(repo, sales):
+    init(repo, small_business=True)
+    inv = draft(repo, "2027-01-05", [line("100.00", "19")])
+    out = sales.finalize("invoices", inv["id"], USER)
+    assert repo.find("fiscal_years", year=2027)[0]["small_business"] is True
+    assert out["issued"]["regime"] == "small_business"
+
+
+def test_year_gap_is_409_and_rolls_back(repo, sales):
+    init(repo)
+    inv = draft(repo, "2028-01-05", [line("100.00")])
+    with pytest.raises(ServiceError) as exc:
+        sales.finalize("invoices", inv["id"], USER)
+    assert exc.value.status == 409
+    assert repo.find("fiscal_years", year=2028) == [] and repo.find("fiscal_years", year=2027) == []
+    assert not repo.get("invoices", inv["id"]).get("number")
+
+
+def test_year_before_the_earliest_is_409(repo, sales):
+    init(repo, start="2025-01-01")
+    inv = draft(repo, "2025-12-30", [line("100.00")])
+    with pytest.raises(ServiceError) as exc:
+        sales.finalize("invoices", inv["id"], USER)
+    assert exc.value.status == 409
+
+
+def test_finalize_stores_the_date_it_posted_with(repo, sales):
+    init(repo)
+    inv = repo.save("invoices", dict(customer_id=customer(repo)["id"], lines=[line("100.00")]))
+    assert not inv.get("date")
+    out = sales.finalize("invoices", inv["id"], USER)
+    today = date.today().isoformat()
+    assert out["date"] == repo.get("invoices", inv["id"])["date"] == today
+
+
+def test_group_vat_is_rounded_once_not_per_line(repo, sales):
+    """Three 0.03 lines at 19 %: group net 9 ct, VAT 9 * 0.19 = 1.71 -> 2 ct (per line 0.0057 -> 1 ct each = 3 ct)."""
+    init(repo)
+    inv = draft(repo, "2026-03-10", [line("0.03")] * 3)
+    snap = sales.finalize("invoices", inv["id"], USER)["issued"]
+    assert snap["rates"] == {"19": {"net": 9, "vat": 2, "gross": 11}} and snap["gross"] == 11
+    live = calc.doc_totals(dict(repo.get("invoices", inv["id"])), repo.settings())
+    assert (live["net"], live["vat_total"], live["gross"]) == (0.09, 0.02, 0.11)
+
+
+def test_line_amounts_round_half_up_before_the_group_sum(repo, sales):
+    """Two lines 0.5 x 0.05 = 0.025 -> 0.03 each (half-up): net 6 ct, VAT 6 * 0.19 = 1.14 -> 1 ct."""
+    init(repo)
+    inv = draft(repo, "2026-03-10", [dict(description="x", qty="0.5", price="0.05", vat="19")] * 2)
+    snap = sales.finalize("invoices", inv["id"], USER)["issued"]
+    assert snap["rates"] == {"19": {"net": 6, "vat": 1, "gross": 7}}
+
+
+def _pdf_texts(repo, monkeypatch, doc) -> str:
+    from permita38.core import documents
+
+    seen: list[str] = []
+    orig = documents.Pdf.text
+
+    def spy(self, x, y, s, *a, **k):
+        seen.append(str(s))
+        return orig(self, x, y, s, *a, **k)
+
+    monkeypatch.setattr(documents.Pdf, "text", spy)
+    documents.render(repo, "invoice", doc)
+    return " ".join(seen)
+
+
+def test_pdf_note_follows_the_snapshot_not_the_setting(repo, sales, monkeypatch):
+    from permita38.core.documents import LABELS
+
+    note = LABELS["de"]["klein"].split()[0]
+    init(repo, small_business=True)
+    inv = draft(repo, "2026-03-10", [line("100.00", "19")], language="de")
+    sales.finalize("invoices", inv["id"], USER)
+    repo.save_settings({"kleinunternehmer": False})
+    assert note in _pdf_texts(repo, monkeypatch, repo.get("invoices", inv["id"]))
+
+
+def test_pdf_vat_invoice_never_prints_the_note_after_the_setting_changes(repo, sales, monkeypatch):
+    from permita38.core.documents import LABELS
+
+    note = LABELS["de"]["klein"].split()[0]
+    init(repo)
+    inv = draft(repo, "2026-03-10", [line("100.00", "19")], language="de")
+    sales.finalize("invoices", inv["id"], USER)
+    repo.save_settings({"kleinunternehmer": True})
+    doc = repo.get("invoices", inv["id"])
+    assert note not in _pdf_texts(repo, monkeypatch, doc)
+    assert note in _pdf_texts(repo, monkeypatch, {k: v for k, v in doc.items() if k != "issued"})  # a draft is live

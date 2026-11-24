@@ -33,7 +33,9 @@ from permita38.core.charts import Chart, ChartMissing, ChartName, Role, chart_fo
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 from permita38.core.repository.base import JournalConflict, Record
+from permita38.core.service.fiscal_years import FiscalYearService
 from permita38.core.service.locks import first_unlocked_from
+from permita38.core.settings import accounting_start
 from permita38.core.vat_rules import TAX_KEYS, TaxKind
 
 ZERO_HASH = "0" * 64
@@ -352,9 +354,7 @@ class JournalService:
                 return self._existing(existing, event_key, document_date, text, source, lines)
             booking = self._booking_date(document_date)
             year = booking.year
-            rows = self.store.find("fiscal_years", year=year)
-            if not rows:
-                raise ServiceError(409, f"Fiscal year {year} is not open")
+            rows = [self.ensure_year(year, source.created_by)]
             if rows[0].get("closed_at") is not None:
                 raise ServiceError(409, f"Fiscal year {year} is closed")
             self._check_manual_vat_dates(source, lines)
@@ -371,6 +371,28 @@ class JournalService:
             )
             entry["hash"] = entry_hash(entry["prev_hash"], entry, resolved)
             return models.JournalEntry.model_validate(self.store.insert_journal_entry(entry, resolved))
+
+    def ensure_year(self, year: int, user_id: str) -> Record:
+        """The fiscal year row; automatic year opening (accounting.md 4): year N+1 is created from year N in the
+        caller's transaction. 409 when the accounting is not initialised, or year N does not exist (a gap, or before
+        the earliest row)."""
+        rows = self.store.find("fiscal_years", year=year)
+        if rows:
+            return rows[0]
+        previous = self.store.find("fiscal_years", year=year - 1)
+        if accounting_start(self.store.settings()) is None or not previous:
+            raise ServiceError(409, f"Fiscal year {year} is not open")
+        prev = previous[0]
+        body = models.FiscalYearIn(
+            year=year,
+            chart=prev["chart"],
+            income_basis=prev["income_basis"],
+            vat_basis=prev.get("vat_basis") or "soll",
+            vat_frequency=prev.get("vat_frequency") or "month",
+            dauerfrist=bool(prev.get("dauerfrist")),
+            small_business=bool(prev.get("small_business")),
+        )
+        return FiscalYearService(self.store).create({"id": user_id}, body)
 
     # ---------- read
     def get_by_event_key(self, event_key: str) -> models.JournalEntry | None:

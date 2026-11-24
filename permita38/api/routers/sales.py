@@ -56,8 +56,8 @@ def invoice_from_time(body: FromTime, _: Annotated[dict, Needs("invoices", "writ
 
 
 @router.post("/invoices/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
-def finalize_invoice(rid: str, _: Annotated[dict, Needs("invoices", "write")], services: ServicesDep):
-    return _doc(services, "invoices", services.sales.finalize("invoices", rid), finalize=True)
+def finalize_invoice(rid: str, user: Annotated[dict, Needs("invoices", "write")], services: ServicesDep):
+    return _doc(services, "invoices", services.sales.finalize("invoices", rid, user), finalize=True)
 
 
 @router.get("/invoices/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})
@@ -66,8 +66,8 @@ def invoice_pdf(rid: str, _: Annotated[dict, Needs("invoices")], services: Servi
 
 
 @router.post("/offers/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
-def finalize_offer(rid: str, _: Annotated[dict, Needs("offers", "write")], services: ServicesDep):
-    return _doc(services, "offers", services.sales.finalize("offers", rid), finalize=True)
+def finalize_offer(rid: str, user: Annotated[dict, Needs("offers", "write")], services: ServicesDep):
+    return _doc(services, "offers", services.sales.finalize("offers", rid, user), finalize=True)
 
 
 @router.get("/offers/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})

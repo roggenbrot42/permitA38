@@ -124,7 +124,9 @@ class IssuePostingService:
         self.store = store
         self.journal = journal or JournalService(store)
 
-    def post_issue(self, invoice: Mapping[str, Any]) -> models.JournalEntry | None:
+    def post_issue(
+        self, invoice: Mapping[str, Any], user: Mapping[str, Any] | None = None
+    ) -> models.JournalEntry | None:
         """Post the issue entry of an invoice that carries its snapshot. Idempotent (an existing ``issue:<id>``
         entry is returned unchanged). ``None`` when nothing posts: accounting not initialised, invoice dated before the
         start, a credit-note voucher, or an engine result without lines. 409 when the invoice date lies in a locked
@@ -142,9 +144,7 @@ class IssuePostingService:
         snap = stored_snapshot(invoice)
         if snap is None:
             return None
-        fy = _fiscal_year(self.store, invoice_date.year)
-        if fy is None:
-            raise ServiceError(409, f"Fiscal year {invoice_date.year} is not open")
+        fy = self.journal.ensure_year(invoice_date.year, str((user or {}).get("id") or "system"))
         first_open = first_unlocked_from(self.store.list("period_locks"))
         if fy.get("closed_at") is not None or (first_open is not None and invoice_date < first_open):
             raise ServiceError(409, "The invoice date lies in a locked period; use a date in an open month")
@@ -155,6 +155,7 @@ class IssuePostingService:
         customer: Mapping[str, Any] = (invoice.get("issued") or {}).get("customer") or {}
         source = JournalSource(
             event="issue",
+            created_by=str((user or {}).get("id") or "system"),
             source_coll="invoices",
             source_id=str(invoice["id"]),
             source_number=invoice.get("number"),
