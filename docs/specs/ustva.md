@@ -175,8 +175,9 @@ into the last period with the extension *(verify)*.
   the return for a performance in the period, a cash event dated in the period but entered later that changes the due
   VAT (Ist; under Soll a refund of cash above the current gross or a write-off reversal), a § 13b tax date
   in the period, an `eu_b2b_service` performance date in the period. Late bills never drift (their input VAT moves to
-  the booking month). The detail shows "N entries after finalising change the tax by x,xx" with the lines (`created_at >
-  finalised_at`); the user files an amended return. Nothing is moved automatically.
+  the booking month). The detail shows "N entries after finalising change the tax by x,xx" with the lines (every line of the period that is not among the
+  return's stored source lines — by `created_at > finalised_at` only when the source list was truncated; lines with
+  no tax effect, e.g. a § 13b pair or Kz 21, are listed too because they change boxes); the user files an amended return. Nothing is moved automatically.
 
 ## Data model (`vat_returns`, migration in the accounting migration)
 
