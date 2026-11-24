@@ -147,6 +147,16 @@ class Repository(ABC):
         fields of its entry that readers need: ``entry_id``, ``entry_no``, ``fiscal_year``, ``booking_date``,
         ``source_number`` and ``entry_created_at`` (the entry's ``created_at``)."""
 
+    @abstractmethod
+    def journal_lines_by_income_date(self, date_from: str, date_to: str) -> RecordList:
+        """Like :meth:`journal_lines_by_vat_date`, for the lines whose ``income_date`` lies in ``[date_from, date_to]``
+        (uses the ``income_date`` index)."""
+
+    @abstractmethod
+    def journal_account_balance(self, account: str, before: str) -> int:
+        """Sum of ``amount_cents`` (debit positive) of the lines on ``account`` whose entry has a ``booking_date``
+        before ``before`` (ISO date, exclusive); 0 when there are none."""
+
     def next_number(self, doc_type: str, period: str) -> int:
         """Take the next value of the counter ``(doc_type, period)`` in ``number_sequences`` (first value 1).
         Call inside ``transaction()``: the counter then rolls back with the record it numbers (gapless). The row id

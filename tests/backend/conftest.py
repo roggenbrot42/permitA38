@@ -1,12 +1,17 @@
 import os
 import re
+import shutil
+from datetime import date
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from permita38.api.server import get_app
+from permita38.core import charts
 from permita38.core.config import Config
 from permita38.core.service import auth
+from permita38.core.service.journal import JournalSource, PostLine
 
 PASSWORD = "correct horse battery"
 #: the real cost factor; tests run with a cheap one (see `cheap_password_hashing`) and one test pins this value
@@ -192,3 +197,120 @@ def unguarded():
         return saved
 
     return plant
+
+
+CHART_FIXTURE = Path(__file__).parent / "fixtures" / "chart_synthetic.json"
+
+
+@pytest.fixture
+def chart_dir(tmp_path, monkeypatch):
+    d = tmp_path / "charts"
+    d.mkdir()
+    shutil.copy(CHART_FIXTURE, d / "skr03-2026.json")
+    monkeypatch.setattr(charts, "_DIR", d)
+    return d
+
+
+@pytest.fixture
+def scenario(app, boss_client, chart_dir):
+    """Four entries in 2026 (entry numbers 1..4):
+
+    1  2026-01-10 invoice inv1: receivables +119.00, revenue -100.00, VAT -19.00 (tax key S19)
+    2  2026-01-20 payment of 50.00 on inv1: bank +50.00, receivables -50.00
+    3  2026-02-05 software expense: expense +30.00, input VAT +5.70, bank -35.70
+    4  2026-02-10 other expense on credit exp1: expense +20.00, payables -20.00
+    """
+    r = boss_client.post("/api/accounting/years", json={"year": 2026, "chart": "skr03", "income_basis": "accrual"})
+    assert r.status_code == 201, r.text
+    d = date
+    vat = PostLine(
+        role="vat_out_s19", amount_cents=-1900, tax_key="S19", tax_kind="tax", tax_rate="19", tax_base_cents=10000,
+        vat_date=d(2026, 1, 10), income_date=d(2026, 1, 10),
+    )  # fmt: skip
+    _post_entry(
+        app, "e1", d(2026, 1, 10), "Invoice 1", "issue", "invoices", "inv1", "R-1",
+        [
+            PostLine(role="receivables", amount_cents=11900, open_item_id="inv1"),
+            PostLine(role="revenue_s19", amount_cents=-10000, income_date=d(2026, 1, 10)),
+            vat,
+        ],
+    )  # fmt: skip
+    _post_entry(
+        app, "e2", d(2026, 1, 20), "Payment 1", "payment", "invoices", "inv1", "R-1",
+        [
+            PostLine(role="bank", amount_cents=5000),
+            PostLine(role="receivables", amount_cents=-5000, open_item_id="inv1"),
+        ],
+    )  # fmt: skip
+    _post_entry(
+        app, "e3", d(2026, 2, 5), "Software", "expense", "expenses", "exp0", None,
+        [
+            PostLine(role="expense_software", amount_cents=3000, income_date=d(2026, 2, 5)),
+            PostLine(role="input_vat_clearing", amount_cents=570, income_date=d(2026, 2, 5)),
+            PostLine(role="bank", amount_cents=-3570),
+        ],
+    )  # fmt: skip
+    _post_entry(
+        app, "e4", d(2026, 2, 10), "Other", "expense", "expenses", "exp1", None,
+        [
+            PostLine(role="expense_other", amount_cents=2000, income_date=d(2026, 2, 10)),
+            PostLine(role="payables", amount_cents=-2000, open_item_id="exp1"),
+        ],
+    )  # fmt: skip
+    return boss_client
+
+
+@pytest.fixture
+def eur_scenario(app, boss_client, chart_dir):
+    """Two cash-basis (EÜR) years 2025 and 2026 (the 2026 chart file serves both). Entry numbers per year:
+
+    2025/1  2025-11-03 paid invoice: bank +119.00, revenue -100.00, VAT -19.00 (income_date 2025-11-03)
+    2025/2  2025-12-28 software: expense +30.00, input VAT +5.70, bank -35.70 (income_date 2025-12-28)
+    2025/3  2025-12-30 recurring cost paid early (10-day rule shape): expense_other +20.00 / bank -20.00,
+            income_date 2026-01-05
+    2026/1  2026-01-15 software: expense +10.00 / bank -10.00 (income_date 2026-01-15)
+    """
+    for year in (2025, 2026):
+        r = boss_client.post("/api/accounting/years", json={"year": year, "chart": "skr03", "income_basis": "eur"})
+        assert r.status_code == 201, r.text
+    d = date
+    vat = PostLine(
+        role="vat_out_s19", amount_cents=-1900, tax_key="S19", tax_kind="tax", tax_rate="19", tax_base_cents=10000,
+        vat_date=d(2025, 11, 3), income_date=d(2025, 11, 3),
+    )  # fmt: skip
+    _post_entry(
+        app, "x1", d(2025, 11, 3), "Paid invoice", "payment", "invoices", "inv9", "R-9",
+        [
+            PostLine(role="bank", amount_cents=11900),
+            PostLine(role="revenue_s19", amount_cents=-10000, income_date=d(2025, 11, 3)),
+            vat,
+        ],
+    )  # fmt: skip
+    _post_entry(
+        app, "x2", d(2025, 12, 28), "Software", "expense", "expenses", "exp7", None,
+        [
+            PostLine(role="expense_software", amount_cents=3000, income_date=d(2025, 12, 28)),
+            PostLine(role="input_vat_clearing", amount_cents=570, income_date=d(2025, 12, 28)),
+            PostLine(role="bank", amount_cents=-3570),
+        ],
+    )  # fmt: skip
+    _post_entry(
+        app, "x3", d(2025, 12, 30), "Recurring", "expense", "expenses", "exp8", None,
+        [
+            PostLine(role="expense_other", amount_cents=2000, income_date=d(2026, 1, 5)),
+            PostLine(role="bank", amount_cents=-2000),
+        ],
+    )  # fmt: skip
+    _post_entry(
+        app, "x4", d(2026, 1, 15), "Software 2", "expense", "expenses", "exp9", None,
+        [
+            PostLine(role="expense_software", amount_cents=1000, income_date=d(2026, 1, 15)),
+            PostLine(role="bank", amount_cents=-1000),
+        ],
+    )  # fmt: skip
+    return boss_client
+
+
+def _post_entry(app, key, day, text, event, coll, sid, number, lines):
+    source = JournalSource(event=event, created_by="u1x000", source_coll=coll, source_id=sid, source_number=number)
+    app.state.services.journal.post(key, day, text, source, lines)

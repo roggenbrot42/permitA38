@@ -47,6 +47,11 @@ SCHEMA_NUMERIC_ALLOWLIST = {
     "next": "audit pagination cursor",
     "status": "audit entry HTTP status code",
     "year": "calendar year of a record reference",
+    "fiscal_year": "calendar year of a journal entry",
+    "created_at": "journal entry epoch seconds",
+    "entry_no": "gapless journal entry number",
+    "line_no": "ordinal of a journal line within its entry",
+    "age_days": "age of an open item in days",
     "loc": "validation error path element (index)",
     "quarter": "calendar quarter 1..4 (ZM)",
     "rows": "number of ZM list rows",
@@ -780,3 +785,29 @@ def test_zm_responses_carry_no_integer_money(app, clients, synthetic_charts):  #
     offenders = [o for label, body in seen for o in _zm_number_offenders(label, body)]
     assert not offenders, "money in a ZM response must be a decimal string:\n" + "\n".join(offenders)
     assert any("total" in str(b) for _l, b in seen)  # the list was swept
+
+
+# ======================================================================================================================
+# accounting journal and report routes: every amount is a decimal string, no allowlist entry for a money field
+# ======================================================================================================================
+def test_accounting_report_routes_send_money_only_as_decimal_strings(app, scenario):
+    seen_strings = 0
+    paths = [
+        "journal", "accounts", "reports/trial-balance", "reports/pnl", "reports/balance-sheet",
+        "reports/open-items", "reports/ledger?role=bank",
+    ]  # fmt: skip
+    for path in paths:
+        r = scenario.get(f"/api/accounting/{path}")
+        assert r.status_code == 200, (path, r.text)
+        for kp, key, value in _walk_numbers(r.json()):
+            assert key in SWEEP_NUMERIC_KEYS and key not in AMBIGUOUS_KEYS, (path, ".".join(kp), value)
+        seen_strings += len(re.findall(r'"-?[0-9]+\.[0-9]{2}"', r.text))
+    assert seen_strings > 60, seen_strings
+
+
+def test_accounting_eur_route_sends_money_only_as_decimal_strings(eur_scenario):
+    r = eur_scenario.get("/api/accounting/reports/eur", params={"year": 2025})
+    assert r.status_code == 200, r.text
+    for kp, key, value in _walk_numbers(r.json()):
+        assert key in SWEEP_NUMERIC_KEYS and key not in AMBIGUOUS_KEYS, (".".join(kp), value)
+    assert len(re.findall(r'"-?[0-9]+\.[0-9]{2}"', r.text)) >= 8

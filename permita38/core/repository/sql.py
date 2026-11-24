@@ -628,11 +628,29 @@ class SQLRepository(Repository):
             return self._with_lines(entries)
 
     def journal_lines_by_vat_date(self, date_from: str, date_to: str) -> RecordList:
+        return self._journal_lines_by_date("vat_date", date_from, date_to)
+
+    def journal_lines_by_income_date(self, date_from: str, date_to: str) -> RecordList:
+        return self._journal_lines_by_date("income_date", date_from, date_to)
+
+    def journal_account_balance(self, account: str, before: str) -> int:
+        q, ph = self.dialect.quote, self.dialect.placeholder
+        with self.lock:
+            self._ensure()
+            rows = self._rows(
+                f"SELECT SUM(l.{q('amount_cents')}) FROM {q('journal_lines')} l "
+                f"JOIN {q('journal_entries')} e ON e.{q('id')} = l.{q('entry_id')} "
+                f"WHERE l.{q('account')} = {ph} AND e.{q('booking_date')} < {ph}",
+                [account, before],
+            )
+        return int(rows[0][0] or 0) if rows else 0
+
+    def _journal_lines_by_date(self, column: str, date_from: str, date_to: str) -> RecordList:
         q, ph = self.dialect.quote, self.dialect.placeholder
         with self.lock:
             self._ensure()
             lines_t = self._table("journal_lines")
-            sql = self.dialect.select_all(lines_t) + f" WHERE {q('vat_date')} >= {ph} AND {q('vat_date')} <= {ph}"
+            sql = self.dialect.select_all(lines_t) + f" WHERE {q(column)} >= {ph} AND {q(column)} <= {ph}"
             lines = [self._decode(lines_t, r) for r in self._rows(sql, [date_from, date_to])]
             entries_t = self._table("journal_entries")
             ids = builtins.list(dict.fromkeys(str(ln["entry_id"]) for ln in lines))
