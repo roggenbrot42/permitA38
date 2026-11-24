@@ -7,6 +7,7 @@ deterministic names and timestamps.
 """
 
 import io
+import unicodedata
 import zipfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -135,30 +136,56 @@ class DatevHeaderParams:
     date_from: date
     date_to: date
     label: str
-    locked: bool = False
 
 
 def _quote(text: str) -> str:
     return '"' + text.replace('"', '""') + '"'
 
 
+def _is_separator(ch: str) -> bool:
+    """Control and separator characters that would break the line or the field: C0 controls, DEL, U+0085, Zl, Zp.
+
+    The C1 controls U+0080..U+009F other than U+0085 are not mapped here: they are unencodable and end up as ``?``.
+    """
+    if ch == "\u0085":
+        return True
+    if "\u0080" <= ch <= "\u009f":
+        return False
+    return unicodedata.category(ch) in ("Cc", "Zl", "Zp")
+
+
 def _clean(text: str, limit: int) -> str:
-    """Field text: line breaks become spaces and the text is cut to the field length."""
-    return text.replace("\r\n", " ").replace("\r", " ").replace("\n", " ")[:limit]
+    """Field text: control and separator characters become one space each (CRLF one), cut to the field length."""
+    text = text.replace("\r\n", " ")
+    return "".join(" " if _is_separator(ch) else ch for ch in text)[:limit]
 
 
 def _comma(cents: int) -> str:
-    """Whole cents as a decimal-comma amount without thousands separator, e.g. ``1234,50``."""
-    sign = "-" if cents < 0 else ""
-    whole, frac = divmod(abs(cents), 100)
-    return f"{sign}{whole},{frac:02d}"
+    """Whole cents as a non-negative decimal-comma amount without thousands separator, e.g. ``1234,50``."""
+    if cents < 0:
+        raise ValueError(f"DATEV amounts are unsigned, got {cents} cents")
+    whole, frac = divmod(cents, 100)
+    return f"{whole},{frac:02d}"
+
+
+def _signed_comma(cents: int) -> str:
+    """Like :func:`_comma` but with a leading minus (report balances and differences only)."""
+    return ("-" if cents < 0 else "") + _comma(abs(cents))
+
+
+def _locked_flag(rows: Sequence[DatevRow]) -> str:
+    """Header Festschreibung: ``1`` only if every row is locked; mixed rows must be split by the caller."""
+    flags = {r.festschreibung for r in rows}
+    if len(flags) > 1:
+        raise ValueError("rows mix locked and unlocked months; export them as separate batches")
+    return "1" if flags == {True} else "0"
 
 
 def _ymd(d: date) -> str:
     return d.strftime("%Y%m%d")
 
 
-def _header_line(p: DatevHeaderParams) -> str:
+def _header_line(p: DatevHeaderParams, locked: str) -> str:
     created = p.created.strftime("%Y%m%d%H%M%S") + f"{p.created.microsecond // 1000:03d}"
     fields = [""] * _HEADER_FIELDS
     values: dict[int, str] = {
@@ -181,7 +208,7 @@ def _header_line(p: DatevHeaderParams) -> str:
         18: _quote(""),
         19: "1",
         20: "0",
-        21: "1" if p.locked else "0",
+        21: locked,
         22: _quote("EUR"),
     }
     for no, value in values.items():
@@ -205,7 +232,7 @@ def _data_line(row: DatevRow) -> str:
 
 
 def _file_text(rows: Sequence[DatevRow], params: DatevHeaderParams) -> str:
-    lines = [_header_line(params), ";".join(COLUMN_HEADER), *(_data_line(r) for r in rows)]
+    lines = [_header_line(params, _locked_flag(rows)), ";".join(COLUMN_HEADER), *(_data_line(r) for r in rows)]
     return "".join(line + _EOL for line in lines)
 
 
@@ -214,15 +241,19 @@ def extf_csv(rows: Sequence[DatevRow], header_params: DatevHeaderParams) -> byte
     return _file_text(rows, header_params).encode(ENCODING, errors="replace")
 
 
-def unencodable_characters(rows: Sequence[DatevRow], header_params: DatevHeaderParams) -> tuple[str, ...]:
-    """The distinct characters :func:`extf_csv` had to replace, sorted (for the report)."""
+def _unencodable_in(text: str) -> set[str]:
     bad: set[str] = set()
-    for ch in set(_file_text(rows, header_params)):
+    for ch in set(text):
         try:
             ch.encode(ENCODING)
         except UnicodeEncodeError:
             bad.add(ch)
-    return tuple(sorted(bad))
+    return bad
+
+
+def unencodable_characters(rows: Sequence[DatevRow], header_params: DatevHeaderParams) -> tuple[str, ...]:
+    """The distinct characters :func:`extf_csv` had to replace, sorted (for the report)."""
+    return tuple(sorted(_unencodable_in(_file_text(rows, header_params))))
 
 
 def extf_filename(date_from: date, date_to: date) -> str:
@@ -248,9 +279,13 @@ def self_check_report(
     datev_rules: DatevRules,
     vat_rates: Mapping[str, Decimal],
     *,
-    unencodable: Sequence[str] = (),
+    header_params: DatevHeaderParams | None = None,
 ) -> str:
-    """Counts, sums, per-account journal vs DATEV simulation and the known differences (``export-report.txt``)."""
+    """Counts, sums, per-account journal vs DATEV simulation and the known differences (``export-report.txt``).
+
+    Characters outside Windows-1252 are found here from the rows as they are written (after cleaning and cutting);
+    pass ``header_params`` to include the stack label.
+    """
     journal = journal_balances(entries, chart)
     simulated = simulate(rows, chart, datev_rules, vat_rates)
     accounts = sorted(set(journal) | set(simulated))
@@ -264,11 +299,13 @@ def self_check_report(
     out += ["", "Self-check: DATEV simulation against the journal per account (account; journal; DATEV; difference)"]
     for no in accounts:
         j, s = journal.get(no, zero), simulated.get(no, zero)
-        out.append(f"{no};{_comma(j)};{_comma(s)};{_comma(s - j)}")
+        out.append(f"{no};{_signed_comma(j)};{_signed_comma(s)};{_signed_comma(s - j)}")
     out.append("Result: OK" if not mismatches else "Result: DIFFERENCES (bug): " + ", ".join(mismatches))
     out += ["", "Known differences (not bugs):", *(f"- {text}" for text in _STANDING_DIFFERENCES)]
     for diff in known_differences(entries, rows):
         out.append(f"- {diff.kind}: {diff.event_key}: {diff.detail}")
+    written = "".join(_data_line(r) for r in rows) + (_header_line(header_params, "0") if header_params else "")
+    unencodable = sorted(_unencodable_in(written))
     if unencodable:
         out += ["", "Characters outside Windows-1252 replaced by '?': " + " ".join(unencodable)]
     return "\n".join(out) + "\n"

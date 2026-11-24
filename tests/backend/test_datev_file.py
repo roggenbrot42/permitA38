@@ -7,6 +7,7 @@ meals_deductible 9036, meals_nondeductible 9037.
 
 import io
 import zipfile
+from dataclasses import replace
 from datetime import date, datetime
 
 import pytest
@@ -123,10 +124,65 @@ def test_golden_structure_counts() -> None:
 
 def test_header_follows_the_rules_file_and_locked_flag() -> None:
     assert (RULES.header.extf_version, RULES.header.category, RULES.header.format_version) == (700, 21, 13)
-    locked = DatevHeaderParams(**{**PARAMS.__dict__, "locked": True})
-    first = extf_csv([], locked).decode("cp1252").split("\r\n")[0]
+    locked = [row(100, "9001", "9003", None, "0101", "x", festschreibung=True)]
+    first = extf_csv(locked, PARAMS).decode("cp1252").split("\r\n")[0]
     assert first == HEADER_LINE.replace(';"Q1 2026";"";1;0;0;', ';"Q1 2026";"";1;0;1;')
     assert extf_csv([], PARAMS).decode("cp1252").count("\r\n") == 2
+
+
+def header_flag(rows: list[DatevRow]) -> str:
+    return extf_csv(rows, PARAMS).decode("cp1252").split("\r\n")[0].split(";")[20]
+
+
+def test_header_festschreibung_is_derived_from_rows() -> None:
+    on = row(100, "9001", "9003", None, "0101", "x", festschreibung=True)
+    off = row(100, "9001", "9003", None, "0101", "x")
+    assert header_flag([on, on]) == "1"
+    assert header_flag([off, off]) == "0"
+    assert header_flag([]) == "0"
+    with pytest.raises(ValueError, match="separate"):
+        extf_csv([on, off], PARAMS)
+
+
+def test_negative_amount_is_refused() -> None:
+    with pytest.raises(ValueError, match="unsigned"):
+        extf_csv([row(-1, "9001", "9003", None, "0101", "x")], PARAMS)
+
+
+def text_field(text: str, **kw: str) -> str:
+    r = row(100, "9001", "9003", None, "0101", text, **kw)
+    return extf_csv([r], PARAMS).decode("cp1252").split("\r\n")[2].split(";")[13]
+
+
+@pytest.mark.parametrize("ch", ["\t", "\x00", "\x85", "\u2028", "\u2029", "\x0b", "\x7f"])
+def test_control_and_separator_characters_become_a_space(ch: str) -> None:
+    assert text_field(f"a{ch}b") == '"a b"'
+
+
+def test_formula_characters_stay_raw_inside_quotes() -> None:
+    assert text_field("=1+1") == '"=1+1"'
+    assert text_field("@x") == '"@x"'
+
+
+def test_label_is_cut_to_30_and_quotes_doubled() -> None:
+    p = DatevHeaderParams(**{**PARAMS.__dict__, "label": 'x"' * 20})
+    fields = extf_csv([], p).decode("cp1252").split("\r\n")[0].split(";")
+    assert fields[16] == '"' + 'x""' * 15 + '"'
+
+
+def test_c1_control_and_emoji_are_replaced_and_reported() -> None:
+    r = row(100, "9001", "9003", None, "0101", "a\x81b\U0001f600c")
+    assert text_field("a\x81b\U0001f600c") == '"a?b?c"'
+    assert unencodable_characters([r], PARAMS) == ("\x81", "\U0001f600")
+    chart = _chart()
+    report = self_check_report([], [r], chart, RULES, RATES)
+    assert "replaced by '?': \x81 \U0001f600" in report
+
+
+def test_euro_sign_is_byte_0x80() -> None:
+    out = extf_csv([row(100, "9001", "9003", None, "0101", "5 €")], PARAMS)
+    assert b'"5 \x80"' in out
+    assert unencodable_characters([row(100, "9001", "9003", None, "0101", "5 €")], PARAMS) == ()
 
 
 def test_festschreibung_column_is_one_for_locked_rows() -> None:
@@ -209,7 +265,32 @@ def test_report_flags_a_row_that_breaks_the_simulation() -> None:
     entries = case_entries("A1-accrual-soll")
     rows = batch_rows(entries, chart, RULES, RATES)
     broken = [*rows, row(1, "9001", "9003", None, "0302", "x")]
-    report = self_check_report(entries, broken, chart, RULES, RATES, unencodable=("☕",))
+    report = self_check_report(entries, broken, chart, RULES, RATES)
     assert "Result: DIFFERENCES (bug): 9001, 9003" in report
     assert "9001;1190,00;1190,01;0,01" in report
+    assert "replaced by" not in report
+
+
+def test_report_lists_unencodable_characters_after_cutting() -> None:
+    chart = _chart()
+    inside = row(100, "9001", "9003", None, "0101", "Kaffee ☕")
+    beyond = row(100, "9001", "9003", None, "0101", "x" * 60 + "中")
+    report = self_check_report([], [inside, beyond], chart, RULES, RATES)
     assert "replaced by '?': ☕" in report
+    assert "中" not in report
+
+
+def test_report_includes_label_characters_with_header_params() -> None:
+    p = DatevHeaderParams(**{**PARAMS.__dict__, "label": "Q1 中"})
+    report = self_check_report([], [], _chart(), RULES, RATES, header_params=p)
+    assert "replaced by '?': 中" in report
+
+
+def test_report_lists_datev_transfer_rows_as_known_differences() -> None:
+    chart = _chart()
+    entries = case_entries("A1-accrual-soll")
+    rows = batch_rows(entries, chart, RULES, RATES)
+    flagged = [replace(rows[0], note="transfer", event_key="payment:T1"), replace(rows[1], note="fallback")]
+    report = self_check_report(entries, [*flagged, *rows[2:]], chart, RULES, RATES)
+    assert "- transfer: payment:T1: booked through datev_transfer" in report
+    assert f"- fallback: {rows[1].event_key}: unfolded VAT rows" in report
