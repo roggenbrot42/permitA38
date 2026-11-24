@@ -11,6 +11,7 @@ from fastapi import APIRouter, Query, Response
 from permita38.api.deps import Needs, ServicesDep, SessionOnly
 from permita38.api.routers.accounting import not_implemented
 from permita38.core import models
+from permita38.core.service.vat_returns import VatReturnListItem
 from permita38.core.validation import VatPeriodKind
 
 returns = APIRouter(prefix="/vat-returns", tags=["vat"])
@@ -24,7 +25,7 @@ Year = Annotated[int, Query(ge=2000, le=2100)]
 
 
 # ------------------------------------------------------------------ UStVA
-@returns.get("", name="list_vat_returns")
+@returns.get("", name="list_vat_returns", response_model=list[VatReturnListItem])
 def list_returns(year: Year, user: Read, services: ServicesDep):
     return services.vat_returns.list(year)
 

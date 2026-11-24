@@ -10962,7 +10962,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VatReturnListItem"
+                  },
+                  "title": "Response List Vat Returns Api Vat Returns Get"
+                }
               }
             }
           },
@@ -27358,6 +27364,84 @@
           "filed_on"
         ],
         "title": "VatReturnFiledIn"
+      },
+      "VatReturnListItem": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "no": {
+            "type": "integer",
+            "title": "No"
+          },
+          "from_date": {
+            "type": "string",
+            "title": "From Date"
+          },
+          "to_date": {
+            "type": "string",
+            "title": "To Date"
+          },
+          "due_date": {
+            "type": "string",
+            "title": "Due Date"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "year",
+          "kind",
+          "no",
+          "from_date",
+          "to_date",
+          "due_date",
+          "state"
+        ],
+        "title": "VatReturnListItem",
+        "description": "One period row of the year list (``GET /vat/returns?year=``)."
       },
       "VatReturnPaymentIn": {
         "properties": {

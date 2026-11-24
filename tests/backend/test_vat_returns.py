@@ -1,6 +1,7 @@
 """VAT return records (docs/specs/ustva.md "Status, finalise, filed, reopen", accounting.md 8.1, 11): VatReturnService
 and its routes. The figures of the oracle cases U1-U3 come from fixtures/accounting_oracle.json."""
 
+import hashlib
 import json
 import shutil
 from datetime import date
@@ -15,7 +16,7 @@ from permita38.core.errors import ServiceError
 from permita38.core.repository import create_repository
 from permita38.core.service.journal import JournalService, JournalSource, PostLine
 from permita38.core.service.locks import LockService
-from permita38.core.service.vat_returns import VatReturnService, money
+from permita38.core.service.vat_returns import VatReturnListItem, VatReturnService, money
 
 from .test_rbac import PASSWORD, _login
 
@@ -344,3 +345,126 @@ def test_api_cycle_and_rights(clients):
     d3 = boss.post("/api/vat-returns", json={"year": 2024, "kind": "month", "no": 3}).json()["id"]
     assert acc.delete(f"/api/vat-returns/{d3}").status_code == 204
     assert boss.get(f"/api/vat-returns/{d3}").status_code == 404
+
+
+# ------------------------------------------------------------------ review fixes
+def post_sale(
+    journal: JournalService, key: str, booking: date, vat_day: date, base: int = 10000, tax: int = 1900
+) -> None:
+    journal.post(
+        key, booking, key, SRC,
+        [
+            PostLine(role="bank", amount_cents=base + tax),
+            PostLine(role="revenue_s19", amount_cents=-base),
+            PostLine(
+                role="vat_out_s19", amount_cents=-tax, tax_key="S19", tax_kind="tax", tax_rate="19",
+                tax_base_cents=base, vat_date=vat_day,
+            ),
+        ],
+    )  # fmt: skip
+
+
+def repo_row(svc: VatReturnService, rid: str) -> dict[str, Any]:
+    row = svc.store.get("vat_returns", rid)
+    assert row is not None
+    return row
+
+
+def test_the_vat_date_not_the_booking_date_decides_the_period(svc, journal):
+    post_sale(
+        journal, "soll:1", date(2026, 3, 5), date(2026, 2, 20)
+    )  # a Soll invoice issued in March, performed in Feb
+    feb, mar = svc.preview(2026, "month", 2), svc.preview(2026, "month", 3)
+    assert feb["boxes"]["81"]["base"] == "100.00" and feb["boxes"]["81"]["tax"] == "19.00"
+    assert "81" not in mar["boxes"] and mar["source_lines"] == []
+    assert len(feb["source_lines"]) == 1
+
+
+def test_a_final_return_with_no_lines_shows_no_later_lines(svc, journal):
+    d = svc.create_draft(2026, "month", 2)
+    svc.finalize(d["id"], USER, confirm_gap=True)
+    assert repo_row(svc, d["id"])["source_lines"] == []
+    post_sale(journal, "late:1", date(2026, 3, 5), date(2026, 2, 20))  # drift: not part of the final return
+    assert svc.lines(d["id"], "81")["lines"] == []
+    assert "81" not in svc.get(d["id"])["boxes"]
+
+
+def test_a_small_business_period_shows_no_input_lines(svc, repo, journal):
+    repo.save("fiscal_years", fiscal_year(2025, small_business=True, vat_frequency="none"))
+    day = date(2025, 2, 10)
+    journal.post(
+        "rc:1", day, "reverse charge", SRC,
+        [
+            PostLine(role="expense_other", amount_cents=2100),
+            PostLine(
+                role="rc_input_vat", amount_cents=399, tax_key="RC_3C_SVC", tax_kind="input", tax_rate="19",
+                tax_base_cents=2100, vat_date=day,
+            ),
+            PostLine(
+                role="rc_vat_out_3c", amount_cents=-399, tax_key="RC_3C_SVC", tax_kind="tax", tax_rate="19",
+                tax_base_cents=2100, vat_date=day,
+            ),
+            PostLine(role="bank", amount_cents=-2100),
+        ],
+    )  # fmt: skip
+    d = svc.create_draft(2025, "quarter", 1)
+    assert len(d["source_lines"]) == 1  # the input line is excluded, as in the computation
+    assert len(svc.lines(d["id"], "85")["lines"]) == 1
+    assert svc.lines(d["id"], "67")["lines"] == []
+
+
+def test_source_line_limit_stores_sums_and_a_hash_never_a_silent_null(svc, journal, repo, monkeypatch):
+    monkeypatch.setattr("permita38.core.service.vat_returns.MAX_SOURCE_LINES", 2)
+    post_case(journal, CASES["U2"], date(2026, 2, 15))  # four source lines
+    all_ids = sorted(ln["id"] for ln in repo.journal_lines_by_vat_date("2026-02-01", "2026-02-28") if ln.get("tax_key"))
+    want = hashlib.sha256("\n".join(all_ids).encode()).hexdigest()
+    assert len(all_ids) == 4
+    draft = svc.preview(2026, "month", 2)  # a preview says it is cut
+    assert (draft["source_lines_truncated"], draft["source_lines_count"], draft["source_lines_hash"]) == (True, 4, want)
+    assert len(draft["source_lines"]) == 2
+    d = svc.create_draft(2026, "month", 2)
+    fin = svc.finalize(d["id"], USER, confirm_gap=True)
+    assert repo_row(svc, d["id"])["source_lines"] == {"truncated": True, "count": 4, "sha256": want}
+    assert fin["source_lines"] == [] and fin["source_lines_truncated"] is True and fin["source_lines_hash"] == want
+    assert svc.get(d["id"])["source_lines_count"] == 4
+    assert next(r for r in svc.list(2026) if r["no"] == 2)["lines"] == 4
+    assert len(svc.lines(d["id"], "81")["lines"]) == 1  # the drill-down queries the journal by period
+    check_boxes(svc.get(d["id"]), CASES["U2"])  # the per-box sums are stored
+    assert svc.reopen(d["id"])["source_lines_truncated"] is True  # a draft shows the cut again
+    assert repo_row(svc, d["id"]).get("source_lines") is None
+
+
+def test_finalize_stores_the_rules_actually_used_and_refreshes_the_due_date(svc, repo):
+    d = svc.create_draft(2026, "month", 1)
+    repo.save("vat_returns", {**repo_row(svc, d["id"]), "due_date": "2026-02-11", "rules_version": "old/vat-1999"})
+    fin = svc.finalize(d["id"], USER)
+    assert fin["rules_version"] == "skr03-2026/vat-2026" and fin["due_date"] == "2026-02-10"
+
+
+def test_finalize_is_atomic_when_the_lock_fails(svc, repo, monkeypatch):
+    d = svc.create_draft(2026, "month", 1)
+    real = svc.locks.lock_up_to
+
+    def lock_then_fail(*args: Any, **kwargs: Any) -> Any:
+        real(*args, **kwargs)  # the lock rows are written, then the call fails
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(svc.locks, "lock_up_to", lock_then_fail)
+    with pytest.raises(RuntimeError):
+        svc.finalize(d["id"], USER)
+    row = repo_row(svc, d["id"])
+    assert row["status"] == "draft" and not row.get("boxes") and row.get("finalised_at") is None
+    assert repo.list("period_locks") == []
+
+
+def test_reopen_after_filing_is_a_service_409_not_a_database_guard(svc):
+    d = svc.create_draft(2026, "month", 1)
+    svc.finalize(d["id"], USER)
+    svc.filed(d["id"], "2026-02-09", None, None)
+    with pytest.raises(ServiceError) as err:
+        svc.reopen(d["id"])
+    assert err.value.status == 409 and "amended return" in err.value.message
+
+
+def test_list_rows_are_typed(svc):
+    assert all(VatReturnListItem(**r) for r in svc.list(2026))

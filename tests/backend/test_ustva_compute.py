@@ -259,3 +259,13 @@ def test_unmapped_tax_key_kind_pair_raises() -> None:
     ln = Line(Role("v"), Cents(0), TaxKey("S19"), "input", None, None, start)
     with pytest.raises(ValueError, match="S19.*input"):
         compute_boxes([ln], start, end, RULES)
+
+
+def test_a_bad_line_outside_the_period_cannot_block_the_return() -> None:
+    day = date(2026, 3, 10)
+    good = Line(Role("revenue_s19"), Cents(-1900), TaxKey("S19"), "tax", "19", Cents(10000), day)
+    bad = dataclasses.replace(good, tax_kind="nonsense", vat_date=date(2026, 4, 2))  # unmapped, but in April
+    res = compute_boxes([good, bad], date(2026, 3, 1), date(2026, 3, 31), RULES)
+    assert res.boxes["81"].tax == 1900
+    with pytest.raises(ValueError, match="no VAT rules mapping"):  # the same line inside its period still fails
+        compute_boxes([good, bad], date(2026, 4, 1), date(2026, 4, 30), RULES)

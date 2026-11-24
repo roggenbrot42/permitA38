@@ -94,11 +94,11 @@ def compute_boxes(
     for ln in lines:
         if ln.tax_key is None or ln.tax_key in _IGNORED_KEYS or ln.tax_kind is None:
             continue
+        if ln.vat_date is None or not period_from <= ln.vat_date <= period_to:
+            continue  # only the period's lines count; a line outside it cannot block the return
         entry = mapping.get((ln.tax_key, ln.tax_kind))
         if entry is None:
             raise ValueError(f"no VAT rules mapping for (tax_key, tax_kind) = ({ln.tax_key!r}, {ln.tax_kind!r})")
-        if ln.vat_date is None or not period_from <= ln.vat_date <= period_to:
-            continue
         if ln.tax_kind == "input":
             if small_business or entry.tax_kz is None:
                 continue
