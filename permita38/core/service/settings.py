@@ -19,7 +19,15 @@ WORK_LIMITS_PREFIX = "work_limits."
 WORK_LIMIT_FIELDS = ("info_day", "warn_day", "max_day", "info_week", "info_average")
 
 #: numbering settings: changed only through the guarded numbering service
-NUMBERING_KEYS = ("invoice_pattern", "offer_pattern", "invoice_reset", "offer_reset", "numbering_shared")
+NUMBERING_KEYS = (
+    "invoice_pattern",
+    "offer_pattern",
+    "invoice_reset",
+    "offer_reset",
+    "numbering_shared",
+    "credit_note_pattern",
+    "credit_note_reset",
+)
 
 
 class SettingsService:

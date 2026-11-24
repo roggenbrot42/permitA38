@@ -429,6 +429,8 @@ class Settings(BaseModel):
     default_template: str = "classic"
     invoice_pattern: str = "RE-{year}-{n:04d}"
     offer_pattern: str = "AN-{year}-{n:04d}"
+    credit_note_pattern: str = "RK-{year}-{n:04d}"
+    credit_note_reset: str = "yearly"
     invoice_reset: str = "yearly"  # never | yearly | monthly (see core/numbering.py)
     offer_reset: str = "yearly"
     numbering_shared: bool = False  # invoices and offers share one sequence
@@ -1093,6 +1095,8 @@ class SettingsIn(v.StrictRecord):
     default_template: v.Id = "classic"
     invoice_pattern: Annotated[str, StringConstraints(max_length=100)] = "RE-{year}-{n:04d}"
     offer_pattern: Annotated[str, StringConstraints(max_length=100)] = "AN-{year}-{n:04d}"
+    credit_note_pattern: Annotated[str, StringConstraints(max_length=100)] = "RK-{year}-{n:04d}"
+    credit_note_reset: Literal["never", "yearly", "monthly"] = "yearly"
     invoice_reset: Literal["never", "yearly", "monthly"] = "yearly"
     offer_reset: Literal["never", "yearly", "monthly"] = "yearly"
     numbering_shared: bool = False
@@ -1121,7 +1125,7 @@ class SettingsIn(v.StrictRecord):
             raise ValueError("is not a German federal state code")
         return value
 
-    @field_validator("invoice_pattern", "offer_pattern")
+    @field_validator("invoice_pattern", "offer_pattern", "credit_note_pattern")
     @classmethod
     def _numbering_pattern(cls, value: str) -> str:
         try:

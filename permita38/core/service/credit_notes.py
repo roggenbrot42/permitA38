@@ -21,52 +21,19 @@ from permita38.core.accounting.postings_issue import rate_str
 from permita38.core.accounting.types import IssuedSnapshot
 from permita38.core.errors import ServiceError
 from permita38.core.money import vat_amount
-from permita38.core.numbering import period_key
 from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service import invoice_state
 from permita38.core.service.journal import JournalService
 from permita38.core.service.locks import first_unlocked_from
-from permita38.core.service.numbering import NumberConfig, NumberingService
+from permita38.core.service.numbering import NumberingService
 from permita38.core.service.payments import PaymentService
 from permita38.core.service.postings import CreditPostingService, invoice_state_of, stored_snapshot
-from permita38.core.settings import effective_settings
 
-__all__ = ["CREDIT_NOTE_PATTERN", "CREDIT_NOTE_RESET", "CreditNoteNumbering", "CreditNoteService"]
+__all__ = ["CreditNoteService"]
 
-CREDIT_NOTE_PATTERN = "RK-{year}-{n:04d}"
-CREDIT_NOTE_RESET = "yearly"
 DOC_TYPE = "credit_note"
 _NOW = Callable[[], float]
-
-
-class CreditNoteNumbering(NumberingService):
-    """The sequence ``credit_note`` on the generic numbering service: its own counter group, the settings
-    ``credit_note_pattern`` / ``credit_note_reset`` (read with defaults until the settings page knows them, E11b), and
-    the credit notes of the ``invoices`` collection as the documents in scope."""
-
-    def config(self, doc_type: str = DOC_TYPE) -> NumberConfig:
-        st = effective_settings(self.store.settings())
-        return NumberConfig(
-            DOC_TYPE,
-            str(st.get("credit_note_pattern") or CREDIT_NOTE_PATTERN),
-            str(st.get("credit_note_reset") or CREDIT_NOTE_RESET),
-            False,
-        )
-
-    def _docs_in_scope(self, cfg: NumberConfig, period: str, reset: str) -> list[dict[str, Any]]:
-        out = []
-        for doc in self.store.list("invoices"):
-            if doc.get("kind") != "credit_note":
-                continue
-            raw = str(doc.get("date") or "")[:10]
-            try:
-                day = date.fromisoformat(raw)
-            except ValueError:
-                continue
-            if period_key(reset, day) == period:
-                out.append(doc)
-        return out
 
 
 def _decimal(value: Any, what: str) -> Decimal:
@@ -97,7 +64,7 @@ class CreditNoteService:
     ):
         self.store = store
         self.payments = payments or PaymentService(store, journal)
-        self.numbering = numbering or CreditNoteNumbering(store)
+        self.numbering = numbering or NumberingService(store)
         self.posting = CreditPostingService(store, journal)
         self.now = now
 

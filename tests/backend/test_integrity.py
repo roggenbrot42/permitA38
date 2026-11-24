@@ -921,3 +921,20 @@ def test_check_db_leaves_the_database_file_unchanged(tmp_path, capsys):
     assert hashlib.sha256(path.read_bytes()).hexdigest() == before
     assert not list(path.parent.glob("*.sqlite3-wal"))
     capsys.readouterr()
+
+
+def test_credit_note_sequence_is_checked_on_its_own(store):
+    with_customer(store)
+    store.save("invoices", doc("invoices", "inv001", status="sent", number="RE-2026-0001"))
+    for rid, n in (("crn001", 1), ("crn002", 4)):
+        note = doc("invoices", rid, status="sent", number=f"RK-2026-{n:04d}")
+        note["kind"] = "credit_note"
+        store.save("invoices", note)
+    store.save("number_sequences", {"id": "seq001", "doc_type": "invoices", "period": "2026", "last_value": 1})
+    store.save("number_sequences", {"id": "seq002", "doc_type": "credit_note", "period": "2026", "last_value": 2})
+    got = IntegrityService(store).run(["numbering."])
+    assert [(f.code, f.collection, f.id) for f in got] == [
+        ("numbering.sequence_behind", "number_sequences", "seq002"),
+        ("numbering.gap", "credit_note", "2026"),
+    ]
+    assert got[1].message == "sequence numbers missing in period 2026: 2-3"

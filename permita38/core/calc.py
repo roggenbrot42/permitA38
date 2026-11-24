@@ -397,6 +397,7 @@ def finance(store, year, today=None):
     pay_rows = invoice_state.group_by(store.list("payments"), "document_id")
     invoices = store.list("invoices")
     notes = invoice_state.group_by(invoice_state.credit_notes_of(invoices), "corrects_id")
+    revenue_ids: set[str] = set()  # invoices that count as revenue; the credit notes of the others are not netted again
     for inv in invoices:
         if inv.get("status") == "draft" or inv.get("kind") == "credit_note":
             continue
@@ -406,17 +407,28 @@ def finance(store, year, today=None):
         )
         if st.status == "cancelled" or inv.get("status") == "cancelled":
             continue
+        revenue_ids.add(inv["id"])
         paid = st.status == "paid"
         when = d(inv.get("date")) if accrual else d(st.paid_date)
-        if not paid and not accrual:
-            open_receivables += dec(t["gross"])
-            continue
         if not paid:
-            open_receivables += dec(t["gross"])
+            credited = sum((Decimal(invoice_state.credit_note_gross(n)) for n in notes.get(inv["id"], [])), ZERO)
+            open_receivables += dec(t["gross"]) - credited / 100  # a partial credit note lowers what is still owed
+            if not accrual:
+                continue
         if when and when.year == year:
             m = months[when.month - 1]
             m["revenue"] += dec(t["net"])
             m["vat_out"] += dec(t["vat_total"])
+    # credit notes net revenue and output VAT on their own date, in both bases (kind = credit_note; drafts do not exist)
+    for note in invoices:
+        if note.get("kind") != "credit_note" or note.get("corrects_id") not in revenue_ids:
+            continue
+        when = d(note.get("date"))
+        if when and when.year == year:
+            t = doc_totals(dict(note), s)
+            m = months[when.month - 1]
+            m["revenue"] -= dec(t["net"])
+            m["vat_out"] -= dec(t["vat_total"])
     cats: dict[str, Decimal] = defaultdict(lambda: ZERO)
     for x in store.list("expenses"):
         # docs/specs/receipt-scan.md: the cost counts on the paid date under `eur` (null/damaged = the bill date) and on
