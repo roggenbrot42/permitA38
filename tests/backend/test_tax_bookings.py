@@ -56,20 +56,21 @@ def lines(entry) -> list[tuple[str, int, str | None]]:
 def test_vat_payment_and_refund_lines(eur):
     e = eur.vat_payment("ret1", date(2026, 3, 10), 12345, "payment", USER)
     # 123,45 paid: D vat_prepayments 12345 (income_date = payment date) / C bank -12345
-    assert e.event_key == "vat:ret1" and e.origin == "auto"
+    assert e.event_key is not None and e.event_key.startswith("vat:") and e.event_key != "vat:ret1"
+    assert e.origin == "manual" and e.source_id == "ret1"
     assert lines(e) == [("vat_prepayments", 12345, "2026-03-10"), ("bank", -12345, None)]
     r = eur.vat_payment("ret2", date(2026, 4, 10), 5000, "refund", USER)
     # 50,00 refunded: D bank 5000 / C vat_prepayments -5000 (income_date = refund date)
     assert lines(r) == [("bank", 5000, None), ("vat_prepayments", -5000, "2026-04-10")]
-    assert r.event_key == "vat:ret2"
+    assert r.event_key is not None and r.event_key.startswith("vat:") and r.origin == "manual"
 
 
 def test_vat_payment_is_idempotent_and_different_content_is_409(eur):
-    first = eur.vat_payment("ret1", date(2026, 3, 10), 12345, "payment", USER)
-    again = eur.vat_payment("ret1", date(2026, 3, 10), 12345, "payment", USER)
-    assert again.id == first.id and len(JournalService(eur.store).entries(2026)) == 1
+    first = eur.vat_payment("ret1", date(2026, 3, 10), 12345, "payment", USER, entry_id="fix1")
+    again = eur.vat_payment("ret1", date(2026, 3, 10), 12345, "payment", USER, entry_id="fix1")
+    assert again.id == first.id and first.event_key == "vat:fix1" and len(JournalService(eur.store).entries(2026)) == 1
     with pytest.raises(ServiceError) as e:
-        eur.vat_payment("ret1", date(2026, 3, 10), 999, "payment", USER)
+        eur.vat_payment("ret1", date(2026, 3, 10), 999, "payment", USER, entry_id="fix1")
     assert e.value.status == 409
 
 
@@ -86,12 +87,12 @@ def test_vat_payment_input_rules(eur):
 def test_special_prepayment_and_credit(eur):
     p = eur.special_prepayment(2026, date(2026, 2, 10), 20000, USER)
     # 200,00 paid: D vat_special_prepayment 20000 (income_date = payment date) / C bank
-    assert p.event_key == "vat:special:2026"
+    assert p.event_key is not None and p.event_key.startswith("vat:") and p.origin == "manual"
     assert lines(p) == [("vat_special_prepayment", 20000, "2026-02-10"), ("bank", -20000, None)]
     c = eur.special_prepayment_credit(2026, "dec26", 20000, USER)
     assert c is not None
     # Kz 39 = 200,00: D vat_prepayments 20000 / C vat_special_prepayment -20000, no income_date, 31 Dec
-    assert c.event_key == "vat:dec26:credit" and str(c.document_date) == "2026-12-31"
+    assert c.event_key == "vat:dec26:credit" and c.origin == "auto" and str(c.document_date) == "2026-12-31"
     assert lines(c) == [("vat_prepayments", 20000, None), ("vat_special_prepayment", -20000, None)]
     again = eur.special_prepayment_credit(2026, "dec26", 20000, USER)
     assert again is not None and again.id == c.id
@@ -124,6 +125,10 @@ def test_refunds_and_corporate_tax(eur):
     assert lines(t) == [("bank", 10000, None), ("tax_refunds", -10000, "2026-06-01")]
     i = eur.income_tax_payment(date(2026, 6, 2), 7000, "refund", USER)
     assert lines(i) == [("bank", 7000, None), ("private_withdrawal", -7000, None)]
+    eur.store.save_settings({ACCOUNTING_START_KEY: "2026-01-01", "company_type": "gmbh"})
+    with pytest.raises(ServiceError) as err:  # a GmbH pays no income tax
+        eur.income_tax_payment(date(2026, 6, 2), 7000, "refund", USER)
+    assert err.value.status == 422
     c = eur.corporate_tax_payment(date(2026, 6, 3), 30000, "payment", USER)
     assert lines(c) == [("corporate_tax_expense", 30000, "2026-06-03"), ("bank", -30000, None)]
     assert c.origin == "manual" and c.event_key is not None and c.event_key.startswith("manual:")
@@ -147,50 +152,51 @@ def test_provision_nets_prepayments_and_settlement_above(accrual):
     booking = svc.trade_tax_provision(2026, 4500, USER)
     # prepayments expensed in 2026: 30,00 + 20,00 = 5000 cents; provision typed by the user (already net): 45,00
     assert booking.prepayments_expensed_cents == 5000
-    assert booking.entry.event_key == "manual:trade_tax_provision:2026"
+    assert booking.entry.event_key == "manual:trade_tax_provision:2026:r1"
     assert lines(booking.entry) == [("trade_tax_expense", 4500, "2026-12-31"), ("trade_tax_provision", -4500, None)]
-    assert svc.provision_balance("trade_tax") == 4500
+    assert svc.year_provision("trade_tax", 2026) == 4500
     again = svc.trade_tax_provision(2026, 4500, USER)
     assert again.entry.id == booking.entry.id  # idempotent per year
 
     # above: 60,00 paid against 45,00: D provision 4500, C bank 6000, D expense 1500 (income_date = payment date)
-    above = svc.settle_trade_tax_provision(date(2027, 3, 15), 6000, USER)
+    above = svc.settle_trade_tax_provision(2026, date(2027, 3, 15), 6000, USER)
     assert lines(above) == [
         ("trade_tax_provision", 4500, None),
         ("bank", -6000, None),
         ("trade_tax_expense", 1500, "2027-03-15"),
     ]
-    assert svc.provision_balance("trade_tax") == 0  # -(-4500 + 4500)
+    assert svc.year_provision("trade_tax", 2026) == 0  # -(-4500 + 4500)
     with pytest.raises(ServiceError) as e:  # nothing left to settle
-        svc.settle_trade_tax_provision(date(2027, 4, 1), 100, USER)
+        svc.settle_trade_tax_provision(2026, date(2027, 4, 1), 100, USER)
     assert e.value.status == 409
 
 
 def test_settlement_below_the_provision_releases_the_rest(accrual):
     svc = accrual
     svc.trade_tax_provision(2026, 4500, USER)
-    below = svc.settle_trade_tax_provision(date(2027, 3, 15), 3000, USER)
+    below = svc.settle_trade_tax_provision(2026, date(2027, 3, 15), 3000, USER)
     # 30,00 paid against 45,00: D provision 4500, C bank 3000, C tax_refunds 1500 (income_date = payment date)
     assert lines(below) == [
         ("trade_tax_provision", 4500, None),
         ("bank", -3000, None),
         ("tax_refunds", -1500, "2027-03-15"),
     ]
-    assert svc.provision_balance("trade_tax") == 0
+    assert svc.year_provision("trade_tax", 2026) == 0
 
 
 def test_settlement_equal_to_the_provision_has_no_third_line(accrual):
     svc = accrual
     svc.trade_tax_provision(2026, 4500, USER)
-    exact = svc.settle_trade_tax_provision(date(2027, 3, 15), 4500, USER)
+    exact = svc.settle_trade_tax_provision(2026, date(2027, 3, 15), 4500, USER)
     assert lines(exact) == [("trade_tax_provision", 4500, None), ("bank", -4500, None)]
 
 
 def test_corporate_provision_and_settlement(accrual):
     svc = accrual
+    svc.store.save_settings({ACCOUNTING_START_KEY: "2026-01-01", "company_type": "gmbh"})
     b = svc.corporate_tax_provision(2026, 9000, USER)
     assert lines(b.entry) == [("corporate_tax_expense", 9000, "2026-12-31"), ("corporate_tax_provision", -9000, None)]
-    s = svc.settle_corporate_tax_provision(date(2027, 2, 1), 8000, USER)
+    s = svc.settle_corporate_tax_provision(2026, date(2027, 2, 1), 8000, USER)
     assert lines(s) == [
         ("corporate_tax_provision", 9000, None),
         ("bank", -8000, None),
@@ -203,7 +209,7 @@ def test_provision_and_settlement_are_refused_under_eur(eur):
         eur.trade_tax_provision(2026, 4500, USER)
     assert e.value.status == 422
     with pytest.raises(ServiceError) as e:
-        eur.settle_trade_tax_provision(date(2026, 3, 15), 4500, USER)
+        eur.settle_trade_tax_provision(2026, date(2026, 3, 15), 4500, USER)
     assert e.value.status == 422
     assert JournalService(eur.store).entries(2026) == []
 
@@ -273,7 +279,7 @@ def test_nothing_posts_before_initialisation(repo):  # noqa: F811
         lambda: svc.income_tax_payment(date(2026, 3, 1), 100, "payment", USER),
         lambda: svc.corporate_tax_payment(date(2026, 3, 1), 100, "payment", USER),
         lambda: svc.trade_tax_provision(2026, 100, USER),
-        lambda: svc.settle_trade_tax_provision(date(2027, 3, 1), 100, USER),
+        lambda: svc.settle_trade_tax_provision(2026, date(2027, 3, 1), 100, USER),
         lambda: svc.opening_balances(2026, [("bank", 100), ("equity", -100)], USER),
     ]
     for call in calls:
@@ -281,3 +287,118 @@ def test_nothing_posts_before_initialisation(repo):  # noqa: F811
             call()
         assert e.value.status == 409
     assert JournalService(repo).entries(2026) == []
+
+
+# ------------------------------------------------------------------ review fixes: keys, origins, revisions
+def _manual(svc):
+    from permita38.core.service.manual_entries import ManualEntryService
+
+    return ManualEntryService(svc.store, svc.journal)
+
+
+def test_two_vat_payments_and_a_refund_for_one_return(eur):
+    a = eur.vat_payment("ret1", date(2026, 3, 10), 1000, "payment", USER)
+    b = eur.vat_payment("ret1", date(2026, 3, 20), 500, "payment", USER)
+    c = eur.vat_payment("ret1", date(2026, 4, 1), 300, "refund", USER)
+    assert len({a.event_key, b.event_key, c.event_key}) == 3
+    assert {a.source_id, b.source_id, c.source_id} == {"ret1"}
+    assert lines(c) == [("bank", 300, None), ("vat_prepayments", -300, "2026-04-01")]
+    assert len(JournalService(eur.store).entries(2026)) == 3
+
+
+def test_a_vat_payment_is_reversed_through_the_manual_entries(eur):
+    a = eur.vat_payment("ret1", date(2026, 3, 10), 1000, "payment", USER)
+    rev = _manual(eur).reverse(a.id, None, None, USER)
+    # 10,00 paid, then reversed: C vat_prepayments 1000 (income_date kept: the year is open) / D bank 1000
+    assert rev.event_key == f"{a.event_key}:rev" and rev.reverses_id == a.id
+    assert lines(rev) == [("vat_prepayments", -1000, "2026-03-10"), ("bank", 1000, None)]
+
+
+def test_special_prepayments_are_several_and_manual(eur):
+    a = eur.special_prepayment(2026, date(2026, 2, 10), 20000, USER)
+    b = eur.special_prepayment(2026, date(2026, 2, 11), 100, USER)
+    assert a.event_key != b.event_key and a.origin == b.origin == "manual"
+
+
+def test_credit_reversal_on_reopen(eur):
+    c = eur.special_prepayment_credit(2026, "dec26", 20000, USER)
+    assert c is not None
+    r = eur.special_prepayment_credit_reverse(2026, "dec26", USER)
+    assert r is not None and r.event_key == "vat:dec26:credit:rev" and r.reverses_id == c.id
+    assert lines(r) == [("vat_prepayments", -20000, None), ("vat_special_prepayment", 20000, None)]
+    again = eur.special_prepayment_credit_reverse(2026, "dec26", USER)
+    assert again is not None and again.id == r.id
+    assert eur.special_prepayment_credit_reverse(2026, "nothing", USER) is None
+
+
+def test_provision_reversed_and_booked_again_is_r2(accrual):
+    svc = accrual
+    first = svc.trade_tax_provision(2026, 4500, USER)
+    assert first.entry.event_key == "manual:trade_tax_provision:2026:r1"
+    _manual(svc).reverse(first.entry.id, None, None, USER)
+    assert svc.year_provision("trade_tax", 2026) == 0
+    second = svc.trade_tax_provision(2026, 5000, USER)
+    assert second.entry.event_key == "manual:trade_tax_provision:2026:r2"
+    assert svc.year_provision("trade_tax", 2026) == 5000
+    assert svc.trade_tax_provision(2026, 5000, USER).entry.id == second.entry.id  # replay of r2
+
+
+def test_settlement_settles_only_the_named_year(accrual):
+    svc = accrual
+    svc.trade_tax_provision(2026, 4500, USER)
+    svc.trade_tax_provision(2027, 7000, USER)
+    s = svc.settle_trade_tax_provision(2026, date(2027, 3, 15), 4500, USER)
+    assert lines(s) == [("trade_tax_provision", 4500, None), ("bank", -4500, None)]
+    assert svc.year_provision("trade_tax", 2026) == 0
+    assert svc.year_provision("trade_tax", 2027) == 7000  # untouched
+    assert svc.provision_balance("trade_tax") == 7000
+    with pytest.raises(ServiceError) as e:
+        svc.settle_trade_tax_provision(2026, date(2027, 4, 1), 100, USER)
+    assert e.value.status == 409
+
+
+def test_company_type_refusals(eur):
+    with pytest.raises(ServiceError) as e:  # a freiberufler has no corporate tax
+        eur.corporate_tax_payment(date(2026, 6, 3), 100, "payment", USER)
+    assert e.value.status == 422
+    eur.store.save_settings({ACCOUNTING_START_KEY: "2026-01-01", "company_type": "gmbh"})
+    with pytest.raises(ServiceError) as e:
+        eur.income_tax_payment(date(2026, 6, 3), 100, "payment", USER)
+    assert e.value.status == 422
+    assert JournalService(eur.store).entries(2026) == []
+
+
+def test_corporate_provision_refused_for_a_non_gmbh(accrual):
+    with pytest.raises(ServiceError) as e:
+        accrual.corporate_tax_provision(2026, 100, USER)
+    assert e.value.status == 422
+
+
+def test_opening_balances_refuse_a_profit_and_loss_account(accrual):
+    pl_account = str(chart_for("skr03", 2026).account(Role("revenue_s19")))
+    for key in ("revenue_s19", pl_account):
+        with pytest.raises(ServiceError) as e:
+            accrual.opening_balances(2026, [("bank", 100), (key, -100)], USER)
+        assert e.value.status == 422
+    assert JournalService(accrual.store).entries(2026) == []
+
+
+def test_a_reversed_prepayment_is_not_expensed(accrual):
+    svc = accrual
+    a = svc.trade_tax_payment(date(2026, 5, 10), 3000, "payment", USER)
+    svc.trade_tax_payment(date(2026, 8, 10), 2000, "payment", USER)
+    _manual(svc).reverse(a.id, None, None, USER)
+    assert svc.prepayments_expensed("trade_tax", 2026) == 2000
+
+
+def test_closed_year_and_locked_month(eur):
+    lock = {"year": 2026, "month": 3, "locked_at": 1, "locked_by": "u1x000", "reason": "manual"}
+    eur.store.save("period_locks", lock)
+    e = eur.vat_payment("ret1", date(2026, 3, 10), 1000, "payment", USER)
+    assert str(e.document_date) == "2026-03-10" and str(e.booking_date) == "2026-04-01"  # first open day
+    row = eur.store.find("fiscal_years", year=2026)[0]
+    eur.store.save("fiscal_years", {**row, "closed_at": 1, "closed_by": "u1x000"})
+    # a closed year is fully locked: the payment books into the next open year, its income date follows
+    late = eur.vat_payment("ret1", date(2026, 5, 10), 1000, "payment", USER)
+    assert str(late.document_date) == "2026-05-10" and str(late.booking_date) == "2027-01-01"
+    assert late.lines[0].income_date == "2027-01-01"
