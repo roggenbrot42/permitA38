@@ -814,17 +814,28 @@ class DocumentIn(v.StrictRecord):
     lines: list[LineIn] = Field(default=[], max_length=v.MAX_LINES)
     plan: PlanIn | None = None
     offer_id: v.OptId = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        # an offer never has a tax treatment (InvoiceIn overrides this to keep it)
+        return _without(data, (*INTERNAL_DOCUMENT_FIELDS, "tax_treatment"))
+
+    @model_validator(mode="after")
+    def _period(self):
+        v.check_period(self.service_from, self.service_to, "service period end")
+        return self
+
+
+class InvoiceIn(DocumentIn):
+    """The invoice body: an offer has no tax treatment (docs/specs/accounting.md 8, the column is on ``invoices`` only)."""
+
     tax_treatment: v.SalesTreatment | None = None  # null reads as `standard`; reserved values are refused
 
     @model_validator(mode="before")
     @classmethod
     def _drop_internal(cls, data: Any) -> Any:
         return _without(data, INTERNAL_DOCUMENT_FIELDS)
-
-    @model_validator(mode="after")
-    def _period(self):
-        v.check_period(self.service_from, self.service_to, "service period end")
-        return self
 
 
 class PaymentIn(v.CheckedBody):
@@ -2327,7 +2338,7 @@ RECORD_MODELS: dict[str, tuple[type[Record], type[BaseModel]]] = {
     "contracts": (Contract, ContractIn),
     "absences": (Absence, AbsenceIn),
     "offers": (Document, DocumentIn),
-    "invoices": (Document, DocumentIn),
+    "invoices": (Document, InvoiceIn),
     "expenses": (Expense, ExpenseIn),
     "templates": (Template, TemplateIn),
 }

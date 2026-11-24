@@ -15,6 +15,7 @@ from permita38.core.models import (
     DocumentIn,
     Expense,
     ExpenseIn,
+    InvoiceIn,
     Payment,
     PaymentIn,
     PaymentReverseIn,
@@ -244,7 +245,7 @@ def test_credit_note_refuses_bad_date():
 
 @pytest.mark.parametrize("value", ["standard", "small_business", "eu_b2b_service", None])
 def test_document_in_accepts_sales_treatment(value):
-    assert DocumentIn(tax_treatment=value).tax_treatment == value
+    assert InvoiceIn(tax_treatment=value).tax_treatment == value
 
 
 RESERVED_SALES = [
@@ -266,13 +267,13 @@ def test_reserved_treatment_constants_match_the_contract():
 @pytest.mark.parametrize("value", RESERVED_SALES)
 def test_document_in_reserved_sales_treatment_message(value):
     with pytest.raises(ValidationError, match="not supported in this release"):
-        DocumentIn(tax_treatment=value)
+        InvoiceIn(tax_treatment=value)
 
 
 @pytest.mark.parametrize("value", ["no_input_vat", "reverse_charge_eu_service", "Standard", "", 1])
 def test_document_in_refuses_other_sales_treatments(value):
     with pytest.raises(ValidationError) as e:
-        DocumentIn(tax_treatment=value)
+        InvoiceIn(tax_treatment=value)
     assert "not supported in this release" not in str(e.value)
 
 
@@ -341,7 +342,7 @@ def test_internal_fields_are_not_declared_on_the_in_models():
 
 
 def test_new_fields_default_to_none():
-    assert DocumentIn().tax_treatment is None
+    assert InvoiceIn().tax_treatment is None
     e = ExpenseIn(**EXP)
     assert e.tax_treatment is None and e.service_date is None
 
@@ -447,3 +448,11 @@ def test_unknown_fields_round_trip_on_lenient_models():
     assert out["payments"][0]["future_p"] == 1 and out["credit_notes"][0]["future_c"] == 2
     assert Expense(date="2026-01-01", net=1, future=3).model_dump()["future"] == 3
     assert Payment(future=1).model_dump()["future"] == 1
+
+
+def test_offer_body_ignores_credit_kind_and_tax_treatment():
+    """Invoice-only fields (docs/specs/accounting.md 8): the server-owned ones are dropped, the treatment is dropped too."""
+    assert "credit_kind" not in DocumentIn(credit_kind="storno").model_dump()
+    assert "tax_treatment" not in DocumentIn.model_fields
+    assert "tax_treatment" not in DocumentIn(tax_treatment="standard").model_dump()
+    assert InvoiceIn(tax_treatment="standard").tax_treatment == "standard"
