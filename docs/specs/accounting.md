@@ -515,7 +515,12 @@ template); open receivables come from the backfill (section 16).
    `vat_special_prepayment` payments belong to "VAT paid"; lines without `income_date` (the December credit of the
    special prepayment) are ignored. *(verify)* the line list against the
    form of the year; the app does not file the Anlage EÜR.
-5. **P&L and balance sheet** (accrual): by account class of the chart; simple form (no HGB layout in v1).
+5. **P&L and balance sheet** (accrual): by account class of the chart; simple form (no HGB layout in v1). Under
+   accrual every line's `income_date` lies in the entry's fiscal year (`JournalService` refuses other lines with 422),
+   so the P&L result equals the balance-sheet result of the year; before the year closing the balance sheet shows the
+   results of earlier unclosed years as a separate "result of earlier years not yet closed" line. The EÜR route
+   answers 422 for an accrual year and P&L / balance sheet answer 422 for an EÜR year (EÜR may carry an `income_date`
+   in another year, e.g. the 10-day rule for recurring payments).
 6. **Open items**: receivables and payables per document (gross − credit notes − payments), age.
 7. **VAT account reconciliation**: per period, the VAT account balances vs. the filed returns.
 
@@ -813,7 +818,7 @@ maintainer's sign-off of these specs (PR #124).
 | E13 | Credit-note PDF | F | E11 |
 | E14 | Expense treatment mapping, `service_date`, bill/pay posting, repost/409; expense `net`/`vat` must be whole cents (today they accept sub-cent values, unlike line gross and trip amounts) | F | E7, F8 |
 | E15 | Trip posting | F | E7, F9 |
-| E16 | Manual entries, reverse, accounts API, templates | F | E7 |
+| E16 | Manual entries, reverse, accounts API, templates; JournalService refuses an accrual line whose `income_date` lies outside the entry's fiscal year (section 14.5) | F | E7 |
 | E17 | VAT/tax bookings, opening balances | F | E16, F9 |
 | E18 | Year closing / EÜR year end; migration adding `fiscal_years.closing_hash` / `closing_entry_no` (set once) | F | E17 |
 | E19 | xlsx importer: snapshot, `paid`→payment, `cancelled`→review, undo | F | E10 |
