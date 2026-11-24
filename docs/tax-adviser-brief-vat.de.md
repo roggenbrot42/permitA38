@@ -100,7 +100,10 @@ Antwort:
 und Skonti melden wir (negativ) im Quartal der Änderung; nur eine bei Abgabe falsche Meldung wird im ursprünglichen
 Quartal berichtigt. Beträge in vollen Euro. Kleinunternehmer geben keine ZM ab. Beispiel: Leistung an Kunde A im
 März 2.000,70, Gutschrift 500,00 im Mai → ZM Q1: 2.000 (mit weiteren Leistungen), ZM Q2: −500. Richtig? Was gilt bei
-einem Storno einer von Anfang an falschen Rechnung (falscher Kunde, falsche USt-IdNr.)?
+einem Storno einer von Anfang an falschen Rechnung (falscher Kunde, falsche USt-IdNr.)? Die CSV-Datei für den Upload im BZSt-Portal
+bauen wir nach der ELSTER-Anleitung von 2015 (Versionszeile `#v1.0`, Spalten Länderkennzeichen, USt-IdNr., Betrag,
+Art `S`); bitte prüfen Sie bei einem Test-Upload, ob die aktuelle Versionszeile passt und wie eine Berichtigung
+hochgeladen wird.
 Antwort:
 
 ## C. Buchhaltung und EÜR

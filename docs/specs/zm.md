@@ -64,8 +64,25 @@ Table `zm_reports` (in the accounting migration): `id`, `year`, `quarter`, `stat
 | `GET /api/zm/{id}`, `POST /api/zm/{id}/finalize`, `/reopen`, `/filed`, `DELETE` (drafts) | like the UStVA |
 | `GET /api/zm/{id}/export.csv` / `.pdf` | exports |
 
-CSV: the BZSt portal import format *(verify the exact column layout against the BZSt "CSV-Upload ZM" description;
-the WP fetches it and stores a golden file)*; a second, readable CSV (`;`, decimal comma, BOM). PDF: header,
+CSV: the BZSt portal import format, per the official "Benutzeranleitung: CSV-Format der Import-Datei im
+BZSt-Verfahren Zusammenfassende Meldung" (ELSTER, Stand 03.11.2015,
+`https://download.elster.de/bop/importsheet/Benutzeranleitung_ZM_Import.pdf`) *(verify the current version line with
+the tax adviser or the BOP help — TA-41)*:
+- line 1 the version marker `#v1.0` (constant `ZM_CSV_VERSION`; the 2015 PDF shows `#v1.1`, a BZSt forum reply of 2022
+  shows `#v1.0` working; a different minor version is tolerated by the portal);
+- line 2 the header, which the portal does not read but always skips: `Laenderkennzeichen,USt-IdNr.,Betrag(EUR),Art der Leistung`;
+- then one line per customer VAT id, 1..1000 lines, no empty lines: country code (2 letters, `EL` for Greece, taken
+  from the VAT id prefix), VAT id without the prefix (A–Z, 0–9, 5..12 characters, spaces and dots removed, upper
+  case), the amount in whole euros (truncated as in Rules; no decimals, no separators; a `-` only for a negative
+  total), and the type `S` (sonstige Leistung); example `FR,12345678901,1047,S`;
+- separator `,`, no quotes, encoding ISO-8859-15, line end CRLF, every line terminated;
+- rows are aggregated per country + VAT id before writing (the portal rejects duplicates);
+- the reporting period and the own VAT id are not in the file; they are entered in the portal form; a correction
+  (Berichtigung) uploads the full corrected list for the quarter and is marked as a correction in the form; rows that
+  dropped to 0 € in a correction are written with amount `0`;
+- more than 1000 lines or a VAT id that does not fit the pattern is an export error (422 listing the rows), never a
+  silently shortened file.
+A second, readable CSV (`;`, decimal comma, BOM). PDF: header,
 the list, the adviser banner, footer "Not a filing. Enter or upload these figures in the BZSt online portal."
 
 ## Worked examples (oracle)
