@@ -246,6 +246,11 @@ gross of rate group `r` from the **issued snapshot**; `G = Σ G_r`. `perf` is th
 The snapshot `issued` is written in the same transaction as the number: `{regime: "regular"|"small_business",
 treatment, rates: {"19": {net, vat, gross}, ...} (cents), gross, perf, customer: {id, name, vat_id, country},
 issued_at, rules_version}`. `doc_totals` uses the snapshot for every non-draft document (no retroactive repricing).
+Rounding: each line amount is rounded to cents (half-up) first; the cents are summed per rate group to `N_r`; `V_r` =
+half-up(`N_r` × rate). **Zero amounts:** a group with `N_r` = 0 posts no lines; a group with `N_r` ≠ 0 but `V_r` = 0
+(e.g. 0.05 at 7 %) posts its revenue line and, instead of a 0 VAT line, a statistical line (amount 0, same `tax_key`,
+`tax_kind` base_only, base `N_r`, same `vat_date`) so the base still reaches Kz 81/86; no `vat_not_due` or clearing
+line of 0 is written.
 Small-business status of the year forces `treatment = small_business` and rate 0.
 
 | Basis | Lines (one entry, booking date = invoice date) |
