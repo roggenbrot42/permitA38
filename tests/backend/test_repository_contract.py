@@ -643,3 +643,91 @@ def test_fiscal_years_get_list_find_and_unique_year(repo):
         repo.save("fiscal_years", _fiscal_year(2026))
     assert repo.save("fiscal_years", {**b, "vat_regular_from": None})["id"] == b["id"]  # update by id keeps the row
     assert len(repo.list("fiscal_years")) == 2
+
+
+# ---- accounting journal (docs/specs/accounting.md 7): insert-only, event keys, hash lookups, paged reads
+def _entry(year: int, no: int, key: str, booking: str, hash_: str | None = None) -> dict:
+    return {
+        "fiscal_year": year, "entry_no": no, "document_date": booking, "booking_date": booking, "event": "issue",
+        "event_key": key, "text": f"entry {key}", "origin": "auto", "created_at": 1, "created_by": "u1x000",
+        "prev_hash": "0" * 64, "hash": hash_ or f"{no:064d}",
+    }  # fmt: skip
+
+
+def _lines(*amounts: int) -> list[dict]:
+    return [{"line_no": i, "account": "1200", "amount_cents": a} for i, a in enumerate(amounts, start=1)]
+
+
+def test_insert_journal_entry_returns_entry_with_ordered_lines_and_finds_it_by_event_key(repo):
+    stored = repo.insert_journal_entry(_entry(2026, 1, "k:1", "2026-01-05"), _lines(500, -500))
+    assert stored["id"] and [ln["entry_id"] for ln in stored["lines"]] == [stored["id"]] * 2
+    assert [(ln["line_no"], ln["amount_cents"]) for ln in stored["lines"]] == [(1, 500), (2, -500)]
+    again = repo.get_journal_entry_by_event_key("k:1")
+    assert again is not None and again["id"] == stored["id"] and again["lines"] == stored["lines"]
+    assert repo.get_journal_entry_by_event_key("nope") is None
+
+
+def test_insert_journal_entry_is_a_plain_insert_and_all_or_nothing(repo):
+    repo.insert_journal_entry(_entry(2026, 1, "k:1", "2026-01-05"), _lines(5, -5))
+    with pytest.raises(integrity_error(repo)):  # same event_key
+        repo.insert_journal_entry(_entry(2026, 2, "k:1", "2026-01-06"), _lines(1, -1))
+    with pytest.raises(integrity_error(repo)):  # same (fiscal_year, entry_no)
+        repo.insert_journal_entry(_entry(2026, 1, "k:2", "2026-01-06"), _lines(1, -1))
+    with pytest.raises(integrity_error(repo)):  # a duplicate line_no: the whole entry rolls back
+        repo.insert_journal_entry(_entry(2026, 2, "k:3", "2026-01-06"), [*_lines(1, -1), *_lines(1)])
+    assert [e["event_key"] for e in repo.list("journal_entries")] == ["k:1"]
+    assert len(repo.list("journal_lines")) == 2
+
+
+def test_journal_entries_and_lines_refuse_update_and_delete(repo):
+    stored = repo.insert_journal_entry(_entry(2026, 1, "k:1", "2026-01-05"), _lines(5, -5))
+    row = {k: v for k, v in stored.items() if k != "lines"}
+    with pytest.raises(ConstraintViolation) as err:
+        repo.save("journal_entries", {**row, "text": "changed"})
+    assert err.value.code == "state.append_only"
+    with pytest.raises(ConstraintViolation):
+        repo.delete("journal_lines", stored["lines"][0]["id"])
+
+
+def test_last_journal_hash_falls_back_to_the_previous_year(repo):
+    assert repo.last_journal_hash(2026) is None
+    repo.insert_journal_entry(_entry(2025, 1, "a", "2025-12-01", "a" * 64), _lines(1, -1))
+    repo.insert_journal_entry(_entry(2025, 2, "b", "2025-12-02", "b" * 64), _lines(1, -1))
+    assert repo.last_journal_hash(2025) == "b" * 64
+    assert repo.last_journal_hash(2026) == "b" * 64  # no entry in 2026 yet: the end of 2025
+    assert repo.last_journal_hash(2024) is None
+    repo.insert_journal_entry(_entry(2026, 1, "c", "2026-01-02", "c" * 64), _lines(1, -1))
+    assert repo.last_journal_hash(2026) == "c" * 64 and repo.last_journal_hash(2025) == "b" * 64
+
+
+def test_list_journal_entries_pages_filters_and_orders(repo):
+    for year, no, day in (
+        (2026, 2, "2026-02-01"),
+        (2025, 1, "2025-12-30"),
+        (2026, 1, "2026-01-10"),
+        (2026, 3, "2026-03-01"),
+    ):
+        repo.insert_journal_entry(_entry(year, no, f"k{year}-{no}", day), _lines(no, -no))
+
+    def keys(rows):
+        return [r["event_key"] for r in rows]
+
+    assert keys(repo.list_journal_entries()) == ["k2025-1", "k2026-1", "k2026-2", "k2026-3"]
+    assert keys(repo.list_journal_entries(year=2026)) == ["k2026-1", "k2026-2", "k2026-3"]
+    assert keys(repo.list_journal_entries(year=2026, limit=2)) == ["k2026-1", "k2026-2"]
+    assert keys(repo.list_journal_entries(year=2026, limit=2, offset=2)) == ["k2026-3"]
+    assert keys(repo.list_journal_entries(date_from="2026-01-10", date_to="2026-02-01")) == ["k2026-1", "k2026-2"]
+    assert keys(repo.list_journal_entries(date_from="2026-03-02")) == []
+    first = repo.list_journal_entries(year=2026, limit=1)[0]
+    assert [ln["amount_cents"] for ln in first["lines"]] == [1, -1]
+
+
+def test_next_number_counts_per_key_and_rolls_back_with_the_transaction(repo):
+    assert [repo.next_number("journal", "2026") for _ in range(3)] == [1, 2, 3]
+    assert repo.next_number("journal", "2027") == 1
+    assert repo.next_number("other", "2026") == 1
+    with pytest.raises(RuntimeError):
+        with repo.transaction():
+            assert repo.next_number("journal", "2026") == 4
+            raise RuntimeError("boom")
+    assert repo.next_number("journal", "2026") == 4  # the failed attempt left no gap

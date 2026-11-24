@@ -275,6 +275,10 @@ class Dialect:
     def all_columns(self, table: Table) -> list[str]:
         return self._all_columns(table)
 
+    def insert(self, table: Table, columns: list[str]) -> str:
+        """A plain INSERT (never an upsert): an existing primary key or unique value is an error."""
+        return self._insert_head(table, columns)
+
     def _insert_head(self, table: Table, columns: list[str]) -> str:
         names = ", ".join(self.quote(c) for c in columns)
         values = ", ".join(self.value_placeholder(table.column(c) or Column(c, JSON)) for c in columns)

@@ -14,6 +14,7 @@ Contract (verified for every backend by tests/backend/test_repository_contract.p
 * ``transaction()`` makes everything inside atomic and isolated; an exception rolls it all back.
 """
 
+import hashlib
 import re
 import uuid
 from abc import ABC, abstractmethod
@@ -100,6 +101,45 @@ class Repository(ABC):
 
     @abstractmethod
     def delete(self, coll: str, rid: str) -> bool: ...
+
+    # ---- accounting journal (docs/specs/accounting.md 7): only JournalService calls these ----
+    @abstractmethod
+    def insert_journal_entry(self, entry: Record, lines: RecordList) -> Record:
+        """Insert one entry and its lines with plain INSERTs in one transaction (never an upsert: an existing id,
+        ``event_key`` or ``(fiscal_year, entry_no)`` is an error and nothing is written). ``lines`` get ``entry_id``;
+        ids and timestamps are assigned. Returns the stored entry with its ``lines`` ordered by ``line_no``."""
+
+    @abstractmethod
+    def get_journal_entry_by_event_key(self, event_key: str) -> Record | None:
+        """The entry with this ``event_key`` including its ``lines``, or None."""
+
+    @abstractmethod
+    def last_journal_hash(self, year: int) -> str | None:
+        """The ``hash`` of the last entry of ``year``; when the year has none, of the last entry of the nearest
+        earlier year; None when there is no such entry (the chain then starts with 64 zeros)."""
+
+    @abstractmethod
+    def list_journal_entries(
+        self,
+        year: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> RecordList:
+        """Entries with their ``lines``, ordered by ``(fiscal_year, entry_no)``; ``date_from`` / ``date_to`` (ISO
+        dates, inclusive) filter on ``booking_date``. Paged with ``limit`` / ``offset``."""
+
+    def next_number(self, doc_type: str, period: str) -> int:
+        """Take the next value of the counter ``(doc_type, period)`` in ``number_sequences`` (first value 1).
+        Call inside ``transaction()``: the counter then rolls back with the record it numbers (gapless). The row id
+        is derived from the key like ``NumberingService`` does, so concurrent first allocations meet in one row."""
+        row_id = "n" + hashlib.sha256(f"{doc_type}|{period}".encode()).hexdigest()[:20]
+        with self.transaction():
+            row = self.get("number_sequences", row_id)
+            value = int((row or {}).get("last_value") or 0) + 1
+            self.save("number_sequences", {"id": row_id, "doc_type": doc_type, "period": period, "last_value": value})
+        return value
 
     def find(self, coll: str, **equals: Any) -> RecordList:
         """Records whose columns equal the given values (``find("calendar_events", source_id=x)``), ordered like ``list``.
