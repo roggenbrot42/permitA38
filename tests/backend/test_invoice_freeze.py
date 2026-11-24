@@ -186,6 +186,8 @@ def test_paid_with_date_creates_one_payment_of_the_open_amount(boss_client, cust
     ]  # fmt: skip
     rows = store.find("payments", document_id=inv["id"])
     assert len(rows) == 1 and rows[0]["amount_cents"] == 119000 and rows[0]["created_by"]
+    mirror = store.get("invoices", inv["id"])  # compat mirror for readers of the stored fields
+    assert (mirror["status"], mirror["paid_date"]) == ("paid", "2026-02-03")
     again = put(boss_client, inv, status="paid", paid_date="2026-02-03")  # P1: a second identical PUT changes nothing
     assert again.status_code == 200 and len(store.find("payments", document_id=inv["id"])) == 1
 

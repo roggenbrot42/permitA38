@@ -291,6 +291,9 @@ class SalesService:
             if action == "pay" and d0.open_cents > 0:
                 paid_on = str(data["paid_date"])[:10]
                 record_payment_row(self.store, rid, date=paid_on, amount_cents=d0.open_cents, note=PAID_NOTE, user=me)
+                # compat mirror: readers of the stored fields (the dominance hint, older binaries) still see it paid;
+                # the derived state ignores a stored `paid` that no payment backs (invoice_state.derive)
+                changes["status"], changes["paid_date"] = "paid", paid_on
             elif action == "reverse":
                 for row in self.store.find("payments", document_id=rid):
                     if row["kind"] == "payment":
@@ -303,7 +306,7 @@ class SalesService:
                             reverses_id=row["id"],
                             user=me,
                         )
-                changes["status"] = data["status"]
+                changes["status"], changes["paid_date"] = data["status"], None
         elif action == "label":
             changes["status"] = data["status"]
         new = {**old}
