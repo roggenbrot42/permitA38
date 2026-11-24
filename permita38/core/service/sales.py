@@ -147,6 +147,7 @@ class SalesService:
         self.store = store
         self.postings = postings or IssuePostingService(store)
         self.records = records
+        records.invoice_hook = self  # the generic invoice routes go through this service
         self.numbering = numbering or NumberingService(store)
 
     def settings(self) -> dict:
@@ -230,10 +231,10 @@ class SalesService:
         return out
 
     def get_invoice(self, me: dict, rid: str) -> dict:
-        return self.invoice_view(self.records.get(me, "invoices", rid))
+        return self.invoice_view(self.records.get_stored(me, "invoices", rid))
 
     def list_invoices(self, me: dict) -> list[dict]:
-        return self.invoice_views(self.records.list_records(me, "invoices"))
+        return self.invoice_views(self.records.list_stored(me, "invoices"))
 
     def delete_invoice(self, me: dict, rid: str) -> None:
         old = self.store.get("invoices", rid) if _valid_id(rid) else None
@@ -243,7 +244,7 @@ class SalesService:
             and (old.get("status", "draft") != "draft" or old.get("kind") == "credit_note")
         ):
             raise ServiceError(409, "An issued invoice or credit note cannot be deleted; issue a credit note instead")
-        self.records.delete(me, "invoices", rid)  # a numbered invoice: its own 409; a draft: deleted
+        self.records.delete_stored(me, "invoices", rid)  # a numbered invoice: its own 409; a draft: deleted
 
     def update_invoice(
         self,
@@ -259,7 +260,7 @@ class SalesService:
         """
         old = self.store.get("invoices", rid) if _valid_id(rid) else None
         if not old or old.get("status", "draft") == "draft":
-            return self.records.update(me, "invoices", rid, data)
+            return self.records.update_stored(me, "invoices", rid, data)
         if rights.scope_for(me, "invoices", "write") != rights.Scope.ALL:
             raise ServiceError(403, "Forbidden")
         with self.store.transaction():
@@ -291,9 +292,6 @@ class SalesService:
             if action == "pay" and d0.open_cents > 0:
                 paid_on = str(data["paid_date"])[:10]
                 record_payment_row(self.store, rid, date=paid_on, amount_cents=d0.open_cents, note=PAID_NOTE, user=me)
-                # compat mirror: readers of the stored fields (the dominance hint, older binaries) still see it paid;
-                # the derived state ignores a stored `paid` that no payment backs (invoice_state.derive)
-                changes["status"], changes["paid_date"] = "paid", paid_on
             elif action == "reverse":
                 for row in self.store.find("payments", document_id=rid):
                     if row["kind"] == "payment":

@@ -20,6 +20,7 @@ from permita38.core.money import ZERO, dec, q2
 from permita38.core.repository import ID_RE, Repository
 from permita38.core.rights import Scope
 
+from . import invoice_state
 from . import planning_warnings as pw
 from .planner import load as planner_load
 from .planner import spread as sp
@@ -933,12 +934,26 @@ class ProcurementService:
         projects = {p["id"]: p for p in self.store.list("projects")}
         totals: dict[str, Decimal] = defaultdict(lambda: ZERO)
         total = ZERO
-        for inv in self.store.list("invoices"):
+        invoices = self.store.list("invoices")
+        pay_rows = invoice_state.group_by(self.store.list("payments"), "document_id")
+        notes = invoice_state.group_by(invoice_state.credit_notes_of(invoices), "corrects_id")
+        for inv in invoices:
             if inv.get("status") in ("draft", "cancelled"):
                 continue
-            if not accrual and inv.get("status") != "paid":
+            status, paid_date = inv.get("status"), inv.get("paid_date")
+            if inv.get("kind") != "credit_note":  # paid state is derived from the payment rows (spec 2.3)
+                derived = invoice_state.derive(
+                    inv,
+                    int(dec(calc.doc_totals(dict(inv), settings)["gross"]) * 100),
+                    pay_rows.get(inv["id"], []),
+                    notes.get(inv["id"], []),
+                )
+                status, paid_date = derived.status, derived.paid_date
+                if status == "cancelled":
+                    continue
+            if not accrual and status != "paid":
                 continue
-            when = calc.d(inv.get("date")) if accrual else calc.d(inv.get("paid_date"))
+            when = calc.d(inv.get("date")) if accrual else calc.d(paid_date)
             if not when or not (start <= when <= today):
                 continue
             net = calc.doc_totals(dict(inv), settings)["net"]

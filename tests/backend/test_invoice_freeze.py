@@ -186,10 +186,37 @@ def test_paid_with_date_creates_one_payment_of_the_open_amount(boss_client, cust
     ]  # fmt: skip
     rows = store.find("payments", document_id=inv["id"])
     assert len(rows) == 1 and rows[0]["amount_cents"] == 119000 and rows[0]["created_by"]
-    mirror = store.get("invoices", inv["id"])  # compat mirror for readers of the stored fields
-    assert (mirror["status"], mirror["paid_date"]) == ("paid", "2026-02-03")
+    stored = store.get("invoices", inv["id"])  # no compat mirror: the payment row is the only truth
+    assert stored["status"] == "sent" and "paid_date" not in stored
     again = put(boss_client, inv, status="paid", paid_date="2026-02-03")  # P1: a second identical PUT changes nothing
     assert again.status_code == 200 and len(store.find("payments", document_id=inv["id"])) == 1
+
+
+def test_generic_routes_enforce_the_freeze_without_shadow_routes(app, boss_client, cust):
+    names = {getattr(r, "name", "") for r in app.routes}
+    assert {
+        "update_invoice_frozen",
+        "delete_invoice_frozen",
+        "get_invoice_derived",
+        "list_invoices_derived",
+    }.isdisjoint(names)
+    inv = issue(boss_client, cust)
+    r = put(boss_client, inv, lines=[{**LINE, "price": 2000}])
+    assert r.status_code == 409 and r.json()["detail"] == FROZEN
+    assert boss_client.delete(f"/api/invoices/{inv['id']}").status_code == 409
+    shown = boss_client.get(f"/api/invoices/{inv['id']}").json()
+    assert shown["open_amount"] == "1190.00"
+    assert {i["id"]: i for i in boss_client.get("/api/invoices").json()}[inv["id"]]["open_amount"] == "1190.00"
+
+
+def test_hints_read_the_derived_paid_state_after_a_put_paid(boss_client, cust, store):
+    inv = issue(boss_client, cust, day=TODAY)
+    hints = lambda: boss_client.get("/api/finance/commitments").json()["hints"]  # noqa: E731
+    assert not [h for h in hints() if h["code"] == "business.customer_dominance"]
+    assert put(boss_client, inv, status="paid", paid_date=TODAY).status_code == 200
+    assert store.get("invoices", inv["id"]).get("status") == "sent"
+    found = [h for h in hints() if h["code"] == "business.customer_dominance"]
+    assert len(found) == 1 and found[0]["details"]["customer_id"] == cust["id"]
 
 
 def test_paid_when_nothing_is_open_is_a_no_op(boss_client, cust, store):

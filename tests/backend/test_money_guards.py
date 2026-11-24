@@ -31,6 +31,10 @@ SCHEMA_NUMERIC_ALLOWLIST = {
     "last_used_at": "token last use epoch seconds",
     "revoked_at": "token revocation epoch seconds",
     "last_fetched": "calendar fetch epoch seconds",
+    "opened_at": "fiscal year opening epoch seconds",
+    "closed_at": "fiscal year closing epoch seconds",
+    "locked_at": "period lock epoch seconds",
+    "month": "calendar month number of a period lock",
     "next": "audit pagination cursor",
     "status": "audit entry HTTP status code",
     "year": "calendar year of a record reference",
@@ -93,6 +97,9 @@ SCHEMA_NUMERIC_PAIRS = {
 SCHEMA_UNTYPED_ALLOWLIST: dict[tuple[str, str], str] = {
     ("Result", "planning_warnings"): "warning details: money converted by money_out.warning_list / convert_warnings",
     ("Result", "sanity_warnings"): "warning details: money converted by money_out.warning_list / convert_warnings",
+    ("Result", "issued"): "invoice snapshot taken at issue: integer cents (spec 9.1) of a numbered, frozen invoice",
+    ("Document", "issued"): "invoice snapshot, see Result.issued",
+    ("DocumentResult", "issued"): "invoice snapshot, see Result.issued",
     ("Result", "extensions"): "project extensions: dates and a reason, no money",
     ("Allocation", "planning_warnings"): "warning details, see Result.planning_warnings",
     ("Allocation", "days"): "per-day hours of an allocation, no money",
@@ -186,6 +193,13 @@ SWEEP_NUMERIC_PAIRS = {
     ("/api/plan", "shortfall"): "hours missing (also in warning details and weekly_shortfalls)",
     ("POST /api/contracts", "shortfall"): "capacity warning details: hours missing",
     ("POST /api/offers/{id}/accept", "shortfall"): "capacity warning details: hours missing",
+}
+# the `issued` snapshot of a numbered invoice is a record in integer cents by design (spec 9.1); it is allowlisted as a
+# whole object (schema side: SCHEMA_UNTYPED_ALLOWLIST), here per route and key. TODO(architect): decimal strings?
+SWEEP_NUMERIC_PAIRS |= {
+    (route, key): "issued snapshot: integer cents (spec 9.1), issued_at epoch seconds"
+    for route in ("/api/invoices", "/api/invoices/{rid}", "POST /api/invoices/{id}/finalize")
+    for key in ("gross", "net", "vat", "issued_at")
 }
 # ambiguous names (money in some places, not in others) may NEVER be allowlisted by bare key: only as a (route, key)
 # pair above, with a reason, so that a new money field with such a name is caught.
@@ -559,6 +573,14 @@ SWEEP_ID_SKIP = {
     "/api/invoices/{rid}/pdf": "PDF",
     "/api/offers/{rid}/pdf": "PDF",
     "/api/trips/{rid}/statement.pdf": "PDF",
+    "/api/vat-returns/{rid}": "skeleton (501) until the VAT service lands",
+    "/api/vat-returns/{rid}/boxes/{kz}": "skeleton (501) until the VAT service lands",
+    "/api/vat-returns/{rid}/export.pdf": "skeleton (501), PDF",
+    "/api/vat-returns/{rid}/export.csv": "skeleton (501) until the VAT service lands",
+    "/api/vat-returns/{rid}/export.json": "skeleton (501) until the VAT service lands",
+    "/api/zm/{rid}": "skeleton (501) until the VAT service lands",
+    "/api/zm/{rid}/export.csv": "skeleton (501) until the VAT service lands",
+    "/api/zm/{rid}/export.pdf": "skeleton (501) until the VAT service lands",
     "/api/tasks/{rid}": "no money fields (task record without a rate in the seed)",
     "/api/absences/{rid}": "no money fields",
     "/api/templates/{rid}": "no money fields",
@@ -585,7 +607,13 @@ SWEEP_ID_RECORD = {
 }
 
 
+# GET routes parametrised by a calendar year, not by a record id: swept with the current year
+SWEEP_YEAR_ROUTES = {"/api/accounting/years/{year}"}
+
+
 def _id_url(path, ids):
+    if path in SWEEP_YEAR_ROUTES:
+        return path.replace("{year}", str(date.today().year))
     for prefix, kind in SWEEP_ID_RECORD.items():
         if path.startswith(prefix):
             return re.sub(r"\{[^}]+\}", ids[kind], path, count=1)

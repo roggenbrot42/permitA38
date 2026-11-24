@@ -59,7 +59,9 @@ def crud_router(coll: str, model: type[models.Record], in_model: type[BaseModel]
     @router.put("/{rid}", response_model=out_model, response_model_exclude_none=True, name=f"update_{coll}")
     def update_record(rid: str, body: in_model, user: writer, services: ServicesDep):  # type: ignore[valid-type]
         old = services.sanity.previous(coll, rid)
-        rec = services.records.update(user, coll, rid, body.model_dump(exclude_none=True))
+        nulls = [k for k in body.model_fields_set if getattr(body, k, None) is None]
+        given = body.model_dump(exclude_none=True, exclude_unset=True)
+        rec = services.records.update(user, coll, rid, body.model_dump(exclude_none=True), given, nulls)
         return stored(out_model, convert_warnings(_with_warnings(services, coll, rec, user, old)))
 
     @router.delete("/{rid}", status_code=204, name=f"delete_{coll}")

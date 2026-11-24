@@ -1,6 +1,8 @@
 """Generic CRUD with role-based permissions (the scopes come from `core/rights.py`)."""
 
+from collections.abc import Iterable, Mapping
 from decimal import Decimal
+from typing import Any
 
 from permita38.core import calc, rights
 from permita38.core.errors import ServiceError
@@ -58,12 +60,21 @@ _IMPORT_FIELDS = (
 class RecordService:
     def __init__(self, store: Repository):
         self.store = store
+        #: the sales service registers itself here: the ``invoices`` collection is frozen once issued and carries
+        #: derived payment fields (docs/specs/credit-notes-payments.md 2); the generic routes reach that through it
+        self.invoice_hook: Any = None
 
     def _check(self, coll: str):
         if coll not in COLLECTIONS or coll == "users":
             raise ServiceError(404, "Unknown collection")
 
     def list_records(self, me: dict, coll: str) -> list[dict]:
+        rows = self.list_stored(me, coll)
+        if coll == "invoices" and self.invoice_hook:
+            return self.invoice_hook.invoice_views(rows)
+        return rows
+
+    def list_stored(self, me: dict, coll: str) -> list[dict]:
         self._check(coll)
         sc = _scope(me, coll, "read")
         rows = self.store.list(coll)
@@ -82,6 +93,12 @@ class RecordService:
         return rows
 
     def get(self, me: dict, coll: str, rid: str) -> dict:
+        rec = self.get_stored(me, coll, rid)
+        if coll == "invoices" and self.invoice_hook:
+            return self.invoice_hook.invoice_view(rec)
+        return rec
+
+    def get_stored(self, me: dict, coll: str, rid: str) -> dict:
         self._check(coll)
         rec = self.store.get(coll, rid) if _valid_id(rid) else None
         if not rec:
@@ -105,7 +122,21 @@ class RecordService:
         data = {k: v for k, v in data.items() if k not in ("id", "created", "updated")}
         return self._write(me, coll, data, None)
 
-    def update(self, me: dict, coll: str, rid: str, data: dict) -> dict:
+    def update(
+        self,
+        me: dict,
+        coll: str,
+        rid: str,
+        data: dict,
+        given: Mapping[str, Any] | None = None,
+        nulls: Iterable[str] = (),
+    ) -> dict:
+        """``given`` / ``nulls``: the keys the client sent / sent as null (only an issued invoice needs them)."""
+        if coll == "invoices" and self.invoice_hook:
+            return self.invoice_hook.update_invoice(me, rid, data, given, nulls)
+        return self.update_stored(me, coll, rid, data)
+
+    def update_stored(self, me: dict, coll: str, rid: str, data: dict) -> dict:
         self._check(coll)
         old = self.store.get(coll, rid) if _valid_id(rid) else None
         if not old:
@@ -360,6 +391,11 @@ class RecordService:
             raise ServiceError(409, f"This project is still used by {names}; archive it instead.")
 
     def delete(self, me: dict, coll: str, rid: str):
+        if coll == "invoices" and self.invoice_hook:
+            return self.invoice_hook.delete_invoice(me, rid)
+        return self.delete_stored(me, coll, rid)
+
+    def delete_stored(self, me: dict, coll: str, rid: str):
         self._check(coll)
         old = self.store.get(coll, rid) if _valid_id(rid) else None
         if not old:
