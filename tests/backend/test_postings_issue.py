@@ -2,6 +2,7 @@
 
 import io
 import json
+import random
 import tokenize
 from datetime import date
 from decimal import Decimal
@@ -326,3 +327,114 @@ def test_mixed_sign_rate_groups_are_refused_at_issue() -> None:
     negative = {"lines": [{"qty": 1, "price": -100, "vat": 19}, {"qty": 1, "price": -50, "vat": 7}]}
     snap = snapshot_from_document(negative, {}, document_id="m2", treatment="standard", invoice_date=date(2026, 3, 2))
     assert [g.gross for g in snap.rates] == [-11900, -5350]  # one sign only: allowed (a legacy credit invoice)
+
+
+# ---- zero amounts (accounting.md 9.1) -----------------------------------------------------------------------------
+
+_DAY = date(2026, 1, 2)
+_PERF = date(2026, 1, 1)
+_RECEIVABLES = ("receivables", 5, None, None, None, None, None)
+
+
+def _flat(entry: Entry | None) -> list[tuple[Any, ...]]:
+    assert entry is not None
+    return [
+        (ln.role, ln.amount_cents, ln.tax_key, ln.tax_kind, ln.tax_base_cents, ln.vat_date, ln.income_date)
+        for ln in entry.lines
+    ]
+
+
+@pytest.mark.parametrize(
+    ("income", "vat", "expected"),
+    [
+        (
+            "accrual",
+            "soll",
+            [
+                _RECEIVABLES,
+                ("revenue_s7", -5, None, None, None, None, _DAY),
+                ("vat_out_s7", 0, "S7", "base_only", 5, _PERF, None),
+            ],
+        ),
+        ("accrual", "ist", [_RECEIVABLES, ("revenue_s7", -5, None, None, None, None, _DAY)]),
+        ("eur", "soll", [("vat_out_s7", 0, "S7", "base_only", 5, _PERF, None)]),
+    ],
+)
+def test_five_cents_at_seven_percent_posts_a_statistical_line_instead_of_a_zero_vat_line(
+    income: str, vat: str, expected: list[tuple[Any, ...]]
+) -> None:
+    doc = {"lines": [{"qty": "1", "price": "0.05", "vat": "7"}], "service_from": "2026-01-01"}
+    snap = snapshot_from_document(doc, {}, document_id="z1", treatment="standard", invoice_date=_DAY)
+    assert [(g.net, g.vat) for g in snap.rates] == [(5, 0)]
+    assert _flat(issue_entry(snap, Bases(income, vat), _DAY)) == expected  # type: ignore[arg-type]
+
+
+def test_five_cents_at_seven_percent_eur_ist_posts_no_entry() -> None:
+    snap = IssuedSnapshot("z1", "regular", "standard", (RateGroup(Decimal(7), Cents(5), Cents(0)),), _PERF)
+    assert issue_entry(snap, Bases("eur", "ist"), _DAY) is None
+
+
+@pytest.mark.parametrize(
+    ("income", "vat", "expected"),
+    [
+        (
+            "accrual",
+            "soll",
+            [
+                ("receivables", 11900, None, None, None, None, None),
+                ("revenue_s19", -10000, None, None, None, None, _DAY),
+                ("vat_out_s19", -1900, "S19", "tax", 10000, _PERF, None),
+            ],
+        ),
+        (
+            "accrual",
+            "ist",
+            [
+                ("receivables", 11900, None, None, None, None, None),
+                ("revenue_s19", -10000, None, None, None, None, _DAY),
+                ("vat_not_due_s19", -1900, None, None, None, None, None),
+            ],
+        ),
+        (
+            "eur",
+            "soll",
+            [
+                ("vat_soll_clearing_s19", 1900, None, None, None, None, None),
+                ("vat_out_s19", -1900, "S19", "tax", 10000, _PERF, None),
+            ],
+        ),
+    ],
+)
+def test_a_group_whose_net_cancels_to_zero_posts_no_lines(
+    income: str, vat: str, expected: list[tuple[Any, ...]]
+) -> None:
+    doc = {
+        "lines": [
+            {"qty": "1", "price": "50", "vat": "7"},
+            {"qty": "1", "price": "-50", "vat": "7"},
+            {"qty": "1", "price": "100", "vat": "19"},
+        ],
+        "service_from": "2026-01-01",
+    }
+    snap = snapshot_from_document(doc, {}, document_id="z2", treatment="standard", invoice_date=_DAY)
+    assert [(g.rate, g.net, g.vat) for g in snap.rates] == [(19, 10000, 1900), (7, 0, 0)]
+    assert _flat(issue_entry(snap, Bases(income, vat), _DAY)) == expected  # type: ignore[arg-type]
+
+
+def test_random_groups_never_post_a_zero_line_except_a_base_only_statistical_line() -> None:
+    rng = random.Random(20261124)
+    for _ in range(400):
+        groups = []
+        for rate in rng.sample([Decimal(19), Decimal(7), Decimal(5), Decimal(0)], rng.randint(1, 3)):
+            net = rng.choice([0, 1, 5, 7, 9, 14, 15, 20, 100, 5000, 33333])
+            vat = int((Decimal(net) * rate / 100).quantize(Decimal(1), rounding="ROUND_HALF_UP"))
+            groups.append(RateGroup(rate, Cents(net), Cents(vat)))
+        snap = IssuedSnapshot("r", "regular", "standard", tuple(groups), _PERF)
+        for income in ("accrual", "eur"):
+            for vat_basis in ("soll", "ist"):
+                entry = issue_entry(snap, Bases(income, vat_basis), _DAY)  # type: ignore[arg-type]
+                if entry is None:
+                    continue
+                assert entry.balance == 0
+                for ln in entry.lines:
+                    assert ln.amount_cents != 0 or ln.tax_kind == "base_only", (groups, income, vat_basis, ln)
