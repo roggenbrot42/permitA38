@@ -42,6 +42,7 @@ from permita38.core.service.tokens import TokenService
 from permita38.core.service.totp import TotpService
 from permita38.core.service.transfer.service import TransferService, clean_stale_tmp
 from permita38.core.service.trips import TripService
+from permita38.core.service.vat_returns import VatReturnService
 from permita38.core.settings import effective_settings
 
 COOKIE_NAME = "authorization"
@@ -78,11 +79,13 @@ class Services:
     fiscal_years: FiscalYearService
     journal: JournalService
     locks: LockService
+    vat_returns: VatReturnService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
         """``calendar_fetcher`` exists for tests (a local fake server); production always uses the SSRF-safe fetcher."""
         store = create_repository(config)
+        locks = LockService(store)
         records = RecordService(store)
         auth = AuthService(store, config.secret_key, config.token_ttl_hours)
         user_agent = f"permitA38/{__version__} (+https://github.com/roggenbrot42/permitA38)"
@@ -116,7 +119,8 @@ class Services:
             audit=AuditService(store),
             fiscal_years=FiscalYearService(store),
             journal=JournalService(store),
-            locks=LockService(store),
+            locks=locks,
+            vat_returns=VatReturnService(store, locks),
             impressum=ImpressumService(
                 SafeFetcher(user_agent),
                 enabled=config.features.impressum_lookup,
