@@ -7,7 +7,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from permita38.core.vat.zm import ZmLine
+from permita38.core.vat.zm import ZmLine, normalize_vat_id
 
 __all__ = [
     "BZST_HEADER",
@@ -23,7 +23,7 @@ __all__ = [
 ZM_CSV_VERSION = "#v1.0"
 BZST_HEADER = "Laenderkennzeichen,USt-IdNr.,Betrag(EUR),Art der Leistung"
 MAX_ROWS = 1000
-_VAT_ID = re.compile(r"^[A-Z]{2}[A-Z0-9]{5,12}$")
+_VAT_ID = re.compile(r"[A-Z]{2}[A-Z0-9]{5,12}", re.ASCII)
 _READABLE_HEADER = "Land;USt-IdNr.;Betrag (EUR);Summe exakt (EUR);Art der Leistung"
 
 
@@ -43,44 +43,42 @@ class ZmExportError(ValueError):
         super().__init__("; ".join(f"{r.vat_id or '-'}: {r.reason}" for r in self.rows))
 
 
-def normalize_vat_id(vat_id: str) -> str:
-    """Remove spaces and dots, upper case."""
-    return re.sub(r"[ .]", "", vat_id).upper()
+def _truncate(cents: int) -> int:
+    """Whole euros, toward zero (the only ``base_rounding`` mode of the rules data)."""
+    return -(-cents // 100) if cents < 0 else cents // 100
 
 
 def _aggregate(lines: Sequence[ZmLine]) -> dict[str, tuple[int, int]]:
     """Per normalised VAT id (country + id): (whole euros, exact cents of the source lines), in first-seen order."""
     bad: list[ZmExportRow] = []
-    out: dict[str, tuple[int, int]] = {}
+    exact: dict[str, int] = {}
     for ln in lines:
         vid = normalize_vat_id(ln.vat_id)
-        if not _VAT_ID.fullmatch(vid):
+        if not vid.isascii() or not _VAT_ID.fullmatch(vid):
             bad.append(ZmExportRow(ln.vat_id, "VAT id does not match the pattern"))
             continue
-        cents = sum(int(s.tax_base_cents or 0) for s in ln.source)
-        euros, exact = out.get(vid, (0, 0))
-        out[vid] = (euros + ln.amount, exact + cents)
+        exact[vid] = exact.get(vid, 0) + sum(int(s.tax_base_cents or 0) for s in ln.source)
     if bad:
         raise ZmExportError(bad)
-    return out
+    return {vid: (_truncate(c), c) for vid, c in exact.items()}
 
 
 def bzst_csv(lines: Sequence[ZmLine], *, correction: bool) -> bytes:
-    """The BZSt portal import file: ``#v1.0``, skipped header, ``country,id,euros,S`` rows; ISO-8859-15, CRLF.
+    """The BZSt portal import file: ``#v1.0``, skipped header, ``country,id,euros,S`` rows; ISO-8859-15, every line (the last too) ends with CRLF.
 
     Rows are aggregated per country + VAT id. Rows of 0 EUR are omitted in a first report and written in a
-    correction. Raises ``ZmExportError`` for a malformed VAT id, an empty first report or more than 1000 rows.
+    correction. Raises ``ZmExportError`` for a malformed VAT id, no row to write (also in a correction) or more than 1000 rows.
     """
     rows = _aggregate(lines)
     if not correction:
         rows = {k: v for k, v in rows.items() if v[0] != 0}
-        if not rows:
-            raise ZmExportError([ZmExportRow("", "no rows to report")])
+    if not rows:
+        raise ZmExportError([ZmExportRow("", "no rows to report")])
     if len(rows) > MAX_ROWS:
         raise ZmExportError([ZmExportRow("", f"{len(rows)} rows, at most {MAX_ROWS} allowed")])
     out = [ZM_CSV_VERSION, BZST_HEADER]
     out.extend(f"{vid[:2]},{vid[2:]},{euros},S" for vid, (euros, _) in rows.items())
-    return "\r\n".join(out).encode("iso-8859-15")
+    return ("\r\n".join(out) + "\r\n").encode("iso-8859-15")
 
 
 def _decimal_comma(cents: int) -> str:
@@ -89,10 +87,10 @@ def _decimal_comma(cents: int) -> str:
     return f"{sign}{whole},{frac:02d}"
 
 
-def readable_csv(lines: Sequence[ZmLine], *, correction: bool = True) -> bytes:
+def readable_csv(lines: Sequence[ZmLine], *, correction: bool) -> bytes:
     """A human-readable CSV: UTF-8 with BOM, ``;``, decimal comma, the whole-euro amount and the exact cent sum.
 
-    Same aggregation and 0-row rule as :func:`bzst_csv`, but an empty list is allowed and no row limit applies.
+    Same aggregation (exact cents summed per id, truncated once) and 0-row rule as :func:`bzst_csv`, but an empty list is allowed and no row limit applies.
     """
     rows = _aggregate(lines)
     if not correction:
