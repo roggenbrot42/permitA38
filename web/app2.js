@@ -121,7 +121,7 @@ function docTable(rows) {
   return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${d.number ? esc(d.number) : '<span class="muted">No number yet</span>'}</b>${d.imported ? ' <span class="pill">imported</span>' : ''}<div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${eur(docTotal(d))}</td><td>${statusPill(coll, d)}</td></tr>`).join('')}</table>`;
 }
 function statusPill(coll, d) {
-  const late = coll === 'invoices' && d.status === 'sent' && d.due_date && d.due_date < todayISO();
+  const late = coll === 'invoices' && isOverdue(d);
   const cls = late ? 'bad' : { paid: 'good', accepted: 'good', sent: 'blue', rejected: 'bad', cancelled: 'bad', draft: 'warn' }[d.status] || '';
   return `<span class="pill ${cls}">${late ? 'overdue' : esc(d.status)}</span>`;
 }
@@ -221,8 +221,9 @@ PAGES.sales = async (tab = 'invoices') => {
   const rep = await api('GET', 'project-report'), unbilled = Money.sum(Object.values(rep).map(r => r.unbilled_revenue));
   const rows = S.d[tab].map(d => [tab, d]);
   const sum = (f) => Money.sum(S.d.invoices.filter(f).map(docTotal));
+  const sumOpen = (f) => Money.sum(S.d.invoices.filter(f).map(i => invOpenAmount(i) ?? docTotal(i)));   // what is still owed
   return `<div class="head"><div><h1>Offers & Invoices</h1><div class="muted">Offer → accepted → project → invoice.</div></div><div class="row tight" style="flex:none">${DS.uploadButton()}<button data-a="newDoc" data-coll="offers">+ Offer</button><button class="primary" data-a="newDoc" data-coll="invoices">+ Invoice</button></div></div>
-  ${DS.pageTop()}${DS.flaggedSection()}<div class="grid g3"><div class="card kpi warn"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a data-a="billTime" class="small">Invoice tracked time →</a></div><div class="card kpi"><div class="l">Outstanding</div><div class="v">${eur(sum(i => i.status === 'sent'))}</div></div><div class="card kpi bad"><div class="l">Overdue</div><div class="v">${eur(sum(i => i.status === 'sent' && i.due_date && i.due_date < todayISO()))}</div></div></div>
+  ${DS.pageTop()}${DS.flaggedSection()}<div class="grid g3"><div class="card kpi warn"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a data-a="billTime" class="small">Invoice tracked time →</a></div><div class="card kpi"><div class="l">Outstanding</div><div class="v">${eur(sumOpen(i => i.kind !== 'credit_note' && i.status !== 'draft' && i.status !== 'cancelled' && (invOpenAmount(i) === null ? i.status === 'sent' : Money.cmp(invOpenAmount(i), 0) > 0)))}</div></div><div class="card kpi bad"><div class="l">Overdue</div><div class="v">${eur(sumOpen(i => isOverdue(i)))}</div></div></div>
   <div class="tabs"><a href="#/sales/invoices" class="${tab === 'invoices' ? 'on' : ''}">Invoices</a><a href="#/sales/offers" class="${tab === 'offers' ? 'on' : ''}">Offers</a></div><div class="card">${docTable(rows)}</div>`;
 };
 A.newDoc = el => { location.hash = `#/doc/${el.dataset.coll}/new${el.dataset.cust ? '-' + el.dataset.cust : ''}`; };
@@ -236,6 +237,29 @@ A.billTime = el => {
 };
 
 let DOC = null;
+/** An issued invoice (numbered, not a draft) is frozen (credit-notes-payments.md 2.1). */
+const isFrozen = d => !!d && d.coll === 'invoices' && !!d.id && !!d.number && d.status !== 'draft';
+/** Tax treatment of an invoice (spec 5): standard or eu_b2b_service; small_business is set by the year and shown fixed. */
+function taxField(d, frozen, smallYear) {
+  const cur = d.tax_treatment || 'standard', fixed = smallYear || cur === 'small_business';
+  const names = { standard: 'Standard (with VAT)', eu_b2b_service: 'EU B2B service (reverse charge, 0 % VAT)', small_business: 'Small business (§ 19 UStG)' };
+  if (fixed || frozen) return `<div class="field"><label>Tax treatment</label><select id="d_tt" disabled><option>${esc(names[fixed ? 'small_business' : cur] || cur)}</option></select>${fixed && !frozen ? '<div class="small muted">Set by the year: small business.</div>' : ''}</div>`;
+  return `<div class="field"><label>Tax treatment</label><select id="d_tt">${['standard', 'eu_b2b_service'].map(v => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(names[v])}</option>`).join('')}</select>${cur === 'eu_b2b_service' ? '<div class="small muted">Needs an EU VAT id (not DE) at the customer.</div>' : ''}</div>`;
+}
+let PAY_WARN = { id: null, list: [] };   // warnings of the last payment action (overpayment, vat_drift), for this invoice
+/** Payments panel of an issued invoice: derived amounts, the payment list, record / reverse. Money is only formatted and summed with Money. */
+function paymentsPanel(d) {
+  const paid = Money.str(d.paid_amount), credited = Money.str(d.credited_amount), open = Money.str(d.open_amount);
+  const pays = d.payments || [], reversed = new Set(pays.filter(p => p.reverses_id).map(p => p.reverses_id));
+  const warns = PAY_WARN.id === d.id ? PAY_WARN.list : [];
+  const rows = pays.map(p => `<tr data-pay="${esc(p.id || 'legacy')}"><td class="nowrap">${fmtDate(p.date)}</td><td class="num">${eur(p.amount)}</td><td>${esc(p.kind || '')}</td><td>${esc(p.method || '')}</td><td class="small muted">${esc(p.note || '')}</td><td>${['payment', 'refund'].includes(p.kind) && !reversed.has(p.id) ? `<button class="sm" data-a="payReverse" data-id="${esc(p.id || '')}">Reverse</button>` : ''}</td></tr>`).join('');
+  return `<div class="card" id="pay_panel"><h2>Payments</h2>
+    ${warns.map(w => `<div class="banner" data-warn="${esc(w.code)}">${esc(w.message)}</div>`).join('')}
+    <div class="grid g4"><div class="kpi"><div class="l">Total</div><div class="v small" id="pay_total">${eur(Money.sum([open, paid, credited]))}</div></div><div class="kpi"><div class="l">Paid</div><div class="v small" id="pay_paid">${eur(paid)}</div></div><div class="kpi"><div class="l">Credited</div><div class="v small" id="pay_credited">${eur(credited)}</div></div><div class="kpi ${Money.cmp(open, 0) > 0 ? 'warn' : ''}"><div class="l">Open</div><div class="v small" id="pay_open">${eur(open)}</div></div></div>
+    <div class="small muted" style="margin:6px 0">Status: <b id="pay_status">${esc(d.status)}</b>${d.paid_date ? ' · paid on ' + fmtDate(d.paid_date) : ''}</div>
+    ${rows ? `<table id="pay_list"><tr><th>Date</th><th class="num">Amount</th><th>Kind</th><th>Method</th><th>Note</th><th></th></tr>${rows}</table>` : '<div class="empty">No payments yet.</div>'}
+    <button class="sm primary" data-a="payRecord" style="margin-top:8px">Record payment</button></div>`;
+}
 PAGES.doc = async (coll, id) => {
   await loadAll(['customers', 'projects', 'users', 'offers', 'invoices']);
   const s = S.settings, isInv = coll === 'invoices';
@@ -251,31 +275,38 @@ PAGES.doc = async (coll, id) => {
     DOC = { coll, ...rec, lines: rec.lines || [] };
   }
   const d = DOC, locked = d.number && d.status !== 'draft', isNew = !d.id;
+  const frozen = isFrozen(d), fz = frozen ? 'disabled' : '';   // an issued invoice: only the labels, due date, notes, reference change
+  let smallYear = false;   // the year's regime sets small_business on a document; it is not chosen (credit-notes-payments.md 5)
+  if (isInv && !frozen) {
+    try { const ys = await api('GET', 'years'), y = ys.find(r => String(r.year) === String(d.date || '').slice(0, 4)); smallYear = y ? !!y.small_business : !!s.kleinunternehmer; } catch { smallYear = !!s.kleinunternehmer; }
+  }
   const opt = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
   const klein = s.kleinunternehmer;
-  const statuses = isInv ? [['sent', 'Sent'], ['paid', 'Paid'], ['cancelled', 'Cancelled']] : [['sent', 'Sent'], ['accepted', 'Accepted'], ['rejected', 'Rejected']];
+  const statuses = isInv ? [['sent', 'Sent'], ['accepted', 'Accepted'], ['rejected', 'Rejected']] : [['sent', 'Sent'], ['accepted', 'Accepted'], ['rejected', 'Rejected']];
   const plan = d.plan || {};
   return `<div class="head"><div><a href="#/sales/${coll}" class="small">← ${isInv ? 'Invoices' : 'Offers'}</a><h1>${isInv ? 'Invoice' : 'Offer'} ${esc(d.number || '')} ${d.id ? statusPill(coll, d) : '<span class="pill warn">draft – not saved yet</span>'}</h1></div>
     <div class="row tight" style="flex:none">${d.id ? `<button data-a="docPdf">Preview PDF</button>` : ''}<button class="${d.number ? '' : 'primary'}" data-a="docSave">${d.status === 'draft' ? 'Save draft' : 'Save'}</button>
     ${d.id && !d.number ? `<button class="primary" data-a="docFinalize">Finalize & number</button>` : ''}${d.id && !d.number ? `<button class="danger" data-a="docDelete">Delete draft</button>` : ''}${d.id && d.number ? `<select style="width:auto" data-change="docStatus"><option value="">Set status…</option>${opt(statuses, '')}</select>` : ''}
     ${d.id && !isInv && d.number && d.status !== 'accepted' ? `<button data-a="docAccept">✓ Accepted → create project</button>` : ''}${d.id && !isInv ? `<button data-a="docToInvoice">→ Invoice</button>` : ''}</div></div>
   ${d.status === 'draft' && !d.number ? `<div class="banner info">This is a <b>draft</b>: it has no number yet, is not counted in revenue or planning, and the PDF is marked as a draft. It gets its ${isInv ? 'invoice' : 'offer'} number when you press <b>Finalize &amp; number</b>.</div>` : ''}
-  ${locked ? '<div class="banner">This document has a number and was probably sent. Changing it now changes the PDF – only edit for corrections.</div>' : ''}
-  <div class="card"><div class="grid g3"><div class="field"><label>Customer</label><select id="d_cust">${opt([['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])], d.customer_id)}</select></div>
-    <div class="field"><label>Project</label><select id="d_proj">${opt(projectOptions(true, d.customer_id || '', d.project_id, true), d.project_id || '')}</select></div><div class="field"><label>Title / subject</label><input id="d_title" value="${esc(d.title || '')}"></div>
-    <div class="field"><label>Date</label><input type="date" id="d_date" value="${esc(d.date || '')}"></div>
-    ${isInv ? `<div class="field"><label>Due date</label><input type="date" id="d_due" value="${esc(d.due_date || '')}"></div><div class="field"><label>Paid on</label><input type="date" id="d_paid" value="${esc(d.paid_date || '')}"></div>` : `<div class="field"><label>Valid until</label><input type="date" id="d_valid" value="${esc(d.valid_until || '')}"></div>`}
-    <div class="field"><label>Service period from</label><input type="date" id="d_sf" value="${esc(d.service_from || '')}"></div><div class="field"><label>to</label><input type="date" id="d_st" value="${esc(d.service_to || '')}"></div>
+  ${frozen ? '<div class="banner info" id="d_frozen">Issued invoices are frozen; issue a credit note to correct one. Only the status label, due date, reference and notes can still be changed.</div>' : ''}
+  ${locked && !frozen ? '<div class="banner">This document has a number and was probably sent. Changing it now changes the PDF – only edit for corrections.</div>' : ''}
+  <div class="card"><div class="grid g3"><div class="field"><label>Customer</label><select id="d_cust" ${fz}>${opt([['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])], d.customer_id)}</select></div>
+    <div class="field"><label>Project</label><select id="d_proj" ${fz}>${opt(projectOptions(true, d.customer_id || '', d.project_id, true), d.project_id || '')}</select></div><div class="field"><label>Title / subject</label><input id="d_title" ${fz} value="${esc(d.title || '')}"></div>
+    <div class="field"><label>Date</label><input type="date" id="d_date" ${fz} value="${esc(d.date || '')}"></div>
+    ${isInv ? `<div class="field"><label>Due date</label><input type="date" id="d_due" value="${esc(d.due_date || '')}"></div>${taxField(d, frozen, smallYear)}` : `<div class="field"><label>Valid until</label><input type="date" id="d_valid" value="${esc(d.valid_until || '')}"></div>`}
+    <div class="field"><label>Service period from</label><input type="date" id="d_sf" ${fz} value="${esc(d.service_from || '')}"></div><div class="field"><label>to</label><input type="date" id="d_st" ${fz} value="${esc(d.service_to || '')}"></div>
     <div class="field"><label>Your reference / PO number</label><input id="d_ref" value="${esc(d.reference || '')}"></div>
-    <div class="field"><label>Template</label><select id="d_tpl">${opt(S.templates.map(t => [t.id, t.name]), d.template_id)}</select></div>
-    <div class="field"><label>Language</label><select id="d_lang">${opt([['', 'Template default'], ['de', 'Deutsch'], ['en', 'English']], d.language || '')}</select></div>
-    ${klein ? '' : `<div class="field"><label>Default VAT %</label><input type="number" id="d_vat" value="${esc(d.vat_rate ?? s.vat_rate)}"></div>`}</div></div>
+    <div class="field"><label>Template</label><select id="d_tpl" ${fz}>${opt(S.templates.map(t => [t.id, t.name]), d.template_id)}</select></div>
+    <div class="field"><label>Language</label><select id="d_lang" ${fz}>${opt([['', 'Template default'], ['de', 'Deutsch'], ['en', 'English']], d.language || '')}</select></div>
+    ${klein ? '' : `<div class="field"><label>Default VAT %</label><input type="number" id="d_vat" ${fz} value="${esc(d.vat_rate ?? s.vat_rate)}"></div>`}</div></div>
   <div class="card"><h2>Items</h2><table class="lines"><tr><th>Description</th><th style="width:80px">Qty</th><th style="width:70px">Unit</th><th style="width:110px">Unit price €</th>${klein ? '' : '<th style="width:70px">VAT %</th>'}<th class="num" style="width:110px">Amount</th><th></th></tr>
-    ${d.lines.map((l, i) => `<tr><td><input data-l="${i}" data-k="description" value="${esc(l.description)}" placeholder="What did you deliver?"></td><td><input data-l="${i}" data-k="qty" type="number" step="any" value="${esc(l.qty)}"></td><td><input data-l="${i}" data-k="unit" value="${esc(l.unit)}"></td><td><input data-l="${i}" data-k="price" type="text" inputmode="decimal" value="${esc(l.price)}"></td>${klein ? '' : `<td><input data-l="${i}" data-k="vat" type="number" value="${esc(l.vat ?? '')}" placeholder="${esc(d.vat_rate ?? s.vat_rate)}"></td>`}<td class="num" id="amt${i}">${eur(Money.fromCents(Money.lineCents(l.qty, l.price)))}</td><td><button class="ghost sm" data-a="delLine" data-i="${i}">✕</button></td></tr>`).join('')}</table>
-    <button class="sm" data-a="addLine" style="margin-top:8px">+ Add line</button>${isInv ? ' <button class="sm" data-a="billTimeInto">+ Add unbilled time…</button>' : ''}
+    ${d.lines.map((l, i) => `<tr><td><input data-l="${i}" data-k="description" ${fz} value="${esc(l.description)}" placeholder="What did you deliver?"></td><td><input data-l="${i}" data-k="qty" type="number" step="any" ${fz} value="${esc(l.qty)}"></td><td><input data-l="${i}" data-k="unit" ${fz} value="${esc(l.unit)}"></td><td><input data-l="${i}" data-k="price" type="text" inputmode="decimal" ${fz} value="${esc(l.price)}"></td>${klein ? '' : `<td><input data-l="${i}" data-k="vat" type="number" ${fz} value="${esc(l.vat ?? '')}" placeholder="${esc(d.vat_rate ?? s.vat_rate)}"></td>`}<td class="num" id="amt${i}">${eur(Money.fromCents(Money.lineCents(l.qty, l.price)))}</td><td>${frozen ? '' : `<button class="ghost sm" data-a="delLine" data-i="${i}">✕</button>`}</td></tr>`).join('')}</table>
+    ${frozen ? '' : `<button class="sm" data-a="addLine" style="margin-top:8px">+ Add line</button>${isInv ? ' <button class="sm" data-a="billTimeInto">+ Add unbilled time…</button>' : ''}`}
     <div class="right" id="d_totals" style="margin-top:12px"></div></div>
-  <div class="card"><div class="grid g2"><div class="field"><label>Intro text (empty = from template)</label><textarea id="d_intro" rows="4">${esc(d.intro || '')}</textarea></div><div class="field"><label>Closing text (empty = from template)</label><textarea id="d_outro" rows="4">${esc(d.outro || '')}</textarea></div></div>
+  <div class="card"><div class="grid g2"><div class="field"><label>Intro text (empty = from template)</label><textarea id="d_intro" rows="4" ${fz}>${esc(d.intro || '')}</textarea></div><div class="field"><label>Closing text (empty = from template)</label><textarea id="d_outro" rows="4" ${fz}>${esc(d.outro || '')}</textarea></div></div>
     <div class="field"><label>Internal notes (not printed)</label><textarea id="d_notes" rows="2">${esc(d.notes || '')}</textarea></div></div>
+  ${frozen ? paymentsPanel(d) : ''}
   ${isInv ? '' : `<div class="card"><h2>Planning (optional)</h2><div class="muted small" style="margin-bottom:8px">When should this work happen? Enter hours per week or total hours, not both; without hours, the offer's hour lines are booked on acceptance. While the offer is open, it shows up in the planning Overview as possible work; once accepted it becomes a contract.</div><div class="row"><div><label>Start</label><input type="date" id="p_s" value="${esc(plan.start || '')}"></div><div><label>End</label><input type="date" id="p_e" value="${esc(plan.end || '')}"></div><div><label>Hours per week</label><input type="number" min="0" step="any" id="p_hpw" value="${esc(plan.hours_per_week ?? '')}"></div><div><label>or total hours</label><input type="number" min="0" step="any" id="p_tot" value="${esc(plan.total_hours ?? '')}"></div></div></div>`}`;
 };
 // Hourly rate for a new document: project > customer > your default (the same order the time entries use).
@@ -316,8 +347,9 @@ const docPrice = text => { const r = Money.parseInput(text); return r.ok ? (r.va
 function syncDoc() {
   if (!DOC || !$('#d_cust')) return;
   const g = i => $('#' + i)?.value, d = DOC;
+  if (isFrozen(d)) { Object.assign(d, { due_date: g('d_due') || null, reference: g('d_ref'), notes: g('d_notes') }); return; }   // frozen: nothing else is read back
   Object.assign(d, { customer_id: g('d_cust'), project_id: g('d_proj') || null, title: g('d_title'), date: g('d_date'), service_from: g('d_sf') || null, service_to: g('d_st') || null, reference: g('d_ref'), template_id: g('d_tpl'), language: g('d_lang'), intro: g('d_intro'), outro: g('d_outro'), notes: g('d_notes') });
-  if (d.coll === 'invoices') Object.assign(d, { due_date: g('d_due') || null, paid_date: g('d_paid') || null }); else Object.assign(d, { valid_until: g('d_valid') || null, plan: g('p_s') && g('p_e') ? { start: g('p_s'), end: g('p_e'), hours_per_week: +g('p_hpw') > 0 ? +g('p_hpw') : null, total_hours: +g('p_hpw') > 0 ? null : +g('p_tot') > 0 ? +g('p_tot') : null } : null });
+  if (d.coll === 'invoices') Object.assign(d, { due_date: g('d_due') || null, ...($('#d_tt') && !$('#d_tt').disabled ? { tax_treatment: g('d_tt') } : {}) }); else Object.assign(d, { valid_until: g('d_valid') || null, plan: g('p_s') && g('p_e') ? { start: g('p_s'), end: g('p_e'), hours_per_week: +g('p_hpw') > 0 ? +g('p_hpw') : null, total_hours: +g('p_hpw') > 0 ? null : +g('p_tot') > 0 ? +g('p_tot') : null } : null });
   if ($('#d_vat')) d.vat_rate = +g('d_vat');
   document.querySelectorAll('[data-l]').forEach(inp => { const l = d.lines[+inp.dataset.l], k = inp.dataset.k; l[k] = k === 'price' ? docPrice(inp.value) : ['qty', 'vat'].includes(k) ? (inp.value === '' ? (k === 'vat' ? null : 0) : parseFloat(inp.value)) : inp.value; });
 }
@@ -342,11 +374,14 @@ A.addLine = () => {
 A.delLine = el => { syncDoc(); DOC.lines.splice(+el.dataset.i, 1); render(); };
 /** Warnings are response-only; never echo them back into a PUT body. */
 function stripWarnings(o) { delete o.sanity_warnings; delete o.planning_warnings; return o; }
+/** Fields the server derives (credit-notes-payments.md 2.3): never sent back. */
+const DERIVED_INVOICE = ['paid_amount', 'credited_amount', 'open_amount', 'payments', 'credit_notes'];
 async function persistDoc() {
   syncDoc(); const d = DOC;
   if (!d.customer_id) throw new Error('Choose a customer first');
   d.lines.forEach((l, i) => { const r = Money.parseInput(l.price); if (!r.ok) throw new Error(`Line ${i + 1}, unit price: ${r.error}`); });
-  const { coll, __route, ...body } = d; stripWarnings(body);
+  const { coll, __route, __setStatus, ...body } = d; stripWarnings(body);
+  if (coll === 'invoices') { DERIVED_INVOICE.forEach(k => delete body[k]); if (isFrozen(d) && !__setStatus) { delete body.status; delete body.paid_date; } }
   const r = await api.upsert(coll, body); DOC = { coll, ...stripWarnings({ ...r }) };
   await loadAll([coll]); return r;
 }
@@ -362,12 +397,35 @@ A.docDelete = async () => {
 A.docPdf = async () => { await persistDoc(); window.open(api.url(`${DOC.coll}/${DOC.id}/pdf`), '_blank'); };
 A.docStatus = async el => {
   if (!el.value) return;
-  syncDoc(); DOC.status = el.value;
-  if (el.value === 'paid' && !DOC.paid_date) { DOC.paid_date = todayISO(); const pd = $('#d_paid'); if (pd) pd.value = DOC.paid_date; }  // before persistDoc() re-reads the form
+  syncDoc(); DOC.status = el.value; DOC.__setStatus = true;
   await persistDoc(); toast('Status: ' + el.value); render();
 };
 A.docAccept = async () => { await persistDoc(); const r = await api('POST', `offers/${DOC.id}/accept`); await loadAll(['offers', 'projects', 'contracts']); DOC = null; toast('Accepted – project' + (r.contract ? ' and contract' : '') + ' created'); location.hash = '#/project/' + r.project.id; };
 A.docToInvoice = async () => { await persistDoc(); const r = await api('POST', `offers/${DOC.id}/to-invoice`); DOC = null; await loadAll(['invoices']); location.hash = '#/doc/invoices/' + r.id; };
+/** Record a payment or refund (POST invoices/{id}/payments); the amount is parsed with Money, the server does the maths. */
+A.payRecord = () => {
+  const d = DOC, open = Money.str(d.open_amount);
+  openForm({
+    title: 'Record payment', saveLabel: 'Record', vals: { date: todayISO(), amount: Money.cmp(open, 0) > 0 ? open : '', kind: 'payment', method: 'bank', note: '' },
+    fields: [{ k: 'date', l: 'Date', t: 'date', row: 1 }, { k: 'amount', l: 'Amount €', m: true, row: 1 }, { k: 'kind', l: 'Kind', t: 'select', o: [['payment', 'Payment'], ['refund', 'Refund']], row: 2 }, { k: 'method', l: 'Method', t: 'select', o: [['bank', 'Bank'], ['cash', 'Cash']], row: 2 }, { k: 'note', l: 'Note' }],
+    save: async v => {
+      const a = Money.parseInput(v.amount);
+      if (!a.ok || a.value === null) throw new Error(a.ok ? 'Enter the amount' : a.error);
+      if (!v.date) throw new Error('Enter the date');
+      await payResult(await api('POST', `invoices/${d.id}/payments`, { date: v.date, amount: a.value, kind: v.kind, method: v.method, note: (v.note || '').trim() || null }), 'Payment recorded');
+    }
+  });
+};
+A.payReverse = async el => {
+  if (!window.confirm('Reverse this payment? Use this only for an entry made by mistake; a returned transfer is a refund.')) return;
+  const path = el.dataset.id ? `payments/${el.dataset.id}/reverse` : `invoices/${DOC.id}/payments/legacy/reverse`;
+  await payResult(await api('POST', path, {}), 'Payment reversed');
+};
+async function payResult(r, msg) {
+  DOC = { coll: 'invoices', ...stripWarnings({ ...r.invoice }) };
+  PAY_WARN = { id: DOC.id, list: r.warnings || [] };
+  await loadAll(['invoices']); toast(msg); render();
+}
 A.billTimeInto = () => A.billTime({ dataset: { cust: DOC.customer_id } });
 
 /* ================= EXPENSES ================= */
