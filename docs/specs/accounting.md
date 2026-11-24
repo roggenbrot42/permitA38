@@ -530,7 +530,10 @@ template); open receivables come from the backfill (section 16).
 
 The Money page (`calc.finance`) switches to the journal once accounting is initialised for the year
 (revenue, costs, VAT per month from `income_date` / `vat_date`), keeping its response shape; a reconciliation test
-compares the old computation and the journal for documents that the old code could represent.
+compares the old computation and the journal for documents that the old code could represent. Until then (accounting
+not initialised) the old computation nets credit notes on their own date, also against an unpaid invoice under the
+cash basis, and drops a storno'd invoice entirely, also when it was paid in an earlier year — known differences that
+the journal-based figures do not have; the page says "approximate until accounting is set up".
 
 ## 15. DATEV export
 
