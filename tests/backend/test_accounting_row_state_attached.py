@@ -165,3 +165,18 @@ def test_reopen_that_leaves_boxes_in_place_allowed(repo):
     repo.save("vat_returns", {**r, "status": "draft"})  # unfiled: the boxes may stay
     got = repo.get("vat_returns", "v1x000")
     assert got["status"] == "draft" and got["boxes"] == BOXES
+
+
+STORED = ("result_cents", "special_prepayment_credit_cents", "rounding_difference_cents")
+
+
+def test_reopen_clears_the_stored_figures_but_final_freezes_them(repo):
+    r = repo.save("vat_returns", vat(special_prepayment_credit_cents=500, rounding_difference_cents=1))
+    for col in STORED:
+        refused(FROZEN, repo.save, "vat_returns", {**r, col: 7})  # final: frozen
+        refused(FROZEN, repo.save, "vat_returns", {k: v for k, v in r.items() if k != col})  # cleared while final
+    gone = ("boxes", *CLEARED, *STORED)
+    reopened = {k: v for k, v in r.items() if k not in gone}
+    repo.save("vat_returns", {**reopened, "status": "draft"})
+    got = repo.get("vat_returns", "v1x000")
+    assert got["status"] == "draft" and not set(gone) & set(got)
