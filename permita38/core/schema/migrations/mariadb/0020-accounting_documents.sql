@@ -33,9 +33,9 @@ CREATE TABLE `vat_returns` (
     `rules_version` VARCHAR(255),
     `boxes` LONGTEXT,
     `source_lines` LONGTEXT,
-    `result` VARCHAR(255),
-    `special_prepayment_credit` VARCHAR(255),
-    `rounding_difference` VARCHAR(255),
+    `result_cents` BIGINT,
+    `special_prepayment_credit_cents` BIGINT,
+    `rounding_difference_cents` BIGINT,
     `filed_on` VARCHAR(255),
     `reference` VARCHAR(255),
     `note` LONGTEXT,
@@ -46,7 +46,8 @@ CREATE TABLE `vat_returns` (
     `finalised_at` BIGINT,
     `finalised_by` VARCHAR(32),
     `extra` LONGTEXT,
-    CONSTRAINT `vat_returns_amends_key` CHECK (`amends_key` IS NOT NULL AND `amends_key` = COALESCE(`amends_id`, ''))
+    CONSTRAINT `vat_returns_amends_key` CHECK (`amends_key` IS NOT NULL AND `amends_key` = COALESCE(`amends_id`, '')),
+    CONSTRAINT `vat_returns_quarter_no` CHECK (`period_kind` <> 'quarter' OR `period_no` BETWEEN 1 AND 4)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 CREATE UNIQUE INDEX `idx_vat_returns_period` ON `vat_returns` (`year`, `period_kind`, `period_no`, `amends_key`);
 
@@ -78,6 +79,7 @@ CREATE UNIQUE INDEX `idx_zm_reports_quarter` ON `zm_reports` (`year`, `quarter`,
 ALTER TABLE `expenses` ADD CONSTRAINT `guard_expenses_service_date_date` CHECK (`service_date` IS NULL OR `service_date` = '' OR `service_date` REGEXP '^[0-9]{4}-[01][0-9]-[0-3][0-9]$');
 ALTER TABLE `invoices` ADD CONSTRAINT `guard_invoices_kind_one_of` CHECK (NOT COALESCE(((`kind` IS NOT NULL AND `kind` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND BINARY `kind` NOT IN ('invoice', 'credit_note')), 0));
 ALTER TABLE `invoices` ADD CONSTRAINT `guard_invoices_credit_kind_one_of` CHECK (NOT COALESCE(((`credit_kind` IS NOT NULL AND `credit_kind` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND BINARY `credit_kind` NOT IN ('storno', 'partial', 'discount', 'write_off', 'write_off_reversal')), 0));
+ALTER TABLE `invoices` ADD CONSTRAINT `guard_invoices_credit_kind_credit_note_implies` CHECK (NOT COALESCE((COALESCE((`credit_kind` IS NOT NULL AND `credit_kind` NOT REGEXP '^[\\x20\\x09-\\x0d]*$'), 0) AND NOT COALESCE(BINARY `kind` = 'credit_note', 0)), 0));
 ALTER TABLE `invoices` ADD CONSTRAINT `guard_invoices_tax_treatment_one_of` CHECK (NOT COALESCE(((`tax_treatment` IS NOT NULL AND `tax_treatment` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND BINARY `tax_treatment` NOT IN ('standard', 'eu_b2b_service', 'small_business')), 0));
 CREATE TRIGGER `guard_invoices_corrects_id_ref_ins` BEFORE INSERT ON `invoices` FOR EACH ROW
 BEGIN
@@ -112,6 +114,9 @@ ALTER TABLE `vat_returns` ADD CONSTRAINT `guard_vat_returns_basis_one_of` CHECK 
 ALTER TABLE `vat_returns` ADD CONSTRAINT `guard_vat_returns_frequency_one_of` CHECK (NOT COALESCE(((`frequency` IS NOT NULL AND `frequency` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND BINARY `frequency` NOT IN ('month', 'quarter', 'none')), 0));
 ALTER TABLE `vat_returns` ADD CONSTRAINT `guard_vat_returns_year_range` CHECK (NOT COALESCE((`year` IS NOT NULL AND (`year` < 2000 OR `year` > 2100)), 0));
 ALTER TABLE `vat_returns` ADD CONSTRAINT `guard_vat_returns_period_no_range` CHECK (NOT COALESCE((`period_no` IS NOT NULL AND (`period_no` < 1 OR `period_no` > 12)), 0));
+ALTER TABLE `vat_returns` ADD CONSTRAINT `guard_vat_returns_period_order` CHECK (`from_date` IS NULL OR `from_date` = '' OR `to_date` IS NULL OR `to_date` = '' OR `to_date` >= `from_date`);
+ALTER TABLE `vat_returns` ADD CONSTRAINT `guard_vat_returns_final_finalised_at_implies` CHECK (NOT COALESCE((COALESCE(BINARY `status` = 'final', 0) AND NOT COALESCE((`finalised_at` IS NOT NULL AND `finalised_at` NOT REGEXP '^[\\x20\\x09-\\x0d]*$'), 0)), 0));
+ALTER TABLE `vat_returns` ADD CONSTRAINT `guard_vat_returns_final_finalised_by_implies` CHECK (NOT COALESCE((COALESCE(BINARY `status` = 'final', 0) AND NOT COALESCE((`finalised_by` IS NOT NULL AND `finalised_by` NOT REGEXP '^[\\x20\\x09-\\x0d]*$'), 0)), 0));
 CREATE TRIGGER `guard_vat_returns_amends_id_ref_ins` BEFORE INSERT ON `vat_returns` FOR EACH ROW
 BEGIN
   IF (NEW.`amends_id` IS NOT NULL AND NEW.`amends_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `vat_returns` WHERE `id` = NEW.`amends_id`) AND NOT EXISTS (SELECT 1 FROM `vat_returns` WHERE `id` = NEW.`id` AND `amends_id` <=> NEW.`amends_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
@@ -145,6 +150,8 @@ ALTER TABLE `zm_reports` ADD CONSTRAINT `guard_zm_reports_filed_on_date` CHECK (
 ALTER TABLE `zm_reports` ADD CONSTRAINT `guard_zm_reports_status_one_of` CHECK (NOT COALESCE(((`status` IS NOT NULL AND `status` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND BINARY `status` NOT IN ('draft', 'final')), 0));
 ALTER TABLE `zm_reports` ADD CONSTRAINT `guard_zm_reports_year_range` CHECK (NOT COALESCE((`year` IS NOT NULL AND (`year` < 2000 OR `year` > 2100)), 0));
 ALTER TABLE `zm_reports` ADD CONSTRAINT `guard_zm_reports_quarter_range` CHECK (NOT COALESCE((`quarter` IS NOT NULL AND (`quarter` < 1 OR `quarter` > 4)), 0));
+ALTER TABLE `zm_reports` ADD CONSTRAINT `guard_zm_reports_final_finalised_at_implies` CHECK (NOT COALESCE((COALESCE(BINARY `status` = 'final', 0) AND NOT COALESCE((`finalised_at` IS NOT NULL AND `finalised_at` NOT REGEXP '^[\\x20\\x09-\\x0d]*$'), 0)), 0));
+ALTER TABLE `zm_reports` ADD CONSTRAINT `guard_zm_reports_final_finalised_by_implies` CHECK (NOT COALESCE((COALESCE(BINARY `status` = 'final', 0) AND NOT COALESCE((`finalised_by` IS NOT NULL AND `finalised_by` NOT REGEXP '^[\\x20\\x09-\\x0d]*$'), 0)), 0));
 CREATE TRIGGER `guard_zm_reports_amends_id_ref_ins` BEFORE INSERT ON `zm_reports` FOR EACH ROW
 BEGIN
   IF (NEW.`amends_id` IS NOT NULL AND NEW.`amends_id` NOT REGEXP '^[\\x20\\x09-\\x0d]*$') AND NOT EXISTS (SELECT 1 FROM `zm_reports` WHERE `id` = NEW.`amends_id`) AND NOT EXISTS (SELECT 1 FROM `zm_reports` WHERE `id` = NEW.`id` AND `amends_id` <=> NEW.`amends_id`) THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:ref.dangling'; END IF;
