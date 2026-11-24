@@ -14774,6 +14774,28 @@
             ],
             "title": "Service Date"
           },
+          "bill_rev": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bill Rev"
+          },
+          "pay_rev": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pay Rev"
+          },
           "sanity_warnings": {
             "anyOf": [
               {
@@ -17751,6 +17773,28 @@
               }
             ],
             "title": "Service Date"
+          },
+          "bill_rev": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bill Rev"
+          },
+          "pay_rev": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pay Rev"
           }
         },
         "additionalProperties": true,
@@ -29511,6 +29555,28 @@
               }
             ],
             "title": "Service Date"
+          },
+          "bill_rev": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bill Rev"
+          },
+          "pay_rev": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pay Rev"
           },
           "planning_warnings": {
             "anyOf": [
