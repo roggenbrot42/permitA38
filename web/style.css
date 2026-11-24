@@ -18,7 +18,7 @@ h1 { font-size: 24px; margin: 0 0 4px; } h2 { font-size: 17px; margin: 0 0 12px;
 a { color: var(--accent); text-decoration: none; cursor: pointer; }
 .muted { color: var(--muted); } .small { font-size: 13px; } .right { text-align: right; } .nowrap { white-space: nowrap; }
 .shell { display: flex; min-height: 100vh; }
-.side { width: 216px; background: var(--card); border-right: 1px solid var(--line); padding: 16px 10px; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; }
+.side { width: 216px; background: var(--card); border-right: 1px solid var(--line); padding: 16px 10px; position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; min-height: 0; overflow-y: auto; }
 .brand { font-weight: 700; font-size: 19px; padding: 4px 10px 14px; display: flex; align-items: center; gap: 8px; }
 .brand i { width: 22px; height: 22px; border-radius: 50%; background: var(--accent); display: inline-block; }
 .side a.nav { padding: 9px 12px; border-radius: 9px; color: var(--ink); display: flex; gap: 10px; align-items: center; }
