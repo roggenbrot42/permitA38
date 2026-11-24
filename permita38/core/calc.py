@@ -84,6 +84,19 @@ def snapshot_totals(issued: dict) -> dict:
     )
 
 
+def with_year_regime(store, doc):
+    """A copy of a draft or offer for a preview (PDF): when the fiscal year of its date is a small-business year, it
+    carries the treatment ``small_business`` so ``doc_totals`` prints no VAT, as the snapshot will when it is issued.
+    An issued document (it has its snapshot) and a document of another regime come back unchanged."""
+    if isinstance(doc.get("issued"), dict):
+        return doc
+    day = str(doc.get("date") or "")[:4]
+    rows = store.find("fiscal_years", year=int(day)) if day.isdigit() else []
+    if rows and rows[0].get("small_business") and doc.get("tax_treatment") in (None, "", "standard"):
+        return {**doc, "tax_treatment": "small_business"}
+    return doc
+
+
 def doc_totals(doc, settings):
     """Net, VAT per rate and gross of an offer/invoice, in exact cents (rule: see :mod:`permita38.core.money`).
 
@@ -379,15 +392,26 @@ def finance(store, year, today=None):
     accrual = s.get("accounting", "eur") == "accrual"
     months: list[dict[str, Any]] = [dict(month=m, **{k: ZERO for k in _MONEY_KEYS}) for m in range(1, 13)]
     open_receivables = ZERO
-    for inv in store.list("invoices"):
-        if inv.get("status") in ("draft", "cancelled"):
+    from permita38.core.service import invoice_state  # derived status/paid date of an issued invoice (spec 2.3)
+
+    pay_rows = invoice_state.group_by(store.list("payments"), "document_id")
+    invoices = store.list("invoices")
+    notes = invoice_state.group_by(invoice_state.credit_notes_of(invoices), "corrects_id")
+    for inv in invoices:
+        if inv.get("status") == "draft" or inv.get("kind") == "credit_note":
             continue
         t = doc_totals(dict(inv), s)
-        when = d(inv.get("date")) if accrual else d(inv.get("paid_date"))
-        if inv.get("status") != "paid" and not accrual:
+        st = invoice_state.derive(
+            inv, int(dec(t["gross"]) * 100), pay_rows.get(inv["id"], []), notes.get(inv["id"], [])
+        )
+        if st.status == "cancelled" or inv.get("status") == "cancelled":
+            continue
+        paid = st.status == "paid"
+        when = d(inv.get("date")) if accrual else d(st.paid_date)
+        if not paid and not accrual:
             open_receivables += dec(t["gross"])
             continue
-        if inv.get("status") != "paid":
+        if not paid:
             open_receivables += dec(t["gross"])
         if when and when.year == year:
             m = months[when.month - 1]
