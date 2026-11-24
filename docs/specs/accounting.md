@@ -400,7 +400,8 @@ arose in that period by law.
 
 Changing an expense: the service posts reversals of its current bill and payment entries (`reverses_id`) and new ones
 with revision `r+1`; deleting posts the reversals only. Both are refused (409 "the period is locked; book a
-correction") when an entry to be reversed has its booking date in a locked month.
+correction") when a **bill** entry to be reversed has its booking date in a locked month; payment entries carry no
+VAT line and may be reversed and reposted into the first open month (above).
 
 ### 9.5 Trips
 
@@ -467,7 +468,7 @@ postings start only after initialisation (section 16).
   is not closed (section 7.8; manual year-end entries such as depreciation, accruals and provisions use it too). A late document is **not refused**: its entry is booked on
   the first day of the first unlocked month (section 7.8), so bills, payments and `paid_on` dates of a filed month can
   still be entered. Reversing an entry whose booking date is in a locked month is refused (409); corrections are new
-  entries. Invoices and credit notes are issued with a date in an open month (a back-dated issue into a locked month
+  entries — except the payment entry of an expense or trip, which carries no VAT line (9.4). Invoices and credit notes are issued with a date in an open month (a back-dated issue into a locked month
   is refused, 409); the importer follows the same rules.
 * `vat_date` in a locked month — the **allowed drift cases** (automatic postings only; manual entries never):
   1. a Soll issue whose performance date lies in a locked month (an invoice written after the return);
