@@ -79,6 +79,14 @@ def sample(table: Table, i: int = 0) -> dict:
         rec.update(method="bank", kind="payment")
     elif table.name == "period_locks":
         rec.update(month=5, reason="manual")
+    elif table.name == "invoices":  # the guards of migration accounting_documents
+        rec.update(kind="invoice", credit_kind="storno", tax_treatment="standard")
+    elif table.name == "expenses":
+        rec.update(tax_treatment="standard")
+    elif table.name in ("vat_returns", "zm_reports"):
+        rec.update(status="draft", amends_key=rec["amends_id"])  # amends_key = COALESCE(amends_id, '')
+        if table.name == "vat_returns":
+            rec.update(period_kind="month", basis="soll", frequency="month")
     return rec
 
 
@@ -109,8 +117,10 @@ def seed_references(repo, table: Table, rec: dict) -> None:
         if g.table == table.name and g.kind == "reference" and rec.get(g.columns[0]) is not None:
             if repo.get(g.target, rec[g.columns[0]]) is None:
                 target = {"id": rec[g.columns[0]], "name": "Demo"}
-                if g.target in ("journal_entries", "payments"):  # accounting rows have required fields
+                if g.target in ("journal_entries", "payments", "vat_returns", "zm_reports"):  # required fields
                     target = {**sample(TABLES[g.target]), "id": rec[g.columns[0]]}
+                    if g.target in ("vat_returns", "zm_reports"):  # the referenced return amends nothing itself
+                        target.update(amends_id=None, replaced_by=None, amends_key="")
                 if g.target == "projects":
                     target.update(kind="internal", status="active")  # an internal project needs no customer
                 repo.save(g.target, target)

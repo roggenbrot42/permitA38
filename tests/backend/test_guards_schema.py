@@ -30,6 +30,18 @@ def repo(tmp_path):
 
 
 ACCOUNTING_TABLES = ("fiscal_years", "journal_entries", "journal_lines", "payments", "period_locks")
+DOCUMENT_COLUMNS = {  # the columns and tables of migration accounting_documents
+    "invoices": ("kind", "credit_kind", "corrects_id", "tax_treatment"),
+    "expenses": ("tax_treatment", "service_date", "bill_rev", "pay_rev"),
+    "trips": ("post_rev",),
+}
+DOCUMENT_TABLES = ("vat_returns", "zm_reports")
+
+
+def is_document_guard(g) -> bool:
+    return g.table in DOCUMENT_TABLES or any(c in DOCUMENT_COLUMNS.get(g.table, ()) for c in g.columns)
+
+
 GUARD_MIGRATIONS = ("guards", "project_planning")  # the migrations that create guards
 
 
@@ -79,7 +91,7 @@ def test_guard_declarations_are_well_formed():
         else:
             assert g.target is None, g.name
     # trips start/end are local datetimes: only the order guard (plus the project reference)
-    assert [g.kind for g in GUARDS if g.table == "trips"] == ["order", "reference"]
+    assert [g.kind for g in GUARDS if g.table == "trips"] == ["order", "reference", "range"]
     assert CHECKS["allocations"][0] == "allocations_one_owner"
 
 
@@ -114,7 +126,13 @@ def test_sqlite_migration_file_is_exactly_the_generated_statements(tmp_path):
     v1 = "".join(m.sql() for m in CHAIN if m.name in GUARD_MIGRATIONS)
     refs = next(m for m in CHAIN if m.name == "reference_guards").sql()
     acc = next(m for m in CHAIN if m.name == "accounting_journal").sql()
-    old = [g for g in GUARDS if g.table not in ACCOUNTING_TABLES]
+    docs = next(m for m in CHAIN if m.name == "accounting_documents").sql()
+    old = [g for g in GUARDS if g.table not in ACCOUNTING_TABLES and not is_document_guard(g)]
+    for g in GUARDS:
+        if is_document_guard(g):  # the document and return guards live in migration accounting_documents only
+            for s in d.guard_sql(g):
+                assert s in docs and s not in acc and s not in v1 and s not in refs
+    assert docs.count("CREATE TRIGGER") == sum(len(d.guard_sql(g)) for g in GUARDS if is_document_guard(g))
     for g in GUARDS:  # the accounting guards (all kinds) live in migration accounting_journal only
         if g.table in ACCOUNTING_TABLES:
             for s in d.guard_sql(g):
@@ -139,7 +157,12 @@ def test_native_dialects_cover_every_guard(dialect):
     sql = "".join(m.sql() for m in migrations if m.name in GUARD_MIGRATIONS)
     ref_sql = next(m for m in migrations if m.name == "reference_guards").sql()
     acc_sql = next(m for m in migrations if m.name == "accounting_journal").sql()
+    doc_sql = next(m for m in migrations if m.name == "accounting_documents").sql()
     for g in GUARDS:
+        if is_document_guard(g):
+            for s in d.guard_sql(g):
+                assert s in doc_sql and s not in acc_sql and s not in sql and s not in ref_sql
+            continue
         if g.table in ACCOUNTING_TABLES:
             for s in d.guard_sql(g):
                 assert s in acc_sql and s not in sql and s not in ref_sql
@@ -459,7 +482,13 @@ def test_migration_does_not_change_old_rows(old_db):
     repo.startup()
     after = {t: repo.conn.execute(f'SELECT * FROM "{t}" ORDER BY id').fetchall() for t in before}
     repo.close()
-    assert after == before
+    for (
+        t,
+        rows,
+    ) in before.items():  # later migrations append nullable columns: compare the old columns, new ones are NULL
+        width = len(rows[0]) if rows else 0
+        assert [r[:width] for r in after[t]] == rows
+        assert all(v is None for r in after[t] for v in r[width:])
     assert sum(len(v) for v in before.values()) == 4
 
 

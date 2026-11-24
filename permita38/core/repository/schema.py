@@ -86,10 +86,10 @@ _DOCUMENT = (
 )
 
 
-def _document_table(name: str) -> Table:
+def _document_table(name: str, more: str = "") -> Table:
     return Table(
         name,
-        _cols(_BASE + _DOCUMENT + _EXTRA),
+        _cols(_BASE + _DOCUMENT + more + _EXTRA),
         (
             Index(f"idx_{name}_status", ("status",)),
             Index(f"idx_{name}_customer", ("customer_id",)),
@@ -153,14 +153,15 @@ TABLES: dict[str, Table] = {
             (Index("idx_plan_scenarios_user", ("user_id",)),),
         ),
         _document_table("offers"),
-        _document_table("invoices"),
+        # accounting columns (docs/specs/accounting.md section 8.2), all nullable: NULL reads as the spec default
+        _document_table("invoices", " kind:str credit_kind:str corrects_id:id tax_treatment:str issued:json"),
         Table(
             "expenses",
             _cols(
                 _BASE + "date:str net:float vat:float vat_rate:float vendor:str description:text category:str "
                 "project_id:id deductible:float attachment:str vat_deductible:float external_id:str import_batch:str lines:json "
-                "trip_id:id trip_item_id:id supplier_id:id allocation_id:id reverse_charge:bool paid_on:str invoice_no:str"
-                + _EXTRA
+                "trip_id:id trip_item_id:id supplier_id:id allocation_id:id reverse_charge:bool paid_on:str invoice_no:str "
+                "tax_treatment:str service_date:str bill_rev:int pay_rev:int" + _EXTRA
             ),
             (
                 Index("idx_expenses_date", ("date",)),
@@ -201,7 +202,7 @@ TABLES: dict[str, Table] = {
             _cols(
                 _BASE + "user_id:id title:str purpose:text customer_id:id project_id:id start:str end:str "
                 "places:json meals_provided:json mileage:json not_needed:json cost_centre:str status:str allowance_total:float "
-                "mileage_km:float mileage_total:float rules_version:str days:json" + _EXTRA
+                "mileage_km:float mileage_total:float rules_version:str days:json post_rev:int" + _EXTRA
             ),
             (Index("idx_trips_user", ("user_id",)), Index("idx_trips_project", ("project_id",))),
         ),
@@ -378,6 +379,28 @@ TABLES: dict[str, Table] = {
             "period_locks",
             _cols(_BASE + "year:int month:int locked_at:int locked_by:id reason:str" + _EXTRA),
             (Index("idx_period_locks_year_month", ("year", "month"), unique=True),),
+        ),
+        # VAT returns and ZM reports (docs/specs/ustva.md "Data model", zm.md "Records, status, drift"): internal.
+        # `amends_key` = COALESCE(amends_id, '') carries the unique index (a CHECK keeps it equal, see CHECKS)
+        Table(
+            "vat_returns",
+            _cols(
+                _BASE + "year:int period_kind:str period_no:int from_date:str to_date:str due_date:str status:str "
+                "basis:str frequency:str dauerfrist:bool small_business:bool rules_version:str boxes:json "
+                "source_lines:json result:str special_prepayment_credit:str rounding_difference:str filed_on:str "
+                "reference:str note:text amends_id:id amends_key:str replaced_by:id external:bool finalised_at:int "
+                "finalised_by:id" + _EXTRA
+            ),
+            (Index("idx_vat_returns_period", ("year", "period_kind", "period_no", "amends_key"), unique=True),),
+        ),
+        Table(
+            "zm_reports",
+            _cols(
+                _BASE + "year:int quarter:int status:str due_date:str lines:json source_lines:json rules_version:str "
+                "filed_on:str reference:str note:text amends_id:id amends_key:str replaced_by:id finalised_at:int "
+                "finalised_by:id" + _EXTRA
+            ),
+            (Index("idx_zm_reports_quarter", ("year", "quarter", "amends_key"), unique=True),),
         ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
@@ -648,7 +671,7 @@ _DATE_COLUMNS: dict[str, tuple[str, ...]] = {
     "entries": ("date",),
     "invoices": ("date", "due_date", "valid_until", "paid_date", "service_from", "service_to"),
     "offers": ("date", "due_date", "valid_until", "paid_date", "service_from", "service_to"),
-    "expenses": ("date", "paid_on"),
+    "expenses": ("date", "paid_on", "service_date"),
     "absences": ("start", "end"),
     "contracts": ("start", "end"),
     "projects": ("start", "end"),
@@ -706,6 +729,7 @@ def _build_guards() -> tuple[Guard, ...]:
     out += [Guard(f"guard_{t}_{c}_ref", t, "reference", (c,), "ref.dangling", target=g) for t, c, g in _REFERENCES]
     out += _planning_guards()  # migration 0018-project_planning, after 0017-reference_guards
     out += _accounting_guards()  # migration 0019-accounting_journal
+    out += _accounting_document_guards()  # migration 0020-accounting_documents
     return tuple(out)
 
 
@@ -793,6 +817,60 @@ def _accounting_guards() -> list[Guard]:
     return out
 
 
+def _accounting_document_guards() -> list[Guard]:
+    """Guards of migration accounting_documents (docs/specs/accounting.md section 8.1 and 8.2)."""
+    from permita38.core.accounting.postings_expense import ExpenseTreatment
+    from permita38.core.accounting.types import CreditKind, Treatment, VatBasis
+
+    def required(table: str, *cols: str) -> list[Guard]:
+        return [Guard(f"guard_{table}_{c}_required", table, "required", (c,), "state.required") for c in cols]
+
+    def dates(table: str, *cols: str) -> list[Guard]:
+        return [Guard(f"guard_{table}_{c}_date", table, "date", (c,), "format.date") for c in cols]
+
+    def one_of(table: str, col: str, values: tuple[str, ...]) -> Guard:
+        return Guard(f"guard_{table}_{col}_one_of", table, "one_of", (col,), "vocab.unknown", values=values)
+
+    def bounds(table: str, col: str, lo: int, hi: int | None = None) -> Guard:
+        return Guard(f"guard_{table}_{col}_range", table, "range", (col,), "range.bounds", lo=lo, hi=hi)
+
+    def ref(table: str, col: str, target: str) -> Guard:
+        return Guard(f"guard_{table}_{col}_ref", table, "reference", (col,), "ref.dangling", target=target)
+
+    out: list[Guard] = [
+        one_of("invoices", "kind", ("invoice", "credit_note")),
+        one_of("invoices", "credit_kind", get_args(CreditKind)),
+        one_of("invoices", "tax_treatment", get_args(Treatment)),  # the reserved treatments are refused
+        ref("invoices", "corrects_id", "invoices"),
+        one_of("expenses", "tax_treatment", get_args(ExpenseTreatment)),
+        bounds("expenses", "bill_rev", 0),
+        bounds("expenses", "pay_rev", 0),
+        bounds("trips", "post_rev", 0),
+    ]
+    out += required("vat_returns", "year", "period_kind", "period_no", "from_date", "to_date", "due_date", "status")
+    out += dates("vat_returns", "from_date", "to_date", "due_date", "filed_on")
+    out += [
+        one_of("vat_returns", "period_kind", ("month", "quarter")),
+        one_of("vat_returns", "status", ("draft", "final")),
+        one_of("vat_returns", "basis", get_args(VatBasis)),
+        one_of("vat_returns", "frequency", ("month", "quarter", "none")),
+        bounds("vat_returns", "year", 2000, 2100),
+        bounds("vat_returns", "period_no", 1, 12),
+        ref("vat_returns", "amends_id", "vat_returns"),
+        ref("vat_returns", "replaced_by", "vat_returns"),
+    ]
+    out += required("zm_reports", "year", "quarter", "status", "due_date")
+    out += dates("zm_reports", "due_date", "filed_on")
+    out += [
+        one_of("zm_reports", "status", ("draft", "final")),
+        bounds("zm_reports", "year", 2000, 2100),
+        bounds("zm_reports", "quarter", 1, 4),
+        ref("zm_reports", "amends_id", "zm_reports"),
+        ref("zm_reports", "replaced_by", "zm_reports"),
+    ]
+    return out
+
+
 def _model_literal(model: Any, field_name: str) -> Any:
     """The `Literal` of a pydantic field (a `Literal | None` is unwrapped), so a vocabulary is never typed twice."""
     ann = model.model_fields[field_name].annotation
@@ -873,6 +951,11 @@ CHECKS = {
         '("user_id" IS NOT NULL AND "supplier_id" IS NULL) OR ("user_id" IS NULL AND "supplier_id" IS NOT NULL)',
     ),
     "payments": ("payments_amount_nonzero", '"amount_cents" <> 0'),
+    "vat_returns": (
+        "vat_returns_amends_key",
+        '"amends_key" IS NOT NULL AND "amends_key" = COALESCE("amends_id", \'\')',
+    ),
+    "zm_reports": ("zm_reports_amends_key", '"amends_key" IS NOT NULL AND "amends_key" = COALESCE("amends_id", \'\')'),
     "period_locks": (
         "period_locks_reason_vocab",
         "\"reason\" IN ('manual', 'year_close') OR \"reason\" LIKE 'vat_return:%'",
@@ -898,6 +981,8 @@ INTERNAL_COLLECTIONS = [
     "journal_lines",
     "payments",
     "period_locks",
+    "vat_returns",
+    "zm_reports",
 ]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]
