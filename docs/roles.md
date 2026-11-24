@@ -75,6 +75,8 @@ Notes
 * **Accounting and VAT** (`specs/accounting.md` 17): the accountant has full bookkeeping rights (`accounting` and `vat`
   read and write), the employee none. Recording a payment, reversing one, settling with a cash discount and issuing a
   credit note on an invoice need write access on `invoices` **or** `accounting` (so the accountant may do them).
+  The declared-rights table lists these routes as `accounting` write; that is an approximation, the real rule is
+  `invoices` write or `accounting` write (also for `POST /api/invoices/{id}/payments/legacy/reverse`).
   Initialising accounting (`POST /api/accounting/init`) and closing a fiscal year
   (`POST /api/accounting/years/{year}/close`) are boss only. API tokens read `accounting` and `vat` with the rights of
   their owner, but every route that changes them (including payments and credit notes) is session only: a token,

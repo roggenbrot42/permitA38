@@ -345,6 +345,7 @@ NEW_ROUTES: list[tuple[str, str, str, str, bool, dict | None, str]] = [
     ("GET", "/api/invoices/{rid}/payments", "invoices", "read", False, None, ""),
     ("POST", "/api/invoices/{rid}/payments", "accounting", "write", False, _PAY, ""),
     ("POST", "/api/payments/{payment_id}/reverse", "accounting", "write", False, {}, ""),
+    ("POST", "/api/invoices/{rid}/payments/legacy/reverse", "accounting", "write", False, {}, ""),
     ("POST", "/api/invoices/{rid}/settle-discount", "accounting", "write", False, _DISCOUNT, ""),
     ("GET", "/api/invoices/{rid}/credit-notes", "invoices", "read", False, None, ""),
     ("POST", "/api/invoices/{rid}/credit-notes", "accounting", "write", False, _CREDIT, ""),
@@ -450,7 +451,7 @@ def test_every_route_is_denied_exactly_where_the_matrix_says(app, clients):
 
 
 NEW_PREFIXES = ("/api/accounting", "/api/vat", "/api/zm", "/api/payments")
-NEW_INVOICE_SUFFIXES = ("/payments", "/credit-notes", "/settle-discount")
+NEW_INVOICE_SUFFIXES = ("/payments", "/credit-notes", "/settle-discount", "/payments/legacy/reverse")
 
 
 def test_new_routes_are_exactly_the_documented_ones(app):
@@ -460,7 +461,7 @@ def test_new_routes_are_exactly_the_documented_ones(app):
         if path.startswith(NEW_PREFIXES) or (path.startswith("/api/invoices/{") and path.endswith(NEW_INVOICE_SUFFIXES))
     }
     assert found == {(m, p) for m, p, *_ in NEW_ROUTES}
-    assert len(NEW_ROUTES) == 51
+    assert len(NEW_ROUTES) == 52
 
 
 def test_boss_only_routes_are_exactly_init_and_close_year(app):
@@ -506,15 +507,22 @@ def test_api_tokens_read_accounting_and_vat_but_never_write_them(app, clients):
                     assert got.status_code == (403 if role == "employee" else 501), (role, read_only, method, path)
 
 
+PAYMENT_DEP_PATHS = {
+    "/api/invoices/{rid}/payments",
+    "/api/invoices/{rid}/credit-notes",
+    "/api/invoices/{rid}/payments/legacy/reverse",
+}
+
+
 def test_payment_dependency_is_the_either_or_rule(app):
     """`invoices` write OR `accounting` write: the roles that pass are the union of both."""
     deps = {}
     for m, route, path in _routes(app):
-        if m == "POST" and path in ("/api/invoices/{rid}/payments", "/api/invoices/{rid}/credit-notes"):
+        if m == "POST" and path in PAYMENT_DEP_PATHS:
             for d in route.dependant.dependencies:
                 if hasattr(d.call, "rbac_any"):
                     deps[path] = d.call
-    assert set(deps) == {"/api/invoices/{rid}/payments", "/api/invoices/{rid}/credit-notes"}
+    assert set(deps) == PAYMENT_DEP_PATHS
     for fn in deps.values():
         assert fn.rbac_any == (("invoices", "write"), ("accounting", "write"))
         assert rights.PAYMENT_WRITE_AREAS == ("invoices", "accounting")
@@ -527,6 +535,38 @@ def test_payment_dependency_is_the_either_or_rule(app):
                 with pytest.raises(HTTPException) as err:
                     fn({"role": role})
                 assert err.value.status_code == 403
+
+
+PAYMENT_WRITE_ROUTES = [
+    ("POST", "/api/invoices/{rid}/payments", _PAY),
+    ("POST", "/api/payments/{payment_id}/reverse", {}),
+    ("POST", "/api/invoices/{rid}/payments/legacy/reverse", {}),
+    ("POST", "/api/invoices/{rid}/settle-discount", _DISCOUNT),
+    ("POST", "/api/invoices/{rid}/credit-notes", _CREDIT),
+]
+
+
+def test_payment_routes_follow_invoices_or_accounting_write(app, clients, monkeypatch):
+    """With a patched matrix one role has ONLY `invoices` write, another ONLY `accounting` write: both pass the
+    payment and credit-note routes; a role with neither is refused (fails if the dependency checked one area)."""
+    none = (rights.Scope.NONE, rights.Scope.NONE)
+    full = (rights.Scope.ALL, rights.Scope.ALL)
+    base = rights.MATRIX["employee"]
+    rows = {
+        "employee": {**base, "invoices": full, "accounting": none},  # only invoices write
+        "accountant": {**rights.MATRIX["accountant"], "invoices": none, "accounting": full},  # only accounting write
+    }
+    monkeypatch.setattr(rights, "MATRIX", {**rights.MATRIX, **rows})
+    for method, path, body in PAYMENT_WRITE_ROUTES:
+        for who in ("employee", "accountant"):
+            r = _call(clients[who], method, path, body, "")
+            assert r.status_code == 501, (who, method, path, r.status_code, r.text)
+    # neither right: the employee row without invoices and accounting write is refused, the accountant still passes
+    monkeypatch.setitem(rights.MATRIX, "employee", {**base, "invoices": none, "accounting": none})
+    for method, path, body in PAYMENT_WRITE_ROUTES:
+        r = _call(clients["employee"], method, path, body, "")
+        assert r.status_code == 403, (method, path, r.status_code, r.text)
+        assert _call(clients["accountant"], method, path, body, "").status_code == 501
 
 
 def test_accounting_and_vat_matrix_cells():

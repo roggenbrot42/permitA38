@@ -179,6 +179,17 @@ def reverse_payment(payment_id: str, body: models.PaymentReverseIn, user: Paymen
     not_implemented()
 
 
+@payments_router.post(
+    "/invoices/{rid}/payments/legacy/reverse",
+    status_code=201,
+    dependencies=[SessionOnly],
+    name="reverse_legacy_payment",
+)
+def reverse_legacy_payment(rid: str, body: models.PaymentReverseIn, user: PaymentWrite, services: ServicesDep):
+    """Reverse the virtual payment of a legacy paid invoice (credit-notes-payments.md 2.3)."""
+    not_implemented()
+
+
 @payments_router.post("/invoices/{rid}/settle-discount", dependencies=[SessionOnly], name="settle_discount")
 def settle_discount(rid: str, body: models.SettleDiscountIn, user: PaymentWrite, services: ServicesDep):
     not_implemented()

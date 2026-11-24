@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from permita38.api.routers.accounting import NOT_IMPLEMENTED
 from permita38.api.server import get_app
 from permita38.core.config import Config
 
@@ -254,7 +255,13 @@ class Gen:
 def check_response(r, method, url, who, has_traversal, world, sent=""):
     sent = sent if isinstance(sent, str) else sent.decode("utf-8", "replace")
     body = r.text
-    assert r.status_code < 500, f"{who} {method} {url} -> {r.status_code}: {body[:300]}  sent={sent[:400]!r}"
+    skeleton = r.status_code == 501 and r.headers.get("content-type", "").startswith("application/json")
+    skeleton = skeleton and r.json() == {
+        "detail": NOT_IMPLEMENTED
+    }  # only the accounting/VAT skeleton routes raise this
+    assert r.status_code < 500 or skeleton, (
+        f"{who} {method} {url} -> {r.status_code}: {body[:300]}  sent={sent[:400]!r}"
+    )
     assert "Traceback (most recent call last)" not in body and 'File "/' not in body, body[:300]
     assert world.canary not in body, f"{who} {method} {url} leaked a file outside the data folder"
     if r.status_code >= 400:
