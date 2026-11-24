@@ -744,3 +744,28 @@ def test_next_number_counts_per_key_and_rolls_back_with_the_transaction(repo):
             assert repo.next_number("journal", "2026") == 4
             raise RuntimeError("boom")
     assert repo.next_number("journal", "2026") == 4  # the failed attempt left no gap
+
+
+def _vat_line(no: int, vat_date: str | None) -> dict:
+    ln: dict = {"line_no": no, "account": "1200", "amount_cents": 100 if no == 1 else -100}
+    if vat_date:
+        ln.update(
+            role="revenue_s19", tax_key="S19", tax_kind="tax", tax_rate="19", tax_base_cents=500, vat_date=vat_date
+        )
+    return ln
+
+
+def test_journal_lines_by_vat_date_selects_by_period_with_entry_fields(repo):
+    repo.insert_journal_entry(_entry(2026, 1, "k:1", "2026-03-05"), [_vat_line(1, None), _vat_line(2, "2026-02-20")])
+    e2 = repo.insert_journal_entry(
+        _entry(2026, 2, "k:2", "2026-02-05"), [_vat_line(1, "2026-02-28"), _vat_line(2, "2026-03-01")]
+    )
+    repo.insert_journal_entry(_entry(2026, 3, "k:3", "2026-02-06"), [_vat_line(1, None), _vat_line(2, None)])
+    got = repo.journal_lines_by_vat_date("2026-02-01", "2026-02-28")  # inclusive bounds
+    assert [(ln["entry_no"], ln["line_no"], ln["vat_date"]) for ln in got] == [
+        (1, 2, "2026-02-20"),
+        (2, 1, "2026-02-28"),
+    ]
+    assert got[0]["booking_date"] == "2026-03-05"  # the vat_date differs from the entry's booking date
+    assert got[1]["entry_id"] == e2["id"] and got[1]["entry_created_at"] == 1 and got[1]["fiscal_year"] == 2026
+    assert repo.journal_lines_by_vat_date("2027-01-01", "2027-12-31") == []

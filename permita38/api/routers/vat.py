@@ -1,4 +1,4 @@
-"""VAT return (UStVA) and ZM routes (docs/specs/ustva.md and zm.md "API"): skeletons.
+"""VAT return (UStVA) and ZM routes (docs/specs/ustva.md and zm.md "API"): partly implemented (UStVA records); the rest answers 501.
 
 Area `vat`: boss and accountant read and write, employee nothing. Handlers answer 501 until the service work packages
 land. Every route that changes something is ``SessionOnly``: no write to `vat` through API tokens in v1.
@@ -6,11 +6,12 @@ land. Every route that changes something is ``SessionOnly``: no write to `vat` t
 
 from typing import Annotated
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Response
 
 from permita38.api.deps import Needs, ServicesDep, SessionOnly
 from permita38.api.routers.accounting import not_implemented
 from permita38.core import models
+from permita38.core.service.vat_returns import VatReturnListItem
 from permita38.core.validation import VatPeriodKind
 
 returns = APIRouter(prefix="/vat-returns", tags=["vat"])
@@ -24,51 +25,56 @@ Year = Annotated[int, Query(ge=2000, le=2100)]
 
 
 # ------------------------------------------------------------------ UStVA
-@returns.get("", name="list_vat_returns")
+@returns.get("", name="list_vat_returns", response_model=list[VatReturnListItem])
 def list_returns(year: Year, user: Read, services: ServicesDep):
-    not_implemented()
+    return services.vat_returns.list(year)
 
 
-@returns.get("/preview", name="preview_vat_return")
+@returns.get("/preview", name="preview_vat_return", response_model=models.VatReturn)
 def preview_return(
     year: Year, kind: VatPeriodKind, no: Annotated[int, Query(ge=1, le=12)], user: Read, services: ServicesDep
 ):
-    not_implemented()
+    return models.VatReturn(**services.vat_returns.preview(year, kind, no))
 
 
-@returns.post("", status_code=201, dependencies=[SessionOnly], name="create_vat_return")
+@returns.post(
+    "", status_code=201, dependencies=[SessionOnly], name="create_vat_return", response_model=models.VatReturn
+)
 def create_return(body: models.VatReturnCreateIn, user: Write, services: ServicesDep):
-    not_implemented()
+    return models.VatReturn(**services.vat_returns.create_draft(body.year, body.kind, body.no, body.amends_id))
 
 
-@returns.get("/{rid}", name="get_vat_return")
+@returns.get("/{rid}", name="get_vat_return", response_model=models.VatReturn)
 def get_return(rid: str, user: Read, services: ServicesDep):
-    not_implemented()
+    return models.VatReturn(**services.vat_returns.get(rid))
 
 
-@returns.post("/{rid}/finalize", dependencies=[SessionOnly], name="finalize_vat_return")
-def finalize_return(rid: str, user: Write, services: ServicesDep):
-    not_implemented()
+@returns.post(
+    "/{rid}/finalize", dependencies=[SessionOnly], name="finalize_vat_return", response_model=models.VatReturn
+)
+def finalize_return(rid: str, user: Write, services: ServicesDep, confirm_gap: Annotated[bool, Query()] = False):
+    return models.VatReturn(**services.vat_returns.finalize(rid, user, confirm_gap))
 
 
-@returns.post("/{rid}/reopen", dependencies=[SessionOnly], name="reopen_vat_return")
+@returns.post("/{rid}/reopen", dependencies=[SessionOnly], name="reopen_vat_return", response_model=models.VatReturn)
 def reopen_return(rid: str, user: Write, services: ServicesDep):
-    not_implemented()
+    return models.VatReturn(**services.vat_returns.reopen(rid))
 
 
-@returns.post("/{rid}/filed", dependencies=[SessionOnly], name="mark_vat_return_filed")
+@returns.post("/{rid}/filed", dependencies=[SessionOnly], name="mark_vat_return_filed", response_model=models.VatReturn)
 def filed_return(rid: str, body: models.VatReturnFiledIn, user: Write, services: ServicesDep):
-    not_implemented()
+    return models.VatReturn(**services.vat_returns.filed(rid, body.filed_on, body.reference, body.note))
 
 
-@returns.delete("/{rid}", dependencies=[SessionOnly], name="delete_vat_return")
+@returns.delete("/{rid}", status_code=204, dependencies=[SessionOnly], name="delete_vat_return")
 def delete_return(rid: str, user: Write, services: ServicesDep):
-    not_implemented()
+    services.vat_returns.delete(rid)
+    return Response(status_code=204)
 
 
 @returns.get("/{rid}/boxes/{kz}", name="get_vat_return_box")
 def box_lines(rid: str, kz: str, user: Read, services: ServicesDep):
-    not_implemented()
+    return services.vat_returns.lines(rid, kz)
 
 
 @returns.post("/{rid}/payment", status_code=201, dependencies=[SessionOnly], name="pay_vat_return")

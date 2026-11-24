@@ -140,6 +140,13 @@ class Repository(ABC):
         """Entries with their ``lines``, ordered by ``(fiscal_year, entry_no)``; ``date_from`` / ``date_to`` (ISO
         dates, inclusive) filter on ``booking_date``. Paged with ``limit`` / ``offset``."""
 
+    @abstractmethod
+    def journal_lines_by_vat_date(self, date_from: str, date_to: str) -> RecordList:
+        """Journal lines whose ``vat_date`` lies in ``[date_from, date_to]`` (ISO dates, inclusive; uses the
+        ``vat_date`` index), ordered by ``(fiscal_year, entry_no, line_no)`` of their entry. Each line carries the
+        fields of its entry that readers need: ``entry_id``, ``entry_no``, ``fiscal_year``, ``booking_date``,
+        ``source_number`` and ``entry_created_at`` (the entry's ``created_at``)."""
+
     def next_number(self, doc_type: str, period: str) -> int:
         """Take the next value of the counter ``(doc_type, period)`` in ``number_sequences`` (first value 1).
         Call inside ``transaction()``: the counter then rolls back with the record it numbers (gapless). The row id
