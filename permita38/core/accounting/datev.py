@@ -9,6 +9,7 @@ per account, so the result can be compared with :func:`journal_balances`.
 Row orientation: ``konto`` is the debited account and the flag is ``S`` (the spec examples), amounts are > 0.
 """
 
+import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -20,7 +21,6 @@ from permita38.core.charts import Chart, Role
 from permita38.core.datev import DatevRules
 
 __all__ = [
-    "DEFAULT_VAT_RATES",
     "DatevBatchError",
     "DatevRow",
     "KnownDifference",
@@ -30,13 +30,6 @@ __all__ = [
     "known_differences",
     "simulate",
 ]
-
-DEFAULT_VAT_RATES: Mapping[str, Decimal] = {
-    "S19": Decimal(19),
-    "S7": Decimal(7),
-    "RC_EU_SVC": Decimal(19),
-    "RC_3C_SVC": Decimal(19),
-}
 
 Note = Literal["fallback", "transfer"]
 DifferenceKind = Literal["eur_clearing", "statistical", "fallback", "transfer"]
@@ -292,11 +285,14 @@ def _is_vat(line: Line) -> bool:
     return line.tax_kind in ("tax", "input") and line.tax_key in _VAT_KEYS
 
 
-def _rate_of(w: _Work) -> Decimal | None:
+def _rate_of(ctx: _Ctx, w: _Work) -> Decimal | None:
     if w.line.tax_rate is not None:
         return Decimal(w.line.tax_rate)
     if w.role.startswith("rc_"):
-        return Decimal(19)
+        rate = ctx.rates.get(w.line.tax_key or "")
+        if rate is None:
+            raise DatevBatchError(f"No VAT rate for reverse-charge key {w.line.tax_key!r}")
+        return rate
     return _ROLE_RATE.get(w.role.rsplit("_", 1)[-1])
 
 
@@ -335,8 +331,8 @@ def _pair_off(works: list[_Work], fold: bool, pairs: list[_Pair]) -> None:
             _take(debit, credit, pairs)
 
 
-def _group_key(w: _Work) -> tuple[str, Decimal | None]:
-    return (w.line.tax_key or "", _rate_of(w))
+def _group_key(ctx: _Ctx, w: _Work) -> tuple[str, Decimal | None]:
+    return (w.line.tax_key or "", _rate_of(ctx, w))
 
 
 def _fold(ctx: _Ctx, works: list[_Work]) -> tuple[bool, bool]:
@@ -366,7 +362,7 @@ def _fold(ctx: _Ctx, works: list[_Work]) -> tuple[bool, bool]:
                 c.rem = 0
     for ident, vats in groups.items():
         target = by_id[ident]
-        keys = {_group_key(v) for v in vats}
+        keys = {_group_key(ctx, v) for v in vats}
         if len(keys) != 1:
             return False, True
         tax_key, rate = next(iter(keys))
@@ -426,6 +422,13 @@ def _build(ctx: _Ctx, lines: Sequence[Line], fold: bool) -> _Build:
 # rows
 
 
+def _belegfeld1(event_key: str) -> str:
+    """Belegfeld 1 (36 characters): long keys keep a 27 character prefix plus a hash so entries stay distinct."""
+    if len(event_key) <= 36:
+        return event_key
+    return event_key[:27] + "~" + hashlib.sha256(event_key.encode()).hexdigest()[:8]
+
+
 def _to_rows(
     ctx: _Ctx, entry: Entry, pairs: Sequence[_Pair], festschreibung: bool, note: Note | None
 ) -> list[DatevRow]:
@@ -442,7 +445,7 @@ def _to_rows(
                 gegenkonto=p.credit,
                 bu_key=bu,
                 belegdatum=entry.booking_date.strftime("%d%m"),
-                belegfeld1=entry.event_key[:36],
+                belegfeld1=_belegfeld1(entry.event_key),
                 text=entry.event_key[:60],
                 festschreibung=festschreibung,
                 event_key=entry.event_key,
@@ -487,12 +490,12 @@ def entry_rows(
     entry: Entry,
     chart: Chart,
     datev_rules: DatevRules,
-    vat_rates: Mapping[str, Decimal] | None = None,
+    vat_rates: Mapping[str, Decimal],
     *,
     festschreibung: bool = False,
 ) -> list[DatevRow]:
     """DATEV rows of one journal entry (rules 1 to 6). The result always simulates to the entry's balances."""
-    ctx = _context(chart, datev_rules, DEFAULT_VAT_RATES if vat_rates is None else vat_rates)
+    ctx = _context(chart, datev_rules, vat_rates)
     lines = [ln for ln in entry.lines if ln.amount_cents != 0]
     if not lines:
         return []
@@ -526,7 +529,7 @@ def batch_rows(
     entries: Sequence[Entry],
     chart: Chart,
     datev_rules: DatevRules,
-    vat_rates: Mapping[str, Decimal] | None = None,
+    vat_rates: Mapping[str, Decimal],
     *,
     festschreibung: bool = False,
 ) -> list[DatevRow]:
