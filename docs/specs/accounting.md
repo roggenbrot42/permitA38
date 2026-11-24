@@ -833,7 +833,7 @@ maintainer's sign-off of these specs (PR #124).
 | E19 | xlsx importer: snapshot, `paid`→payment, `cancelled`→review, undo; scans of the invoices collection distinguish `kind = credit_note`; imported, overwritten and undone **expenses** go through the expense posting hook (no direct `store.save`), keeping `bill_rev`/`pay_rev` | F | E10 |
 | E20 | Stateful randomized model ×2 (freeze/payments; credit notes/locks) | F (test) | E12 |
 | E21 | Web `e2e_random` models | S | E12, W1 |
-| W1 | Read-only issued invoice, treatment select, payments panel | S | E10 |
+| W1 | Read-only issued invoice, treatment select, payments panel; overdue = `open_amount` > 0 and `due_date` < today (web/app.js, app2.js), never by status alone (a fully written-off invoice stays `sent` but is not overdue) | S | E10 |
 | W2 | Credit note / write-off / discount actions | S | W1, E12 |
 | W3 | Expense treatment + service date | S | E14 |
 | **M2c initialisation** | | | |
