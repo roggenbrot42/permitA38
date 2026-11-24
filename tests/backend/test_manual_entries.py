@@ -165,6 +165,20 @@ def test_reverse_keeps_income_date_across_the_year_boundary_while_the_year_is_op
     assert [ln.income_date for ln in rev.lines] == [None, "2026-12-10"]
 
 
+def test_accrual_reversal_into_another_year_books_income_on_the_booking_date(manual, repo):
+    repo.save("fiscal_years", {**fiscal_year(2027), "income_basis": "accrual"})
+    year = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**year, "income_basis": "accrual"})
+    lines = [
+        {"account": BANK, "amount": "10.00"},
+        {"account": REVENUE, "amount": "-10.00", "income_date": "2026-12-10"},
+    ]
+    orig = manual.post(entry_body(date="2026-12-10", lines=lines), USER)
+    rev = manual.reverse(orig.id, "2027-01-05", None, USER)
+    assert (rev.fiscal_year, rev.booking_date) == (2027, "2027-01-05")
+    assert [ln.income_date for ln in rev.lines] == [None, "2027-01-05"]
+
+
 def test_reverse_twice_and_reversing_a_reversal_are_409(manual):
     orig = manual.post(entry_body(), USER)
     rev = manual.reverse(orig.id, None, None, USER)

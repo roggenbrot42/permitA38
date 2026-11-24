@@ -139,8 +139,11 @@ class ManualEntryService:
             wanted = _date(str(income))
             rows = self.store.find("fiscal_years", year=wanted.year)
             closed = bool(rows) and rows[0].get("closed_at") is not None
-            # the original income date while its year is open, the booking date once it is closed (spec 9.8, 11)
-            income_date = booking if closed else wanted
+            # the original income date while its year is open, the booking date once it is closed; under accrual
+            # also when the reversal books into another fiscal year (an accrual line stays in its year, spec 9.8)
+            booked = self.store.find("fiscal_years", year=booking.year)
+            accrual = bool(booked) and booked[0].get("income_basis") == "accrual"
+            income_date = booking if closed or (accrual and wanted.year != booking.year) else wanted
         vat = None if not ln.get("vat_date") else _date(str(ln["vat_date"]))
         first_open = first_unlocked_from(self.store.list("period_locks"))
         if vat is not None and first_open is not None and vat < first_open:
