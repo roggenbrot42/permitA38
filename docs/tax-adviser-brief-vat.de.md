@@ -120,6 +120,9 @@ Antwort:
 Forderungen, Verbindlichkeiten, Verrechnungskonten für die EÜR), Automatikkonten, BU-Schlüssel inkl. § 13b, BU 40 zum
 Aufheben der Automatik, Sammelkonten statt Personenkonten, ein Buchungsstapel je Wirtschaftsjahr. Welche Konten und
 Schlüssel erwarten Sie? **Bitte importieren Sie einen Test-Export in DATEV**, bevor wir die Version freigeben.
+Beim Import bitte auch prüfen: die Spaltenbezeichnungen der Formatversion 13 (die Positionen sind gegen öffentliche
+Beispieldateien geprüft, die Namen nicht), das Herkunft-Kennzeichen im Kopfsatz (Feld 8, derzeit leer) und das
+Festschreibungskennzeichen.
 Antwort:
 
 **TA-45 GoBD.** Das Journal ist unveränderlich (nur Gegenbuchungen, Hash-Kette). Mit dem Abschluss einer
