@@ -22299,6 +22299,51 @@
             "type": "number",
             "title": "Customer Dominance Percent",
             "default": 83
+          },
+          "datev_consultant_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datev Consultant No"
+          },
+          "datev_client_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datev Client No"
+          },
+          "datev_account_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Datev Account Length",
+            "default": 4
+          },
+          "datev_label": {
+            "type": "string",
+            "title": "Datev Label",
+            "default": ""
           }
         },
         "additionalProperties": true,
@@ -22555,6 +22600,45 @@
             "title": "Customer Dominance Percent",
             "default": 83
           },
+          "datev_consultant_no": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 9999999.0,
+                "minimum": 1001.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datev Consultant No"
+          },
+          "datev_client_no": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 99999.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datev Client No"
+          },
+          "datev_account_length": {
+            "type": "integer",
+            "maximum": 8.0,
+            "minimum": 4.0,
+            "title": "Datev Account Length",
+            "default": 4
+          },
+          "datev_label": {
+            "type": "string",
+            "maxLength": 30,
+            "title": "Datev Label",
+            "default": ""
+          },
           "team_timeline_visibility": {
             "$ref": "#/components/schemas/TeamTimelineVisibilityIn",
             "default": {
@@ -22749,6 +22833,51 @@
             "type": "number",
             "title": "Customer Dominance Percent",
             "default": 83
+          },
+          "datev_consultant_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datev Consultant No"
+          },
+          "datev_client_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datev Client No"
+          },
+          "datev_account_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Datev Account Length",
+            "default": 4
+          },
+          "datev_label": {
+            "type": "string",
+            "title": "Datev Label",
+            "default": ""
           },
           "sanity_warnings": {
             "anyOf": [

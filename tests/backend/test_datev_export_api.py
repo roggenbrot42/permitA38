@@ -7,7 +7,9 @@ meals_deductible 9036, meals_nondeductible 9037.
 import io
 import shutil
 import zipfile
+from dataclasses import replace
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -244,3 +246,180 @@ def test_rights_per_role_and_token(app, boss_client, store):
     api.headers["Authorization"] = f"Bearer {tok.json()['token']}"
     assert api.get(URL, params=RANGE).status_code == 200
     assert TestClient(app).get(URL, params=RANGE).status_code == 401
+
+
+# ---------- rates (spec "Rates"), report check, paging, locks, settings
+
+
+def _fiscal_year(store):
+    if any(r.get("year") == 2026 for r in store.list("fiscal_years")):
+        return
+    store.save(
+        "fiscal_years",
+        {"year": 2026, "chart": "skr03", "income_basis": "accrual", "vat_basis": "soll", "vat_frequency": "month",
+         "dauerfrist": False, "small_business": False, "rules_version": "r1", "opened_at": 1, "opened_by": "u1x000"},
+    )  # fmt: skip
+
+
+def _post_13b(store, day=date(2026, 6, 2), key="rc:1", rate="19"):
+    """Spec D2: § 13b EU service, 200,50 net, 19 % = 38,10 out and in."""
+    _fiscal_year(store)
+    JournalService(store).post(
+        key, day, "13b", SRC,
+        [
+            PostLine(role="rc_vat_out_eu", amount_cents=-3810, tax_key="RC_EU_SVC", tax_kind="tax", tax_rate=rate,
+                     tax_base_cents=20050, vat_date=date(2026, 5, 20)),
+            PostLine(role="rc_input_vat", amount_cents=3810, tax_key="RC_EU_SVC", tax_kind="input", tax_rate=rate,
+                     vat_date=date(2026, 5, 20)),
+            PostLine(role="expense_software", amount_cents=20050, income_date=day),
+            PostLine(role="payables", amount_cents=-20050),
+        ],
+    )  # fmt: skip
+
+
+def _post_s7(store, key="s7:1", rate="7", day=date(2026, 3, 5)):
+    """Net 100,00 at 7 %: the line carries ``rate`` (``None``: the box rate of the rules applies)."""
+    _fiscal_year(store)
+    JournalService(store).post(
+        key, day, "S7", SRC,
+        [
+            PostLine(role="receivables", amount_cents=10700),
+            PostLine(role="revenue_s7", amount_cents=-10000, income_date=day),
+            PostLine(role="vat_out_s7", amount_cents=-700, tax_key="S7", tax_kind="tax", tax_rate=rate,
+                     tax_base_cents=10000, vat_date=day),
+        ],
+    )  # fmt: skip
+
+
+def _report(resp) -> str:
+    return unzip(resp)["export-report.txt"].decode("utf-8")
+
+
+def test_13b_expense_with_the_spec_d2_numbers(boss_client, store):
+    set_numbers(store)
+    _post_13b(store)
+    r = boss_client.get(URL, params={"from": "2026-06-01", "to": "2026-06-30"})
+    assert r.status_code == 200, r.text
+    files = unzip(r)
+    rows = csv_lines(files["EXTF_Buchungsstapel_20260601_20260630.csv"])[2:]
+    assert [(x[0], x[6], x[7]) for x in rows] == [("200,50", "9035", "9004"), ("38,10", "9027", "9025")]
+    report = files["export-report.txt"].decode("utf-8")
+    assert "Result: OK" in report and "DIFFERENCES" not in report
+
+
+def test_13b_line_without_a_rate_is_422_listing_the_entry(boss_client, store):
+    set_numbers(store)
+    _post_13b(store, key="rc:norate", rate=None)
+    r = boss_client.get(URL, params={"from": "2026-06-01", "to": "2026-06-30"})
+    assert r.status_code == 422 and "rc:norate" in r.json()["detail"]
+
+
+def test_s7_revenue_with_and_without_a_line_rate_has_no_differences(boss_client, store):
+    set_numbers(store)
+    _post_s7(store, key="s7:rated", rate="7")
+    _post_s7(store, key="s7:box", rate=None, day=date(2026, 3, 6))  # the box rate of Kz 86 (7) applies
+    r = boss_client.get(URL, params=RANGE)
+    assert r.status_code == 200, r.text
+    rows = csv_lines(unzip(r)[CSV_Q1])[2:]
+    assert [x[0] for x in rows] == ["107,00", "107,00"]
+    assert "Result: OK" in _report(r)
+
+
+def test_a_forced_difference_is_reported(boss_client, store, monkeypatch):
+    from permita38.core.service import datev_export
+
+    set_numbers(store)
+    post_scenario(store)
+    original = datev_export.self_check_report
+
+    def wrong_box_rate(entries, rows, chart, rules, rates, **kwargs):
+        return original(entries, rows, chart, rules, {**rates, "S19": Decimal(7)}, **kwargs)
+
+    monkeypatch.setattr(datev_export, "self_check_report", wrong_box_rate)
+    r = boss_client.get(URL, params=RANGE)
+    assert r.status_code == 200, r.text
+    report = _report(r)
+    assert "Result: DIFFERENCES" in report and "Result: OK" not in report
+
+
+def test_booking_on_the_last_day_of_the_range_is_included(boss_client, store):
+    set_numbers(store)
+    _post_s7(store, key="s7:last", day=date(2026, 3, 31))
+    rows = csv_lines(unzip(boss_client.get(URL, params=RANGE))[CSV_Q1])[2:]
+    assert [x[0] for x in rows] == ["107,00"]
+
+
+def test_more_entries_than_one_page_are_all_exported(boss_client, store, monkeypatch):
+    from permita38.core.service import datev_export
+
+    set_numbers(store)
+    for i in range(5):
+        _post_s7(store, key=f"s7:{i}", day=date(2026, 3, 1 + i))
+    monkeypatch.setattr(datev_export, "PAGE", 2)
+    r = boss_client.get(URL, params=RANGE)
+    rows = csv_lines(unzip(r)[CSV_Q1])[2:]
+    assert len(rows) == 5 and "Entries: 5" in _report(r)
+
+
+def test_empty_range_with_all_months_locked_has_festschreibung_1(boss_client, store):
+    set_numbers(store)
+    post_scenario(store)
+    lock_up_to(store, 6)
+    june = unzip(boss_client.get(URL, params={"from": "2026-06-01", "to": "2026-06-30"}))
+    lines = csv_lines(june["EXTF_Buchungsstapel_20260601_20260630.csv"])
+    assert len(lines) == 2 and lines[0][20] == "1"
+    july = unzip(boss_client.get(URL, params={"from": "2026-07-01", "to": "2026-07-31"}))
+    assert csv_lines(july["EXTF_Buchungsstapel_20260701_20260731.csv"])[0][20] == "0"  # July is not locked
+
+
+def test_role_fallback_with_two_roles_on_one_account_is_422(boss_client, store, monkeypatch):
+    from permita38.core.service import datev_export
+
+    set_numbers(store)
+    post_scenario(store)
+    chart = charts.chart_for("skr03", 2026)
+    shared = next(acc for role, acc in chart.roles if role == "revenue_s19")
+    roles = tuple((role, shared if role == "revenue_s7" else acc) for role, acc in chart.roles)
+    monkeypatch.setattr(datev_export, "chart_for", lambda *_: replace(chart, roles=roles))
+    original = store.list_journal_entries
+
+    def without_roles(*args, **kwargs):
+        rows = original(*args, **kwargs)
+        for row in rows:
+            for ln in row["lines"]:
+                ln["role"] = None
+        return rows
+
+    monkeypatch.setattr(store, "list_journal_entries", without_roles)
+    r = boss_client.get(URL, params=RANGE)
+    assert r.status_code == 422 and "shared by the roles" in r.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "field, good, bad",
+    [
+        ("datev_consultant_no", [1001, 9999999], [1000, 10000000, 1.5, True]),
+        ("datev_client_no", [1, 99999], [0, 100000, 1.5]),
+        ("datev_account_length", [4, 8], [3, 9, 4.5]),
+        ("datev_label", ["", "x" * 30], ["x" * 31, 5]),
+    ],
+)
+def test_put_settings_datev_fields_are_bounded(boss_client, field, good, bad):
+    for value in good:
+        r = boss_client.put("/api/settings", json={field: value})
+        assert r.status_code == 200, (field, value, r.text)
+        assert r.json()[field] == value
+        assert boss_client.get("/api/settings").json()[field] == value
+    for value in bad:
+        r = boss_client.put("/api/settings", json={field: value})
+        assert r.status_code == 422, (field, value, r.text)
+
+
+def test_legacy_string_numbers_in_the_settings_do_not_break_the_export(boss_client, store):
+    set_numbers(store, datev_consultant_no="1001", datev_client_no="12345")
+    post_scenario(store)
+    assert boss_client.get(URL, params=RANGE).status_code == 200
+    set_numbers(store, datev_client_no="12a")
+    r = boss_client.get(URL, params=RANGE)
+    assert r.status_code == 422 and "datev_client_no" in r.json()["detail"]
+    assert boss_client.get("/api/settings").status_code == 200
