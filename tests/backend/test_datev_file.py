@@ -141,7 +141,7 @@ def test_special_characters_round_trip_and_quoting() -> None:
     out = extf_csv([r], PARAMS)
     line = out.decode("cp1252").split("\r\n")[2]
     assert '"ä;ö";;;"Büro; ""Größe"" Straße"' in line
-    assert "Büro; \"Größe\" Straße".encode("cp1252") in out.replace(b'""', b'"')
+    assert 'Büro; "Größe" Straße'.encode("cp1252") in out.replace(b'""', b'"')
     assert unencodable_characters([r], PARAMS) == ()
 
 
