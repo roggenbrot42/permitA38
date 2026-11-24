@@ -10880,7 +10880,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response List Credit Notes Api Invoices  Rid  Credit Notes Get"
+                }
               }
             }
           },
@@ -10901,6 +10908,7 @@
           "accounting"
         ],
         "summary": "Create Credit Note",
+        "description": "Issue a storno or partial credit note (number, snapshot and posting in one transaction).",
         "operationId": "create_credit_note_api_invoices__rid__credit_notes_post",
         "security": [
           {
@@ -10933,7 +10941,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Credit Note Api Invoices  Rid  Credit Notes Post"
+                }
               }
             }
           },

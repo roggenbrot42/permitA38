@@ -485,6 +485,8 @@ IMPLEMENTED = {
     ("POST", "/api/invoices/{rid}/payments"),
     ("POST", "/api/payments/{payment_id}/reverse"),
     ("POST", "/api/invoices/{rid}/payments/legacy/reverse"),
+    ("GET", "/api/invoices/{rid}/credit-notes"),
+    ("POST", "/api/invoices/{rid}/credit-notes"),
 }
 
 
@@ -559,6 +561,7 @@ def test_payment_dependency_is_the_either_or_rule(app):
 
 _PAYMENT_IMPLEMENTED = {
     "/api/invoices/{rid}/payments",
+    "/api/invoices/{rid}/credit-notes",
     "/api/payments/{payment_id}/reverse",
     "/api/invoices/{rid}/payments/legacy/reverse",
 }  # 404: dummy id
