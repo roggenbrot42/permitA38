@@ -853,7 +853,7 @@ maintainer's sign-off of these specs (PR #124).
 | O9 | Reports B: EÜR (deductible), P&L, balance sheet, VAT reconciliation, before-start | F | O8, F3 |
 | O10 | DATEV rows (anchor, folding, § 13b, reclassification) with **hand-written golden rows** | F | F3, E6 |
 | O11 | DATEV fallback, simulation self-check, report, zip, API | F | O10 |
-| O12 | `finance()` from the journal + reconciliation | F | E22 |
+| O12 | `finance()` from the journal + reconciliation; before initialisation the response carries an `approximate: true` flag (section 14) | F | E22 |
 | O13 | MCP invoice schema (only if PR #73 is merged) | S | E9 |
 | **M4 web** | | | |
 | W4 | VAT page (returns, detail, finalise/filed/amend, exports) | S | O2–O5 |
