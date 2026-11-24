@@ -80,7 +80,9 @@ def sample(table: Table, i: int = 0) -> dict:
     elif table.name == "period_locks":
         rec.update(month=5, reason="manual")
     elif table.name == "invoices":  # the guards of migration accounting_documents
-        rec.update(kind="invoice", credit_kind="storno", tax_treatment="standard")
+        rec.update(
+            kind="credit_note", credit_kind="storno", tax_treatment="standard"
+        )  # a credit kind needs a credit note
     elif table.name == "expenses":
         rec.update(tax_treatment="standard")
     elif table.name in ("vat_returns", "zm_reports"):
