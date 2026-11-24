@@ -4,9 +4,12 @@ No I/O, no floats: amounts are integer euros (``ZmLine.amount``) or integer cent
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any
 
+from permita38.core.vat.pdf_common import _M, _W, BANNER, _clean, _Page, _text
 from permita38.core.vat.zm import ZmLine, normalize_vat_id
 
 __all__ = [
@@ -18,12 +21,14 @@ __all__ = [
     "bzst_csv",
     "normalize_vat_id",
     "readable_csv",
+    "zm_pdf",
 ]
 
 ZM_CSV_VERSION = "#v1.0"
 BZST_HEADER = "Laenderkennzeichen,USt-IdNr.,Betrag(EUR),Art der Leistung"
 MAX_ROWS = 1000
 _VAT_ID = re.compile(r"[A-Z]{2}[A-Z0-9]{5,12}", re.ASCII)
+ZM_FOOTER = "Not a filing. Enter or upload these figures in the BZSt online portal."
 _READABLE_HEADER = "Land;USt-IdNr.;Betrag (EUR);Summe exakt (EUR);Art der Leistung"
 
 
@@ -99,3 +104,47 @@ def readable_csv(lines: Sequence[ZmLine], *, correction: bool) -> bytes:
     for vid, (euros, exact) in rows.items():
         out.append(f"{vid[:2]};{vid[2:]};{_decimal_comma(euros * 100)};{_decimal_comma(exact)};S")
     return ("\r\n".join(out) + "\r\n").encode("utf-8-sig")
+
+
+_COLS = [(0.0, 40.0), (40.0, 180.0), (220.0, 90.0), (310.0, 40.0)]
+
+
+def zm_pdf(report: Mapping[str, Any], *, business: str = "", unconfirmed: bool = True) -> bytes:
+    """The ZM as an A4 PDF: header, the list (country, VAT id, whole euros, kind), the adviser banner while the rules
+    are unconfirmed and the footer ``ZM_FOOTER`` on every page. ``report`` is the report as the API shows it."""
+    p = _Page()
+    pdf = p.pdf
+    correction = bool(report.get("amends_id"))
+    pdf.text(
+        _M, 50, "EC sales list (Zusammenfassende Meldung)" + (" - correction" if correction else ""), size=15, bold=True
+    )
+    p.y = 72
+    if unconfirmed:
+        p.line(BANNER, size=10, bold=True, color="#b00020")
+    p.line(f"Business: {business}", gap=13)
+    p.line(f"Quarter: {_text(report.get('year'))} Q{_text(report.get('quarter'))}", gap=13)
+    p.line(f"Period: {_text(report.get('from_date'))} to {_text(report.get('to_date'))}", gap=13)
+    p.line(f"Status: {_text(report.get('status'))}   Due date: {_text(report.get('due_date'))}", gap=13)
+    p.y += 8
+    heads = ["Country", "VAT id", "Amount (EUR)", "Kind"]
+    p.row(
+        [(x, w, h, "r" if i == 2 else "l") for i, ((x, w), h) in enumerate(zip(_COLS, heads, strict=True))], bold=True
+    )
+    pdf.line(_M, p.y - 9, _M + _W, p.y - 9)
+    total = 0
+    rows = [x for x in report.get("lines") or [] if isinstance(x, Mapping)]
+    for x in rows:
+        vid = normalize_vat_id(str(x.get("vat_id") or ""))
+        euros = int(Decimal(str(x.get("amount") or 0)))
+        total += euros
+        cells = [_text(x.get("country") or vid[:2]), vid[2:], str(euros), _text(x.get("kind") or "S")]
+        p.row([(c[0], c[1], t, "r" if i == 2 else "l") for i, (c, t) in enumerate(zip(_COLS, cells, strict=True))])
+    if not rows:
+        p.line("No rows.", size=9, gap=12)
+    p.y += 4
+    p.line(f"Total: {total} EUR in {len(rows)} rows", bold=True)
+    for page in pdf.pages:
+        pdf.cur = page
+        pdf.text(_M, 810, ZM_FOOTER, size=8)
+        pdf.text(_M + _W, 810, f"Rules: {_clean(report.get('rules_version'))}", size=8, align="r")
+    return bytes(pdf.output())

@@ -46,6 +46,7 @@ from permita38.core.service.totp import TotpService
 from permita38.core.service.transfer.service import TransferService, clean_stale_tmp
 from permita38.core.service.trips import TripService
 from permita38.core.service.vat_returns import VatReturnService
+from permita38.core.service.zm_reports import ZmReportService
 from permita38.core.settings import effective_settings
 
 COOKIE_NAME = "authorization"
@@ -86,6 +87,7 @@ class Services:
     manual_entries: ManualEntryService
     tax_bookings: TaxBookingService
     vat_returns: VatReturnService
+    zm_reports: ZmReportService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
@@ -132,6 +134,7 @@ class Services:
             manual_entries=ManualEntryService(store, journal),
             tax_bookings=TaxBookingService(store, journal),
             vat_returns=VatReturnService(store, locks),
+            zm_reports=ZmReportService(store),
             impressum=ImpressumService(
                 SafeFetcher(user_agent),
                 enabled=config.features.impressum_lookup,

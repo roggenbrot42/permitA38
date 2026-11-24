@@ -11,9 +11,11 @@ from fastapi import APIRouter, Query, Response
 from permita38.api.deps import Needs, ServicesDep, SessionOnly
 from permita38.api.routers.accounting import not_implemented
 from permita38.core import models
+from permita38.core.errors import ServiceError
 from permita38.core.service.vat_returns import VatReturnListItem
+from permita38.core.service.zm_reports import ZmListItem
 from permita38.core.validation import VatPeriodKind
-from permita38.core.vat import ustva_export
+from permita38.core.vat import ustva_export, zm_export
 
 returns = APIRouter(prefix="/vat-returns", tags=["vat"])
 special = APIRouter(prefix="/vat", tags=["vat"])
@@ -148,51 +150,93 @@ def put_special_prepayment(body: models.SpecialPrepaymentIn, user: Write, servic
 
 
 # ------------------------------------------------------------------ ZM
-@zm.get("", name="list_zm")
+@zm.get("", name="list_zm", response_model=list[ZmListItem])
 def list_zm(year: Year, user: Read, services: ServicesDep):
-    not_implemented()
+    return services.zm_reports.list(year)
 
 
-@zm.get("/preview", name="preview_zm")
+@zm.get("/preview", name="preview_zm", response_model=models.ZmReport)
 def preview_zm(year: Year, quarter: Annotated[int, Query(ge=1, le=4)], user: Read, services: ServicesDep):
-    not_implemented()
+    return models.ZmReport(**services.zm_reports.preview(year, quarter))
 
 
-@zm.post("", status_code=201, dependencies=[SessionOnly], name="create_zm")
+@zm.post("", status_code=201, dependencies=[SessionOnly], name="create_zm", response_model=models.ZmReport)
 def create_zm(body: models.ZmCreateIn, user: Write, services: ServicesDep):
-    not_implemented()
+    return models.ZmReport(**services.zm_reports.create_draft(body.year, body.quarter, body.amends_id))
 
 
-@zm.get("/{rid}", name="get_zm")
+@zm.get("/{rid}", name="get_zm", response_model=models.ZmReport)
 def get_zm(rid: str, user: Read, services: ServicesDep):
-    not_implemented()
+    return models.ZmReport(**services.zm_reports.get(rid))
 
 
-@zm.post("/{rid}/finalize", dependencies=[SessionOnly], name="finalize_zm")
+@zm.post("/{rid}/finalize", dependencies=[SessionOnly], name="finalize_zm", response_model=models.ZmReport)
 def finalize_zm(rid: str, user: Write, services: ServicesDep):
-    not_implemented()
+    return models.ZmReport(**services.zm_reports.finalize(rid, user))
 
 
-@zm.post("/{rid}/reopen", dependencies=[SessionOnly], name="reopen_zm")
+@zm.post("/{rid}/reopen", dependencies=[SessionOnly], name="reopen_zm", response_model=models.ZmReport)
 def reopen_zm(rid: str, user: Write, services: ServicesDep):
-    not_implemented()
+    return models.ZmReport(**services.zm_reports.reopen(rid))
 
 
-@zm.post("/{rid}/filed", dependencies=[SessionOnly], name="mark_zm_filed")
+@zm.post("/{rid}/filed", dependencies=[SessionOnly], name="mark_zm_filed", response_model=models.ZmReport)
 def filed_zm(rid: str, body: models.ZmFiledIn, user: Write, services: ServicesDep):
-    not_implemented()
+    return models.ZmReport(**services.zm_reports.filed(rid, body.filed_on, body.reference, body.note))
 
 
-@zm.delete("/{rid}", dependencies=[SessionOnly], name="delete_zm")
+@zm.delete("/{rid}", status_code=204, dependencies=[SessionOnly], name="delete_zm")
 def delete_zm(rid: str, user: Write, services: ServicesDep):
-    not_implemented()
+    services.zm_reports.delete(rid)
+    return Response(status_code=204)
 
 
-@zm.get("/{rid}/export.csv", name="export_zm_csv")
-def export_zm_csv(rid: str, user: Read, services: ServicesDep):
-    not_implemented()
+def _zm_name(rep: dict, ext: str) -> str:
+    return f"zm-{rep['year']}-q{rep['quarter']}.{ext}"
 
 
-@zm.get("/{rid}/export.pdf", name="export_zm_pdf")
+@zm.get(
+    "/{rid}/export.csv",
+    response_class=Response,
+    responses={200: {"content": {"text/csv": {}}}, 422: {"description": "The list cannot be exported"}},
+    name="export_zm_csv",
+)
+def export_zm_csv(
+    rid: str,
+    user: Read,
+    services: ServicesDep,
+    readable: Annotated[bool, Query(description="a readable CSV instead of the BZSt import file")] = False,
+):
+    rep, rows = services.zm_reports.export_lines(rid)
+    correction = bool(rep.get("amends_id"))
+    try:
+        if readable:
+            data = zm_export.readable_csv(rows, correction=correction)
+        else:
+            data = zm_export.bzst_csv(rows, correction=correction)
+    except zm_export.ZmExportError as e:
+        raise ServiceError(
+            422, str(e), body={"rows": [{"vat_id": r.vat_id, "reason": r.reason} for r in e.rows]}
+        ) from None
+    media = "text/csv; charset=utf-8" if readable else "text/csv; charset=iso-8859-15"
+    name = _zm_name(rep, "csv") if not readable else _zm_name(rep, "readable.csv")
+    return Response(data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@zm.get(
+    "/{rid}/export.pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+    name="export_zm_pdf",
+)
 def export_zm_pdf(rid: str, user: Read, services: ServicesDep):
-    not_implemented()
+    rep, _rows = services.zm_reports.export_lines(rid)
+    cfg = services.settings.get()
+    data = zm_export.zm_pdf(
+        rep, business=str(cfg.get("company_name") or ""), unconfirmed=ustva_export.rules_unconfirmed(int(rep["year"]))
+    )
+    return Response(
+        data,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{_zm_name(rep, "pdf")}"'},
+    )
