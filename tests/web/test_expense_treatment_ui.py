@@ -120,7 +120,47 @@ def test_typed_vat_on_a_reverse_charge_bill_is_ignored_and_the_warning_is_shown(
     toast = ui.inner_text("#toast")
     assert "computed by the server" in toast and "ignored" in toast
     e = expenses(srv)[0]
-    assert e["vat"] != "50.00" and e["reverse_charge"] is True  # the server's figure, never the typed 50
+    assert (e["vat"], e["tax_treatment"], e["reverse_charge"]) == ("190.00", "reverse_charge_eu_service", True)
+
+
+def test_no_input_vat_saves_vat_zero_and_net_equals_gross(ui, srv):
+    open_new(ui, srv)
+    ui.fill("#f_date", "2026-02-10")
+    ui.fill("#f_vendor", "Demo Shop")
+    ui.fill("#f_gross", "119")
+    ui.select_option("#f_tax_treatment", "no_input_vat")
+    ui.click("#m-save")
+    ui.wait_for_selector("#m-save", state="detached")
+    e = expenses(srv)[0]
+    assert (e["tax_treatment"], e["vat"], e["net"]) == ("no_input_vat", "0.00", "119.00")
+
+
+def test_old_reverse_charge_bill_with_rate_zero_shows_and_saves_19(ui, srv):
+    body = {"date": "2026-02-10", "vendor": "Demo Cloud Ltd", "category": "Software", "net": "1000.00", "vat": "0",
+            "vat_rate": 0, "reverse_charge": True}
+    r = api(srv, "POST", "expenses", json=body)
+    assert r.status_code == 200, r.text
+    ui.goto(srv.base + "/#/expenses")
+    ui.wait_for_selector("tr[data-id]")
+    ui.click("tr[data-id]")
+    ui.wait_for_selector("#f_vendor")
+    assert ui.input_value("#f_vat_rate") == "19"
+    ui.click("#m-save")
+    ui.wait_for_selector("#m-save", state="detached")
+    e = expenses(srv)[0]
+    assert (e["vat_rate"], e["vat"]) == (19, "190.00")
+
+
+def test_switching_back_to_automatic_restores_the_typed_vat(ui, srv):
+    api(srv, "POST", "suppliers", json={"name": "Demo Cloud Ltd", "country": "IE", "vat_mode": "eu_reverse_charge"})
+    open_new(ui, srv)
+    ui.fill("#f_vendor", "Demo Cloud Ltd")
+    ui.wait_for_selector("#f_rc_vat", state="visible")
+    ui.fill("#f_rc_vat", "50")
+    ui.select_option("#f_tax_treatment", "reverse_charge_eu_service")
+    assert ui.input_value("#f_rc_vat") == ""
+    ui.select_option("#f_tax_treatment", "")
+    assert ui.input_value("#f_rc_vat") == "50"
 
 
 def test_service_date_beyond_the_bound_is_refused_and_the_dialog_keeps_the_input(ui, srv):

@@ -660,7 +660,8 @@ function bindTreatment(hasSup) {
     const rc = EXP_RC_TREATMENTS.includes(sel.value);
     $('#e_tt_help').textContent = EXP_TREATMENT_HELP[sel.value] || '';
     $('#e_rc_note').hidden = !rc;
-    const rv = $('#f_rc_vat'); if (rv) { rv.readOnly = rc; if (rc) rv.value = ''; }
+    const rv = $('#f_rc_vat');   // the typed value is kept while the field is read-only and restored on "automatic"
+    if (rv) { if (rc && !rv.readOnly) { rv.dataset.typed = rv.value; rv.value = ''; } else if (!rc && rv.readOnly) rv.value = rv.dataset.typed ?? rv.value; rv.readOnly = rc; }
     const cb = $('#f_reverse_charge'); if (cb) cb.disabled = !!sel.value;
     const last = /^\d{4}-\d{2}-\d{2}$/.test(dt.value) ? addDays(dt.value, 366) : '';
     $('#e_sd_help').textContent = 'Empty = the bill date. At most 366 days after the bill date' + (last ? ' (latest ' + last + ')' : '') + '.';
@@ -676,7 +677,7 @@ function expenseDialog(e, scan) {
     const { description, gross, vat_rate, deductible, vat_deductible, net, vat, ...extra } = l;
     return { description: description ?? '', gross: String(gross ?? ''), vat_rate: String(vat_rate ?? 19), deductible: String(deductible ?? 100), vat_deductible: vat_deductible ?? null, extra };
   });
-  const v0 = { ...e, gross: e.net != null && !stored.length ? Money.sum([e.net, e.reverse_charge ? 0 : e.vat]) : (e.gross ?? ''), vat_rate: e.vat_rate ?? 19, itemise: stored.length > 0, rc_vat: e.reverse_charge ? e.vat : '', tax_treatment: e.tax_treatment || '', service_date: e.service_date || '' };
+  const v0 = { ...e, gross: e.net != null && !stored.length ? Money.sum([e.net, e.reverse_charge ? 0 : e.vat]) : (e.gross ?? ''), vat_rate: e.reverse_charge && !+e.vat_rate ? 19 : (e.vat_rate ?? 19), itemise: stored.length > 0, rc_vat: e.reverse_charge ? e.vat : '', tax_treatment: e.tax_treatment || '', service_date: e.service_date || '' };
   const hasSup = !!window.SUP && can('suppliers');   // supplier, allocation and reverse-charge fields (docs/contracts/subcontractors.md)
   const supFields = hasSup ? [{ k: 'supplier_id', l: 'Supplier', t: 'select', o: [['', '— none (free-text vendor) —'], ...SUP.options(e.supplier_id)] },
     { k: 'allocation_id', l: 'Subcontractor allocation', t: 'select', o: [['', '— none —']] },
@@ -740,8 +741,9 @@ function expenseDialog(e, scan) {
         const r = +v.vat_rate || 0;
         if (Money.isNeg(gross)) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
         if (!v.date) throw new Error('Pick the bill date');
-        Object.assign(v, Money.splitGrossStr(gross, rc ? 0 : r)); v.vat_rate = rc && !rcExplicit ? 0 : r;
-        if (rcExplicit) v.vat = '0';   // computed by the server from the net amount and the VAT %
+        const noInput = v.tax_treatment === 'no_input_vat';   // the gross is the cost: net = gross, vat 0
+        Object.assign(v, Money.splitGrossStr(gross, rc || noInput ? 0 : r)); v.vat_rate = r;   // the selected rate is always sent
+        if (rcExplicit || noInput) v.vat = '0';   // reverse charge: computed by the server from the net amount and the VAT %   // computed by the server from the net amount and the VAT %
         else if (rc) v.vat = rcVat != null && mPos(rcVat) ? rcVat : '0';   // the self-assessed VAT, as typed
       }
       if (scan) return RCPT.confirm(scan, v);   // POST /api/receipts/{id}/confirm; the server sets attachment and external_id
