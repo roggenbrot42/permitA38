@@ -34,6 +34,11 @@ SCHEMA_NUMERIC_ALLOWLIST = {
     "next": "audit pagination cursor",
     "status": "audit entry HTTP status code",
     "year": "calendar year of a record reference",
+    "fiscal_year": "calendar year of a journal entry",
+    "created_at": "journal entry epoch seconds",
+    "entry_no": "gapless journal entry number",
+    "line_no": "ordinal of a journal line within its entry",
+    "age_days": "age of an open item in days",
     "loc": "validation error path element (index)",
     # counts
     "count": "number of items",
@@ -678,3 +683,29 @@ def test_no_to_float_or_bare_float_in_the_api_layer():
                 hits.append(f"{rel}:{node.lineno} (import)")
     assert not hits, f"money.to_float / float( in response builders (use money.to_decimal_str): {hits}"
     assert (API_DIR / "money_out.py").is_file()
+
+
+# ======================================================================================================================
+# accounting journal and report routes: every amount is a decimal string, no allowlist entry for a money field
+# ======================================================================================================================
+def test_accounting_report_routes_send_money_only_as_decimal_strings(app, scenario):
+    seen_strings = 0
+    paths = [
+        "journal", "accounts", "reports/trial-balance", "reports/pnl", "reports/balance-sheet",
+        "reports/open-items", "reports/ledger?role=bank",
+    ]  # fmt: skip
+    for path in paths:
+        r = scenario.get(f"/api/accounting/{path}")
+        assert r.status_code == 200, (path, r.text)
+        for kp, key, value in _walk_numbers(r.json()):
+            assert key in SWEEP_NUMERIC_KEYS and key not in AMBIGUOUS_KEYS, (path, ".".join(kp), value)
+        seen_strings += len(re.findall(r'"-?[0-9]+\.[0-9]{2}"', r.text))
+    assert seen_strings > 60, seen_strings
+
+
+def test_accounting_eur_route_sends_money_only_as_decimal_strings(eur_scenario):
+    r = eur_scenario.get("/api/accounting/reports/eur", params={"year": 2025})
+    assert r.status_code == 200, r.text
+    for kp, key, value in _walk_numbers(r.json()):
+        assert key in SWEEP_NUMERIC_KEYS and key not in AMBIGUOUS_KEYS, (".".join(kp), value)
+    assert len(re.findall(r'"-?[0-9]+\.[0-9]{2}"', r.text)) >= 8

@@ -11,11 +11,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.core import models, rights
+from permita38.core.service.accounting_reports import (
+    AccountOut,
+    BalanceSheetOut,
+    EurOut,
+    LedgerOut,
+    OpenItemsOut,
+    PnlOut,
+    TrialBalanceOut,
+    parse_date,
+)
 
 router = APIRouter(prefix="/accounting", tags=["accounting"])
 payments_router = APIRouter(tags=["accounting"])
 routers = [router, payments_router]
 
+Year = Annotated[int | None, Query(ge=2000, le=2100)]
 NOT_IMPLEMENTED = "not implemented yet"
 
 
@@ -88,7 +99,7 @@ def init_review(user: Read, services: ServicesDep):
 
 
 # ------------------------------------------------------------------ journal, accounts
-@router.get("/journal", name="list_journal")
+@router.get("/journal", name="list_journal", response_model=list[models.JournalEntry])
 def journal(
     user: Read,
     services: ServicesDep,
@@ -100,7 +111,9 @@ def journal(
     offset: Annotated[int, Query(ge=0, le=10_000_000)] = 0,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ):
-    not_implemented()
+    return services.accounting_reports.journal(
+        parse_date(date_from, "from"), parse_date(date_to, "to"), account, tax_key, source, offset, limit
+    )
 
 
 @router.post("/entries", status_code=201, dependencies=[SessionOnly], name="create_manual_entry")
@@ -113,27 +126,59 @@ def reverse_entry(entry_id: str, body: models.EntryReverseIn, user: Write, servi
     not_implemented()
 
 
-@router.get("/accounts", name="list_accounts")
-def accounts(user: Read, services: ServicesDep, year: Annotated[int | None, Query(ge=2000, le=2100)] = None):
-    not_implemented()
+@router.get("/accounts", name="list_accounts", response_model=list[AccountOut])
+def accounts(user: Read, services: ServicesDep, year: Year = None):
+    return services.accounting_reports.accounts(year)
 
 
 # ------------------------------------------------------------------ reports (read only)
-def _report_route(name: str) -> None:
-    @router.get(f"/reports/{name}", name=f"report_{name.replace('-', '_')}")
-    def report(
-        user: Read,
-        services: ServicesDep,
-        year: Annotated[int | None, Query(ge=2000, le=2100)] = None,
-        date_from: Annotated[str | None, Query(alias="from", max_length=10)] = None,
-        date_to: Annotated[str | None, Query(alias="to", max_length=10)] = None,
-        account: Annotated[str | None, Query(max_length=10)] = None,
-    ):
-        not_implemented()
+DateFrom = Annotated[str | None, Query(alias="from", max_length=10)]
+DateTo = Annotated[str | None, Query(alias="to", max_length=10)]
 
 
-for _name in ("trial-balance", "eur", "pnl", "balance-sheet", "open-items", "ledger"):
-    _report_route(_name)
+@router.get("/reports/trial-balance", name="report_trial_balance", response_model=TrialBalanceOut)
+def report_trial_balance(
+    user: Read, services: ServicesDep, year: Year = None, date_from: DateFrom = None, date_to: DateTo = None
+):
+    return services.accounting_reports.trial_balance(year, parse_date(date_from, "from"), parse_date(date_to, "to"))
+
+
+@router.get("/reports/eur", name="report_eur", response_model=EurOut)
+def report_eur(user: Read, services: ServicesDep, year: Year = None):
+    return services.accounting_reports.eur(year)
+
+
+@router.get("/reports/pnl", name="report_pnl", response_model=PnlOut)
+def report_pnl(user: Read, services: ServicesDep, year: Year = None):
+    return services.accounting_reports.pnl(year)
+
+
+@router.get("/reports/balance-sheet", name="report_balance_sheet", response_model=BalanceSheetOut)
+def report_balance_sheet(user: Read, services: ServicesDep, year: Year = None, date_to: DateTo = None):
+    """Cumulated up to ``to`` (default: 31 December of the year)."""
+    return services.accounting_reports.balance_sheet(year, parse_date(date_to, "to"))
+
+
+@router.get("/reports/open-items", name="report_open_items", response_model=OpenItemsOut)
+def report_open_items(user: Read, services: ServicesDep, year: Year = None, date_to: DateTo = None):
+    """Open receivables and payables up to ``to`` (default: 31 December of the year)."""
+    return services.accounting_reports.open_items(year, parse_date(date_to, "to"))
+
+
+@router.get("/reports/ledger", name="report_ledger", response_model=LedgerOut)
+def report_ledger(
+    user: Read,
+    services: ServicesDep,
+    year: Year = None,
+    date_from: DateFrom = None,
+    date_to: DateTo = None,
+    account: Annotated[str | None, Query(max_length=10)] = None,
+    role: Annotated[str | None, Query(max_length=60)] = None,
+):
+    """The postings of one account (``account`` or ``role`` is required) with a running balance."""
+    return services.accounting_reports.ledger(
+        year, account, role, parse_date(date_from, "from"), parse_date(date_to, "to")
+    )
 
 
 # ------------------------------------------------------------------ locks, DATEV, integrity
