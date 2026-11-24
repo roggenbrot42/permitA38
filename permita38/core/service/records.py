@@ -14,6 +14,7 @@ from permita38.core.settings import effective_settings
 from permita38.core.validation import ALLOWED_VAT_RATES, MAX_MONEY
 
 from .auth import public_user
+from .expense_postings import WARNINGS_KEY, ExpensePostingService
 from .planning_warnings import warning
 from .project_customer import (
     PROJECT_CUSTOMER_COLLECTIONS,
@@ -27,7 +28,7 @@ OWN_COLLECTIONS = {"entries", "absences"}
 VIEW_COLLECTIONS = {"projects", "tasks"}
 
 #: fields that only exist in responses
-RESPONSE_ONLY = ("sanity_warnings", "planning_warnings")
+RESPONSE_ONLY = ("sanity_warnings", "planning_warnings", WARNINGS_KEY)
 
 
 LAW_WEEKLY_HOURS = 48
@@ -63,6 +64,8 @@ class RecordService:
         #: the sales service registers itself here: the ``invoices`` collection is frozen once issued and carries
         #: derived payment fields (docs/specs/credit-notes-payments.md 2); the generic routes reach that through it
         self.invoice_hook: Any = None
+        #: expenses post to the journal on every write (docs/specs/accounting.md 9.4, 10); idle before initialisation
+        self.expense_hook = ExpensePostingService(store)
 
     def _check(self, coll: str):
         if coll not in COLLECTIONS or coll == "users":
@@ -218,6 +221,7 @@ class RecordService:
             else:
                 data.pop("lines", None)
                 self._check_vat_rates(data.get("vat_rate"))
+            expense_warnings = self.expense_hook.prepare(data, old)
         elif coll == "contracts":
             data.pop("user_ids", None)  # contracts are not assigned to people; the project carries the team
         elif coll == "projects":
@@ -242,8 +246,12 @@ class RecordService:
                 data.setdefault("invoice_id", old["invoice_id"])
         if data.get("created") is None:
             data.pop("created", None)
-        saved = self.store.save(coll, data)
-        return _expense_view(saved) if coll == "expenses" else saved
+        if coll == "expenses":
+            with self.store.transaction():  # a refused repost (locked period) leaves the record unchanged
+                saved = self.expense_hook.sync(self.store.save(coll, data), old, me)
+            view = _expense_view(saved)
+            return {**view, WARNINGS_KEY: expense_warnings} if expense_warnings else view
+        return self.store.save(coll, data)
 
     def _resolve_project_kind(self, data: dict, old: dict | None) -> None:
         """``kind`` is derived from the customer only on create; an update that omits it keeps the stored kind."""
@@ -427,6 +435,7 @@ class RecordService:
                         e.pop("invoice_id", None)
                         self.store.save("entries", e)
             if coll == "expenses":  # the scan row of a booked receipt goes with its expense (a re-upload works again)
+                self.expense_hook.unpost(old, me)  # reversals only; 409 when a bill entry lies in a locked month
                 self.store.delete_where("receipt_scans", expense_id=rid)
             self.store.delete(coll, rid)
 

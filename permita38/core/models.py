@@ -148,6 +148,8 @@ class Expense(Record):
     invoice_no: str | None = None  # the invoice number printed on the bill
     tax_treatment: str | None = None  # docs/specs/accounting.md 8.2; null reads as derived (section 16)
     service_date: str | None = None  # performance date (§ 13b); null reads as `date`
+    bill_rev: int | None = None  # revision of the posted bill entry (server-owned; accounting.md 7, 9.4)
+    pay_rev: int | None = None  # revision of the posted payment entry (server-owned)
 
 
 class Line(BaseModel):
