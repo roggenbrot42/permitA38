@@ -174,7 +174,9 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
    31 December of the document's year instead (a "closing date" entry, like DATEV's period 13), so late bills and
    year-end entries stay in their year after the December/Q4 return has locked December. The entry's
    `fiscal_year` is the year of its booking date. `vat_date` and `income_date` follow the rules of
-   section 9 and may lie in a locked month only in the **allowed drift cases** of section 11; such lines create drift
+   section 9 and may lie in a locked month only in the **allowed drift cases** of section 11 (the caller chooses the
+  `vat_date` with the section 11 rules; `JournalService` itself marks every line whose `vat_date` lies in a locked
+  month as drift — a caller cannot set or suppress the flag — and refuses such a line in a manual entry); such lines create drift
    on the return of that period ([`ustva.md`](ustva.md)) and a warning on the entry.
 9. **Synced folders.** When accounting is on and the data folder looks synced (the existing sync detection, or a
    setting), the app shows "use permitA38 on one device at a time while accounting is on"; the hash chain detects a
@@ -520,7 +522,9 @@ accounts and BU keys come from the chart and `datev/<year>.json`.
 `permita38 accounting init` (CLI) and a web wizard (boss) — one transaction, idempotent through `event_key`:
 
 1. The user chooses chart, income basis, VAT basis (default Soll), frequency, Dauerfrist, small-business status and
-   the **accounting start** (default 1 January of the current year).
+   the **accounting start** (default 1 January of the current year), stored in the settings as
+   `accounting.start` (a date, first day of a month; set once by the initialisation). Locks, the lock order and the
+   "before the accounting start" rules read it; months before it are never locked and hold no journal.
 2. Creates the `fiscal_years` row and, for accrual, the opening entry from the balances the user types.
 3. Writes the `issued` snapshot for every issued invoice that lacks one (rates from the document, regime from the
    `kleinunternehmer` setting unless `vat_regular_from` says otherwise, customer data as now).
