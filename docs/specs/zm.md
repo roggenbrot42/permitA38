@@ -38,7 +38,8 @@ date, a CSV for entry/upload in the BZSt online portal, and a frozen record of w
 `zm_lines(year, quarter)` = group by `cp_vat_id` the `tax_base_cents` of all `EU_SVC` lines whose `vat_date` lies in
 the quarter (invoices and their changes alike). The result per VAT id: `amount = trunc(Σ / 100)` (rules data,
 toward zero), the country prefix, the customer's name (display only), and the source lines. A negative total is
-reported as negative; a total of exactly 0 is omitted in a first report and listed with 0 in a corrected one.
+reported as negative; a total that truncates to 0 € (e.g. 0.40 €) is omitted in a first report and listed with 0 in a
+corrected one. The VAT id comes from the issue snapshot, which was validated at issue; an empty id is an error.
 
 ## Records, status, drift
 
