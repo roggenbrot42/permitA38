@@ -57,9 +57,11 @@ list. These rules keep today's figures: such invoices count as paid, never as op
 `kind` (`invoice` / `credit_note`), `credit_kind`, `corrects_id`, `tax_treatment`, `issued` (snapshot),
 `paid_amount`, `credited_amount`, `open_amount` (= gross − credited − paid, may be negative = customer credit),
 `payments` (list of `{id, date, amount, kind, method}`), `credit_notes` (list of `{id, number, date, credit_kind,
-gross}`), `paid_date` (date of the last cash event when `open_amount` ≤ 0 and `paid_amount` > 0, else null),
-`status` derived in this order: `cancelled` when a `storno` credited everything (also after a payment); else `paid`
-when `open_amount` ≤ 0 and `paid_amount` > 0; else the stored label.
+gross}`), `paid_date` (the date of the latest `payment` row that is not reversed, when `open_amount` ≤ 0 and
+`paid_amount` > 0; else `null` — the key is always present), `status` derived in this order: `cancelled` when a
+`storno` credited everything (also after a payment); else `paid` when `open_amount` ≤ 0 and `paid_amount` > 0; else
+the stored label, except that a stored `paid` not explained by these rules (and not a legacy virtual payment) reads as
+`sent`. `payments` are listed by date, then `created_at`, then id.
 
 `DELETE` of an issued invoice or a credit note → 409.
 
