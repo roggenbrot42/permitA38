@@ -5,12 +5,14 @@ credit-notes-payments.md 5).
 The expected entries are read from the hand-computed oracle ``fixtures/accounting_oracle.json`` (never edited here).
 """
 
+from datetime import date
 from typing import Any
 
 import pytest
 
 from permita38.core.errors import ServiceError
 from permita38.core.service.journal import JournalService
+from permita38.core.service.locks import LockService
 from permita38.core.service.records import RecordService
 
 from .test_issue_posting import (  # noqa: F401  (fixtures and helpers)
@@ -365,3 +367,96 @@ def test_api_reverse_charge_response_carries_the_warning(boss_client):
     assert float(out["vat"]) == 38.10
     assert out["accounting_warnings"][0]["code"] == "expense.rc_vat_ignored"
     assert "bill_rev" not in boss_client.post("/api/expenses", json={**body, "bill_rev": 5}).json()
+
+
+# ---------------------------------------------------------------- change detection against the stored entry (9.4)
+def test_invoice_no_only_edit_reposts_while_open(repo, rs):
+    init(repo)
+    rec = make(repo, rs, invoice_no="R-1")
+    rec = put(rs, rec, invoice_no="R-2")
+    posted = entries(repo)
+    eid = rec["id"]
+    assert [e.event_key for e in posted] == [
+        f"expense:{eid}:bill:r1",
+        f"expense:{eid}:bill:r1:rev",
+        f"expense:{eid}:bill:r2",
+    ]
+    assert posted[2].source_number == "R-2" and rec["bill_rev"] == 2
+
+
+def test_supplier_change_reposts_while_open_and_is_409_when_the_bill_is_locked(repo, rs):
+    init(repo)
+    a = repo.save("suppliers", {"name": "Demo A", "kind": "goods", "vat_id": "DE111111111", "country": "DE"})
+    b = repo.save("suppliers", {"name": "Demo B", "kind": "goods", "vat_id": "FR22222222222", "country": "FR"})
+    rec = make(repo, rs, supplier_id=a["id"], vendor="Demo A")
+    rec = put(rs, rec, supplier_id=b["id"], vendor="Demo A")
+    assert rec["bill_rev"] == 2
+    assert entries(repo)[-1].counterparty_id == b["id"] and entries(repo)[-1].cp_vat_id == "FR22222222222"
+    lock_through(repo, 3)
+    before = len(entries(repo))
+    with pytest.raises(ServiceError) as exc:
+        put(rs, rec, supplier_id=a["id"], vendor="Demo A")
+    assert exc.value.status == 409 and len(entries(repo)) == before
+    with pytest.raises(ServiceError) as exc:
+        put(rs, rec, invoice_no="R-9")
+    assert exc.value.status == 409 and len(entries(repo)) == before
+
+
+def test_treatment_change_in_a_locked_month_is_409(repo, rs):
+    init(repo)
+    rec = make(repo, rs)
+    lock_through(repo, 3)
+    with pytest.raises(ServiceError) as exc:
+        put(rs, rec, tax_treatment="no_input_vat")
+    assert exc.value.status == 409
+    assert "tax_treatment" not in rs.store.get("expenses", rec["id"]) and len(entries(repo)) == 1
+
+
+def test_a_bill_409_with_a_payment_change_rolls_back_the_whole_save(repo, rs):
+    init(repo)
+    rec = make(repo, rs, paid_on="2026-03-12")
+    lock_through(repo, 3)
+    before = keys(repo)
+    with pytest.raises(ServiceError) as exc:
+        put(rs, rec, net=200.0, vat=38.0, paid_on="2026-04-02")
+    assert exc.value.status == 409 and keys(repo) == before
+    stored = rs.store.get("expenses", rec["id"])
+    assert stored["net"] == 100.0 and stored["paid_on"] == "2026-03-12" and stored["pay_rev"] == 1
+
+
+# ---------------------------------------------------------------- booking-date rule of the engine input
+def test_13b_private_share_income_date_follows_the_closing_date_exception(repo, rs):
+    """Spec 7.8: December locked, 2026 open: the entry books on 31 December and so does the income date."""
+    init(repo, income="eur", vat="ist")
+    LockService(repo, today=lambda: date(2027, 1, 15)).lock_up_to(2026, 12, "manual", "u1x000")
+    make(
+        repo, rs, date="2026-10-15", tax_treatment="reverse_charge_eu_service", net=100.0, vat=0.0, vat_rate=19.0,
+        deductible=50,
+    )  # fmt: skip
+    bill = next(e for e in entries(repo) if ":bill:" in e.event_key)
+    assert bill.booking_date == "2026-12-31"
+    private = next(ln for ln in bill.lines if ln.role == "vat_paid_private")
+    assert private.income_date == "2026-12-31"
+
+
+def test_itemised_reverse_charge_line_without_a_rate_defaults_to_19(repo, rs):
+    init(repo)
+    lines = [{"description": "a", "gross": 100.0, "category": "software"}]
+    rec = rs.create(BOSS, "expenses", {"date": "2026-06-02", "net": 0, "tax_treatment": "reverse_charge_eu_service",
+                                       "lines": lines})  # fmt: skip
+    assert rec["vat"] == 19.0
+    (entry,) = entries(repo)
+    assert next(ln for ln in entry.lines if ln.role == "rc_vat_out_eu").amount == -19.0
+
+
+# ---------------------------------------------------------------- other creation paths post
+def test_scanned_and_adopted_expenses_post(repo, rs):
+    init(repo)
+    scanned = {"date": "2026-03-10", "net": 100.0, "vat": 19.0, "vat_rate": 19.0, "category": "software",
+               "vendor": "Demo Shop"}  # fmt: skip
+    rec = rs.create_scanned(BOSS, scanned, "scan0001")
+    assert rec["bill_rev"] == 1
+    plain = repo.save("expenses", {**scanned, "date": "2026-03-11", "net": 50.0, "vat": 9.5})
+    adopted = rs.adopt_expense(BOSS, plain, supplier(repo, "domestic"))
+    assert adopted["bill_rev"] == 1
+    assert len(keys(repo)) == 2

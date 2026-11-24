@@ -126,7 +126,7 @@ class ExpensePostingService:
             lines = []
             for ln in raw_lines:
                 net = dec(ln.get("gross"))
-                rate = dec(ln.get("vat_rate"))
+                rate = dec(ln["vat_rate"]) if ln.get("vat_rate") is not None else DEFAULT_RC_RATE
                 nets[rate] = nets.get(rate, Decimal(0)) + net
                 lines.append({**ln, "net": to_float(net), "vat": 0.0})
             data["lines"] = lines
@@ -196,9 +196,27 @@ class ExpensePostingService:
             pay_rev=rev[1],
         )
 
-    def _entries(self, rec: Mapping[str, Any], rev: tuple[int, int]) -> dict[Part, Entry | None]:
+    def _engine_first(self, day: date, first_open: date | None, stored: Mapping[str, Any] | None) -> date:
+        """The ``first_open_day`` handed to the pure engine for a document dated ``day``, so that its booking date
+        and booking-date-dependent fields (``vat_paid_private`` income date, input-VAT ``vat_date``) follow the
+        journal's rule incl. the closing-date exception (spec 7.8). With a ``stored`` entry: the state it was posted
+        in (for change detection, so a lock set afterwards does not look like an edit)."""
+        if stored is not None:
+            return date.fromisoformat(str(stored["booking_date"]))
+        # TODO: make JournalService.booking_date public; called through the instance for now
+        booking = self.journal._booking_date(day)
+        return booking if booking > day else (first_open or date.min)
+
+    def _entries(
+        self,
+        rec: Mapping[str, Any],
+        rev: tuple[int, int],
+        stored: Mapping[Part, Record | None] | None = None,
+        year_closed: bool | None = None,
+    ) -> dict[Part, Entry | None]:
         """The bill and payment entries the engine gives for the expense now; ``None`` entries post nothing. Empty
-        before the accounting start (and nothing when the fiscal year does not exist yet and cannot be opened)."""
+        before the accounting start (and nothing when the fiscal year does not exist yet and cannot be opened).
+        ``stored`` / ``year_closed`` are for change detection only (see :meth:`_engine_first`)."""
         start = accounting_start(self.store.settings())
         day = _day(rec.get("date"))
         if start is None or day is None or day < start:
@@ -207,11 +225,18 @@ class ExpensePostingService:
         bases = Bases(cast(IncomeBasis, fy["income_basis"]), cast(VatBasis, fy["vat_basis"]))
         first_open = first_unlocked_from(self.store.list("period_locks"))
         engine = self._engine(rec, fy, rev)
-        first = first_open or date.min
+        stored = stored or {}
         paid = engine.paid_on or (engine.date if bases.income == "eur" else None)
-        bill = expense_bill_entry(engine, bases, first, self._closed(engine.date))
-        pay = expense_pay_entry(engine, bases, first, self._closed(paid) if paid else False)
-        return {"bill": self._dated(bill, first_open), "pay": self._dated(pay, first_open)}
+        bill_first = self._engine_first(engine.date, first_open, stored.get("bill"))
+        bill_closed = self._closed(engine.date) if year_closed is None else year_closed
+        bill = expense_bill_entry(engine, bases, bill_first, bill_closed)
+        pay = None
+        pay_first = bill_first
+        if paid is not None:
+            pay_first = self._engine_first(paid, first_open, stored.get("pay"))
+            pay_closed = self._closed(paid) if year_closed is None else year_closed
+            pay = expense_pay_entry(engine, bases, pay_first, pay_closed)
+        return {"bill": self._dated(bill, bill_first), "pay": self._dated(pay, pay_first)}
 
     @staticmethod
     def _dated(entry: Entry | None, first_open: date | None) -> Entry | None:
@@ -306,11 +331,12 @@ class ExpensePostingService:
             return saved
         eid = str(saved["id"])
         new = self._entries(saved, (revs["bill"] + 1, revs["pay"] + 1))
-        before = self._entries(old, (1, 1)) if old is not None and old.get("id") else {"bill": None, "pay": None}
+        lives: dict[Part, Record | None] = {part: self._live(eid, part, revs[part]) for part in PARTS}
+        compare = self._compare_entries(saved, lives)
         for part in PARTS:
-            live = self._live(eid, part, revs[part])
-            now, was = new[part], before[part]
-            if live is not None and now is not None and was is not None and _same(now, was):
+            live = lives[part]
+            now = new[part]
+            if live is not None and now is not None and self._unchanged(saved, part, live, compare[part], user):
                 continue  # nothing this event posts has changed (e.g. only a description was edited)
             if live is None and now is None:
                 continue
@@ -335,6 +361,41 @@ class ExpensePostingService:
                 out[f"{part}_rev"] = revs[part]
         return dict(self.store.save("expenses", out))
 
+    def _compare_entries(
+        self, rec: Mapping[str, Any], lives: Mapping[Part, Record | None]
+    ) -> dict[Part, list[Entry | None]]:
+        """The would-be entries in the state the stored ones were posted in (both closed-year readings: whether the
+        year was closed at posting time is not stored)."""
+        if not any(lives.values()):
+            return {"bill": [], "pay": []}
+        out: dict[Part, list[Entry | None]] = {"bill": [], "pay": []}
+        for closed in (False, True):
+            got = self._entries(rec, (1, 1), lives, closed)
+            for part in PARTS:
+                out[part].append(got[part])
+        return out
+
+    def _unchanged(
+        self, rec: Mapping[str, Any], part: Part, live: Record, candidates: list[Entry | None], user: Any
+    ) -> bool:
+        """Spec 9.4: the would-be entry equals the stored one in lines, document date, source number and counterparty
+        fields (the free text alone never reposts)."""
+        source = self._source(rec, part, user, False)
+        for cand in candidates:
+            if cand is None or cand.document_date.isoformat() != str(live["document_date"])[:10]:
+                continue
+            if (
+                (source.source_number or None) != (live.get("source_number") or None)
+                or (source.counterparty_id or None) != (live.get("counterparty_id") or None)
+                or (source.cp_vat_id or None) != (live.get("cp_vat_id") or None)
+                or (source.cp_country or None) != (live.get("cp_country") or None)
+            ):
+                return False
+            mine = [_line_key(dataclasses.asdict(post_line(ln))) for ln in cand.lines]
+            if mine == [_line_key(ln) for ln in live["lines"]]:
+                return True
+        return False
+
     def unpost(self, expense: Mapping[str, Any], user: Mapping[str, Any] | None = None) -> None:
         """Before a delete: the reversals of the live entries only (409 for a bill entry in a locked month)."""
         lives = {part: self._live(str(expense["id"]), part, _rev(expense, part)) for part in PARTS}
@@ -351,8 +412,21 @@ class ExpensePostingService:
                 self._reverse(expense, part, stored, user)
 
 
-def _same(a: Entry, b: Entry) -> bool:
-    return a.lines == b.lines and a.document_date == b.document_date
+def _line_key(ln: Mapping[str, Any]) -> tuple[Any, ...]:
+    def iso(v: Any) -> str | None:
+        return str(v)[:10] if v else None
+
+    return (
+        ln.get("role"),
+        int(ln["amount_cents"]),
+        ln.get("tax_key") or None,
+        ln.get("tax_kind") or None,
+        ln.get("tax_rate") or None,
+        ln.get("tax_base_cents"),
+        iso(ln.get("vat_date")),
+        iso(ln.get("income_date")),
+        ln.get("open_item_id") or None,
+    )
 
 
 def _rate(net: Decimal, vat: Decimal, given: Any, rc: bool) -> Decimal:
