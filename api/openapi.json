@@ -11496,9 +11496,7 @@
           "200": {
             "description": "Successful Response",
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "application/pdf": {}
             }
           },
           "422": {
@@ -11538,15 +11536,25 @@
               "type": "string",
               "title": "Rid"
             }
+          },
+          {
+            "name": "lines",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "the source lines",
+              "default": false,
+              "title": "Lines"
+            },
+            "description": "the source lines"
           }
         ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "text/csv": {}
             }
           },
           "422": {
@@ -11593,7 +11601,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/VatReturn"
+                }
               }
             }
           },
