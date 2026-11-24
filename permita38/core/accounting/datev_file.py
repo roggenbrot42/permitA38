@@ -23,6 +23,7 @@ __all__ = [
     "COLUMN_HEADER",
     "DatevHeaderParams",
     "datev_zip",
+    "datev_zip_files",
     "extf_csv",
     "extf_filename",
     "self_check_report",
@@ -136,6 +137,8 @@ class DatevHeaderParams:
     date_from: date
     date_to: date
     label: str
+    #: Festschreibung of an empty file (no rows to derive it from); ignored when rows are present
+    locked_if_empty: bool = False
 
 
 def _quote(text: str) -> str:
@@ -173,8 +176,12 @@ def _signed_comma(cents: int) -> str:
     return ("-" if cents < 0 else "") + _comma(abs(cents))
 
 
-def _locked_flag(rows: Sequence[DatevRow]) -> str:
-    """Header Festschreibung: ``1`` only if every row is locked; mixed rows must be split by the caller."""
+def _locked_flag(rows: Sequence[DatevRow], locked_if_empty: bool = False) -> str:
+    """Header Festschreibung: ``1`` only if every row is locked; mixed rows must be split by the caller.
+
+    Without rows the flag comes from ``locked_if_empty`` (the lock state of the range)."""
+    if not rows:
+        return "1" if locked_if_empty else "0"
     flags = {r.festschreibung for r in rows}
     if len(flags) > 1:
         raise ValueError("rows mix locked and unlocked months; export them as separate batches")
@@ -232,7 +239,11 @@ def _data_line(row: DatevRow) -> str:
 
 
 def _file_text(rows: Sequence[DatevRow], params: DatevHeaderParams) -> str:
-    lines = [_header_line(params, _locked_flag(rows)), ";".join(COLUMN_HEADER), *(_data_line(r) for r in rows)]
+    lines = [
+        _header_line(params, _locked_flag(rows, params.locked_if_empty)),
+        ";".join(COLUMN_HEADER),
+        *(_data_line(r) for r in rows),
+    ]
     return "".join(line + _EOL for line in lines)
 
 
@@ -256,8 +267,9 @@ def unencodable_characters(rows: Sequence[DatevRow], header_params: DatevHeaderP
     return tuple(sorted(_unencodable_in(_file_text(rows, header_params))))
 
 
-def extf_filename(date_from: date, date_to: date) -> str:
-    return f"EXTF_Buchungsstapel_{_ymd(date_from)}_{_ymd(date_to)}.csv"
+def extf_filename(date_from: date, date_to: date, suffix: str = "") -> str:
+    """``EXTF_Buchungsstapel_<from>_<to>.csv``; ``suffix`` (e.g. ``_locked``) tells two files of one export apart."""
+    return f"EXTF_Buchungsstapel_{_ymd(date_from)}_{_ymd(date_to)}{suffix}.csv"
 
 
 _BANNER = (
@@ -311,14 +323,19 @@ def self_check_report(
     return "\n".join(out) + "\n"
 
 
-def datev_zip(csv: bytes, report: str, date_from: date, date_to: date) -> bytes:
-    """Zip with the EXTF file and ``export-report.txt``; fixed names, timestamps and attributes (byte-identical)."""
+def datev_zip_files(files: Sequence[tuple[str, bytes]], report: str) -> bytes:
+    """Zip with the named EXTF files and ``export-report.txt``; fixed timestamps and attributes (byte-identical)."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name, data in ((extf_filename(date_from, date_to), csv), (REPORT_NAME, report.encode("utf-8"))):
+        for name, data in (*files, (REPORT_NAME, report.encode("utf-8"))):
             info = zipfile.ZipInfo(name, _ZIP_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 3
             info.external_attr = 0o644 << 16
             zf.writestr(info, data)
     return buf.getvalue()
+
+
+def datev_zip(csv: bytes, report: str, date_from: date, date_to: date) -> bytes:
+    """Zip with the EXTF file and ``export-report.txt``; fixed names, timestamps and attributes (byte-identical)."""
+    return datev_zip_files([(extf_filename(date_from, date_to), csv)], report)
