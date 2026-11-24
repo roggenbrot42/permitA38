@@ -1,6 +1,7 @@
 """ZM (EC sales list) computation from journal lines (docs/specs/zm.md "Computation"; accounting 6, 7a). Pure, no I/O.
 
-Money is integer cents; the whole-euro amounts are truncated toward zero (rules data ``base_rounding``).
+Money is integer cents; the whole-euro amounts are rounded by the rules data ``base_rounding`` (only
+``truncate_toward_zero`` is defined; an unknown mode raises ``ValueError``).
 """
 
 from collections.abc import Callable, Iterable
@@ -8,6 +9,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from permita38.core.accounting.types import Line
+from permita38.core.vat_rules import vat_rules_for
 
 __all__ = ["ZmLine", "kz21_by_month", "zm_lines"]
 
@@ -25,8 +27,11 @@ class ZmLine:
     source: tuple[Line, ...]
 
 
-def _trunc_euros(cents: int) -> int:
-    """Whole euros, truncated toward zero."""
+def _euros(cents: int, year: int) -> int:
+    """Whole euros, rounded by the ``base_rounding`` mode of the VAT rules of ``year``."""
+    mode = vat_rules_for(year).base_rounding
+    if mode != "truncate_toward_zero":
+        raise ValueError(f"unknown base_rounding mode {mode!r}")
     return -(-cents // 100) if cents < 0 else cents // 100
 
 
@@ -40,7 +45,9 @@ def zm_lines(
 ) -> list[ZmLine]:
     """Group the ``EU_SVC`` base lines whose ``vat_date`` lies in the quarter by customer VAT id.
 
-    A total of 0 is omitted unless ``corrected``. Result sorted by VAT id.
+    Amounts are whole euros per the rules' ``base_rounding`` (``truncate_toward_zero``; others raise ``ValueError``).
+    A total that rounds to 0 is omitted unless ``corrected``. An empty VAT id raises ``ValueError``.
+    Result sorted by VAT id.
     """
     if not 1 <= quarter <= 4:
         raise ValueError(f"invalid quarter {quarter}")
@@ -55,12 +62,15 @@ def zm_lines(
         if d.year != year or not first_month <= d.month <= first_month + 2:
             continue
         vid = vat_id_of(ln)
+        if not vid:
+            raise ValueError("missing customer VAT id for an EU_SVC line")
         sums[vid] = sums.get(vid, 0) + int(base)
         sources.setdefault(vid, []).append(ln)
+    rounded = {vid: _euros(total, year) for vid, total in sums.items()}
     return [
-        ZmLine(vid, vid[:2], _trunc_euros(total), "S", tuple(sources[vid]))
-        for vid, total in sorted(sums.items())
-        if corrected or _trunc_euros(total) != 0
+        ZmLine(vid, vid[:2], rounded[vid], "S", tuple(sources[vid]))
+        for vid in sorted(sums)
+        if corrected or rounded[vid] != 0
     ]
 
 
@@ -73,4 +83,4 @@ def kz21_by_month(lines: Iterable[Line], year: int) -> dict[int, int]:
         if ln.tax_key != _EU_SVC or ln.tax_kind != "base_only" or d is None or base is None or d.year != year:
             continue
         sums[d.month] = sums.get(d.month, 0) + int(base)
-    return {m: _trunc_euros(t) for m, t in sorted(sums.items())}
+    return {m: _euros(t, year) for m, t in sorted(sums.items())}
