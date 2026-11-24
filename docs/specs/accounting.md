@@ -400,7 +400,9 @@ arose in that period by law.
 
 Changing an expense: the service posts reversals of its current bill and payment entries (`reverses_id`) and new ones
 with revision `r+1`; deleting posts the reversals only. Both are refused (409 "the period is locked; book a
-correction") when a **bill** entry to be reversed has its booking date in a locked month; payment entries carry no
+correction") when a **bill** entry to be reversed has its booking date in a locked month. "Changed" is decided by
+comparing the would-be entry with the **stored** current entry (not with a recomputation of the old record): lines,
+`document_date`, `source_number`, `counterparty_id`, `cp_vat_id`, `cp_country` (the free `text` alone never reposts); payment entries carry no
 VAT line and may be reversed and reposted into the first open month (above).
 
 ### 9.5 Trips
@@ -823,7 +825,7 @@ maintainer's sign-off of these specs (PR #124).
 | E16 | Manual entries, reverse, accounts API, templates; JournalService refuses an accrual line whose `income_date` lies outside the entry's fiscal year (section 14.5) | F | E7 |
 | E17 | VAT/tax bookings, opening balances | F | E16, F9 |
 | E18 | Year closing / EÜR year end; migration adding `fiscal_years.closing_hash` / `closing_entry_no` (set once) | F | E17 |
-| E19 | xlsx importer: snapshot, `paid`→payment, `cancelled`→review, undo; scans of the invoices collection distinguish `kind = credit_note` | F | E10 |
+| E19 | xlsx importer: snapshot, `paid`→payment, `cancelled`→review, undo; scans of the invoices collection distinguish `kind = credit_note`; imported, overwritten and undone **expenses** go through the expense posting hook (no direct `store.save`), keeping `bill_rev`/`pay_rev` | F | E10 |
 | E20 | Stateful randomized model ×2 (freeze/payments; credit notes/locks) | F (test) | E12 |
 | E21 | Web `e2e_random` models | S | E12, W1 |
 | W1 | Read-only issued invoice, treatment select, payments panel | S | E10 |
