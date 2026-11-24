@@ -265,8 +265,8 @@ def test_totals_oracle_expected_and_actual(boss_client):
     gross 11,90. Actual = 95,20 + 11,90 = 107,10."""
     trip = make_trip(boss_client, items=[item(expected=80), item(text="Hotel", category="hotel", expected=120)])
     first = trip["items"][0]
-    assert trip["items_expected_total"] == 200.0
-    assert trip["items_actual_total"] == 0.0
+    assert trip["items_expected_total"] == "200.00"
+    assert trip["items_actual_total"] == "0.00"
     boss_client.post(
         "/api/expenses",
         json={
@@ -280,19 +280,19 @@ def test_totals_oracle_expected_and_actual(boss_client):
     )
     boss_client.post("/api/expenses", json={"date": "2026-11-09", "net": 11.9, "vat": 0, "trip_id": trip["id"]})
     got = boss_client.get(f"/api/trips/{trip['id']}").json()
-    assert got["items_expected_total"] == 200.0
-    assert got["items_actual_total"] == 107.1
+    assert got["items_expected_total"] == "200.00"
+    assert got["items_actual_total"] == "107.10"
     listed = [t for t in boss_client.get("/api/trips").json() if t["id"] == trip["id"]][0]
-    assert listed["items_actual_total"] == 107.1
+    assert listed["items_actual_total"] == "107.10"
 
 
 def test_planned_costs_do_not_change_allowance_mileage_or_statement(boss_client):
     """Expected costs are planning figures only: allowance 56,00 (9-11 Nov, see trip_body) stays the same."""
     plain = make_trip(boss_client)
     planned = make_trip(boss_client, items=[item(expected=500)])
-    assert planned["allowance_total"] == plain["allowance_total"] == 56.0
-    assert planned["mileage_total"] == 0
-    assert planned["bills"] == {"count": 0, "net": 0, "vat": 0}
+    assert planned["allowance_total"] == plain["allowance_total"] == "56.00"
+    assert planned["mileage_total"] == "0.00"
+    assert planned["bills"] == {"count": 0, "net": "0.00", "vat": "0.00"}
     text = _pdf_text(boss_client.get(f"/api/trips/{planned['id']}/statement.pdf").content)
     assert "500,00" not in text
     assert not any("Itinerary" in t for t in text)
@@ -300,12 +300,12 @@ def test_planned_costs_do_not_change_allowance_mileage_or_statement(boss_client)
 
 def test_items_totals_are_zero_for_a_trip_without_items(boss_client):
     trip = make_trip(boss_client)
-    assert trip["items_expected_total"] == 0 and trip["items_actual_total"] == 0
+    assert trip["items_expected_total"] == "0.00" and trip["items_actual_total"] == "0.00"
 
 
 def test_client_cannot_set_the_totals(boss_client):
     trip = make_trip(boss_client, items_expected_total=1, items_actual_total=2)
-    assert trip["items_expected_total"] == 0 and trip["items_actual_total"] == 0
+    assert trip["items_expected_total"] == "0.00" and trip["items_actual_total"] == "0.00"
 
 
 # ------------------------------------------------------------------ rights
@@ -375,8 +375,8 @@ def test_items_actual_total_excludes_bills_of_other_trips(boss_client):
         json={"date": "2026-11-09", "net": 50, "vat": 9.5, "vat_rate": 19, "trip_id": trip_a["id"]},
     )
     boss_client.post("/api/expenses", json={"date": "2026-11-09", "net": 1000, "vat": 0, "trip_id": trip_b["id"]})
-    assert boss_client.get(f"/api/trips/{trip_a['id']}").json()["items_actual_total"] == 59.5
-    assert boss_client.get(f"/api/trips/{trip_b['id']}").json()["items_actual_total"] == 1000.0
+    assert boss_client.get(f"/api/trips/{trip_a['id']}").json()["items_actual_total"] == "59.50"
+    assert boss_client.get(f"/api/trips/{trip_b['id']}").json()["items_actual_total"] == "1000.00"
 
 
 def test_legs_with_equal_departure_keep_their_order(boss_client):
@@ -410,7 +410,7 @@ def test_old_stored_trip_without_itinerary_items_or_origin_loads(app, boss_clien
     assert body["purpose"] == "Old customer visit"
     assert body.get("itinerary", []) == [] and body.get("items", []) == []
     assert body.get("origin") is None and body.get("destination") is None
-    assert body["items_actual_total"] == 0 and body["items_expected_total"] == 0
+    assert body["items_actual_total"] == "0.00" and body["items_expected_total"] == "0.00"
     assert [t["id"] for t in boss_client.get("/api/trips").json()].count("oldtrip0001") == 1
 
 

@@ -39,13 +39,43 @@ def env_int(name: str, default: int) -> int:
     return int(os.environ.get(name, default))
 
 
-def money(x) -> Decimal:
+MONEY_KEYS = frozenset(
+    {"rate", "price", "amount", "net", "vat", "gross", "default_rate", "cost_rate", "mileage_rate", "planning_min_rate"}
+)
+
+
+def dec(x) -> Decimal:
+    """Exact cents (half-up) as a Decimal, for arithmetic in the models."""
     return Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def money(x) -> str:
+    """A money value as the API returns it: a decimal string with two decimals."""
+    return f"{dec(x):.2f}"
+
+
+def money_in(rng, x):
+    """A money input as a client may send it: sometimes a JSON number, sometimes a decimal string."""
+    if x is None:
+        return None
+    return str(x) if rng.random() < 0.5 else x
+
+
+def money_eq(a, b) -> bool:
+    """Equal as exact decimals; `a` is a response value (decimal string), `b` what was sent (number or string)."""
+    if a is None or b is None:
+        return a is None and b is None
+    if isinstance(a, bool) or isinstance(b, bool):
+        return False
+    try:
+        return Decimal(str(a)) == Decimal(str(b))
+    except ArithmeticError:
+        return False
 
 
 def eur(x) -> str:
     """German euro formatting like `Intl.NumberFormat('de-DE', {style:'currency',currency:'EUR'})`."""
-    s = f"{money(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    s = f"{dec(x):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return s + " €"
 
 

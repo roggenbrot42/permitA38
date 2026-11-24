@@ -4,9 +4,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Response
 from pydantic import Field
 
+from permita38.api import money_out
 from permita38.api.deps import Needs, ServicesDep
+from permita38.api.responses import present
 from permita38.core import validation as v
-from permita38.core.models import Document
+from permita38.core.models import Contract, Document, Project
 
 router = APIRouter(tags=["sales"])
 routers = [router]
@@ -20,11 +22,13 @@ class DocumentResult(Document):
 
 
 def _doc(services, coll: str, doc: dict, finalize: bool = False) -> dict:
-    return {
-        **doc,
-        "planning_warnings": services.planner.warnings_for(coll, doc),
-        "sanity_warnings": services.sanity.check(coll, doc, None, finalize=finalize),
-    }
+    return money_out.convert_warnings(
+        {
+            **doc,
+            "planning_warnings": services.planner.warnings_for(coll, doc),
+            "sanity_warnings": services.sanity.check(coll, doc, None, finalize=finalize),
+        }
+    )
 
 
 class FromTime(v.CheckedBody):
@@ -77,7 +81,11 @@ def accept_offer(rid: str, _: Annotated[dict, Needs("offers", "write")], service
     out["planning_warnings"] = services.planner.warnings_for("projects", out["project"])
     if out.get("contract"):
         out["planning_warnings"] += services.planner.warnings_for("contracts", out["contract"])
-    return out
+    out["offer"] = present(Document, out["offer"])
+    out["project"] = present(Project, out["project"])
+    if out.get("contract"):
+        out["contract"] = present(Contract, out["contract"])
+    return money_out.convert_warnings(out)
 
 
 @router.post("/offers/{rid}/to-invoice", response_model=DocumentResult, response_model_exclude_none=True)

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Response
 from pydantic import BaseModel
 
 from permita38.api.deps import Needs, ServicesDep
+from permita38.api.money_out import convert_warnings
 from permita38.api.responses import stored
 from permita38.core import models, rights
 from permita38.core.service.sanity import CHECKED
@@ -49,7 +50,7 @@ def crud_router(coll: str, model: type[models.Record], in_model: type[BaseModel]
     @router.post("", response_model=out_model, response_model_exclude_none=True, name=f"create_{coll}")
     def create_record(body: in_model, user: writer, services: ServicesDep):  # type: ignore[valid-type]
         rec = services.records.create(user, coll, body.model_dump(exclude_none=True))
-        return stored(out_model, _with_warnings(services, coll, rec, user))
+        return stored(out_model, convert_warnings(_with_warnings(services, coll, rec, user)))
 
     @router.get("/{rid}", response_model=model, response_model_exclude_none=True, name=f"get_{coll}")
     def get_record(rid: str, user: reader, services: ServicesDep):
@@ -59,7 +60,7 @@ def crud_router(coll: str, model: type[models.Record], in_model: type[BaseModel]
     def update_record(rid: str, body: in_model, user: writer, services: ServicesDep):  # type: ignore[valid-type]
         old = services.sanity.previous(coll, rid)
         rec = services.records.update(user, coll, rid, body.model_dump(exclude_none=True))
-        return stored(out_model, _with_warnings(services, coll, rec, user, old))
+        return stored(out_model, convert_warnings(_with_warnings(services, coll, rec, user, old)))
 
     @router.delete("/{rid}", status_code=204, name=f"delete_{coll}")
     def delete_record(rid: str, user: writer, services: ServicesDep):

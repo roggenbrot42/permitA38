@@ -2,18 +2,21 @@
 other devices survive a round-trip through this version."""
 
 import json
-from datetime import datetime
+from datetime import date as _date
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictBool,
     StrictInt,
     StringConstraints,
+    ValidationError,
     field_validator,
     model_serializer,
     model_validator,
@@ -44,7 +47,7 @@ class Customer(Record):
     email: str | None = None
     phone: str | None = None
     notes: str | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     external_id: str | None = None
     import_batch: str | None = None
 
@@ -53,7 +56,7 @@ class Project(Record):
     name: str
     customer_id: str | None = None
     kind: str = "customer"
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     budget_hours: float | None = None
     status: str = "active"
     color: str | None = None
@@ -67,7 +70,7 @@ class Project(Record):
 class Task(Record):
     project_id: str
     name: str
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
 
 
 class Entry(Record):
@@ -81,7 +84,7 @@ class Entry(Record):
     end: str | None = None
     billable: bool = True
     invoice_id: str | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
 
 
 class Contract(Record):
@@ -92,7 +95,7 @@ class Contract(Record):
     end: str
     hours_per_week: float | None = None
     total_hours: float | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     status: str = "confirmed"
     user_ids: list[str] = []
     offer_id: str | None = None
@@ -111,10 +114,10 @@ class ExpenseLine(BaseModel):
 
     model_config = ConfigDict(extra="allow")
     description: str = ""
-    gross: float | None = None
+    gross: v.Money | None = None
     vat_rate: float | None = None
-    net: float | None = None
-    vat: float | None = None
+    net: v.Money | None = None
+    vat: v.Money | None = None
     deductible: float = 100
     vat_deductible: float | None = None
     category: str | None = None
@@ -122,8 +125,8 @@ class ExpenseLine(BaseModel):
 
 class Expense(Record):
     date: str
-    net: float
-    vat: float = 0
+    net: v.Money
+    vat: v.Money = 0
     vat_rate: float | None = None
     vendor: str | None = None
     description: str | None = None
@@ -142,6 +145,8 @@ class Expense(Record):
     reverse_charge: bool | None = None  # stored as sent; the VAT figures are not changed (open decision 6)
     paid_on: str | None = None  # docs/specs/receipt-scan.md: null = not given, counts as paid on the bill date `date`
     invoice_no: str | None = None  # the invoice number printed on the bill
+    tax_treatment: str | None = None  # docs/specs/accounting.md 8.2; null reads as derived (section 16)
+    service_date: str | None = None  # performance date (§ 13b); null reads as `date`
 
 
 class Line(BaseModel):
@@ -149,9 +154,9 @@ class Line(BaseModel):
     description: str = ""
     qty: float = 0
     unit: str | None = None
-    price: float = 0
+    price: v.UnitPrice = 0
     vat: float | None = None
-    amount: float | None = None
+    amount: v.Money | None = None
 
 
 class Plan(BaseModel):
@@ -161,8 +166,44 @@ class Plan(BaseModel):
     hours_per_week: float | None = None
     total_hours: float | None = None
     user_ids: list[str] = []
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     win_probability: float | None = None
+
+
+class Payment(BaseModel):
+    """One payment, refund or reversal of an invoice (docs/specs/credit-notes-payments.md 2.3 and 3). ``amount`` is
+    signed: positive = money received, negative = money paid back. ``id`` is null for a legacy virtual payment."""
+
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    document_id: str | None = None
+    date: str | None = None
+    amount: v.Money = 0
+    kind: str = "payment"  # payment | refund | reversal
+    method: str = "bank"
+    note: str | None = None
+    reverses_id: str | None = None
+    created: int | None = None
+
+    @field_validator("date", "amount", "created", mode="wrap")
+    @classmethod
+    def _lenient(cls, value: Any, handler: Any, info: Any) -> Any:
+        """A stored malformed value must never fail a read: it reads as empty (date, created) or 0 (amount)."""
+        try:
+            return handler(value)
+        except ValidationError:
+            return 0.0 if info.field_name == "amount" else None
+
+
+class CreditNoteSummary(BaseModel):
+    """A credit note as listed on its invoice (``credit_notes`` of the invoice response)."""
+
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    number: str | None = None  # null for write-offs (internal vouchers)
+    date: str | None = None
+    credit_kind: str | None = None
+    gross: v.Money = 0
 
 
 class Document(Record):
@@ -196,6 +237,17 @@ class Document(Record):
     import_batch: str | None = None
     totals_unverified: bool | None = None
     original_pdf: str | None = None
+    # docs/specs/credit-notes-payments.md 2.3: stored by the accounting services, derived on output
+    kind: str | None = None  # invoice | credit_note
+    credit_kind: str | None = None
+    corrects_id: str | None = None
+    tax_treatment: str | None = None  # null reads as `standard`
+    issued: dict[str, Any] | None = None  # the snapshot taken when the invoice is issued
+    paid_amount: v.Money | None = None
+    credited_amount: v.Money | None = None
+    open_amount: v.Money | None = None  # gross - credited - paid; negative = customer credit
+    payments: list[Payment] | None = None
+    credit_notes: list[CreditNoteSummary] | None = None
 
 
 class Template(Record):
@@ -231,8 +283,8 @@ class UserOut(Record):
     role: str | None = None
     weekly_hours: float | None = None
     workdays: list[int] | None = None
-    default_rate: float | None = None
-    cost_rate: float | None = None
+    default_rate: v.UnitPrice | None = None
+    cost_rate: v.UnitPrice | None = None
     color: str | None = None
     tracking_start: str | None = None
     active: bool | None = None
@@ -338,7 +390,7 @@ class Settings(BaseModel):
     vat_rate: float = 19
     state: str = ""
     hebesatz: float = 400
-    default_rate: float = 80
+    default_rate: v.UnitPrice = 80
     payment_days: int = 14
     offer_valid_days: int = 30
     default_template: str = "classic"
@@ -347,7 +399,7 @@ class Settings(BaseModel):
     invoice_reset: str = "yearly"  # never | yearly | monthly (see core/numbering.py)
     offer_reset: str = "yearly"
     numbering_shared: bool = False  # invoices and offers share one sequence
-    planning_min_rate: float = 0
+    planning_min_rate: v.UnitPrice = 0
     planning_default_win_probability: float = 100
     subcontractor_hint_hours_per_week: float = 30
     subcontractor_hint_weeks: int = 12
@@ -560,6 +612,28 @@ class ExpenseLineIn(v.StrictRecord):
         return value
 
 
+# Fields the server owns: a client (also one that sends a whole record back) cannot set them. They are dropped
+# silently before validation, so a round-tripped response is accepted and the stored value is never overwritten.
+INTERNAL_EXPENSE_FIELDS = ("bill_rev", "pay_rev")
+INTERNAL_DOCUMENT_FIELDS = (
+    "issued",
+    "kind",
+    "credit_kind",
+    "corrects_id",
+    "paid_amount",
+    "credited_amount",
+    "open_amount",
+    "payments",
+    "credit_notes",
+)
+
+
+def _without(data: Any, names: tuple[str, ...]) -> Any:
+    if isinstance(data, dict) and any(name in data for name in names):
+        return {k: val for k, val in data.items() if k not in names}
+    return data
+
+
 class ExpenseIn(v.StrictRecord):
     date: v.ISODate
     net: v.NonNegAmount | None = None  # required without lines; with lines it is derived by the server
@@ -580,11 +654,22 @@ class ExpenseIn(v.StrictRecord):
     reverse_charge: bool = False
     paid_on: v.OptDate = None  # null/empty = same as the bill date
     invoice_no: Annotated[str, StringConstraints(max_length=60)] | None = None
+    tax_treatment: v.ExpenseTreatment | None = None  # docs/specs/accounting.md 8.2; null = derived by the server
+    service_date: v.OptDate = None  # performance date for § 13b; null = same as the bill date
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        return _without(data, INTERNAL_EXPENSE_FIELDS)
 
     @model_validator(mode="after")
     def _net_or_lines(self):
         if not self.lines and self.net is None:
             raise ValueError("net is required for a bill without lines")
+        if self.service_date and _date.fromisoformat(self.service_date) > _date.fromisoformat(self.date) + timedelta(
+            days=366
+        ):
+            raise ValueError("service_date must not be more than 366 days after the bill date")
         return self
 
 
@@ -729,9 +814,73 @@ class DocumentIn(v.StrictRecord):
     plan: PlanIn | None = None
     offer_id: v.OptId = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        # an offer never has a tax treatment (InvoiceIn overrides this to keep it)
+        return _without(data, (*INTERNAL_DOCUMENT_FIELDS, "tax_treatment"))
+
     @model_validator(mode="after")
     def _period(self):
         v.check_period(self.service_from, self.service_to, "service period end")
+        return self
+
+
+class InvoiceIn(DocumentIn):
+    """The invoice body: an offer has no tax treatment (docs/specs/accounting.md 8, the column is on ``invoices`` only)."""
+
+    tax_treatment: v.SalesTreatment | None = None  # null reads as `standard`; reserved values are refused
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        return _without(data, INTERNAL_DOCUMENT_FIELDS)
+
+
+class PaymentIn(v.CheckedBody):
+    """A payment or refund on an issued invoice (docs/specs/credit-notes-payments.md 3). The amount is positive; a
+    refund is stored negative by the service."""
+
+    date: v.ISODate
+    amount: v.PaymentAmountIn
+    kind: v.PaymentKindIn = "payment"
+    method: v.PaymentMethod = "bank"
+    note: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+class PaymentReverseIn(v.CheckedBody):
+    """Reverse a payment entered by mistake; the date defaults to the payment date (service)."""
+
+    date: v.OptDate = None
+    note: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+class SettleDiscountIn(v.CheckedBody):
+    """Settle an invoice with a cash discount: a discount credit note for the rest, then the payment."""
+
+    date: v.ISODate
+    amount_paid: v.PaymentAmountIn
+    note: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+RateAmounts = Annotated[
+    dict[v.RateKey, v.PositiveMoneyIn], BeforeValidator(v._unique_rate_keys), Field(max_length=v.MAX_CREDIT_RATES)
+]
+
+
+class CreditNoteIn(v.CheckedBody):
+    """Issue a credit note on an invoice (docs/specs/credit-notes-payments.md 4). ``amounts`` maps a VAT rate to the
+    net amount credited; it is required for ``partial`` and ignored by the service for the other kinds."""
+
+    credit_kind: v.CreditNoteKindIn
+    date: v.ISODate
+    reason: Annotated[str, StringConstraints(min_length=1, max_length=500), AfterValidator(v._not_blank)]
+    amounts: RateAmounts | None = None
+
+    @model_validator(mode="after")
+    def _amounts_for_partial(self):
+        if self.credit_kind == "partial" and not self.amounts:
+            raise ValueError("amounts is required for a partial credit note")
         return self
 
 
@@ -835,16 +984,16 @@ class PersonalTaxHealth(BaseModel):
     mode: str = "gkv"
     krankengeld: bool = True
     zusatzbeitrag_percent: float | None = None
-    pkv_monthly: float = 0
-    pkv_basis_monthly: float = 0
-    pkv_care_monthly: float = 0
-    pkv_employer_subsidy_monthly: float = 0
+    pkv_monthly: v.Money = 0
+    pkv_basis_monthly: v.Money = 0
+    pkv_care_monthly: v.Money = 0
+    pkv_employer_subsidy_monthly: v.Money = 0
 
 
 class PersonalTaxPension(BaseModel):
     model_config = ConfigDict(extra="allow")
     mode: str = "none"
-    fixed_monthly: float = 0
+    fixed_monthly: v.Money = 0
 
 
 class PersonalTaxUnemployment(BaseModel):
@@ -854,14 +1003,14 @@ class PersonalTaxUnemployment(BaseModel):
 
 class PersonalTaxEmployment(BaseModel):
     model_config = ConfigDict(extra="allow")
-    gross_year: float = 0
+    gross_year: v.Money = 0
     sv_liable: bool = True
     steuerklasse: int | None = None
-    bav_employee_year: float = 0
-    bav_employer_year: float = 0
-    vwl_employer_year: float = 0
-    werbungskosten_year: float = 0
-    withheld_year: float | None = None
+    bav_employee_year: v.Money = 0
+    bav_employer_year: v.Money = 0
+    vwl_employer_year: v.Money = 0
+    werbungskosten_year: v.Money = 0
+    withheld_year: v.Money | None = None
 
 
 class PersonalTax(BaseModel):
@@ -870,9 +1019,9 @@ class PersonalTax(BaseModel):
     model_config = ConfigDict(extra="allow")
     assessment: str = "single"
     church_tax_percent: float = 0
-    other_income_year: float = 0
-    other_deductions_year: float = 0
-    other_insurance_year: float = 0
+    other_income_year: v.Money = 0
+    other_deductions_year: v.Money = 0
+    other_insurance_year: v.Money = 0
     children: PersonalTaxChildren = Field(default_factory=PersonalTaxChildren)
     health: PersonalTaxHealth = Field(default_factory=PersonalTaxHealth)
     pension: PersonalTaxPension = Field(default_factory=PersonalTaxPension)
@@ -1160,7 +1309,7 @@ class Allocation(BaseModel):
     end: str
     hours_per_week: float | None = None
     total_hours: float | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     status: str = "active"
     cancelled_from: str | None = None
     cancel_reason: str | None = None
@@ -1173,9 +1322,9 @@ class Allocation(BaseModel):
     planned_hours: float | None = None
     planning_warnings: list[dict] | None = None  # only in POST/PUT answers
     # external allocations only (docs/contracts/subcontractors.md)
-    planned_net: float | None = None
-    invoiced_net: float | None = None
-    open_net: float | None = None
+    planned_net: v.Money | None = None
+    invoiced_net: v.Money | None = None
+    open_net: v.Money | None = None
     offer_reference: str | None = None
     days: list[dict] | None = None  # GET /api/allocations/{allocation_id}
 
@@ -1301,13 +1450,13 @@ class TripItem(BaseModel):
     from_: str | None = Field(None, alias="from")
     to: str | None = None
     text: str | None = None
-    expected: float | None = None
+    expected: v.Money | None = None
 
 
 class TripReduction(BaseModel):
     model_config = ConfigDict(extra="allow")
     meal: Literal["breakfast", "lunch", "dinner"]
-    amount: float
+    amount: v.Money
 
 
 class TripDay(BaseModel):
@@ -1318,9 +1467,9 @@ class TripDay(BaseModel):
     country: str  # the country whose rate row was used (LU after fallback)
     city: str | None = None  # omitted when the place has no city
     absence_hours: float
-    base: float
+    base: v.Money
     reductions: list[TripReduction] = []
-    amount: float
+    amount: v.Money
     note: str = ""
 
 
@@ -1328,8 +1477,8 @@ class TripBills(BaseModel):
     """The linked bills (expenses with this trip_id): count and sums of their net and VAT."""
 
     count: int = 0
-    net: float = 0
-    vat: float = 0
+    net: v.Money = 0
+    vat: v.Money = 0
 
 
 class TripChecklistItem(BaseModel):
@@ -1339,7 +1488,7 @@ class TripChecklistItem(BaseModel):
     hint: str
     state: Literal["added", "open", "not_needed"]
     count: int = 0
-    sum: float = 0
+    sum: v.Money = 0
 
 
 class TripFigures(BaseModel):
@@ -1347,10 +1496,10 @@ class TripFigures(BaseModel):
 
     model_config = ConfigDict(extra="allow")
     days: list[TripDay] = []
-    allowance_total: float = 0
+    allowance_total: v.Money = 0
     mileage_km: float = 0
-    mileage_rate: float | None = None
-    mileage_total: float = 0
+    mileage_rate: v.UnitPrice | None = None
+    mileage_total: v.Money = 0
     rules_version: str | None = None
 
 
@@ -1373,15 +1522,16 @@ class Trip(Record):
     not_needed: list[str] = []
     cost_centre: Literal["project", "general"] | None = None
     status: Literal["draft", "final"] = "draft"
-    allowance_total: float | None = None
+    allowance_total: v.Money | None = None
     mileage_km: float | None = None
-    mileage_total: float | None = None
+    mileage_total: v.Money | None = None
+    mileage_rate: v.UnitPrice | None = None
     rules_version: str | None = None
     days: list[TripDay] = []
     bills: TripBills | None = None  # response-only, computed on every read
     checklist: list[TripChecklistItem] | None = None  # response-only, computed on every read
-    items_expected_total: float | None = None  # response-only: sum of the items' expected (planning only)
-    items_actual_total: float | None = None  # response-only: gross of all linked bills (planned and unplanned)
+    items_expected_total: v.Money | None = None  # response-only: sum of the items' expected (planning only)
+    items_actual_total: v.Money | None = None  # response-only: gross of all linked bills (planned and unplanned)
 
 
 class TripPlaceIn(v.StrictRecord):
@@ -1665,7 +1815,7 @@ class Supplier(Record):
     tags: list[str] = []
     weekly_hours: float | None = None
     workdays: list[int] | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     unavailable: list[dict] | None = None
     login_user_id: str | None = None
     external_id: str | None = None
@@ -1744,10 +1894,10 @@ class IncomingOffer(Record):
     valid_until: str | None = None
     lines: list[dict] = []
     hours: float = 0.0
-    net_total: float | None = None
+    net_total: v.Money | None = None
     vat_rate: float | None = None
-    vat: float | None = None
-    gross_total: float | None = None
+    vat: v.Money | None = None
+    gross_total: v.Money | None = None
     vat_mode: str | None = None
     plan: dict | None = None
     project_id: str | None = None
@@ -1817,7 +1967,7 @@ RECORD_MODELS: dict[str, tuple[type[Record], type[BaseModel]]] = {
     "contracts": (Contract, ContractIn),
     "absences": (Absence, AbsenceIn),
     "offers": (Document, DocumentIn),
-    "invoices": (Document, DocumentIn),
+    "invoices": (Document, InvoiceIn),
     "expenses": (Expense, ExpenseIn),
     "templates": (Template, TemplateIn),
 }

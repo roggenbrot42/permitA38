@@ -6,13 +6,21 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Path, Query, Response
 
+from permita38.api import money_out
 from permita38.api.deps import Needs, ServicesDep
-from permita38.api.responses import StoredJSON, stored
+from permita38.api.responses import StoredJSON, present, with_defaults
 from permita38.core import models
 from permita38.core import validation as v
 
 router = APIRouter(prefix="/incoming-offers", tags=["procurement"])
 routers = [router]
+
+
+def _offer(data, status_code: int = 200) -> StoredJSON:
+    """A stored offer (or list) as a response: Money fields and the untyped ``lines[].unit_price`` as decimal strings."""
+    full = money_out.incoming_offer_lines(present(models.IncomingOffer, with_defaults(models.IncomingOffer, data)))
+    return StoredJSON(money_out.convert_warnings(full), status_code=status_code)
+
 
 OfferId = Annotated[str, Path(pattern=v.ID_PATTERN)]
 Reader = Annotated[dict, Needs("procurement", "read")]
@@ -33,7 +41,7 @@ def list_offers(
     status: Literal["received", "under_review", "accepted", "rejected", "expired"] | None = None,
     project_id: Annotated[str | None, Query(pattern=v.ID_PATTERN)] = None,
 ):
-    return stored(models.IncomingOffer, services.procurement.list(supplier_id, status, project_id, date.today()))
+    return _offer(services.procurement.list(supplier_id, status, project_id, date.today()))
 
 
 @router.post(
@@ -44,7 +52,8 @@ def list_offers(
     name="create_incoming_offer",
 )
 def create_offer(body: models.IncomingOfferIn, _: Writer, services: ServicesDep):
-    return StoredJSON(services.procurement.create(body.model_dump(), date.today()), status_code=201)
+    created = services.procurement.create(body.model_dump(), date.today())
+    return _offer(created, 201)
 
 
 @router.get(
@@ -54,7 +63,7 @@ def create_offer(body: models.IncomingOfferIn, _: Writer, services: ServicesDep)
     name="get_incoming_offer",
 )
 def get_offer(incoming_offer_id: OfferId, _: Reader, services: ServicesDep):
-    return stored(models.IncomingOffer, services.procurement.get(incoming_offer_id, date.today()))
+    return _offer(services.procurement.get(incoming_offer_id, date.today()))
 
 
 @router.put(
@@ -64,7 +73,7 @@ def get_offer(incoming_offer_id: OfferId, _: Reader, services: ServicesDep):
     name="update_incoming_offer",
 )
 def update_offer(incoming_offer_id: OfferId, body: models.IncomingOfferIn, _: Writer, services: ServicesDep):
-    return stored(models.IncomingOffer, services.procurement.update(incoming_offer_id, body.model_dump(), date.today()))
+    return _offer(services.procurement.update(incoming_offer_id, body.model_dump(), date.today()))
 
 
 @router.delete("/{incoming_offer_id}", status_code=204, name="delete_incoming_offer")
@@ -80,9 +89,7 @@ def delete_offer(incoming_offer_id: OfferId, _: Writer, services: ServicesDep):
     name="review_incoming_offer",
 )
 def review_offer(incoming_offer_id: OfferId, user: Writer, services: ServicesDep):
-    return stored(
-        models.IncomingOffer, services.procurement.transition(incoming_offer_id, "review", user, None, date.today())
-    )
+    return _offer(services.procurement.transition(incoming_offer_id, "review", user, None, date.today()))
 
 
 @router.post(
@@ -92,7 +99,15 @@ def review_offer(incoming_offer_id: OfferId, user: Writer, services: ServicesDep
     summary="accept an offer: a capacity supplier gets an external allocation, others a flat commitment",
 )
 def accept_offer(incoming_offer_id: OfferId, body: models.AcceptIn, user: Writer, services: ServicesDep):
-    return services.procurement.accept(incoming_offer_id, body.model_dump(exclude_unset=True), user, date.today())
+    result = services.procurement.accept(incoming_offer_id, body.model_dump(exclude_unset=True), user, date.today())
+    out = dict(result)
+    if isinstance(out.get("offer"), dict):
+        out["offer"] = money_out.incoming_offer_lines(present(models.IncomingOffer, out["offer"]))
+    if isinstance(out.get("allocation"), dict):
+        out["allocation"] = present(models.Allocation, out["allocation"])
+    if isinstance(out.get("commitment"), dict):
+        out["commitment"] = money_out.money_strings(out["commitment"], money_out.COMMITMENT_KEYS)
+    return money_out.convert_warnings(out)
 
 
 @router.post(
@@ -102,8 +117,7 @@ def accept_offer(incoming_offer_id: OfferId, body: models.AcceptIn, user: Writer
     name="reject_incoming_offer",
 )
 def reject_offer(incoming_offer_id: OfferId, body: models.RejectIn, user: Writer, services: ServicesDep):
-    return stored(
-        models.IncomingOffer,
+    return _offer(
         services.procurement.transition(incoming_offer_id, "reject", user, body.model_dump(), date.today()),
     )
 
@@ -115,9 +129,7 @@ def reject_offer(incoming_offer_id: OfferId, body: models.RejectIn, user: Writer
     name="reopen_incoming_offer",
 )
 def reopen_offer(incoming_offer_id: OfferId, user: Writer, services: ServicesDep):
-    return stored(
-        models.IncomingOffer, services.procurement.transition(incoming_offer_id, "reopen", user, None, date.today())
-    )
+    return _offer(services.procurement.transition(incoming_offer_id, "reopen", user, None, date.today()))
 
 
 @router.post(
@@ -127,4 +139,4 @@ def reopen_offer(incoming_offer_id: OfferId, user: Writer, services: ServicesDep
     name="unaccept_incoming_offer",
 )
 def unaccept_offer(incoming_offer_id: OfferId, user: Writer, services: ServicesDep):
-    return stored(models.IncomingOffer, services.procurement.unaccept(incoming_offer_id, user, date.today()))
+    return _offer(services.procurement.unaccept(incoming_offer_id, user, date.today()))

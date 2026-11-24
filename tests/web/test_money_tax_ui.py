@@ -102,14 +102,14 @@ def test_cards_show_the_response_values(browser, srv):
     owed = norm(pg.locator("#card-tax-owed").text_content())
     assert "Owed on the profit booked so far" in owed and "Vorauszahlungen" in owed
     assert fmt(o["profit_ytd"]) in owed and fmt(o["tax_due"]) in owed
-    assert cell(pg, "card-tax-owed", "owed") == fmt(abs(o["owed"]))
-    assert ("Refund so far" in owed) == (o["owed"] < 0)
+    assert cell(pg, "card-tax-owed", "owed") == fmt(abs(Decimal(o["owed"])))
+    assert ("Refund so far" in owed) == (Decimal(o["owed"]) < 0)
     # monthly reserve line
     line = norm(pg.locator("#reserve-line").text_content())
-    if r["monthly"]:
+    if Decimal(r["monthly"]):
         for v in (fmt(r["monthly"]), fmt(r["remaining"]), fmt(r["due_year"]), f"remaining {r['months_left']} months"):
             assert v in line, (v, line)
-        assert (fmt(r["owed_now"]) in line) == (r["owed_now"] > 0)
+        assert (fmt(r["owed_now"]) in line) == (Decimal(r["owed_now"]) > 0)
     else:
         if not r["due_year"]:
             assert line == "No further reserve needed"
@@ -153,9 +153,9 @@ def test_cards_show_the_response_values(browser, srv):
 def test_refund_wording_when_owed_is_negative(browser, srv_refund):
     ctx, pg, f, problems = open_boss_money(browser, srv_refund)
     o = f["tax_owed"]
-    assert o["owed"] < 0, o
+    assert Decimal(o["owed"]) < 0, o
     owed = norm(pg.locator("#card-tax-owed").text_content())
-    assert "Refund so far" in owed and cell(pg, "card-tax-owed", "owed") == fmt(-o["owed"])
+    assert "Refund so far" in owed and cell(pg, "card-tax-owed", "owed") == fmt(-Decimal(o["owed"]))
     assert fmt(o["withheld"]) in owed
     assert not problems
     ctx.close()

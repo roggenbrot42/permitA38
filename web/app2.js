@@ -1,17 +1,21 @@
 /* permitA38 – boss pages: customers, projects, offers/invoices, expenses, money, team, settings. */
 
+/* Money helpers (decimal strings, see web/money.js): "0.00" is truthy and strings compare as text, so test with these. */
+const mPos = v => Money.cmp(v, 0) > 0, mNeg = v => Money.isNeg(v), mZero = v => v == null || Money.isZero(v);
+const mNegate = v => Money.fromCents(-Money.cents(v));
+
 /* ================= CUSTOMERS ================= */
 PAGES.customers = async () => {
   await loadAll(['customers', 'projects', 'invoices', 'offers']);
   const cs = S.d.customers.sort((a, b) => a.name.localeCompare(b.name));
   return `<div class="head"><div><h1>Customers</h1><div class="muted">Business info, contacts and everything you did for them.</div></div><button class="primary" data-a="editCustomer">+ New customer</button></div>
   <div class="card">${cs.length ? `<table><tr><th>Name</th><th>Contact</th><th>City</th><th class="num">Rate</th><th class="num">Open</th></tr>${cs.map(c => {
-    const open = S.d.invoices.filter(i => i.customer_id === c.id && i.status === 'sent').reduce((a, i) => a + docTotal(i), 0);
-    return `<tr class="click" data-href="#/customer/${c.id}"><td><b>${esc(c.name)}</b></td><td>${esc(c.contact || '')}<div class="small muted">${esc(c.email || '')}</div></td><td>${esc(c.city || '')}</td><td class="num">${c.rate ? eur(c.rate) + '/h' : ''}</td><td class="num">${open ? eur(open) : ''}</td></tr>`;
+    const open = Money.sum(S.d.invoices.filter(i => i.customer_id === c.id && i.status === 'sent').map(docTotal));
+    return `<tr class="click" data-href="#/customer/${c.id}"><td><b>${esc(c.name)}</b></td><td>${esc(c.contact || '')}<div class="small muted">${esc(c.email || '')}</div></td><td>${esc(c.city || '')}</td><td class="num">${mZero(c.rate) ? '' : eur(c.rate) + '/h'}</td><td class="num">${mZero(open) ? '' : eur(open)}</td></tr>`;
   }).join('')}</table>` : '<div class="empty">No customers yet. Add your first one – you need one before you can send an offer.</div>'}</div>`;
 };
 const CUSTOMER_FIELDS = [
-  { k: 'name', l: 'Company / name' }, { k: 'customer_no', l: 'Customer no.', row: 1 }, { k: 'rate', l: 'Default hourly rate (€)', t: 'number', row: 1 },
+  { k: 'name', l: 'Company / name' }, { k: 'customer_no', l: 'Customer no.', row: 1 }, { k: 'rate', l: 'Default hourly rate (€)', t: 'number', m: true, row: 1 },
   { k: 'street', l: 'Street & number' }, { k: 'zip', l: 'ZIP', row: 2 }, { k: 'city', l: 'City', row: 2 }, { k: 'country', l: 'Country', row: 2, ph: 'Germany' },
   { k: 'tax_number', l: 'Tax number (Steuernr.)', row: 3 }, { k: 'vat_id', l: 'VAT ID (USt-IdNr.)', row: 3 },
   { k: 'contact', l: 'Point of contact' }, { k: 'email', l: 'E-mail', row: 4 }, { k: 'phone', l: 'Phone', row: 4 },
@@ -133,7 +137,7 @@ PAGES.projects = async () => {
     const r = rep[p.id] || {}, pct = p.budget_hours ? Math.min(100, r.hours / p.budget_hours * 100) : 0;
     return `<tr class="click" data-href="#/project/${p.id}"><td><span class="dot" style="background:${esc(p.color || '#888')}"></span><b>${esc(p.name)}</b>${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? ' <span class="pill">internal</span>' : ''}</td><td>${esc(nameOf('customers', p.customer_id))}</td><td class="num">${hm(r.hours || 0)}</td>
     <td style="min-width:110px">${p.budget_hours ? `<div class="bar ${pct > 100 ? '' : ''}"><div style="width:${pct}%;${r.hours > p.budget_hours ? 'background:var(--bad)' : ''}"></div></div><span class="small muted">${num(r.hours, 0)} / ${p.budget_hours} h</span>` : '<span class="muted small">–</span>'}</td>
-    <td class="num">${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? '' : eur(r.revenue)}</td><td class="num">${r.unbilled_revenue ? eur(r.unbilled_revenue) : ''}</td><td class="num ${r.margin < 0 ? 'free-bad' : ''}">${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? '' : eur(r.margin)}</td></tr>`;
+    <td class="num">${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? '' : eur(r.revenue)}</td><td class="num">${mZero(r.unbilled_revenue) ? '' : eur(r.unbilled_revenue)}</td><td class="num ${mNeg(r.margin) ? 'free-bad' : ''}">${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? '' : eur(r.margin)}</td></tr>`;
   }).join('')}</table>` : '<div class="empty">No projects yet. Create one to start tracking time.</div>'}</div>`;
 };
 A.editProject = el => {
@@ -144,7 +148,7 @@ A.editProject = el => {
     title: p.id ? 'Edit project' : 'New project', vals: p,
     fields: [{ k: 'name', l: 'Project name' }, { k: 'kind', l: 'Kind', t: 'select', o: [['customer', 'Customer project'], ['internal', 'Internal project (no customer, never billed)']] },
       { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])] },
-      { k: 'rate', l: 'Hourly rate (€)', t: 'number', row: 1, h: 'Overrides the customer rate' }, { k: 'budget_hours', l: 'Budget (hours)', t: 'number', row: 1 },
+      { k: 'rate', l: 'Hourly rate (€)', t: 'number', m: true, row: 1, h: 'Overrides the customer rate' }, { k: 'budget_hours', l: 'Budget (hours)', t: 'number', row: 1 },
       { k: 'start', l: 'Start (period)', t: 'date', row: 3, h: 'Required for customer projects' }, { k: 'end', l: 'End (period)', t: 'date', row: 3 },
       { k: 'status', l: 'Status', t: 'select', o: ['active', 'paused', 'done', 'archived'], row: 2 }, { k: 'color', l: 'Colour', t: 'color', row: 2 },
       { k: 'notes', l: 'Notes', t: 'area' }],
@@ -168,10 +172,10 @@ PAGES.project = async id => {
   return `<div class="head"><div><a href="#/projects" class="small">← Projects</a><h1><span class="dot" style="background:${esc(p.color || '#888')}"></span>${esc(p.name)}</h1><div class="muted">${esc(nameOf('customers', p.customer_id) || ((p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? 'Internal project' : ''))}</div></div><span>${can('planning') ? `<button data-a="allocations" data-project="${esc(id)}">Allocations</button> ` : ''}<button data-a="editProject" data-id="${id}">Edit</button></span></div>
   <div class="grid g4"><div class="card kpi"><div class="l">Hours</div><div class="v">${hm(r.hours || 0)}</div></div><div class="card kpi"><div class="l">Revenue (at rates)</div><div class="v">${eur(r.revenue)}</div></div><div class="card kpi"><div class="l">Costs</div><div class="v">${eur((r.cost || 0) + (r.expenses || 0))}</div><span class="small muted">team ${eur(r.cost)} · expenses ${eur(r.expenses)}</span></div><div class="card kpi ${r.margin < 0 ? 'bad' : 'good'}"><div class="l">Margin</div><div class="v">${eur(r.margin)}</div></div></div>
   ${can('contracts') ? `<div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Contracts</h2><div class="right auto">${writeC ? `<button class="primary" data-a="editContract" data-proj="${esc(id)}">+ New contract</button>` : ''}</div></div>
-  ${mine.length ? `<table><tr><th>Contract</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${mine.map(c => `<tr data-id="${c.id}"${writeC ? ' class="click" data-a="editContract"' : ''}><td><b>${esc(c.title)}</b></td><td class="nowrap">${contractPeriod(c)}</td><td class="num">${contractHours(c)}</td><td class="num">${c.rate ? eur(c.rate) : ''}</td><td>${contractPill(c)}</td></tr>`).join('')}</table>` : '<div class="empty">No contracts for this project yet.</div>'}
+  ${mine.length ? `<table><tr><th>Contract</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${mine.map(c => `<tr data-id="${c.id}"${writeC ? ' class="click" data-a="editContract"' : ''}><td><b>${esc(c.title)}</b></td><td class="nowrap">${contractPeriod(c)}</td><td class="num">${contractHours(c)}</td><td class="num">${mZero(c.rate) ? '' : eur(c.rate)}</td><td>${contractPill(c)}</td></tr>`).join('')}</table>` : '<div class="empty">No contracts for this project yet.</div>'}
   ${others ? `<div class="small muted" style="margin-top:10px">${others} more ${others === 1 ? 'contract' : 'contracts'} of ${esc(nameOf('customers', p.customer_id))} without a project${can('planning') ? ' – <a href="#/plan/contracts">show in Planning</a>' : ''}</div>` : ''}</div>` : ''}
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Tasks & task rates</h2><div class="right auto"><button data-a="editTask" data-proj="${id}">+ Task</button></div></div>
-  ${tasks.length ? `<table><tr><th>Task</th><th class="num">Hours</th><th class="num">Rate</th></tr>${tasks.map(t => `<tr class="click" data-a="editTask" data-id="${t.id}" data-proj="${id}"><td>${esc(t.name)}</td><td class="num">${hm(th(t))}</td><td class="num">${t.rate ? eur(t.rate) : '<span class="muted">project rate</span>'}</td></tr>`).join('')}</table>` : '<div class="empty">No tasks. Tasks are optional – use them when different work has a different rate (e.g. "Consulting" vs "Development").</div>'}</div>
+  ${tasks.length ? `<table><tr><th>Task</th><th class="num">Hours</th><th class="num">Rate</th></tr>${tasks.map(t => `<tr class="click" data-a="editTask" data-id="${t.id}" data-proj="${id}"><td>${esc(t.name)}</td><td class="num">${hm(th(t))}</td><td class="num">${mZero(t.rate) ? '<span class="muted">project rate</span>' : eur(t.rate)}</td></tr>`).join('')}</table>` : '<div class="empty">No tasks. Tasks are optional – use them when different work has a different rate (e.g. "Consulting" vs "Development").</div>'}</div>
   ${can('time') ? await timesheetCard(id) : ''}
   ${ex.length ? `<div class="card"><h2>Expenses on this project</h2><table>${ex.map(e => `<tr><td>${fmtDate(e.date)}</td><td>${esc(e.vendor || '')}</td><td class="num">${eur(e.net)}</td></tr>`).join('')}</table></div>` : ''}`;
 };
@@ -205,7 +209,7 @@ A.tsCsv = () => {
 };
 A.editTask = el => {
   const t = el.dataset.id ? S.d.tasks.find(x => x.id === el.dataset.id) : { project_id: el.dataset.proj };
-  openForm({ title: t.id ? 'Edit task' : 'New task', vals: t, fields: [{ k: 'name', l: 'Task name' }, { k: 'rate', l: 'Hourly rate (€) – optional', t: 'number', h: 'Overrides project and customer rate' }],
+  openForm({ title: t.id ? 'Edit task' : 'New task', vals: t, fields: [{ k: 'name', l: 'Task name' }, { k: 'rate', l: 'Hourly rate (€) – optional', t: 'number', m: true, h: 'Overrides project and customer rate' }],
     save: async v => { if (!v.name) throw new Error('Name required'); await save('tasks', v); render(); },
     del: t.id ? async () => { await api('DELETE', 'tasks/' + t.id); await loadAll(['tasks']); render(); } : null });
 };
@@ -214,9 +218,9 @@ A.editTask = el => {
 PAGES.sales = async (tab = 'invoices') => {
   await loadAll(['offers', 'invoices', 'customers', 'projects', 'entries']);
   await DS.load();   // document scan: the scans that wait for a check (docscan.js)
-  const rep = await api('GET', 'project-report'), unbilled = Object.values(rep).reduce((a, r) => a + r.unbilled_revenue, 0);
+  const rep = await api('GET', 'project-report'), unbilled = Money.sum(Object.values(rep).map(r => r.unbilled_revenue));
   const rows = S.d[tab].map(d => [tab, d]);
-  const sum = (f) => S.d.invoices.filter(f).reduce((a, i) => a + docTotal(i), 0);
+  const sum = (f) => Money.sum(S.d.invoices.filter(f).map(docTotal));
   return `<div class="head"><div><h1>Offers & Invoices</h1><div class="muted">Offer → accepted → project → invoice.</div></div><div class="row tight" style="flex:none">${DS.uploadButton()}<button data-a="newDoc" data-coll="offers">+ Offer</button><button class="primary" data-a="newDoc" data-coll="invoices">+ Invoice</button></div></div>
   ${DS.pageTop()}${DS.flaggedSection()}<div class="grid g3"><div class="card kpi warn"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a data-a="billTime" class="small">Invoice tracked time →</a></div><div class="card kpi"><div class="l">Outstanding</div><div class="v">${eur(sum(i => i.status === 'sent'))}</div></div><div class="card kpi bad"><div class="l">Overdue</div><div class="v">${eur(sum(i => i.status === 'sent' && i.due_date && i.due_date < todayISO()))}</div></div></div>
   <div class="tabs"><a href="#/sales/invoices" class="${tab === 'invoices' ? 'on' : ''}">Invoices</a><a href="#/sales/offers" class="${tab === 'offers' ? 'on' : ''}">Offers</a></div><div class="card">${docTable(rows)}</div>`;
@@ -238,7 +242,7 @@ PAGES.doc = async (coll, id) => {
   const route = coll + '/' + id;
   if (id.startsWith('new')) {
     if (!DOC || DOC.__route !== route) {   // keep the in-progress draft across re-renders (add/delete line)
-      DOC = { __route: route, coll, customer_id: id.slice(4) || '', date: todayISO(), status: 'draft', lines: [{ description: '', qty: 1, unit: 'h', price: s.default_rate || 0 }], template_id: s.default_template, vat_rate: s.vat_rate };
+      DOC = { __route: route, coll, customer_id: id.slice(4) || '', date: todayISO(), status: 'draft', lines: [{ description: '', qty: 1, unit: 'h', price: s.default_rate ?? '0' }], template_id: s.default_template, vat_rate: s.vat_rate };
       SUGGESTED_RATE = suggestedRate(DOC.customer_id, null); DOC.lines[0].price = SUGGESTED_RATE; AUTO_PRICED.add(DOC.lines[0]);
     }
   } else if (!DOC || DOC.id !== id || DOC.coll !== coll) {
@@ -267,7 +271,7 @@ PAGES.doc = async (coll, id) => {
     <div class="field"><label>Language</label><select id="d_lang">${opt([['', 'Template default'], ['de', 'Deutsch'], ['en', 'English']], d.language || '')}</select></div>
     ${klein ? '' : `<div class="field"><label>Default VAT %</label><input type="number" id="d_vat" value="${esc(d.vat_rate ?? s.vat_rate)}"></div>`}</div></div>
   <div class="card"><h2>Items</h2><table class="lines"><tr><th>Description</th><th style="width:80px">Qty</th><th style="width:70px">Unit</th><th style="width:110px">Unit price €</th>${klein ? '' : '<th style="width:70px">VAT %</th>'}<th class="num" style="width:110px">Amount</th><th></th></tr>
-    ${d.lines.map((l, i) => `<tr><td><input data-l="${i}" data-k="description" value="${esc(l.description)}" placeholder="What did you deliver?"></td><td><input data-l="${i}" data-k="qty" type="number" step="any" value="${esc(l.qty)}"></td><td><input data-l="${i}" data-k="unit" value="${esc(l.unit)}"></td><td><input data-l="${i}" data-k="price" type="number" step="any" value="${esc(l.price)}"></td>${klein ? '' : `<td><input data-l="${i}" data-k="vat" type="number" value="${esc(l.vat ?? '')}" placeholder="${esc(d.vat_rate ?? s.vat_rate)}"></td>`}<td class="num" id="amt${i}">${eur(l.qty * l.price)}</td><td><button class="ghost sm" data-a="delLine" data-i="${i}">✕</button></td></tr>`).join('')}</table>
+    ${d.lines.map((l, i) => `<tr><td><input data-l="${i}" data-k="description" value="${esc(l.description)}" placeholder="What did you deliver?"></td><td><input data-l="${i}" data-k="qty" type="number" step="any" value="${esc(l.qty)}"></td><td><input data-l="${i}" data-k="unit" value="${esc(l.unit)}"></td><td><input data-l="${i}" data-k="price" type="text" inputmode="decimal" value="${esc(l.price)}"></td>${klein ? '' : `<td><input data-l="${i}" data-k="vat" type="number" value="${esc(l.vat ?? '')}" placeholder="${esc(d.vat_rate ?? s.vat_rate)}"></td>`}<td class="num" id="amt${i}">${eur(Money.fromCents(Money.lineCents(l.qty, l.price)))}</td><td><button class="ghost sm" data-a="delLine" data-i="${i}">✕</button></td></tr>`).join('')}</table>
     <button class="sm" data-a="addLine" style="margin-top:8px">+ Add line</button>${isInv ? ' <button class="sm" data-a="billTimeInto">+ Add unbilled time…</button>' : ''}
     <div class="right" id="d_totals" style="margin-top:12px"></div></div>
   <div class="card"><div class="grid g2"><div class="field"><label>Intro text (empty = from template)</label><textarea id="d_intro" rows="4">${esc(d.intro || '')}</textarea></div><div class="field"><label>Closing text (empty = from template)</label><textarea id="d_outro" rows="4">${esc(d.outro || '')}</textarea></div></div>
@@ -279,11 +283,11 @@ const AUTO_PRICED = new WeakSet();   // lines whose price was set by us, not typ
 let SUGGESTED_RATE = null;   // set only while editing a new, unsaved document; saved documents are never repriced
 /* Effective hourly rate: project, then customer, then the user's rate, then the user's default, then the settings default. null when none is set. */
 function effectiveRate(customerId, projectId) {
-  const pick = x => (x === null || x === undefined || x === '' ? null : +x);
+  const pick = x => (x === null || x === undefined || x === '' ? null : Money.str(x));   // a decimal string, never a float
   return pick(S.d.projects.find(p => p.id === projectId)?.rate) ?? pick(S.d.customers.find(c => c.id === customerId)?.rate)
     ?? pick(S.me?.rate) ?? pick(S.me?.default_rate) ?? pick(S.settings.default_rate);
 }
-function suggestedRate(customerId, projectId) { return effectiveRate(customerId, projectId) ?? 0; }
+function suggestedRate(customerId, projectId) { return effectiveRate(customerId, projectId) ?? '0'; }
 function repriceNewDoc() {
   if (!DOC || DOC.id || SUGGESTED_RATE === null) return;
   syncDoc();
@@ -306,20 +310,23 @@ PAGES.doc = async (...a) => {
   };
   return h;
 };
+/** A typed unit price as the decimal string the API takes; text that is not a valid amount is kept as typed (the totals
+ *  count it as 0) and refused when the document is saved. */
+const docPrice = text => { const r = Money.parseInput(text); return r.ok ? (r.value ?? '0') : String(text); };
 function syncDoc() {
   if (!DOC || !$('#d_cust')) return;
   const g = i => $('#' + i)?.value, d = DOC;
   Object.assign(d, { customer_id: g('d_cust'), project_id: g('d_proj') || null, title: g('d_title'), date: g('d_date'), service_from: g('d_sf') || null, service_to: g('d_st') || null, reference: g('d_ref'), template_id: g('d_tpl'), language: g('d_lang'), intro: g('d_intro'), outro: g('d_outro'), notes: g('d_notes') });
   if (d.coll === 'invoices') Object.assign(d, { due_date: g('d_due') || null, paid_date: g('d_paid') || null }); else Object.assign(d, { valid_until: g('d_valid') || null, plan: g('p_s') && g('p_e') ? { start: g('p_s'), end: g('p_e'), hours_per_week: +g('p_hpw') > 0 ? +g('p_hpw') : null, total_hours: +g('p_hpw') > 0 ? null : +g('p_tot') > 0 ? +g('p_tot') : null } : null });
   if ($('#d_vat')) d.vat_rate = +g('d_vat');
-  document.querySelectorAll('[data-l]').forEach(inp => { const l = d.lines[+inp.dataset.l], k = inp.dataset.k; l[k] = ['qty', 'price', 'vat'].includes(k) ? (inp.value === '' ? (k === 'vat' ? null : 0) : parseFloat(inp.value)) : inp.value; });
+  document.querySelectorAll('[data-l]').forEach(inp => { const l = d.lines[+inp.dataset.l], k = inp.dataset.k; l[k] = k === 'price' ? docPrice(inp.value) : ['qty', 'vat'].includes(k) ? (inp.value === '' ? (k === 'vat' ? null : 0) : parseFloat(inp.value)) : inp.value; });
 }
 function recalcDoc() {
   syncDoc(); const d = DOC; if (!d || !$('#d_totals')) return;
   const klein = S.settings.kleinunternehmer, t = Money.totals(d, S.settings);   // exact cents, half-up VAT per rate
-  t.lines.forEach((c, i) => { const el = $('#amt' + i); if (el) el.textContent = eur(Money.toNumber(c)); });
+  t.lines.forEach((c, i) => { const el = $('#amt' + i); if (el) el.textContent = eur(Money.fromCents(c)); });
   const vat = Object.entries(t.vat).filter(([r]) => +r);
-  $('#d_totals').innerHTML = `Net <b>${eur(Money.toNumber(t.net))}</b>${vat.map(([r, c]) => ` · VAT ${r}% ${eur(Money.toNumber(c))}`).join('')} · <span style="font-size:20px">Total <b>${eur(Money.toNumber(t.gross))}</b></span>${klein ? '<div class="small muted">Kleinunternehmer (§19 UStG): no VAT charged.</div>' : ''}`;
+  $('#d_totals').innerHTML = `Net <b>${eur(Money.fromCents(t.net))}</b>${vat.map(([r, c]) => ` · VAT ${r}% ${eur(Money.fromCents(c))}`).join('')} · <span style="font-size:20px">Total <b>${eur(Money.fromCents(t.gross))}</b></span>${klein ? '<div class="small muted">Kleinunternehmer (§19 UStG): no VAT charged.</div>' : ''}`;
 }
 document.addEventListener('input', e => {
   if (!e.target.closest('[data-l],#d_vat')) return;
@@ -328,7 +335,7 @@ document.addEventListener('input', e => {
 });
 A.addLine = () => {
   syncDoc();
-  const line = { description: '', qty: 1, unit: 'h', price: DOC.id ? S.settings.default_rate || 0 : suggestedRate(DOC.customer_id, DOC.project_id) };
+  const line = { description: '', qty: 1, unit: 'h', price: DOC.id ? S.settings.default_rate ?? '0' : suggestedRate(DOC.customer_id, DOC.project_id) };
   if (!DOC.id) AUTO_PRICED.add(line);
   DOC.lines.push(line); render();
 };
@@ -338,6 +345,7 @@ function stripWarnings(o) { delete o.sanity_warnings; delete o.planning_warnings
 async function persistDoc() {
   syncDoc(); const d = DOC;
   if (!d.customer_id) throw new Error('Choose a customer first');
+  d.lines.forEach((l, i) => { const r = Money.parseInput(l.price); if (!r.ok) throw new Error(`Line ${i + 1}, unit price: ${r.error}`); });
   const { coll, __route, ...body } = d; stripWarnings(body);
   const r = await api.upsert(coll, body); DOC = { coll, ...stripWarnings({ ...r }) };
   await loadAll([coll]); return r;
@@ -367,7 +375,6 @@ const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & 
 // The two tiles on the Expenses page, as /api/finance counts them (core/calc.py `finance`): the cost on the paid date under
 // `eur` (empty = bill date) and on the bill date under `accrual`, the input VAT always on the bill date; a business meal
 // counts its own deductible shares line by line; a Kleinunternehmer's cost is the gross and has no input VAT.
-const cents = v => Math.round((v + Number.EPSILON) * 100) / 100;
 const isoDay = v => {   // a real calendar day as YYYY-MM-DD, else ''  (the backend's d(): a damaged date is no date)
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v ?? ''));
   if (!m) return '';
@@ -377,17 +384,17 @@ const isoDay = v => {   // a real calendar day as YYYY-MM-DD, else ''  (the back
 // Bills only: the trip amounts that calc.finance adds to the expenses are not part of this tile.
 function expenseTiles(list, y) {
   const accrual = S.settings.accounting === 'accrual', klein = !!S.settings.kleinunternehmer, year = String(y);
-  let cost = 0, vat = 0;
+  let cost = 0n, vat = 0n;   // whole cents (BigInt)
   for (const e of list) {
     const bill = isoDay(e.date), paid = accrual ? bill : (isoDay(e.paid_on) || bill);
     for (const ln of (e.lines && e.lines.length ? e.lines : [e])) {
       if (!ln) continue;
-      const pct = (ln.deductible ?? 100) / 100, vatPct = (ln.vat_deductible ?? ln.deductible ?? 100) / 100;
-      if (paid.startsWith(year)) cost += cents(((ln.net || 0) + (klein ? (ln.vat || 0) : 0)) * pct);
-      if (!klein && bill.startsWith(year)) vat += cents((ln.vat || 0) * vatPct);
+      const pct = ln.deductible ?? 100, vatPct = ln.vat_deductible ?? ln.deductible ?? 100;   // percents
+      if (paid.startsWith(year)) cost += Money.pct(klein ? Money.sum([ln.net, ln.vat]) : ln.net, pct);
+      if (!klein && bill.startsWith(year)) vat += Money.pct(ln.vat, vatPct);
     }
   }
-  return { cost: cents(cost), vat: cents(vat) };
+  return { cost: Money.fromCents(cost), vat: Money.fromCents(vat) };
 }
 PAGES.expenses = async () => {
   await loadAll(['expenses', 'projects', 'trips']);   // trips: the bill dialog's trip select
@@ -409,13 +416,14 @@ const kindOf = name => { const ext = String(name).split('.').pop().toLowerCase()
 /** MIME type of a previewable file, from its extension (the same rule as kindOf); '' for other files. */
 const MIME_BY_EXT = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
 const mimeFor = name => MIME_BY_EXT[String(name).split('.').pop().toLowerCase()] || '';
+/** A percent or other plain number typed into a field (never money: see Money.parseInput). */
 const toNum = x => { const t = String(x ?? '').trim().replace(',', '.'); return t === '' ? NaN : Number(t); };
 const lineHTML = (l, i) => {
   // a stored rate outside LINE_RATES (e.g. 5.5 or 16 from the API) is offered too, so the select shows what the totals use
   const rates = LINE_RATES.map(String).includes(String(l.vat_rate)) ? LINE_RATES : [...LINE_RATES, l.vat_rate];
   return `<tr data-line="${i}">
   <td><input data-f="description" value="${esc(l.description)}" maxlength="200" aria-label="Line ${i + 1}: description"></td>
-  <td><input data-f="gross" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(l.gross)}" aria-label="Line ${i + 1}: amount on the bill, gross EUR"></td>
+  <td><input data-f="gross" type="text" inputmode="decimal" value="${esc(l.gross)}" aria-label="Line ${i + 1}: amount on the bill, gross EUR"></td>
   <td><select data-f="vat_rate" aria-label="Line ${i + 1}: VAT rate">${rates.map(r => `<option value="${esc(r)}" ${String(r) === String(l.vat_rate) ? 'selected' : ''}>${esc(r)} %</option>`).join('')}</select></td>
   <td><input data-f="deductible" type="number" step="any" min="0" max="100" inputmode="decimal" value="${esc(l.deductible)}" aria-label="Line ${i + 1}: deductible %"></td>
   <td><button type="button" class="ghost sm" data-a="removeLine" data-i="${i}" aria-label="Remove line ${i + 1}" ${LN.length < 2 ? 'disabled' : ''}>✕</button></td></tr>`;
@@ -600,9 +608,10 @@ function bindExpenseDialog(modalEl) {
   });
 }
 function lineError(l, i) {
-  const n = i + 1, g = toNum(l.gross), d = toNum(l.deductible);
-  if (Number.isNaN(g)) return `Line ${n}: enter the amount on the bill`;
-  if (g < 0) return `Line ${n}: the amount must not be negative (book refunds as a credit-note invoice)`;
+  const n = i + 1, g = Money.parseInput(l.gross), d = toNum(l.deductible);
+  if (!g.ok) return `Line ${n}: ${g.error}`;
+  if (g.value === null) return `Line ${n}: enter the amount on the bill`;
+  if (Money.isNeg(g.value)) return `Line ${n}: the amount must not be negative (book refunds as a credit-note invoice)`;
   if (Number.isNaN(d) || d < 0 || d > 100) return `Line ${n}: the deductible share must be between 0 and 100 %`;
   return null;
 }
@@ -621,17 +630,17 @@ function expenseDialog(e, scan) {
     const { description, gross, vat_rate, deductible, vat_deductible, net, vat, ...extra } = l;
     return { description: description ?? '', gross: String(gross ?? ''), vat_rate: String(vat_rate ?? 19), deductible: String(deductible ?? 100), vat_deductible: vat_deductible ?? null, extra };
   });
-  const v0 = { ...e, gross: e.net != null && !stored.length ? Math.round((e.net + (e.reverse_charge ? 0 : e.vat || 0)) * 100) / 100 : (e.gross ?? ''), vat_rate: e.vat_rate ?? 19, itemise: stored.length > 0, rc_vat: e.reverse_charge ? e.vat : '' };
+  const v0 = { ...e, gross: e.net != null && !stored.length ? Money.sum([e.net, e.reverse_charge ? 0 : e.vat]) : (e.gross ?? ''), vat_rate: e.vat_rate ?? 19, itemise: stored.length > 0, rc_vat: e.reverse_charge ? e.vat : '' };
   const hasSup = !!window.SUP && can('suppliers');   // supplier, allocation and reverse-charge fields (docs/contracts/subcontractors.md)
   const supFields = hasSup ? [{ k: 'supplier_id', l: 'Supplier', t: 'select', o: [['', '— none (free-text vendor) —'], ...SUP.options(e.supplier_id)] },
     { k: 'allocation_id', l: 'Subcontractor allocation', t: 'select', o: [['', '— none —']] },
     { k: 'reverse_charge', l: 'Reverse charge: the VAT is owed by me, not charged on the bill (verify with your tax adviser)', t: 'check' },
-    { k: 'rc_vat', l: 'Self-assessed VAT €', t: 'number', h: 'Enter the amount on the bill above; this is the VAT you owe yourself. Not used for itemised bills.' }] : [];
+    { k: 'rc_vat', l: 'Self-assessed VAT €', t: 'number', m: true, h: 'Enter the amount on the bill above; this is the VAT you owe yourself. Not used for itemised bills.' }] : [];
   openForm({
     title: scan ? 'Check receipt' : e.id ? 'Edit bill' : 'Add bill', vals: v0, wide: true, note: scan ? RCPT.dialogTop(scan) : '',
     fields: [{ k: 'date', l: 'Bill date', t: 'date', row: 1 }, { k: 'paid_on', l: 'Paid on', t: 'date', h: 'Empty = same as the bill date.', row: 1 }, { k: 'invoice_no', l: 'Invoice number', row: 1 }, { k: 'vendor', l: 'Vendor' }, { k: 'description', l: 'Description' }, ...supFields,
       { k: 'itemise', l: 'Itemise this bill (several lines, e.g. a hotel invoice with different VAT rates)', t: 'check' },
-      { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: e.vat_rate != null && !LINE_RATES.includes(+e.vat_rate) ? [...LINE_RATES, e.vat_rate] : LINE_RATES, row: 2 },
+      { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', m: true, row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: e.vat_rate != null && !LINE_RATES.includes(+e.vat_rate) ? [...LINE_RATES, e.vat_rate] : LINE_RATES, row: 2 },
       { k: 'category', l: 'Category', t: 'select', o: cats, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
       { k: 'trip_id', l: 'Business trip', t: 'select', o: [['', '— no trip —'], ...tripOptions(e.trip_id)], row: 4 },
       { k: 'trip_item_id', l: 'Planned item of the trip', t: 'select', o: [['', '— not planned —'], ...tripItemOptions(e.trip_id)], row: 4 },
@@ -670,17 +679,17 @@ function expenseDialog(e, scan) {
         if (!LN.length) throw new Error('Add at least one line');
         const bad = LN.map(lineError).find(Boolean); if (bad) throw new Error(bad);
         if (!v.date) throw new Error('Pick the bill date');
-        v.lines = LN.map(l => ({ ...l.extra, description: l.description, gross: toNum(l.gross), vat_rate: Number(l.vat_rate),
+        v.lines = LN.map(l => ({ ...l.extra, description: l.description, gross: Money.parseInput(l.gross).value, vat_rate: Number(l.vat_rate),
           deductible: toNum(l.deductible), vat_deductible: l.vat_deductible ?? (bmeal ? 100 : null) }));
         delete v.net; delete v.vat; delete v.vat_rate;   // derived by the server from the lines
       } else {
         delete v.lines;
-        if (!gross) throw new Error('Enter the amount');
+        if (gross === null || gross === undefined || Money.isZero(gross)) throw new Error('Enter the amount');
         const r = +v.vat_rate || 0;
-        if (gross < 0) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
+        if (Money.isNeg(gross)) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
         if (!v.date) throw new Error('Pick the bill date');
-        Object.assign(v, Money.splitGross(gross, v.reverse_charge ? 0 : r)); v.vat_rate = v.reverse_charge ? 0 : r;
-        if (v.reverse_charge) v.vat = Number.isFinite(rcVat) && rcVat > 0 ? rcVat : 0;   // the self-assessed VAT, as typed
+        Object.assign(v, Money.splitGrossStr(gross, v.reverse_charge ? 0 : r)); v.vat_rate = v.reverse_charge ? 0 : r;
+        if (v.reverse_charge) v.vat = rcVat != null && mPos(rcVat) ? rcVat : '0';   // the self-assessed VAT, as typed
       }
       if (scan) return RCPT.confirm(scan, v);   // POST /api/receipts/{id}/confirm; the server sets attachment and external_id
       const f = $('#e_file').files[0];
@@ -737,11 +746,11 @@ const TAXNOTE = 'Estimate only – not tax advice.';
 function reserveLine(f, year, cur) {
   const r = f.reserve, thisYear = new Date().getFullYear();
   if (year < thisYear) return 'Year closed';
-  if (!r.monthly) {
-    if (!r.due_year) return 'No further reserve needed';
+  if (mZero(r.monthly)) {
+    if (mZero(r.due_year)) return 'No further reserve needed';
     return `Set aside ${eur(cur ? cur.tax_set_aside : r.owed_now)} now` + (year === thisYear && !f.extrapolated ? '; the monthly reserve starts once 60 days of the year have passed' : '');
   }
-  return `Set aside <b>${eur(r.monthly)}</b> per month for the remaining ${r.months_left} months (${eur(r.remaining)} of ${eur(r.due_year)} still to reserve)` + (r.owed_now > 0 ? `, plus <b>${eur(r.owed_now)}</b> now` : '');
+  return `Set aside <b>${eur(r.monthly)}</b> per month for the remaining ${r.months_left} months (${eur(r.remaining)} of ${eur(r.due_year)} still to reserve)` + (mPos(r.owed_now) ? `, plus <b>${eur(r.owed_now)}</b> now` : '');
 }
 function taxBurdenCards(f, year, cur, s) {
   const tp = f.tax_projected, o = f.tax_owed, ins = tp.insurance || {}, gmbh = f.company_type === 'gmbh';
@@ -749,21 +758,21 @@ function taxBurdenCards(f, year, cur, s) {
   const vp = tp.vorsorge || {};
   const burden = `<div class="card" id="card-tax-burden"><h2>Tax burden ${year}</h2><table>
     ${gmbh ? row('Körperschaftsteuer (15 %)', tp.kst) + row('Solidaritätszuschlag on Körperschaftsteuer', tp.kst_soli)
-      : row('Einkommensteuer' + (tp.kg_added > 0 ? ' (incl. Kindergeld added back)' : ''), tp.est) + row('Solidaritätszuschlag', tp.soli) + (tp.church ? row('Kirchensteuer', tp.church) : '')}
-    ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)${tp.gewst_credit ? `<div class="small muted">incl. ${eur(tp.gewst_credit)} credited against income tax (§35 EStG)</div>` : ''}</td><td class="num" data-k="gewst">${eur(tp.gewst)}</td></tr>` : ''}
+      : row('Einkommensteuer' + (mPos(tp.kg_added) ? ' (incl. Kindergeld added back)' : ''), tp.est) + row('Solidaritätszuschlag', tp.soli) + (mZero(tp.church) ? '' : row('Kirchensteuer', tp.church))}
+    ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)${mZero(tp.gewst_credit) ? '' : `<div class="small muted">incl. ${eur(tp.gewst_credit)} credited against income tax (§35 EStG)</div>`}</td><td class="num" data-k="gewst">${eur(tp.gewst)}</td></tr>` : ''}
     <tr><td><b>Total taxes (full year)</b></td><td class="num" data-k="tax_due"><b>${eur(tp.tax_due)}</b></td></tr>
-    ${tp.withheld > 0 ? row('Already withheld', tp.withheld) : ''}
+    ${mPos(tp.withheld) ? row('Already withheld', tp.withheld) : ''}
     ${tp.balance != null ? row('Expected back payment / refund', tp.balance) : ''}
     <tr><td colspan="2"><b>Social insurance</b> (self-paid, full year)</td></tr>
-    ${row('Health insurance', ins.kv)}${row('Care insurance', ins.pv)}${row('Pension insurance', ins.rv)}${row('Unemployment insurance', ins.alv)}${ins.subsidy > 0 ? row('Employer subsidy', -ins.subsidy) : ''}
+    ${row('Health insurance', ins.kv)}${row('Care insurance', ins.pv)}${row('Pension insurance', ins.rv)}${row('Unemployment insurance', ins.alv)}${mPos(ins.subsidy) ? row('Employer subsidy', mNegate(ins.subsidy)) : ''}
     <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(f.totals.vat_due)}</td></tr>
-    <tr><td><b>What stays with you</b> (months begun)</td><td class="num"><b class="${f.take_home != null && f.take_home >= 0 ? 'free-good' : 'free-bad'}" data-k="take_home">${eur(f.take_home)}</b></td></tr></table>
+    <tr><td><b>What stays with you</b> (months begun)</td><td class="num"><b class="${f.take_home != null && !mNeg(f.take_home) ? 'free-good' : 'free-bad'}" data-k="take_home">${eur(f.take_home)}</b></td></tr></table>
     <details><summary class="small">How this was computed</summary><ul class="small">
       <li>Taxable income (zvE): ${eur(tp.zve)}</li><li>Pension provision deduction: ${eur(vp.dA)}</li><li>Other provision deduction: ${eur(vp.dBO)}</li><li>Projected full-year profit: ${eur(f.projected_profit)}</li></ul></details>
     <p class="small muted">Projected full-year profit: ${eur(f.projected_profit)} → tax rate ${num(f.effective_rate * 100, 1)} %. ${TAXNOTE} <a href="#/me/tax">Edit personal tax profile</a></p></div>`;
   const owed = o ? `<div class="card" id="card-tax-owed"><h2>Owed on the profit booked so far (as of ${esc(fmtDate(o.as_of))})</h2><table>
-    ${row('Profit booked so far', o.profit_ytd)}${row('Taxes on it', o.tax_due)}${o.withheld > 0 ? row('Already withheld', o.withheld) : ''}
-    <tr><td><b>${o.owed < 0 ? 'Refund so far' : 'Owed'}</b></td><td class="num" data-k="owed"><b>${eur(Math.abs(o.owed))}</b></td></tr></table>
+    ${row('Profit booked so far', o.profit_ytd)}${row('Taxes on it', o.tax_due)}${mPos(o.withheld) ? row('Already withheld', o.withheld) : ''}
+    <tr><td><b>${mNeg(o.owed) ? 'Refund so far' : 'Owed'}</b></td><td class="num" data-k="owed"><b>${eur(Money.abs(o.owed))}</b></td></tr></table>
     <p class="small muted">Advance payments (Vorauszahlungen) are not taken into account.</p></div>` : '';
   const reserve = `<div class="card" id="card-reserve"><h2>Monthly reserve</h2><p id="reserve-line">${reserveLine(f, year, cur)}</p></div>`;
   return burden + `<div>${owed}${reserve}</div>`;
@@ -775,17 +784,18 @@ PAGES.money = async (year) => {
   const T = f.totals, ta = f.tax_actual, tp = f.tax_projected;
   const red = !!f.redacted, th = v => v == null ? '–' : eur(v);   // non-boss: business figures only; null take-home = "–"
   const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const mx = Math.max(100, ...f.months.map(x => Math.max(x.revenue, x.expenses, 0))), H = 170, bw = 900 / 12;
+  const px = v => Money.decNum(Money.parse(v));   // pixel geometry only, never shown as money
+  const mx = Math.max(100, ...f.months.map(x => Math.max(px(x.revenue), px(x.expenses), 0))), H = 170, bw = 900 / 12;
   const chart = `<svg class="chart" viewBox="0 0 940 ${H + 28}"><g transform="translate(36,6)">${[0, .5, 1].map(k => `<line x1="0" x2="900" y1="${H - H * k}" y2="${H - H * k}" stroke="var(--line)"/><text x="-6" y="${H - H * k + 4}" text-anchor="end">${num(mx * k, 0)}</text>`).join('')}
-    ${f.months.map((x, i) => `<g><title>${MN[i]}: revenue ${eur(x.revenue)}, expenses ${eur(x.expenses)}, profit ${eur(x.profit)}</title><rect x="${i * bw + 8}" y="${H - Math.max(0, x.revenue) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, x.revenue) / mx * H}" fill="var(--accent)" rx="2"/><rect x="${i * bw + bw / 2}" y="${H - Math.max(0, x.expenses) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, x.expenses) / mx * H}" fill="var(--warn)" rx="2"/><text x="${i * bw + bw / 2}" y="${H + 16}" text-anchor="middle">${MN[i]}</text></g>`).join('')}</g></svg>`;
+    ${f.months.map((x, i) => `<g><title>${MN[i]}: revenue ${eur(x.revenue)}, expenses ${eur(x.expenses)}, profit ${eur(x.profit)}</title><rect x="${i * bw + 8}" y="${H - Math.max(0, px(x.revenue)) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, px(x.revenue)) / mx * H}" fill="var(--accent)" rx="2"/><rect x="${i * bw + bw / 2}" y="${H - Math.max(0, px(x.expenses)) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, px(x.expenses)) / mx * H}" fill="var(--warn)" rx="2"/><text x="${i * bw + bw / 2}" y="${H + 16}" text-anchor="middle">${MN[i]}</text></g>`).join('')}</g></svg>`;
   const typeName = { freiberufler: 'Freiberufler (EÜR, no trade tax)', gewerbe: 'Gewerbetreibender / Einzelunternehmen', gmbh: 'UG / GmbH' }[f.company_type];
   return `<div class="head"><div><h1>Money & Taxes</h1><div class="muted">${esc(typeName)}${f.kleinunternehmer ? ' · Kleinunternehmer' : ''} · ${s.accounting === 'accrual' ? 'by invoice date' : 'by payment date (EÜR)'}</div></div>
     <div class="row tight" style="flex:none;align-items:center"><button data-a="goto" data-to="money/${year - 1}" ${year <= 2000 ? 'disabled' : ''}>←</button><b>${year}</b><button data-a="goto" data-to="money/${year + 1}" ${year >= 2100 ? 'disabled' : ''}>→</button></div></div>
   ${f.warnings.map(w => `<div class="banner">⚠ ${esc(w)}</div>`).join('')}
   ${!red && year === new Date().getFullYear() && !f.extrapolated ? '<div class="banner" id="not-extrapolated">Not yet extrapolated. The full-year estimate starts after 60 days of the year; until then the figures cover only the profit booked so far.</div>' : ''}
   ${cur ? (red ? `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div></div></div>` : `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">Tax reserve (${num(f.effective_rate * 100, 1)} %)</div><div style="font-size:22px;font-weight:700">${eur(cur.tax_set_aside)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div><div><div class="muted small">Social insurance</div><div style="font-size:22px;font-weight:700">${eur(cur.social)}</div></div></div>
-    <div style="margin-top:10px">→ You can take home about <b class="${cur.take_home != null && cur.take_home >= 0 ? 'free-good' : 'free-bad'}" style="font-size:20px">${th(cur.take_home)}</b> this month.</div></div>`) : ''}
-  <div class="grid g4"><div class="card kpi"><div class="l">Revenue (net)</div><div class="v">${eur(T.revenue)}</div></div><div class="card kpi"><div class="l">Expenses (net)</div><div class="v">${eur(T.expenses)}</div></div><div class="card kpi ${T.profit < 0 ? 'bad' : 'good'}"><div class="l">Profit</div><div class="v">${eur(T.profit)}</div></div><div class="card kpi ${f.open_receivables ? 'warn' : ''}"><div class="l">Open receivables</div><div class="v">${eur(f.open_receivables)}</div></div></div>
+    <div style="margin-top:10px">→ You can take home about <b class="${cur.take_home != null && !mNeg(cur.take_home) ? 'free-good' : 'free-bad'}" style="font-size:20px">${th(cur.take_home)}</b> this month.</div></div>`) : ''}
+  <div class="grid g4"><div class="card kpi"><div class="l">Revenue (net)</div><div class="v">${eur(T.revenue)}</div></div><div class="card kpi"><div class="l">Expenses (net)</div><div class="v">${eur(T.expenses)}</div></div><div class="card kpi ${mNeg(T.profit) ? 'bad' : 'good'}"><div class="l">Profit</div><div class="v">${eur(T.profit)}</div></div><div class="card kpi ${f.open_receivables ? 'warn' : ''}"><div class="l">Open receivables</div><div class="v">${eur(f.open_receivables)}</div></div></div>
   <div class="grid g2">${red ? `<div class="card"><h2>Business taxes ${year}</h2><table>
     ${f.company_type === 'gmbh' ? `<tr><td>Körperschaftsteuer (15 %)</td><td class="num">${eur(ta.kst)}</td></tr><tr><td>Solidaritätszuschlag on Körperschaftsteuer</td><td class="num">${eur(ta.kst_soli)}</td></tr>` : ''}
     ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)</td><td class="num">${eur(ta.gewst)}</td></tr>` : '<tr><td>No business taxes (Freiberufler)</td><td class="num">–</td></tr>'}
@@ -794,7 +804,7 @@ PAGES.money = async (year) => {
     <p class="small muted">Based on profit to date. Projected full-year profit: ${eur(f.projected_profit)}. Estimate only – not tax advice.</p></div>` : taxBurdenCards(f, year, cur, s)}
   <div class="card"><h2>Expenses by category</h2>${Object.keys(f.categories).length ? `<table>${Object.entries(f.categories).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${eur(v)}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses this year.</div>'}</div></div>
   <div class="card"><h2>Month by month</h2>${chart}<div class="small muted"><span class="dot" style="background:var(--accent)"></span>revenue <span class="dot" style="background:var(--warn);margin-left:10px"></span>expenses</div>
-  <table style="margin-top:12px"><tr><th>Month</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">VAT due</th>${red ? '' : '<th class="num">Tax reserve</th><th class="num">Social</th><th class="num">Take-home</th>'}</tr>${f.months.map((x, i) => `<tr><td>${MN[i]}</td><td class="num">${eur(x.revenue)}</td><td class="num">${eur(x.expenses)}</td><td class="num ${x.profit < 0 ? 'free-bad' : ''}">${eur(x.profit)}</td><td class="num">${eur(x.vat_due)}</td>${red ? '' : `<td class="num"${cur && i === m ? ' title="' + CURMONTH + '"' : ''}>${eur(x.tax_set_aside)}</td><td class="num">${eur(x.social)}</td><td class="num"><b>${th(x.take_home)}</b></td>`}</tr>`).join('')}</table>${cur && !red ? `<p class="small muted" id="month-footnote">${CURMONTH}</p>` : ''}</div>`;
+  <table style="margin-top:12px"><tr><th>Month</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">VAT due</th>${red ? '' : '<th class="num">Tax reserve</th><th class="num">Social</th><th class="num">Take-home</th>'}</tr>${f.months.map((x, i) => `<tr><td>${MN[i]}</td><td class="num">${eur(x.revenue)}</td><td class="num">${eur(x.expenses)}</td><td class="num ${mNeg(x.profit) ? 'free-bad' : ''}">${eur(x.profit)}</td><td class="num">${eur(x.vat_due)}</td>${red ? '' : `<td class="num"${cur && i === m ? ' title="' + CURMONTH + '"' : ''}>${eur(x.tax_set_aside)}</td><td class="num">${eur(x.social)}</td><td class="num"><b>${th(x.take_home)}</b></td>`}</tr>`).join('')}</table>${cur && !red ? `<p class="small muted" id="month-footnote">${CURMONTH}</p>` : ''}</div>`;
 };
 
 /* ================= TEAM ================= */
@@ -814,7 +824,7 @@ A.editUser = el => {
       { k: 'weekly_hours', l: 'Weekly hours', t: 'number', row: 2 }, { k: 'tracking_start', l: 'Tracking since', t: 'date', row: 2, h: 'Starts the flex-time balance' },
       { k: 'work_start', l: 'Working day from', t: 'time', row: 4, h: 'Calendar busy time counts only inside this window' }, { k: 'work_end', l: 'Working day until', t: 'time', row: 4 },
       { k: 'timezone', l: 'Time zone of the working day', ph: 'Europe/Berlin', h: 'IANA name, empty = Europe/Berlin' },
-      { k: 'default_rate', l: 'Billing rate €/h', t: 'number', row: 3, h: 'Fallback when project/customer have none' }, { k: 'cost_rate', l: 'Cost €/h', t: 'number', row: 3, h: 'For project margins' },
+      { k: 'default_rate', l: 'Billing rate €/h', t: 'number', m: true, row: 3, h: 'Fallback when project/customer have none' }, { k: 'cost_rate', l: 'Cost €/h', t: 'number', m: true, row: 3, h: 'For project margins' },
       { k: 'username', l: 'Username', h: 'Used to sign in (letters, digits, . - _)' }, { k: 'password', l: u.id ? 'New password (leave empty to keep)' : 'Password (min. 8 characters)', t: 'password', h: 'At least 8 characters' }, { k: 'active', l: 'Active', t: 'check' }],
     extra: `<div class="field"><label>Working days</label>${WD.map((d, i) => `<label style="display:inline-block;margin-right:12px"><input type="checkbox" class="wd" value="${i}" ${(u.workdays || [0, 1, 2, 3, 4]).includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div>`,
     save: async v => { if (!v.name) throw new Error('Name required'); if (!v.username) throw new Error('Username required'); if (!u.id && (!v.password || v.password.length < 8)) throw new Error('A password with at least 8 characters is required'); if (v.password && v.password.length < 8) throw new Error('The password must be at least 8 characters long'); v.workdays = [...document.querySelectorAll('.wd:checked')].map(x => +x.value); if (!v.workdays.length) throw new Error('Pick at least one working day'); if (!v.password) delete v.password; delete v.has_password; await save('users', v); if (u.id === S.me.id) await bootstrap(); render(); },
@@ -840,7 +850,7 @@ PAGES.settings = async () => {
     <div class="row">${fieldHTML({ k: 'vat_rate', l: 'Default VAT %', t: 'select', o: [19, 7, 0] }, s)}<div id="hebesatz_wrap" ${hebesatz ? '' : 'hidden'}>${f('hebesatz', 'Gewerbesteuer Hebesatz %', 'number')}</div></div>
     ${fieldHTML({ k: 'accounting', l: 'Revenue counted…', t: 'select', o: [['eur', 'when paid (EÜR / Ist-Versteuerung)'], ['accrual', 'when invoiced (Soll)']] }, s)}
     <p class="small muted">Tax figures are planning estimates (Einkommensteuer tariff §32a, Soli, Gewerbesteuer incl. §35 credit). Always confirm with your Steuerberater.</p></div>
-  <div class="card" id="card-defaults"><h2>Documents and defaults</h2><div class="row">${f('default_rate', 'Default hourly rate €', 'number')}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div><p class="small">Document numbers: <a href="#/numbering">Numbering</a> (patterns, next number, preview, history).</p>
+  <div class="card" id="card-defaults"><h2>Documents and defaults</h2><div class="row">${fieldHTML({ k: 'default_rate', l: 'Default hourly rate €', t: 'number', m: true }, s)}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div><p class="small">Document numbers: <a href="#/numbering">Numbering</a> (patterns, next number, preview, history).</p>
     <h3 style="margin-top:12px">Document templates</h3><div class="row" style="align-items:center"><div class="right auto"><button data-a="editTemplate">+ New template</button></div></div><table>${S.templates.map(t => `<tr><td><b>${esc(t.name)}</b> <span class="muted small">${esc(t.layout)} · ${esc(t.language)}</span></td><td><span class="dot" style="background:${esc(t.accent)}"></span></td><td class="right"><button class="sm" data-a="editTemplate" data-id="${t.id}">${tpls.find(x => x.id === t.id) ? 'Edit' : 'Copy & customise'}</button></td></tr>`).join('')}</table></div>
   ${teamVisibilityCard()}
   <div class="card" id="card-data"><h2>Data & sync</h2><p>Data folder on this device:<br><code>${esc(S.data_dir || '')}</code></p><p class="muted small">Put this folder inside a Syncthing-shared folder and start permitA38 with <code>permita38 --data &lt;that folder&gt;</code> on each device. See the README for details.</p>
@@ -852,9 +862,11 @@ A.settingsCompanyType = el => { const w = $('#hebesatz_wrap'); if (w) w.hidden =
 A.saveSettings = async () => {
   const s = { ...S.settings };
   const txt = ['company_name', 'owner_name', 'street', 'zip', 'city', 'email', 'phone', 'website', 'tax_number', 'vat_id', 'bank_name', 'iban', 'bic', 'company_type', 'state', 'accounting', 'default_template'];
-  const nums = ['hebesatz', 'default_rate', 'payment_days', 'offer_valid_days', 'vat_rate'];
+  const nums = ['hebesatz', 'payment_days', 'offer_valid_days', 'vat_rate'];   // plain numbers; the money field default_rate is read below
   txt.forEach(k => { const e = $('#f_' + k); if (e) s[k] = e.value; });
   nums.forEach(k => { const e = $('#f_' + k); if (e) s[k] = e.value === '' ? 0 : parseFloat(e.value); });
+  const dr = $('#f_default_rate');
+  if (dr) { const r = Money.parseInput(dr.value); if (!r.ok) throw new Error(`Default hourly rate: ${r.error}`); s.default_rate = r.value ?? '0'; }
   s.kleinunternehmer = $('#f_kleinunternehmer').checked;
   delete s.personal_tax;
   if ($('#f_tl_employee')) s.team_timeline_visibility = { employee: $('#f_tl_employee').value, accountant: $('#f_tl_accountant').value };

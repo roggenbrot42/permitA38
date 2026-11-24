@@ -279,7 +279,7 @@ def test_stored_empty_or_string_reads_as_stored(store, stored):
     assert got["assessment"] == "single" and got["children"]["count"] == 0 and got["employment"] is None
 
 
-@pytest.mark.parametrize("bad", ["2", "9.5", "", "abc"])
+@pytest.mark.parametrize("bad", ["", "abc"])
 def test_stored_strings_where_numbers_expected_fall_back(bad):
     got = effective_personal_tax(
         {
@@ -296,3 +296,17 @@ def test_stored_strings_where_numbers_expected_fall_back(bad):
     assert got["health"]["pkv_monthly"] == 0 and got["health"]["krankengeld"] is True
     assert got["employment"]["gross_year"] == 100
     assert got["employment"]["steuerklasse"] is None and got["employment"]["bav_employee_year"] == 0
+
+
+@pytest.mark.parametrize(("stored", "value"), [("2", 2.0), ("9.5", 9.5)])
+def test_stored_decimal_string_in_a_money_field_is_read_as_its_value(stored, value):
+    got = effective_personal_tax(
+        {
+            "personal_tax": {
+                "health": {"pkv_monthly": stored},
+                "employment": {"gross_year": 100, "bav_employee_year": stored},
+            }
+        }
+    )
+    assert got["health"]["pkv_monthly"] == value
+    assert got["employment"]["bav_employee_year"] == value
