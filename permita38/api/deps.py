@@ -36,6 +36,7 @@ from permita38.core.service.sales import SalesService
 from permita38.core.service.sanity import SanityService
 from permita38.core.service.settings import SettingsService
 from permita38.core.service.suppliers import SupplierService
+from permita38.core.service.tax_bookings import TaxBookingService
 from permita38.core.service.team_timeline import TeamTimelineService
 from permita38.core.service.time import TimeService
 from permita38.core.service.timesheet import TimesheetService
@@ -82,6 +83,7 @@ class Services:
     credit_notes: CreditNoteService
     locks: LockService
     manual_entries: ManualEntryService
+    tax_bookings: TaxBookingService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
@@ -125,6 +127,7 @@ class Services:
             journal=journal,
             locks=LockService(store),
             manual_entries=ManualEntryService(store, journal),
+            tax_bookings=TaxBookingService(store, journal),
             impressum=ImpressumService(
                 SafeFetcher(user_agent),
                 enabled=config.features.impressum_lookup,
