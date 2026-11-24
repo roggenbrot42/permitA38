@@ -18,6 +18,7 @@ from permita38.core.service.auth import AuthService
 from permita38.core.service.busy import BusyTimeProvider
 from permita38.core.service.calendar.busy_provider import CalendarBusyProvider
 from permita38.core.service.calendar.service import CalendarService, ResourceFetcher
+from permita38.core.service.credit_notes import CreditNoteService
 from permita38.core.service.document_scans import DocumentScanService
 from permita38.core.service.fiscal_years import FiscalYearService
 from permita38.core.service.importer import ImportService
@@ -77,6 +78,7 @@ class Services:
     audit: AuditService
     fiscal_years: FiscalYearService
     journal: JournalService
+    credit_notes: CreditNoteService
     locks: LockService
 
     @classmethod
@@ -89,6 +91,7 @@ class Services:
         calendar = CalendarService(store, calendar_fetcher or SafeFetcher(user_agent))
         busy = CalendarBusyProvider(store, on_request=calendar.schedule_stale_refresh)
         sanity = SanityService(store)
+        sales = SalesService(store, records)
         return cls(
             busy=busy,
             planner=PlannerService(store, busy),
@@ -104,7 +107,8 @@ class Services:
             records=records,
             receipts=ReceiptService(store, records, config, sanity),
             document_scans=DocumentScanService(store, config),
-            sales=SalesService(store, records),
+            sales=sales,
+            credit_notes=CreditNoteService(store, sales.postings.journal, sales.payments),
             imports=ImportService(store, numbering=None),
             time=TimeService(store),
             timesheet=TimesheetService(store),

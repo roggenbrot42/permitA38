@@ -20,6 +20,8 @@ from permita38.core.accounting.postings_targets import apply_event, event_entry
 from permita38.core.accounting.types import (
     Bases,
     Cents,
+    CreditEvent,
+    CreditKind,
     IncomeBasis,
     InvoiceState,
     IssuedSnapshot,
@@ -37,7 +39,14 @@ from permita38.core.service.journal import JournalService, JournalSource, PostLi
 from permita38.core.service.locks import first_unlocked_from, vat_date_for
 from permita38.core.settings import accounting_start
 
-__all__ = ["IssuePostingService", "PaymentPostingService", "build_snapshot", "invoice_state_of", "stored_snapshot"]
+__all__ = [
+    "CreditPostingService",
+    "IssuePostingService",
+    "PaymentPostingService",
+    "build_snapshot",
+    "invoice_state_of",
+    "stored_snapshot",
+]
 
 SUPPORTED_TREATMENTS: tuple[str, ...] = get_args(Treatment)
 
@@ -273,3 +282,64 @@ class PaymentPostingService:
         label = {"refund": "Refund", "reversal": "Reversal of payment"}.get(str(row.get("kind")), "Payment")
         text = f"{label} {invoice.get('number') or invoice['id']}"[:200]
         return self.journal.post(entry.event_key, entry.document_date, text, source, lines)
+
+
+class CreditPostingService:
+    """Posts the credit-note events (storno, partial) of an issued invoice with the target rule (accounting 9.2, 11)."""
+
+    def __init__(self, store: Repository, journal: JournalService | None = None):
+        self.store = store
+        self.journal = journal or JournalService(store)
+
+    def post_credit(
+        self, invoice: Mapping[str, Any], note: Mapping[str, Any], user: Mapping[str, Any] | None = None
+    ) -> models.JournalEntry | None:
+        """Post ``targets(after) - targets(before)`` for one stored credit note (event key ``credit:<note id>``),
+        ``before`` = the invoice with every other credit note and all payments. ``None`` when nothing posts:
+        accounting not initialised, the invoice dated before the start or without a snapshot, or the delta has no lines.
+        A credit note is dated in an open month, so its lines never drift."""
+        start = accounting_start(self.store.settings())
+        if start is None or invoice.get("credit_kind"):
+            return None
+        invoice_date = date.fromisoformat(str(invoice["date"])[:10])
+        snap = stored_snapshot(invoice)
+        if invoice_date < start or snap is None:
+            return None
+        uid = str((user or {}).get("id") or "system")
+        fy = self.journal.ensure_year(invoice_date.year, uid)
+        bases = Bases(cast(IncomeBasis, fy["income_basis"]), cast(VatBasis, fy["vat_basis"]))
+        kept = sum(int(r["amount_cents"]) for r in self.store.find("payments", document_id=invoice["id"]))
+        others = [
+            n
+            for n in self.store.find("invoices", corrects_id=invoice["id"])
+            if n.get("kind") == "credit_note" and n["id"] != note["id"]
+        ]
+        before = invoice_state_of(snap, others, kept)
+        day = date.fromisoformat(str(note["date"])[:10])
+        raw = (note.get("issued") or {}).get("rates") or {}
+        groups = tuple(
+            RateGroup(Decimal(str(rate)), Cents(int(v["net"])), Cents(int(v["vat"]))) for rate, v in raw.items()
+        )
+        event = CreditEvent(str(note["id"]), day, cast(CreditKind, note["credit_kind"]), groups)
+        try:
+            after = apply_event(before, event)
+        except ValueError as exc:
+            raise ServiceError(422, str(exc)) from exc
+        entry = event_entry(before, after, bases, event)
+        if entry is None:
+            return None
+        customer: Mapping[str, Any] = (invoice.get("issued") or {}).get("customer") or {}
+        source = JournalSource(
+            event="credit",
+            created_by=uid,
+            source_coll="invoices",
+            source_id=str(note["id"]),
+            source_number=note.get("number"),
+            counterparty_id=customer.get("id"),
+            cp_vat_id=customer.get("vat_id"),
+            cp_country=customer.get("country"),
+        )
+        text = f"Credit note {note.get('number') or note['id']}"[:200]
+        return self.journal.post(
+            entry.event_key, entry.document_date, text, source, [post_line(ln) for ln in entry.lines]
+        )

@@ -217,12 +217,22 @@ def settle_discount(rid: str, body: models.SettleDiscountIn, user: PaymentWrite,
 
 
 @payments_router.get("/invoices/{rid}/credit-notes", name="list_credit_notes")
-def list_credit_notes(rid: str, user: InvoiceRead, services: ServicesDep):
-    not_implemented()
+def list_credit_notes(rid: str, user: InvoiceRead, services: ServicesDep) -> list[dict[str, Any]]:
+    return services.credit_notes.list(rid)
 
 
 @payments_router.post(
     "/invoices/{rid}/credit-notes", status_code=201, dependencies=[SessionOnly], name="create_credit_note"
 )
-def create_credit_note(rid: str, body: models.CreditNoteIn, user: PaymentWrite, services: ServicesDep):
-    not_implemented()
+def create_credit_note(
+    rid: str, body: models.CreditNoteIn, user: PaymentWrite, services: ServicesDep
+) -> dict[str, Any]:
+    """Issue a storno or partial credit note (number, snapshot and posting in one transaction)."""
+    return services.credit_notes.create(
+        rid,
+        credit_kind=body.credit_kind,
+        date=body.date,
+        reason=body.reason,
+        amounts=body.amounts,
+        user=user,
+    )
