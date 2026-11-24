@@ -254,7 +254,9 @@ def eur_report(lines: Sequence[PostedLine], chart: Chart, year: int) -> EurRepor
     * ``vat_soll_clearing_*`` / ``vat_out_*`` credits are "VAT received"; ``input_vat_clearing`` debits "input VAT
       paid"; ``vat_prepayments`` and ``vat_special_prepayment`` debits are "VAT paid to the tax office", their credits
       "VAT refunded"; ``vat_paid_private`` reduces "VAT paid". Everything else (private shares, balance accounts) is
-      ignored, as are lines without ``income_date``.
+      ignored, as are lines without ``income_date``. A debit on ``vat_soll_clearing_*`` / ``vat_out_*`` (credit note,
+      refund) reduces "VAT received". A reversed VAT payment (credit on a prepayment role) shows in "VAT refunded"
+      and the original in "VAT paid"; the profit is unchanged by the pair.
     * profit = deductible lines + VAT received + VAT refunded - input VAT paid - VAT paid.
     """
     by_role = _accounts_by_role(chart)
@@ -311,15 +313,19 @@ def _pl_amounts(
 
 
 def pnl(lines: Sequence[PostedLine], chart: Chart, year: int) -> PnlReport:
-    """Accrual P&L: the P&L-class accounts, income-signed, for the lines whose ``income_date`` (else booking date)
-    lies in ``year``."""
+    """Accrual P&L: the P&L-class accounts, income-signed, for the lines whose ``income_date`` lies in ``year``.
+
+    Lines without ``income_date`` are ignored (no fallback to the booking date), like in :func:`eur_report`: the year
+    closing moves the P&L accounts to ``profit_carryforward`` without ``income_date`` and so leaves the P&L of the
+    year unchanged. Accounts with a net of 0 are not listed. Compare :func:`balance_sheet`, which uses the booking
+    date."""
     names = _account_names(chart)
     amounts = _pl_amounts(
-        lines, _accounts_by_role(chart), lambda p: (p.line.income_date or p.booking_date).year == year
+        lines, _accounts_by_role(chart), lambda p: p.line.income_date is not None and p.line.income_date.year == year
     )
-    rows = [PnlRow(AccountNo(no), names.get(no, ""), Cents(v)) for no, v in sorted(amounts.items())]
+    rows = [PnlRow(AccountNo(no), names.get(no, ""), Cents(v)) for no, v in sorted(amounts.items()) if v]
     income = tuple(r for r in rows if r.amount > 0)
-    expenses = tuple(r for r in rows if r.amount <= 0)
+    expenses = tuple(r for r in rows if r.amount < 0)
     total_income = sum(r.amount for r in income)
     total_expense = -sum(r.amount for r in expenses)
     return PnlReport(
@@ -329,7 +335,10 @@ def pnl(lines: Sequence[PostedLine], chart: Chart, year: int) -> PnlReport:
 
 def balance_sheet(lines: Sequence[PostedLine], chart: Chart, as_of: date) -> BalanceSheet:
     """Accrual balance sheet: the balance-class accounts cumulated up to ``as_of`` (by booking date), split by the sign
-    of the balance; zero balances are left out. ``result`` is the not yet closed P&L result up to ``as_of``."""
+    of the balance; zero balances are left out. ``result`` is the not yet closed P&L result up to ``as_of``, also by
+    booking date (not ``income_date``), so the sheet always balances: a cost booked on 30 Dec with ``income_date``
+    2 Jan is in the result of 31 Dec here, but in the next year's P&L, and ``difference`` stays 0. The year closing
+    (P&L accounts to ``profit_carryforward``) turns the result into a balance account."""
     by_role = _accounts_by_role(chart)
     names = _account_names(chart)
     balances: dict[ChartAccountNo, int] = {}

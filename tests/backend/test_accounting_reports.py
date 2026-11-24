@@ -260,3 +260,110 @@ def test_eur_gross_form_counts_vat_received_on_eur_soll_and_eur_ist():
     ist = eur_report(case_lines("A1-eur-ist"), CHART, 2026)
     assert ist.vat_received == 19000 and ist.profit == 119000
     assert eur_report(case_lines("A1-eur-soll"), CHART, 2027).profit == 0
+
+
+def test_pnl_ignores_lines_without_income_date_and_drops_zero_net_accounts():
+    lines = [
+        posted_line("revenue_s19", -500000, "2026-03-01", 1, income_date="2026-03-01"),  # income 5000.00
+        posted_line("expense_other", 200000, "2026-04-01", 2, income_date="2026-04-01"),  # cost 2000.00
+        posted_line("expense_other", -200000, "2026-04-02", 3, income_date="2026-04-02"),  # fully reversed: net 0
+        posted_line("expense_software", 9999, "2026-05-01", 4),  # no income_date: ignored, no booking date fallback
+    ]
+    report = pnl(lines, CHART, 2026)
+    # expense_other nets 2000.00 - 2000.00 = 0 and is not listed; expense_software is ignored
+    assert [(r.account, r.amount) for r in report.income] == [("9007", 500000)]
+    assert report.expenses == ()
+    assert report.total_income == 500000 and report.total_expense == 0 and report.profit == 500000
+
+
+def test_year_closing_does_not_change_the_pnl_and_the_balance_sheet_stays_balanced():
+    lines = [
+        posted_line("bank", 100000, "2026-03-01", 1),
+        posted_line("revenue_s19", -100000, "2026-03-01", 1, income_date="2026-03-01"),  # income 1000.00
+        posted_line("expense_other", 30000, "2026-04-01", 2, income_date="2026-04-01"),  # cost 300.00
+        posted_line("bank", -30000, "2026-04-01", 2),
+        # closing entry: P&L accounts to profit_carryforward, no income_date
+        posted_line("revenue_s19", 100000, "2026-12-31", 3),
+        posted_line("expense_other", -30000, "2026-12-31", 3),
+        posted_line("profit_carryforward", -70000, "2026-12-31", 3),
+    ]
+    report = pnl(lines, CHART, 2026)
+    # profit = 1000.00 - 300.00 = 700.00, unchanged by the closing
+    assert report.total_income == 100000 and report.total_expense == 30000 and report.profit == 70000
+    before = balance_sheet(lines, CHART, _d("2026-12-30"))
+    # bank 1000.00 - 300.00 = 700.00 debit; result 700.00; difference = 700.00 - 0 - 700.00 = 0
+    assert before.debit_total == 70000 and before.credit_total == 0 and before.result == 70000
+    assert before.difference == 0
+    after = balance_sheet(lines, CHART, _d("2026-12-31"))
+    # result: revenue -(-1000.00 + 1000.00) = 0, expense -(300.00 - 300.00) = 0; carryforward 700.00 credit
+    assert after.result == 0
+    assert [(r.account, r.balance) for r in after.credit_side] == [("9052", -70000)]
+    assert after.debit_total == 70000 and after.credit_total == 70000 and after.difference == 0
+
+
+def test_balance_sheet_uses_the_booking_date_while_the_pnl_uses_the_income_date():
+    lines = [
+        posted_line("expense_other", 5000, "2026-12-30", 1, income_date="2027-01-02"),
+        posted_line("bank", -5000, "2026-12-30", 1),
+    ]
+    sheet = balance_sheet(lines, CHART, _d("2026-12-31"))
+    # booked 30 Dec: in the 31 Dec result (-50.00), bank -50.00 credit side; 0 - 50.00 - (-50.00) = 0
+    assert sheet.result == -5000 and sheet.credit_total == 5000 and sheet.difference == 0
+    assert pnl(lines, CHART, 2026).profit == 0 and pnl(lines, CHART, 2027).profit == -5000
+
+
+def test_eur_year_boundary_follows_the_income_date_not_the_booking_date():
+    lines = [
+        posted_line("expense_other", 5000, "2026-12-30", 1, income_date="2027-01-01"),  # paid on 1 Jan: 2027
+        posted_line("revenue_s19", -8000, "2027-01-02", 2, income_date="2026-12-31"),  # received on 31 Dec: 2026
+    ]
+    y2026 = eur_report(lines, CHART, 2026)
+    assert y2026.lines == (EurLineTotal("Line revenue_s19", Cents(8000)),)
+    assert y2026.total_income == 8000 and y2026.total_expense == 0 and y2026.profit == 8000
+    y2027 = eur_report(lines, CHART, 2027)
+    assert y2027.lines == (EurLineTotal("Line expense_other", Cents(-5000)),)
+    assert y2027.total_income == 0 and y2027.total_expense == 5000 and y2027.profit == -5000
+
+
+def test_eur_debits_on_vat_out_reduce_the_vat_received():
+    lines = [
+        posted_line("vat_out_s19", -19000, "2026-02-03", 1, income_date="2026-02-03"),
+        posted_line("vat_soll_clearing_s19", 4750, "2026-03-05", 2, income_date="2026-03-05"),  # refund / credit note
+        posted_line("vat_out_s7", 1000, "2026-03-06", 3, income_date="2026-03-06"),
+    ]
+    report = eur_report(lines, CHART, 2026)
+    # VAT received = 190.00 - 47.50 - 10.00 = 132.50
+    assert report.vat_received == 13250
+    assert report.total_income == 13250 and report.profit == 13250
+
+
+def test_eur_reversed_vat_payment_shows_in_paid_and_refunded_with_unchanged_profit():
+    lines = [
+        posted_line("vat_prepayments", 3810, "2026-06-20", 1, income_date="2026-06-20"),
+        posted_line("bank", -3810, "2026-06-20", 1),
+        posted_line("vat_prepayments", -3810, "2026-06-21", 2, income_date="2026-06-21"),  # reversal
+        posted_line("bank", 3810, "2026-06-21", 2),
+    ]
+    report = eur_report(lines, CHART, 2026)
+    assert report.vat_paid == 3810 and report.vat_refunded == 3810
+    # profit = 38.10 refunded - 38.10 paid = 0
+    assert report.total_income == 3810 and report.total_expense == 3810 and report.profit == 0
+
+
+def test_ledger_with_an_unknown_role_raises_key_error():
+    with pytest.raises(KeyError, match="no_such_role"):
+        ledger([posted_line("no_such_role", 1, "2026-01-01", 1)], CHART, BANK, None, None)
+
+
+def test_ledger_opening_balance_of_a_non_bank_account():
+    lines = [
+        posted_line("receivables", 119000, "2026-01-10", 1),
+        posted_line("bank", 5, "2026-02-01", 2),  # other account: not part of the ledger
+        posted_line("receivables", -50000, "2026-02-10", 3),
+        posted_line("receivables", 7000, "2026-03-10", 4),
+    ]
+    report = ledger(lines, CHART, RECEIVABLES, _d("2026-03-01"), None)
+    # opening = 1190.00 - 500.00 = 690.00; after the row 690.00 + 70.00 = 760.00
+    assert report.opening == 69000
+    assert [(r.entry_no, r.debit, r.balance) for r in report.rows] == [(4, 7000, 76000)]
+    assert report.closing == 76000
