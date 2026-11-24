@@ -6,6 +6,7 @@ turns the snapshot into the engine event (``core/accounting/postings_issue.py``,
 the accounting is initialised (settings key ``accounting.start``) or for an invoice dated before the start. No SQL here.
 """
 
+import copy
 import dataclasses
 import time
 from collections.abc import Iterable, Mapping
@@ -44,6 +45,8 @@ __all__ = [
     "IssuePostingService",
     "PaymentPostingService",
     "build_snapshot",
+    "cash_event_lines",
+    "credit_snapshot",
     "invoice_state_of",
     "stored_snapshot",
 ]
@@ -134,6 +137,22 @@ def post_line(ln: Line) -> PostLine:
     )
 
 
+def cash_event_lines(entry: Any, first_open: date | None) -> list[PostLine]:
+    """The journal lines of a cash event (payment, refund, reversal, write-off reversal): a tax line keeps a locked
+    VAT date only when the VAT itself changes (drift case 2, the journal flags it); a statistical base line moves."""
+    lines: list[PostLine] = []
+    for ln in entry.lines:
+        post = post_line(ln)
+        if post.vat_date is not None and first_open is not None:
+            if ln.tax_kind == "tax":
+                vat_day, _ = vat_date_for("cash_event", post.vat_date, first_open)
+            else:
+                vat_day = max(post.vat_date, first_open)
+            post = dataclasses.replace(post, vat_date=vat_day)
+        lines.append(post)
+    return lines
+
+
 class IssuePostingService:
     def __init__(self, store: Repository, journal: JournalService | None = None):
         self.store = store
@@ -182,6 +201,25 @@ class IssuePostingService:
         return self.journal.post(
             entry.event_key, entry.document_date, text, source, [post_line(ln) for ln in entry.lines]
         )
+
+
+def credit_snapshot(
+    inv: Mapping[str, Any], groups: Iterable[tuple[Decimal, int, int]], day: str, now: float
+) -> dict[str, Any]:
+    """The ``issued`` snapshot of a credit document: ``(rate, net, vat)`` per rate group in cents (negative for a
+    write-off reversal), the regime, treatment and customer of the invoice."""
+    raw = inv["issued"]
+    rows = list(groups)
+    return {
+        "regime": raw["regime"],
+        "treatment": raw["treatment"],
+        "rates": {rate_str(r): {"net": n, "vat": v, "gross": n + v} for r, n, v in rows},
+        "gross": sum(n + v for _r, n, v in rows),
+        "perf": day,
+        "customer": copy.deepcopy(raw.get("customer")),
+        "issued_at": int(now),
+        "rules_version": raw.get("rules_version"),
+    }
 
 
 def invoice_state_of(snap: IssuedSnapshot, credit_notes: Iterable[Mapping[str, Any]], kept_cents: int) -> InvoiceState:
@@ -257,17 +295,7 @@ class PaymentPostingService:
         entry = event_entry(before, after, bases, event)
         if entry is None:
             return None
-        first_open = first_unlocked_from(self.store.list("period_locks"))
-        lines: list[PostLine] = []
-        for ln in entry.lines:
-            post = post_line(ln)
-            if post.vat_date is not None and first_open is not None:
-                if ln.tax_kind == "tax":  # the VAT itself changes: keep the date, the journal flags the drift
-                    vat_day, _ = vat_date_for("cash_event", post.vat_date, first_open)
-                else:  # a statistical base never drifts
-                    vat_day = max(post.vat_date, first_open)
-                post = dataclasses.replace(post, vat_date=vat_day)
-            lines.append(post)
+        lines = cash_event_lines(entry, first_unlocked_from(self.store.list("period_locks")))
         customer: Mapping[str, Any] = (invoice.get("issued") or {}).get("customer") or {}
         source = JournalSource(
             event="payment",
@@ -297,7 +325,8 @@ class CreditPostingService:
         """Post ``targets(after) - targets(before)`` for one stored credit note (event key ``credit:<note id>``),
         ``before`` = the invoice with every other credit note and all payments. ``None`` when nothing posts:
         accounting not initialised, the invoice dated before the start or without a snapshot, or the delta has no lines.
-        A credit note is dated in an open month, so its lines never drift."""
+        A credit note is dated in an open month, so its lines never drift; a write-off reversal is dated the payment date
+        and drifts like a cash event."""
         start = accounting_start(self.store.settings())
         if start is None or invoice.get("credit_kind"):
             return None
@@ -339,7 +368,12 @@ class CreditPostingService:
             cp_vat_id=customer.get("vat_id"),
             cp_country=customer.get("country"),
         )
-        text = f"Credit note {note.get('number') or note['id']}"[:200]
-        return self.journal.post(
-            entry.event_key, entry.document_date, text, source, [post_line(ln) for ln in entry.lines]
+        label = {"write_off": "Write-off", "write_off_reversal": "Write-off reversal", "discount": "Discount"}.get(
+            str(note["credit_kind"]), "Credit note"
         )
+        text = f"{label} {note.get('number') or invoice.get('number') or note['id']}"[:200]
+        if note["credit_kind"] == "write_off_reversal":  # dated the payment date: drift case 2 (accounting 11)
+            lines = cash_event_lines(entry, first_unlocked_from(self.store.list("period_locks")))
+        else:
+            lines = [post_line(ln) for ln in entry.lines]
+        return self.journal.post(entry.event_key, entry.document_date, text, source, lines)

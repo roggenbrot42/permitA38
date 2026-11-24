@@ -328,6 +328,8 @@ class SalesService:
 
     def pdf(self, coll: str, rid: str) -> tuple[bytes, str]:
         doc = self._get(coll, rid)
+        if doc.get("credit_kind") in ("write_off", "write_off_reversal"):
+            raise ServiceError(409, "A write-off is an internal voucher and has no PDF")
         if doc.get("original_pdf"):  # imported: the original is the legal record, never re-rendered
             path = self.store.attachment_path(doc["original_pdf"])
             if path is None:

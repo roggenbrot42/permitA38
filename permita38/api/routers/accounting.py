@@ -211,9 +211,17 @@ def reverse_legacy_payment(
     return _payment_result(services, result)
 
 
-@payments_router.post("/invoices/{rid}/settle-discount", dependencies=[SessionOnly], name="settle_discount")
-def settle_discount(rid: str, body: models.SettleDiscountIn, user: PaymentWrite, services: ServicesDep):
-    not_implemented()
+@payments_router.post(
+    "/invoices/{rid}/settle-discount", status_code=201, dependencies=[SessionOnly], name="settle_discount"
+)
+def settle_discount(
+    rid: str, body: models.SettleDiscountIn, user: PaymentWrite, services: ServicesDep
+) -> dict[str, Any]:
+    """Settle with a cash discount: a discount credit note for the rest, then the payment, in one transaction."""
+    result = services.credit_notes.settle_discount(
+        rid, date=body.date, amount_paid=body.amount_paid, note=body.note, user=user
+    )
+    return _payment_result(services, result)
 
 
 @payments_router.get("/invoices/{rid}/credit-notes", name="list_credit_notes")
@@ -227,7 +235,8 @@ def list_credit_notes(rid: str, user: InvoiceRead, services: ServicesDep) -> lis
 def create_credit_note(
     rid: str, body: models.CreditNoteIn, user: PaymentWrite, services: ServicesDep
 ) -> dict[str, Any]:
-    """Issue a storno or partial credit note (number, snapshot and posting in one transaction)."""
+    """Issue a storno, partial or write-off credit note (a write-off has no number); snapshot, number and posting in
+    one transaction."""
     return services.credit_notes.create(
         rid,
         credit_kind=body.credit_kind,

@@ -94,15 +94,17 @@ def legacy_payment_date(doc: Mapping[str, Any]) -> str:
 
 
 def credit_note_gross(row: Mapping[str, Any]) -> int:
-    """The credited gross of a credit-note row in cents (from its snapshot; stored positive)."""
+    """The credited gross of a credit-note row in cents (from its snapshot; stored positive, except a write-off
+    reversal, which is stored negative and lowers the credited amount)."""
     issued = row.get("issued")
     raw = issued.get("gross") if isinstance(issued, Mapping) else None
     if raw is None:
         return 0
     try:
-        return abs(int(raw))
+        value = abs(int(raw))
     except (TypeError, ValueError):
         return 0
+    return -value if row.get("credit_kind") == "write_off_reversal" else value
 
 
 def _payment_out(row: Mapping[str, Any]) -> dict[str, Any]:
