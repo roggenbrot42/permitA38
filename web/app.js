@@ -17,6 +17,14 @@ const todayISO = () => iso(new Date());
  * passed - never judged by the status label alone (a paid, credited or written-off invoice is not overdue). The server
  * sends open_amount as a decimal string; an old response without it falls back to the label 'sent'. */
 const invOpenAmount = i => (i.open_amount === null || i.open_amount === undefined ? null : Money.str(i.open_amount));
+/** What an invoice still owes: its open amount when positive, else 0 (never a credit note, a draft or a cancelled invoice). An old
+ *  response without open_amount falls back to the total of a 'sent' invoice. One helper for the customer list, the Sales tile. */
+const invOpenDue = i => {
+  if (!i || i.kind === 'credit_note' || i.status === 'draft' || i.status === 'cancelled') return '0.00';
+  const open = invOpenAmount(i);
+  if (open === null) return i.status === 'sent' ? Money.str(docTotal(i)) : '0.00';
+  return Money.cmp(open, 0) > 0 ? open : '0.00';
+};
 const isOverdue = (i, today = todayISO()) => {
   if (!i || i.kind === 'credit_note' || i.status === 'draft' || !i.due_date || !(i.due_date < today)) return false;
   const open = invOpenAmount(i);

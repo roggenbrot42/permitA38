@@ -31,12 +31,17 @@ class Api:
         assert r.status_code in (200, 201), r.text
         return r.json()
 
+    def put(self, path, body):
+        r = httpx.put(self.base + path, headers=self.h, json=body)
+        assert r.status_code == 200, r.text
+        return r.json()
+
     def get(self, path):
         return httpx.get(self.base + path, headers=self.h).json()
 
-    def issued_invoice(self, due=DUE):
+    def issued_invoice(self, due=DUE, cust=None):
         """An issued invoice with one line: net 100.00 + 19 % VAT = gross 119.00 (fake demo data)."""
-        cust = self.post("customers", {"name": "Demo GmbH"})
+        cust = cust or self.post("customers", {"name": "Demo GmbH"})
         draft = self.post(
             "invoices",
             {
@@ -151,4 +156,105 @@ def test_overdue_badge_follows_the_open_amount(browser, srv):
     assert badge(open_inv) == "overdue"
     assert badge(paid_inv) != "overdue"
     assert badge(written_off) != "overdue"
+    ctx.close()
+
+
+def pill(pg, inv):
+    return " ".join(pg.locator(f'tr[data-href="#/doc/invoices/{inv["id"]}"] .pill').last.inner_text().split())
+
+
+def test_pill_texts_for_paid_written_off_and_partly_paid_overdue(browser, srv):
+    api = Api(srv)
+    partly = api.issued_invoice()
+    api.post(f"invoices/{partly['id']}/payments", {"date": INVOICE_DATE, "amount": "50.00"})
+    paid = api.issued_invoice()
+    api.post(f"invoices/{paid['id']}/payments", {"date": INVOICE_DATE, "amount": "119.00"})
+    written_off = api.issued_invoice()
+    api.post(
+        f"invoices/{written_off['id']}/credit-notes",
+        {"credit_kind": "write_off", "date": TODAY.isoformat(), "reason": "uncollectible"},
+    )
+    ctx, pg = open_page(browser, srv)
+    pg.goto(srv.base + "/#/sales/invoices")
+    pg.wait_for_selector("tr.click")
+    assert pill(pg, partly) == "overdue"
+    assert pill(pg, paid) == "paid"
+    assert pill(pg, written_off) == api.get("invoices/" + written_off["id"])["status"]
+    assert pill(pg, written_off) != "overdue"
+    ctx.close()
+
+
+def test_customer_open_column_after_partial_payment_and_credit_note(browser, srv):
+    api = Api(srv)
+    cust = api.post("customers", {"name": "Demo GmbH"})
+    inv = api.issued_invoice(cust=cust)
+    api.post(f"invoices/{inv['id']}/payments", {"date": INVOICE_DATE, "amount": "50.00"})
+    other = api.issued_invoice(cust=cust)  # 119.00 open
+    api.post(
+        f"invoices/{other['id']}/credit-notes", {"credit_kind": "storno", "date": TODAY.isoformat(), "reason": "x"}
+    )
+    ctx, pg = open_page(browser, srv)
+    pg.goto(srv.base + "/#/customers")
+    pg.wait_for_selector("tr.click")
+    # 119.00 - 50.00 = 69.00 open; the fully credited invoice and the credit note itself add nothing
+    assert text(pg, "tr.click td.num:last-child") == "69,00 €"
+    pg.goto(srv.base + "/#/sales")
+    pg.wait_for_function(
+        "() => [...document.querySelectorAll('.kpi')].some(k => k.textContent.includes('Outstanding'))"
+    )
+    assert "69,00 €" in text(pg, ".kpi:has-text('Outstanding') .v")
+    ctx.close()
+
+
+def test_legacy_virtual_payment_can_be_reversed_in_the_ui(browser, srv):
+    cust = Api(srv).post("customers", {"name": "Demo GmbH"})
+    line = {"description": "Work", "qty": 1, "unit": "h", "price": "100.00", "vat": 19, "amount": 100.0}
+    inv = srv.app.state.services.store.save(  # a paid invoice as an older version stored it: no payments rows
+        "invoices",
+        {"customer_id": cust["id"], "number": "RE-2025-0001", "status": "paid", "date": INVOICE_DATE, "due_date": DUE,
+         "paid_date": INVOICE_DATE, "lines": [line], "template_id": "classic"},
+    )  # fmt: skip
+    got = Api(srv).get("invoices/" + inv["id"])
+    assert got["payments"][0]["id"] is None and got["open_amount"] == "0.00"
+    ctx, pg = open_page(browser, srv)
+    pg.goto(srv.base + "/#/doc/invoices/" + inv["id"])
+    pg.wait_for_selector("#pay_panel")
+    assert text(pg, "#pay_open") == "0,00 €"
+    pg.click("[data-a=payReverse]")
+    pg.wait_for_function("() => document.querySelector('#pay_open')?.textContent.includes('119,00')")
+    assert text(pg, "#pay_paid") == "0,00 €"
+    ctx.close()
+
+
+def test_small_business_year_shows_the_fixed_tax_treatment(browser, srv):
+    api = Api(srv)
+    cust = api.post("customers", {"name": "Demo GmbH"})
+    s = api.get("settings")
+    api.put("settings", {**s, "kleinunternehmer": True})
+    ctx, pg = open_page(browser, srv)
+    pg.goto(srv.base + "/#/doc/invoices/new-" + cust["id"])
+    pg.wait_for_selector("#d_totals")
+    assert pg.is_disabled("#d_tt")
+    assert pg.eval_on_selector_all("#d_tt option", "els => els.map(e => e.textContent)") == [
+        "Small business (§ 19 UStG)"
+    ]
+    ctx.close()
+
+
+def test_payment_note_is_rendered_as_text(browser, srv):
+    inv = Api(srv).issued_invoice()
+    payload = '<img src=x onerror="window.__xss=1"><b>bold</b>'
+    ctx, pg = open_page(browser, srv)
+    pg.goto(srv.base + "/#/doc/invoices/" + inv["id"])
+    pg.wait_for_selector("#pay_panel")
+    pg.click("[data-a=payRecord]")
+    pg.wait_for_selector("#f_amount")
+    pg.fill("#f_date", INVOICE_DATE)
+    pg.fill("#f_amount", "10,00")
+    pg.fill("#f_note", payload)
+    pg.click("#m-save")
+    pg.wait_for_selector("#pay_list")
+    assert payload in pg.inner_text("#pay_list")
+    assert pg.locator("#pay_list img, #pay_list b").count() == 0
+    assert pg.evaluate("() => window.__xss") is None
     ctx.close()

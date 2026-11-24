@@ -10,7 +10,7 @@ PAGES.customers = async () => {
   const cs = S.d.customers.sort((a, b) => a.name.localeCompare(b.name));
   return `<div class="head"><div><h1>Customers</h1><div class="muted">Business info, contacts and everything you did for them.</div></div><button class="primary" data-a="editCustomer">+ New customer</button></div>
   <div class="card">${cs.length ? `<table><tr><th>Name</th><th>Contact</th><th>City</th><th class="num">Rate</th><th class="num">Open</th></tr>${cs.map(c => {
-    const open = Money.sum(S.d.invoices.filter(i => i.customer_id === c.id && i.status === 'sent').map(docTotal));
+    const open = Money.sum(S.d.invoices.filter(i => i.customer_id === c.id).map(invOpenDue));
     return `<tr class="click" data-href="#/customer/${c.id}"><td><b>${esc(c.name)}</b></td><td>${esc(c.contact || '')}<div class="small muted">${esc(c.email || '')}</div></td><td>${esc(c.city || '')}</td><td class="num">${mZero(c.rate) ? '' : eur(c.rate) + '/h'}</td><td class="num">${mZero(open) ? '' : eur(open)}</td></tr>`;
   }).join('')}</table>` : '<div class="empty">No customers yet. Add your first one – you need one before you can send an offer.</div>'}</div>`;
 };
@@ -223,7 +223,7 @@ PAGES.sales = async (tab = 'invoices') => {
   const sum = (f) => Money.sum(S.d.invoices.filter(f).map(docTotal));
   const sumOpen = (f) => Money.sum(S.d.invoices.filter(f).map(i => invOpenAmount(i) ?? docTotal(i)));   // what is still owed
   return `<div class="head"><div><h1>Offers & Invoices</h1><div class="muted">Offer → accepted → project → invoice.</div></div><div class="row tight" style="flex:none">${DS.uploadButton()}<button data-a="newDoc" data-coll="offers">+ Offer</button><button class="primary" data-a="newDoc" data-coll="invoices">+ Invoice</button></div></div>
-  ${DS.pageTop()}${DS.flaggedSection()}<div class="grid g3"><div class="card kpi warn"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a data-a="billTime" class="small">Invoice tracked time →</a></div><div class="card kpi"><div class="l">Outstanding</div><div class="v">${eur(sumOpen(i => i.kind !== 'credit_note' && i.status !== 'draft' && i.status !== 'cancelled' && (invOpenAmount(i) === null ? i.status === 'sent' : Money.cmp(invOpenAmount(i), 0) > 0)))}</div></div><div class="card kpi bad"><div class="l">Overdue</div><div class="v">${eur(sumOpen(i => isOverdue(i)))}</div></div></div>
+  ${DS.pageTop()}${DS.flaggedSection()}<div class="grid g3"><div class="card kpi warn"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a data-a="billTime" class="small">Invoice tracked time →</a></div><div class="card kpi"><div class="l">Outstanding</div><div class="v">${eur(Money.sum(S.d.invoices.map(invOpenDue)))}</div></div><div class="card kpi bad"><div class="l">Overdue</div><div class="v">${eur(sumOpen(i => isOverdue(i)))}</div></div></div>
   <div class="tabs"><a href="#/sales/invoices" class="${tab === 'invoices' ? 'on' : ''}">Invoices</a><a href="#/sales/offers" class="${tab === 'offers' ? 'on' : ''}">Offers</a></div><div class="card">${docTable(rows)}</div>`;
 };
 A.newDoc = el => { location.hash = `#/doc/${el.dataset.coll}/new${el.dataset.cust ? '-' + el.dataset.cust : ''}`; };
@@ -238,7 +238,7 @@ A.billTime = el => {
 
 let DOC = null;
 /** An issued invoice (numbered, not a draft) is frozen (credit-notes-payments.md 2.1). */
-const isFrozen = d => !!d && d.coll === 'invoices' && !!d.id && !!d.number && d.status !== 'draft';
+const isFrozen = d => !!d && d.coll === 'invoices' && !!d.id && (d.kind === 'credit_note' || (!!d.number && d.status !== 'draft'));
 /** Tax treatment of an invoice (spec 5): standard or eu_b2b_service; small_business is set by the year and shown fixed. */
 function taxField(d, frozen, smallYear) {
   const cur = d.tax_treatment || 'standard', fixed = smallYear || cur === 'small_business';
@@ -249,16 +249,17 @@ function taxField(d, frozen, smallYear) {
 let PAY_WARN = { id: null, list: [] };   // warnings of the last payment action (overpayment, vat_drift), for this invoice
 /** Payments panel of an issued invoice: derived amounts, the payment list, record / reverse. Money is only formatted and summed with Money. */
 function paymentsPanel(d) {
-  const paid = Money.str(d.paid_amount), credited = Money.str(d.credited_amount), open = Money.str(d.open_amount);
+  const m = v => (v === null || v === undefined ? null : Money.str(v)), amt = v => (v === null ? '—' : eur(v));   // a credit note has no open amount
+  const paid = m(d.paid_amount), credited = m(d.credited_amount), open = m(d.open_amount), isCn = d.kind === 'credit_note';
   const pays = d.payments || [], reversed = new Set(pays.filter(p => p.reverses_id).map(p => p.reverses_id));
   const warns = PAY_WARN.id === d.id ? PAY_WARN.list : [];
   const rows = pays.map(p => `<tr data-pay="${esc(p.id || 'legacy')}"><td class="nowrap">${fmtDate(p.date)}</td><td class="num">${eur(p.amount)}</td><td>${esc(p.kind || '')}</td><td>${esc(p.method || '')}</td><td class="small muted">${esc(p.note || '')}</td><td>${['payment', 'refund'].includes(p.kind) && !reversed.has(p.id) ? `<button class="sm" data-a="payReverse" data-id="${esc(p.id || '')}">Reverse</button>` : ''}</td></tr>`).join('');
   return `<div class="card" id="pay_panel"><h2>Payments</h2>
     ${warns.map(w => `<div class="banner" data-warn="${esc(w.code)}">${esc(w.message)}</div>`).join('')}
-    <div class="grid g4"><div class="kpi"><div class="l">Total</div><div class="v small" id="pay_total">${eur(Money.sum([open, paid, credited]))}</div></div><div class="kpi"><div class="l">Paid</div><div class="v small" id="pay_paid">${eur(paid)}</div></div><div class="kpi"><div class="l">Credited</div><div class="v small" id="pay_credited">${eur(credited)}</div></div><div class="kpi ${Money.cmp(open, 0) > 0 ? 'warn' : ''}"><div class="l">Open</div><div class="v small" id="pay_open">${eur(open)}</div></div></div>
+    <div class="grid g4"><div class="kpi"><div class="l">Total</div><div class="v small" id="pay_total">${[open, paid, credited].includes(null) ? '—' : eur(Money.sum([open, paid, credited]))}</div></div><div class="kpi"><div class="l">Paid</div><div class="v small" id="pay_paid">${amt(paid)}</div></div><div class="kpi"><div class="l">Credited</div><div class="v small" id="pay_credited">${amt(credited)}</div></div><div class="kpi ${open !== null && Money.cmp(open, 0) > 0 ? 'warn' : ''}"><div class="l">Open</div><div class="v small" id="pay_open">${amt(open)}</div></div></div>
     <div class="small muted" style="margin:6px 0">Status: <b id="pay_status">${esc(d.status)}</b>${d.paid_date ? ' · paid on ' + fmtDate(d.paid_date) : ''}</div>
     ${rows ? `<table id="pay_list"><tr><th>Date</th><th class="num">Amount</th><th>Kind</th><th>Method</th><th>Note</th><th></th></tr>${rows}</table>` : '<div class="empty">No payments yet.</div>'}
-    <button class="sm primary" data-a="payRecord" style="margin-top:8px">Record payment</button></div>`;
+    ${isCn ? '' : '<button class="sm primary" data-a="payRecord" style="margin-top:8px">Record payment</button>'}</div>`;
 }
 PAGES.doc = async (coll, id) => {
   await loadAll(['customers', 'projects', 'users', 'offers', 'invoices']);
@@ -376,12 +377,18 @@ A.delLine = el => { syncDoc(); DOC.lines.splice(+el.dataset.i, 1); render(); };
 function stripWarnings(o) { delete o.sanity_warnings; delete o.planning_warnings; return o; }
 /** Fields the server derives (credit-notes-payments.md 2.3): never sent back. */
 const DERIVED_INVOICE = ['paid_amount', 'credited_amount', 'open_amount', 'payments', 'credit_notes'];
-async function persistDoc() {
+async function persistDoc(setStatus) {
   syncDoc(); const d = DOC;
   if (!d.customer_id) throw new Error('Choose a customer first');
   d.lines.forEach((l, i) => { const r = Money.parseInput(l.price); if (!r.ok) throw new Error(`Line ${i + 1}, unit price: ${r.error}`); });
-  const { coll, __route, __setStatus, ...body } = d; stripWarnings(body);
-  if (coll === 'invoices') { DERIVED_INVOICE.forEach(k => delete body[k]); if (isFrozen(d) && !__setStatus) { delete body.status; delete body.paid_date; } }
+  let body;
+  if (isFrozen(d)) { body = { id: d.id, due_date: d.due_date || null, reference: d.reference || '', notes: d.notes || '' }; if (setStatus) body.status = setStatus; }   // frozen: never the whole record
+  else {
+    const { coll: _c, __route, ...rest } = d; body = stripWarnings(rest);
+    if (setStatus) body.status = setStatus;
+    if (d.coll === 'invoices') DERIVED_INVOICE.forEach(k => delete body[k]);
+  }
+  const coll = d.coll;
   const r = await api.upsert(coll, body); DOC = { coll, ...stripWarnings({ ...r }) };
   await loadAll([coll]); return r;
 }
@@ -397,16 +404,16 @@ A.docDelete = async () => {
 A.docPdf = async () => { await persistDoc(); window.open(api.url(`${DOC.coll}/${DOC.id}/pdf`), '_blank'); };
 A.docStatus = async el => {
   if (!el.value) return;
-  syncDoc(); DOC.status = el.value; DOC.__setStatus = true;
-  await persistDoc(); toast('Status: ' + el.value); render();
+  syncDoc();
+  await persistDoc(el.value); toast('Status: ' + el.value); render();
 };
 A.docAccept = async () => { await persistDoc(); const r = await api('POST', `offers/${DOC.id}/accept`); await loadAll(['offers', 'projects', 'contracts']); DOC = null; toast('Accepted – project' + (r.contract ? ' and contract' : '') + ' created'); location.hash = '#/project/' + r.project.id; };
 A.docToInvoice = async () => { await persistDoc(); const r = await api('POST', `offers/${DOC.id}/to-invoice`); DOC = null; await loadAll(['invoices']); location.hash = '#/doc/invoices/' + r.id; };
 /** Record a payment or refund (POST invoices/{id}/payments); the amount is parsed with Money, the server does the maths. */
 A.payRecord = () => {
-  const d = DOC, open = Money.str(d.open_amount);
+  const d = DOC, open = d.open_amount == null ? null : Money.str(d.open_amount);
   openForm({
-    title: 'Record payment', saveLabel: 'Record', vals: { date: todayISO(), amount: Money.cmp(open, 0) > 0 ? open : '', kind: 'payment', method: 'bank', note: '' },
+    title: 'Record payment', saveLabel: 'Record', vals: { date: todayISO(), amount: open !== null && Money.cmp(open, 0) > 0 ? open : '', kind: 'payment', method: 'bank', note: '' },
     fields: [{ k: 'date', l: 'Date', t: 'date', row: 1 }, { k: 'amount', l: 'Amount €', m: true, row: 1 }, { k: 'kind', l: 'Kind', t: 'select', o: [['payment', 'Payment'], ['refund', 'Refund']], row: 2 }, { k: 'method', l: 'Method', t: 'select', o: [['bank', 'Bank'], ['cash', 'Cash']], row: 2 }, { k: 'note', l: 'Note' }],
     save: async v => {
       const a = Money.parseInput(v.amount);
