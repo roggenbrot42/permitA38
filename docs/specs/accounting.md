@@ -823,7 +823,7 @@ maintainer's sign-off of these specs (PR #124).
 | E16 | Manual entries, reverse, accounts API, templates; JournalService refuses an accrual line whose `income_date` lies outside the entry's fiscal year (section 14.5) | F | E7 |
 | E17 | VAT/tax bookings, opening balances | F | E16, F9 |
 | E18 | Year closing / EÜR year end; migration adding `fiscal_years.closing_hash` / `closing_entry_no` (set once) | F | E17 |
-| E19 | xlsx importer: snapshot, `paid`→payment, `cancelled`→review, undo | F | E10 |
+| E19 | xlsx importer: snapshot, `paid`→payment, `cancelled`→review, undo; scans of the invoices collection distinguish `kind = credit_note` | F | E10 |
 | E20 | Stateful randomized model ×2 (freeze/payments; credit notes/locks) | F (test) | E12 |
 | E21 | Web `e2e_random` models | S | E12, W1 |
 | W1 | Read-only issued invoice, treatment select, payments panel | S | E10 |
@@ -834,7 +834,7 @@ maintainer's sign-off of these specs (PR #124).
 | E23 | Pre-start baseline, opening items, lazy baseline | F | E22 |
 | E24 | Review list + API, expense rules, legacy `cancelled`, legacy `paid` without date or before the invoice date | F | E23 |
 | E25 | Integrity: `check-db` chain/balance, sanity warnings, synced-folder warning | S | E6 |
-| E26 | Transfer export/import/restore with the new tables and the trigger exception (append_only, frozen_when and set_once are suspended only inside the importer's replace-restore transaction) | F | E2 |
+| E26 | Transfer export/import/restore with the new tables and the trigger exception (append_only, frozen_when and set_once are suspended only inside the importer's replace-restore transaction); integrity scans of the invoices collection distinguish `kind = credit_note` | F | E2 |
 | **M3 outputs** | | | |
 | O1 | UStVA computation (pure) | F | F2, E6 |
 | O2 | Return records: draft/finalise + lock, reopen, filed, delete, drill-down | F | O1, E7 |
