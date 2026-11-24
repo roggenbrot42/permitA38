@@ -438,8 +438,8 @@ The Money page's reserve keeps working from `core/tax.py`; it additionally shows
 
 ### 9.8 Manual entries
 
-Reversals of trips, manual entries and template entries follow 7.8: booked on `max(original booking date, first open
-day)`, with the original `income_date` while that year is open and the booking date once it is closed. A reversal
+Reversals of trips, manual entries and template entries follow 7.8: booked on `max(requested date or original
+booking date, original booking date, first open day)` (a reversal never books before its original), with the original `income_date` while that year is open and the booking date once it is closed. A reversal
 line whose original `vat_date` now lies in a locked month gets `vat_date` = the reversal's booking date (a reversal
 is a correction, not manual drift).
 
@@ -524,7 +524,10 @@ template); open receivables come from the backfill (section 16).
    special prepayment) are ignored. *(verify)* the line list against the
    form of the year; the app does not file the Anlage EÜR.
 5. **P&L and balance sheet** (accrual): by account class of the chart; simple form (no HGB layout in v1). Under
-   accrual every line's `income_date` lies in the entry's fiscal year (`JournalService` refuses other lines with 422),
+   accrual every line's `income_date` lies in the entry's fiscal year: `JournalService` first applies the section 11
+   rule centrally (a line whose `income_date` lies in a **closed** year gets the entry's booking date — this covers
+   late payments, refunds and write-off reversals of a closed year), then refuses any remaining line outside the year
+   with 422,
    so the P&L result equals the balance-sheet result of the year; before the year closing the balance sheet shows the
    results of earlier unclosed years as a separate "result of earlier years not yet closed" line. The EÜR route
    answers 422 for an accrual year and P&L / balance sheet answer 422 for an EÜR year (EÜR may carry an `income_date`
