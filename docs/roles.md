@@ -58,6 +58,8 @@ and on your own row.
 | `attachments` | Uploaded files (bills, logo) | all / all | none / none | all / all |
 | `team` | Users, passwords and two-factor resets | all / all | limited / none | limited / none |
 | `team_timeline` | Team timeline: who is away and when, contracts (`GET /api/team/timeline`) | all / none | limited / none | limited / none |
+| `accounting` | Accounting: journal, reports, manual entries, period locks, fiscal years, DATEV; payments and credit notes | all / all | none / none | all / all |
+| `vat` | VAT returns (UStVA) and recapitulative statements (ZM) | all / all | none / none | all / all |
 
 Notes
 
@@ -70,6 +72,13 @@ Notes
   declared `suppliers` write although it is a GET (it exposes expense vendors). `GET /api/suppliers/{supplier_id}/dependency`,
   `/api/incoming-offers*`, `GET /api/allocations/{allocation_id}`, `POST /api/allocations/{allocation_id}/cancel` and
   `GET /api/finance/commitments` are `procurement`. The routes `/api/allocations` (list, create, change, delete) are declared `planning`; creating, changing or deleting a subcontractor row (`supplier_id`) additionally needs `procurement` write, employee rows only `planning` write. A row created from an incoming offer cannot be deleted, only cancelled.
+* **Accounting and VAT** (`specs/accounting.md` 17): the accountant has full bookkeeping rights (`accounting` and `vat`
+  read and write), the employee none. Recording a payment, reversing one, settling with a cash discount and issuing a
+  credit note on an invoice need write access on `invoices` **or** `accounting` (so the accountant may do them).
+  Initialising accounting (`POST /api/accounting/init`) and closing a fiscal year
+  (`POST /api/accounting/years/{year}/close`) are boss only. API tokens read `accounting` and `vat` with the rights of
+  their owner, but every route that changes them (including payments and credit notes) is session only: a token,
+  read-write or not, gets `403` there.
 * The accountant can download PDFs of offers and invoices (read access) but not change their status.
 * Account-level endpoints (own password, own two-factor authentication, bootstrap, holidays) are open to every
   signed-in person; resetting someone else's two-factor authentication needs `team` write access.

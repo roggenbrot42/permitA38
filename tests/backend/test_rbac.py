@@ -5,6 +5,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
+from fastapi import HTTPException
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -306,6 +307,90 @@ EXPECTED: dict[tuple[str, str], tuple[str, str, bool]] = {
 }
 
 
+# ------------------------------------------------------------------ accounting and VAT skeleton routes (E4)
+# Hand-written: (method, route template, area, operation, boss only, valid request body, query string). Payments and
+# credit notes need write on `invoices` OR `accounting`; with the current matrix that is the set of roles with
+# `accounting` write, so the table (and the declared requirement) names that area. Every non-GET route is session only.
+_PAY = {"date": "2026-01-05", "amount": "10.00"}
+_ENTRY = {
+    "date": "2026-01-05",
+    "text": "Demo",
+    "lines": [{"account": "1200", "amount": "10.00"}, {"account": "8400", "amount": "-10.00"}],
+}
+_FY = {"year": 2026, "chart": "skr03", "income_basis": "eur"}
+_DISCOUNT = {"date": "2026-01-05", "amount_paid": "10.00"}
+_CREDIT = {"credit_kind": "storno", "date": "2026-01-05", "reason": "Demo"}
+_VAT_PAY = {"date": "2026-02-10", "amount": "5.00", "kind": "payment"}
+NEW_ROUTES: list[tuple[str, str, str, str, bool, dict | None, str]] = [
+    ("GET", "/api/accounting/years", "accounting", "read", False, None, ""),
+    ("POST", "/api/accounting/years", "accounting", "write", False, _FY, ""),
+    ("GET", "/api/accounting/years/{year}", "accounting", "read", False, None, ""),
+    ("POST", "/api/accounting/years/{year}/close", "accounting", "write", True, None, ""),
+    ("POST", "/api/accounting/init", "accounting", "write", True, {"chart": "skr03", "income_basis": "eur"}, ""),
+    ("GET", "/api/accounting/init/review", "accounting", "read", False, None, ""),
+    ("GET", "/api/accounting/journal", "accounting", "read", False, None, ""),
+    ("POST", "/api/accounting/entries", "accounting", "write", False, _ENTRY, ""),
+    ("POST", "/api/accounting/entries/{entry_id}/reverse", "accounting", "write", False, {}, ""),
+    ("GET", "/api/accounting/accounts", "accounting", "read", False, None, ""),
+    ("GET", "/api/accounting/reports/trial-balance", "accounting", "read", False, None, ""),
+    ("GET", "/api/accounting/reports/eur", "accounting", "read", False, None, ""),
+    ("GET", "/api/accounting/reports/pnl", "accounting", "read", False, None, ""),
+    ("GET", "/api/accounting/reports/balance-sheet", "accounting", "read", False, None, ""),
+    ("GET", "/api/accounting/reports/open-items", "accounting", "read", False, None, ""),
+    ("GET", "/api/accounting/reports/ledger", "accounting", "read", False, None, ""),
+    ("GET", "/api/accounting/locks", "accounting", "read", False, None, ""),
+    ("POST", "/api/accounting/locks", "accounting", "write", False, {"year": 2026, "month": 1}, ""),
+    ("GET", "/api/accounting/datev", "accounting", "read", False, None, ""),
+    ("GET", "/api/accounting/integrity", "accounting", "read", False, None, ""),
+    ("GET", "/api/invoices/{rid}/payments", "invoices", "read", False, None, ""),
+    ("POST", "/api/invoices/{rid}/payments", "accounting", "write", False, _PAY, ""),
+    ("POST", "/api/payments/{payment_id}/reverse", "accounting", "write", False, {}, ""),
+    ("POST", "/api/invoices/{rid}/settle-discount", "accounting", "write", False, _DISCOUNT, ""),
+    ("GET", "/api/invoices/{rid}/credit-notes", "invoices", "read", False, None, ""),
+    ("POST", "/api/invoices/{rid}/credit-notes", "accounting", "write", False, _CREDIT, ""),
+    ("GET", "/api/vat-returns", "vat", "read", False, None, "?year=2026"),
+    ("GET", "/api/vat-returns/preview", "vat", "read", False, None, "?year=2026&kind=month&no=1"),
+    ("POST", "/api/vat-returns", "vat", "write", False, {"year": 2026, "kind": "month", "no": 1}, ""),
+    ("GET", "/api/vat-returns/{rid}", "vat", "read", False, None, ""),
+    ("POST", "/api/vat-returns/{rid}/finalize", "vat", "write", False, None, ""),
+    ("POST", "/api/vat-returns/{rid}/reopen", "vat", "write", False, None, ""),
+    ("POST", "/api/vat-returns/{rid}/filed", "vat", "write", False, {"filed_on": "2026-02-10"}, ""),
+    ("DELETE", "/api/vat-returns/{rid}", "vat", "write", False, None, ""),
+    ("GET", "/api/vat-returns/{rid}/boxes/{kz}", "vat", "read", False, None, ""),
+    ("POST", "/api/vat-returns/{rid}/payment", "vat", "write", False, _VAT_PAY, ""),
+    ("GET", "/api/vat-returns/{rid}/export.pdf", "vat", "read", False, None, ""),
+    ("GET", "/api/vat-returns/{rid}/export.csv", "vat", "read", False, None, ""),
+    ("GET", "/api/vat-returns/{rid}/export.json", "vat", "read", False, None, ""),
+    ("GET", "/api/vat/special-prepayment", "vat", "read", False, None, "?year=2026"),
+    ("PUT", "/api/vat/special-prepayment", "vat", "write", False, {"year": 2026, "amount": "100.00"}, ""),
+    ("GET", "/api/zm", "vat", "read", False, None, "?year=2026"),
+    ("GET", "/api/zm/preview", "vat", "read", False, None, "?year=2026&quarter=1"),
+    ("POST", "/api/zm", "vat", "write", False, {"year": 2026, "quarter": 1}, ""),
+    ("GET", "/api/zm/{rid}", "vat", "read", False, None, ""),
+    ("POST", "/api/zm/{rid}/finalize", "vat", "write", False, None, ""),
+    ("POST", "/api/zm/{rid}/reopen", "vat", "write", False, None, ""),
+    ("POST", "/api/zm/{rid}/filed", "vat", "write", False, {"filed_on": "2026-04-20"}, ""),
+    ("DELETE", "/api/zm/{rid}", "vat", "write", False, None, ""),
+    ("GET", "/api/zm/{rid}/export.csv", "vat", "read", False, None, ""),
+    ("GET", "/api/zm/{rid}/export.pdf", "vat", "read", False, None, ""),
+]
+# the declared requirement of a route: (area, operation, full scope); boss-only routes are 'full' (checked separately)
+NEW_EXPECTED = {(m, p): (a, o, boss) for m, p, a, o, boss, _b, _q in NEW_ROUTES}
+NEW_SESSION_ONLY = {(m, p) for m, p, *_ in NEW_ROUTES if m != "GET"}
+
+
+def _concrete(path: str) -> str:
+    out = path.replace("{year}", "2026").replace("{kz}", "81")
+    return re.sub(r"\{[^}]+\}", DUMMY_ID, out)
+
+
+def _is_boss_only(route) -> bool:
+    def walk(dep) -> bool:
+        return bool(getattr(dep.call, "boss_only", False)) or any(walk(sub) for sub in dep.dependencies)
+
+    return walk(route.dependant)
+
+
 def test_declared_rights_equal_the_hand_written_table(app):
     actual = {}
     for method, route, path in _routes(app):
@@ -326,7 +411,7 @@ def test_declared_rights_equal_the_hand_written_table(app):
                 reqs = [("invoices", op, False)]
             assert len(reqs) == 1, (method, path, reqs)
             actual[(method, path)] = reqs[0]
-    assert actual == EXPECTED
+    assert actual == EXPECTED | NEW_EXPECTED
 
 
 # routes whose 403 also depends on data (the team timeline is 403 at level `off`): a valid query so that the
@@ -357,9 +442,98 @@ def test_every_route_is_denied_exactly_where_the_matrix_says(app, clients):
             )
             if method == "POST" and "attachments" in path:
                 r = c.post(_url(path), files={"file": ("a.txt", b"x")})
+            if _is_boss_only(route):  # init and close year: the role itself must be the boss
+                should_pass = should_pass and role == "boss"
             assert (r.status_code != 403) == should_pass, (method, path, role, r.status_code)
             checked += 1
     assert checked > 150
+
+
+NEW_PREFIXES = ("/api/accounting", "/api/vat", "/api/zm", "/api/payments")
+NEW_INVOICE_SUFFIXES = ("/payments", "/credit-notes", "/settle-discount")
+
+
+def test_new_routes_are_exactly_the_documented_ones(app):
+    found = {
+        (m, path)
+        for m, r, path in _routes(app)
+        if path.startswith(NEW_PREFIXES) or (path.startswith("/api/invoices/{") and path.endswith(NEW_INVOICE_SUFFIXES))
+    }
+    assert found == {(m, p) for m, p, *_ in NEW_ROUTES}
+    assert len(NEW_ROUTES) == 51
+
+
+def test_boss_only_routes_are_exactly_init_and_close_year(app):
+    boss_only = {(m, path) for m, r, path in _routes(app) if _is_boss_only(r)}
+    assert boss_only == {("POST", "/api/accounting/init"), ("POST", "/api/accounting/years/{year}/close")}
+    assert boss_only == {(m, p) for m, p, _a, _o, boss, _b, _q in NEW_ROUTES if boss}
+
+
+def _call(client, method, path, body, query):
+    kw = {} if body is None else {"json": body}
+    return client.request(method, _concrete(path) + query, **kw)
+
+
+def test_new_routes_answer_501_where_allowed_and_403_where_denied(app, clients):
+    """Every route x every role with a valid request: 501 "not implemented yet" for boss and accountant, 403 for the
+    employee; init and close year are 403 for the accountant too."""
+    for method, path, _area, _op, boss_only, body, query in NEW_ROUTES:
+        for role, c in clients.items():
+            r = _call(c, method, path, body, query)
+            if role == "employee" or (boss_only and role != "boss"):
+                assert r.status_code == 403, (method, path, role, r.status_code)
+            else:
+                assert r.status_code == 501 and r.json() == {"detail": "not implemented yet"}, (
+                    method, path, role, r.status_code, r.text,
+                )  # fmt: skip
+
+
+def test_api_tokens_read_accounting_and_vat_but_never_write_them(app, clients):
+    """A token reads with its owner's rights, read-only or not; every changing route is session only: 403 for a
+    read-only and a read-write token alike (docs/specs/accounting.md 17: no write through tokens in v1)."""
+    for role, session in clients.items():
+        for read_only in (True, False):
+            r = session.post("/api/tokens", json={"label": "t", "read_only": read_only})
+            assert r.status_code == 201, r.text
+            tok = TestClient(app)
+            tok.headers["Authorization"] = f"Bearer {r.json()['token']}"
+            for method, path, _area, _op, _boss, body, query in NEW_ROUTES:
+                got = _call(tok, method, path, body, query)
+                if method != "GET":
+                    assert got.status_code == 403, (role, read_only, method, path, got.status_code)
+                    assert got.json() == {"detail": "This route cannot be used with an API token"}
+                else:
+                    assert got.status_code == (403 if role == "employee" else 501), (role, read_only, method, path)
+
+
+def test_payment_dependency_is_the_either_or_rule(app):
+    """`invoices` write OR `accounting` write: the roles that pass are the union of both."""
+    deps = {}
+    for m, route, path in _routes(app):
+        if m == "POST" and path in ("/api/invoices/{rid}/payments", "/api/invoices/{rid}/credit-notes"):
+            for d in route.dependant.dependencies:
+                if hasattr(d.call, "rbac_any"):
+                    deps[path] = d.call
+    assert set(deps) == {"/api/invoices/{rid}/payments", "/api/invoices/{rid}/credit-notes"}
+    for fn in deps.values():
+        assert fn.rbac_any == (("invoices", "write"), ("accounting", "write"))
+        assert rights.PAYMENT_WRITE_AREAS == ("invoices", "accounting")
+        for role in rights.ROLES:
+            union = rights.allowed(role, "invoices", "write") or rights.allowed(role, "accounting", "write")
+            assert union == rights.allowed(role, *fn.rbac[:2]), role  # the declared single area is exact today
+            if union:
+                assert fn({"role": role}) == {"role": role}
+            else:
+                with pytest.raises(HTTPException) as err:
+                    fn({"role": role})
+                assert err.value.status_code == 403
+
+
+def test_accounting_and_vat_matrix_cells():
+    for area in ("accounting", "vat"):
+        assert rights.MATRIX["boss"][area] == (rights.Scope.ALL, rights.Scope.ALL)
+        assert rights.MATRIX["accountant"][area] == (rights.Scope.ALL, rights.Scope.ALL)
+        assert rights.MATRIX["employee"][area] == (rights.Scope.NONE, rights.Scope.NONE)
 
 
 # Hand-written: the routes an API token can never use (credentials, two-factor, user administration, token management,
@@ -420,7 +594,7 @@ PUBLIC_OR_TOKEN_OK = {
 
 def test_session_only_routes_equal_the_hand_written_table(app):
     actual = {(m, path) for m, r, path in _routes(app) if is_session_only(r)}
-    assert actual == SESSION_ONLY
+    assert actual == SESSION_ONLY | NEW_SESSION_ONLY
 
 
 def test_every_route_is_guarded_session_only_or_explicitly_public(app):
