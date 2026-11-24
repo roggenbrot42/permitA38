@@ -97,7 +97,7 @@ class CreditNoteService:
         now: _NOW = time.time,
     ):
         self.store = store
-        self.payments = payments or PaymentService(store, journal)
+        self.payments = payments or PaymentService(store, journal, now=now)
         self.numbering = numbering or CreditNoteNumbering(store)
         self.posting = CreditPostingService(store, journal)
         self.now = now
@@ -290,16 +290,18 @@ class CreditNoteService:
             raise ServiceError(422, "The amount must be greater than 0 and at most 10,000,000.00")
         with self.store.transaction():
             inv = self.payments.materialize(self._invoice(invoice_id), user)
-            self.payments._check_date(inv, date)
-            self._check_date(date, inv)
+            self.payments._check_date(inv, date)  # invoice date and today; a locked month is allowed for the payment
             _snap, _notes, state = self._state(inv)
             groups = self._nonzero(discount_amounts(state, Cents(cents)))
             if not groups:
                 raise ServiceError(422, "The amount paid covers the open amount; record a payment instead")
+            # the payment keeps its date (and may drift); the credit note is dated in an open month (accounting 11)
+            first_open = first_unlocked_from(self.store.list("period_locks"))
+            credit_day = max(self._parse_day(date), first_open) if first_open is not None else self._parse_day(date)
             credit = self._issue(
                 inv,
                 credit_kind="discount",
-                day=date[:10],
+                day=credit_day.isoformat(),
                 reason=note or "Cash discount",
                 groups=groups,
                 lines=None,

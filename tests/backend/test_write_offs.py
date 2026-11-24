@@ -260,7 +260,7 @@ def test_api_write_off_has_no_number_and_no_pdf(boss_client, cust):
     note = r.json()
     assert not note.get("number") and note["credit_kind"] == "write_off"
     pdf = boss_client.get(f"/api/invoices/{note['id']}/pdf")
-    assert pdf.status_code in (404, 409), pdf.status_code
+    assert pdf.status_code == 409, pdf.status_code
     assert _write_off(boss_client, inv, "2026-02-06").status_code == 422
     got = boss_client.get(f"/api/invoices/{inv['id']}").json()
     assert got["open_amount"] == "0.00" and [c["credit_kind"] for c in got["credit_notes"]] == ["write_off"]
@@ -285,8 +285,10 @@ def test_api_payment_after_a_write_off_reverses_it(boss_client, cust):
     paid = boss_client.post(_url(inv, "payments"), json={"date": "2026-02-10", "amount": "1190.00"})
     assert paid.status_code == 201, paid.text
     assert paid.json()["invoice"]["open_amount"] == "0.00"
-    kinds = [c["credit_kind"] for c in boss_client.get(_url(inv, "credit-notes")).json()]
-    assert kinds == ["write_off", "write_off_reversal"]
+    notes = boss_client.get(_url(inv, "credit-notes")).json()
+    assert [c["credit_kind"] for c in notes] == ["write_off", "write_off_reversal"]
+    for note in notes:  # internal vouchers: no PDF for either
+        assert boss_client.get(f"/api/invoices/{note['id']}/pdf").status_code == 409
 
 
 def test_write_off_and_settle_discount_rights(app, clients, cust, boss_client):
@@ -297,3 +299,188 @@ def test_write_off_and_settle_discount_rights(app, clients, cust, boss_client):
     assert _write_off(clients["accountant"], inv).status_code == 201
     inv2 = issue(boss_client, cust)
     assert clients["accountant"].post(_url(inv2, "settle-discount"), json=body).status_code == 201
+
+
+# ---------------------------------------------------------------- treatments: statistical lines and base_cents
+def cents_of_base(ln) -> int | None:
+    return None if ln.tax_base is None else int(Decimal(str(ln.tax_base)) * 100)
+
+
+def stat_rows(entry):
+    """``(role, amount cents, tax_key, tax_kind, base cents, vat_date)`` of the lines that carry a tax key."""
+    return [
+        (ln.role, cents_of(ln), ln.tax_key, ln.tax_kind, cents_of_base(ln), str(ln.vat_date))
+        for ln in entry.lines
+        if ln.tax_key
+    ]
+
+
+def treatment_invoice(repo, sales, income, treatment):
+    init(repo, income=income, vat="soll", small_business=treatment == "small_business")
+    return sales.finalize("invoices", draft(repo, "2026-03-02", [line("1000.00", None)], tax_treatment=treatment)["id"])
+
+
+STAT = {"eu_b2b_service": ("revenue_eu_svc", "EU_SVC"), "small_business": ("revenue_ku", "KU")}
+
+
+@pytest.mark.parametrize("income", ["accrual", "eur"])
+@pytest.mark.parametrize("treatment", ["eu_b2b_service", "small_business"])
+def test_write_off_statistical_lines(repo, sales, pay, cn, income, treatment):
+    inv = treatment_invoice(repo, sales, income, treatment)
+    role, key = STAT[treatment]
+    before = len(entries(repo))
+    cn.create(inv["id"], credit_kind="write_off", date="2026-03-06", reason="Lost", user=BOSS)
+    posted = entries(repo)[before:]
+    if income == "eur" and treatment == "small_business":
+        assert posted == []  # no cash moved and the KU statistic follows cash
+        return
+    (entry,) = posted
+    assert entry.booking_date == "2026-03-06"
+    assert stat_rows(entry) == [(role, 0, key, "base_only", -100000, "2026-03-06")]
+    amounts = {ln.role: cents_of(ln) for ln in entry.lines}
+    if income == "accrual":  # the net goes to bad_debts, receivables are reduced
+        assert amounts == {"receivables": -100000, "bad_debts": 100000, role: 0}
+    else:
+        assert amounts == {role: 0}
+
+
+@pytest.mark.parametrize("income", ["accrual", "eur"])
+@pytest.mark.parametrize("treatment", ["eu_b2b_service", "small_business"])
+def test_settle_discount_statistical_lines(repo, sales, pay, cn, income, treatment):
+    inv = treatment_invoice(repo, sales, income, treatment)
+    role, key = STAT[treatment]
+    before = len(entries(repo))
+    cn.settle_discount(inv["id"], date="2026-03-06", amount_paid=Decimal("980.00"), user=BOSS)
+    posted = entries(repo)[before:]
+    kinds = [e.event_key.split(":")[0] for e in posted]
+    pay_entry = posted[-1]
+    assert kinds[-1] == "payment"
+    if income == "eur" and treatment == "small_business":
+        assert kinds == ["payment"]  # the KU statistic follows cash: base = the cash 980.00
+        assert stat_rows(pay_entry) == [(role, -98000, key, "base_only", 98000, "2026-03-06")]
+        return
+    assert kinds == ["credit", "payment"]
+    credit = posted[0]
+    assert stat_rows(credit) == [(role, 0, key, "base_only", -2000, "2026-03-06")]
+    if income == "accrual":
+        assert {ln.role: cents_of(ln) for ln in credit.lines} == {
+            "receivables": -2000,
+            "cash_discount_granted": 2000,
+            role: 0,
+        }
+        assert {ln.role: cents_of(ln) for ln in pay_entry.lines} == {"bank": 98000, "receivables": -98000}
+    else:  # EÜR/eu_b2b_service: the discount posts only the statistic, the revenue follows the cash
+        assert {ln.role: cents_of(ln) for ln in credit.lines} == {role: 0}
+        assert [(ln.role, cents_of(ln), ln.tax_key) for ln in pay_entry.lines] == [
+            ("bank", 98000, None),
+            (role, -98000, None),
+        ]
+
+
+# ---------------------------------------------------------------- recovery in steps, order of dates, atomicity
+def test_partial_payment_then_second_payment_after_a_write_off(repo, sales, pay, cn):
+    init(repo)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("100.00")])["id"])  # 100.00 + 19.00
+    cn.create(inv["id"], credit_kind="write_off", date="2026-03-06", reason="Lost", user=BOSS)
+    pay.record(inv["id"], date="2026-03-10", amount=Decimal("50.00"), user=BOSS)
+    (first,) = credits_of(repo, inv, "write_off_reversal")
+    # VAT = half-up(1900 * 5000 / 11900) = 798 (7.983...), net 4202
+    assert first["issued"]["rates"]["19"] == {"net": -4202, "vat": -798, "gross": -5000}
+    view = sales.invoice_view(repo.get("invoices", inv["id"]))
+    assert (view["open_amount"], view["credited_amount"], view["paid_amount"]) == ("0.00", "69.00", "50.00")
+    pay.record(inv["id"], date="2026-03-11", amount=Decimal("69.00"), user=BOSS)
+    both = sorted(credits_of(repo, inv, "write_off_reversal"), key=lambda n: n["date"])
+    assert len(both) == 2
+    # the rest of the written-off gross 69.00 takes the whole remaining VAT 19.00 - 7.98 = 11.02
+    assert both[1]["issued"]["rates"]["19"] == {"net": -5798, "vat": -1102, "gross": -6900}
+    assert sum(n["issued"]["rates"]["19"]["vat"] for n in both) == -1900  # a full recovery restores the VAT exactly
+    view = sales.invoice_view(repo.get("invoices", inv["id"]))
+    assert (view["open_amount"], view["credited_amount"], view["paid_amount"], view["status"]) == (
+        "0.00",
+        "0.00",
+        "119.00",
+        "paid",
+    )
+    keys = [e.event_key.split(":")[0] for e in entries(repo)]
+    assert keys == ["issue", "credit", "credit", "payment", "credit", "payment"]
+
+
+def test_payment_dated_before_the_write_off_still_reverses_it(repo, sales, pay, cn):
+    init(repo)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("100.00")])["id"])
+    cn.create(inv["id"], credit_kind="write_off", date="2026-03-12", reason="Lost", user=BOSS)
+    pay.record(inv["id"], date="2026-03-05", amount=Decimal("119.00"), user=BOSS)
+    (rev,) = credits_of(repo, inv, "write_off_reversal")
+    assert rev["date"] == "2026-03-05" and rev["issued"]["rates"]["19"] == {
+        "net": -10000,
+        "vat": -1900,
+        "gross": -11900,
+    }
+    view = sales.invoice_view(repo.get("invoices", inv["id"]))
+    assert (view["open_amount"], view["credited_amount"], view["status"]) == ("0.00", "0.00", "paid")
+
+
+def test_reversal_record_uses_the_injected_clock(repo, sales, pay, cn):
+    init(repo)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("100.00")])["id"])
+    cn.create(inv["id"], credit_kind="write_off", date="2026-03-06", reason="Lost", user=BOSS)
+    pay.now = lambda: 1_700_000_000.0
+    pay.record(inv["id"], date="2026-03-10", amount=Decimal("119.00"), user=BOSS)
+    (rev,) = credits_of(repo, inv, "write_off_reversal")
+    assert rev["issued"]["issued_at"] == 1_700_000_000
+
+
+def test_a_refund_never_triggers_a_reversal_even_with_cash_above_the_gross(repo, sales, pay, cn):
+    init(repo)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("100.00")])["id"])
+    pay.record(inv["id"], date="2026-03-03", amount=Decimal("119.00"), user=BOSS)
+    cn.create(inv["id"], credit_kind="partial", date="2026-03-04", reason="Part", amounts={"19": "50.00"}, user=BOSS)
+    # cash 119.00 > current gross 59.50: 59.50 is owed back; refunding part of it never reverses anything
+    pay.record(inv["id"], date="2026-03-05", amount=Decimal("10.00"), kind="refund", user=BOSS)
+    assert credits_of(repo, inv, "write_off_reversal") == []
+
+
+def test_reversal_and_payment_are_atomic(repo, sales, pay, cn, monkeypatch):
+    init(repo)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("100.00")])["id"])
+    cn.create(inv["id"], credit_kind="write_off", date="2026-03-06", reason="Lost", user=BOSS)
+    n_entries = len(entries(repo))
+
+    def boom(*a, **k):
+        raise ServiceError(500, "boom")
+
+    monkeypatch.setattr(pay.posting, "post_payment", boom)
+    with pytest.raises(ServiceError):
+        pay.record(inv["id"], date="2026-03-10", amount=Decimal("119.00"), user=BOSS)
+    assert credits_of(repo, inv, "write_off_reversal") == []
+    assert repo.find("payments", document_id=inv["id"]) == [] and len(entries(repo)) == n_entries
+
+
+def test_a_fully_written_off_invoice_has_nothing_open_to_be_overdue(repo, sales, pay, cn):
+    init(repo)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("100.00")], due_date="2026-03-16")["id"])
+    cn.create(inv["id"], credit_kind="write_off", date="2026-03-20", reason="Lost", user=BOSS)
+    view = sales.invoice_view(repo.get("invoices", inv["id"]))
+    assert view["open_amount"] == "0.00" and view["credited_amount"] == "119.00"
+
+
+# ---------------------------------------------------------------- settle-discount in a locked month (accounting 11)
+def test_settle_discount_in_a_locked_month_dates_the_credit_in_the_open_month_and_lets_the_payment_drift(
+    repo, sales, pay, cn
+):
+    init(repo, vat="ist")
+    inv = sales.finalize("invoices", draft(repo, "2026-01-05", [line("1000.00")])["id"])
+    lock_through(repo, 1)
+    result = cn.settle_discount(inv["id"], date="2026-01-20", amount_paid=Decimal("1000.00"), user=BOSS)
+    credit = result["credit_note"]
+    assert credit["date"] == "2026-02-01" and result["payment"]["date"] == "2026-01-20"
+    assert [w["code"] for w in result["warnings"]] == ["vat_drift"]
+    credit_entry = next(e for e in entries(repo) if e.event_key == f"credit:{credit['id']}")
+    assert credit_entry.booking_date == "2026-02-01" and not credit_entry.warnings
+    view = sales.invoice_view(repo.get("invoices", inv["id"]))
+    assert view["open_amount"] == "0.00" and view["status"] == "paid"
+    # the payment is still checked against the invoice date
+    inv2 = sales.finalize("invoices", draft(repo, "2026-02-03", [line("100.00")])["id"])
+    with pytest.raises(ServiceError) as exc:
+        cn.settle_discount(inv2["id"], date="2026-02-01", amount_paid=Decimal("100.00"), user=BOSS)
+    assert exc.value.status == 422

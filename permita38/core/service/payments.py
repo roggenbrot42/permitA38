@@ -93,9 +93,11 @@ class PaymentService:
         store: Repository,
         journal: JournalService | None = None,
         today: Callable[[], date] = date.today,
+        now: Callable[[], float] = time.time,
     ):
         self.store = store
         self.today = today
+        self.now = now
         self.posting = PaymentPostingService(store, journal)
         self.credit_posting = CreditPostingService(store, journal)
 
@@ -182,7 +184,7 @@ class PaymentService:
             "status": "sent",
             "lines": [],
             "reason": "Write-off reversed by a payment",
-            "issued": credit_snapshot(inv, [(g.rate, int(g.net), int(g.vat)) for g in groups], day[:10], time.time()),
+            "issued": credit_snapshot(inv, [(g.rate, int(g.net), int(g.vat)) for g in groups], day[:10], self.now()),
         }
         for key in ("project_id", "tax_treatment"):
             if inv.get(key):
