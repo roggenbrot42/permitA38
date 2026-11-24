@@ -26956,6 +26956,17 @@
               }
             ],
             "title": "Amount"
+          },
+          "flag": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flag"
           }
         },
         "additionalProperties": true,
