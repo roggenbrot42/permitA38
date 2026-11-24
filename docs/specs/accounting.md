@@ -422,7 +422,8 @@ are expenses and post as 9.4.
   `vat_special_prepayment` with the Kz 39 amount (moves the credit).
 * VAT payments/refunds and special-prepayment payments are entries of their own (event key `vat:<uuid>`, the return or
   year as source, origin `manual`), so several per return are possible and a wrong one is corrected by reversal (9.8).
-  The December/Q4 credit is automatic (`vat:<return id>:credit`) and is reversed when that return is reopened.
+  The December/Q4 credit is automatic (`vat:<return id>:credit:r<n>`, n = 1, 2, … after each reversal) and is
+  reversed when that return is reopened.
   Provisions carry a revision in their key (`…:<year>:r<n>`) so a reversed provision can be booked again; a settlement
   settles the provision of one named year. The opening entry is corrected by a manual entry, never reversed. Opening
   balances accept balance-sheet accounts only.
