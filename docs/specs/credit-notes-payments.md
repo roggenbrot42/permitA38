@@ -103,6 +103,9 @@ date rules.
   (accounting 9.2), only when `open_amount` > 0. `discount` only through `settle-discount`.
 * The credited net per rate group may not exceed the invoice's remaining net of that group (422). `reason` is
   required (1–500 chars). The credit-note `date` is not before the invoice date and not in the future (422).
+  VAT of a credited group = half-up(credited net × rate), capped at the group's remaining VAT; when the credited net
+  equals the group's remaining net, the VAT is exactly the remaining VAT (so a sequence of partials that credits the
+  whole invoice leaves no VAT residue).
 * Credit notes are **issued on creation**: number from the new sequence `credit_note` (settings
   `credit_note_pattern`, default `"RK-{year}-{n:04d}"`, `credit_note_reset`, numbering page shows it), snapshot,
   date not in a locked month (409), in one transaction.
