@@ -112,6 +112,9 @@ class ExpensePostingService:
             data["reverse_charge"] = True
         else:
             data.pop("reverse_charge", None)  # derived output: true only for the two reverse-charge treatments
+        if treatment == "no_input_vat" and not data.get("lines"):  # no reclaimable VAT: the gross is the cost (spec 5)
+            data["net"] = to_float(dec(data.get("net")) + dec(data.get("vat")))
+            data["vat"] = 0.0
         if treatment not in RC_TREATMENTS:
             return []
         return self._self_assess(data)
@@ -126,14 +129,16 @@ class ExpensePostingService:
             lines = []
             for ln in raw_lines:
                 net = dec(ln.get("gross"))
-                rate = dec(ln["vat_rate"]) if ln.get("vat_rate") is not None else DEFAULT_RC_RATE
+                rate = dec(ln.get("vat_rate")) or DEFAULT_RC_RATE  # missing or 0 = the regular rate (spec 5)
                 nets[rate] = nets.get(rate, Decimal(0)) + net
                 lines.append({**ln, "net": to_float(net), "vat": 0.0})
             data["lines"] = lines
             data["net"] = to_float(sum(nets.values(), Decimal(0)))
             data["vat"] = to_float(sum((_tax(n, r) for r, n in nets.items()), Decimal(0)))
             return []
-        rate = dec(data["vat_rate"]) if data.get("vat_rate") is not None else DEFAULT_RC_RATE
+        # a missing or 0 rate is the regular rate of the year (19 %, spec 5) and is stored as such
+        rate = dec(data.get("vat_rate")) or DEFAULT_RC_RATE
+        data["vat_rate"] = to_float(rate)
         computed = _tax(dec(data.get("net")), rate)
         sent = dec(data.get("vat"))
         data["vat"] = to_float(computed)
