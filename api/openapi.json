@@ -10773,7 +10773,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Reverse Legacy Payment Api Invoices  Rid  Payments Legacy Reverse Post"
+                }
               }
             }
           },

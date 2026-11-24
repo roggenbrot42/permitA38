@@ -23,12 +23,12 @@ from permita38.core.service.journal import JournalService
 from permita38.core.service.postings import PaymentPostingService
 from permita38.core.settings import effective_settings
 
-__all__ = ["PaymentService", "insert_payment_row"]
+__all__ = ["PaymentService"]
 
 MAX_PAYMENT_CENTS = 10_000_000_00
 
 
-def insert_payment_row(
+def _insert_row(
     store: Repository,
     invoice_id: str,
     *,
@@ -40,7 +40,8 @@ def insert_payment_row(
     reverses_id: str | None = None,
     user: Mapping[str, Any] | None = None,
 ) -> Record:
-    """Insert one ``payments`` row and return it. No validation and no posting: use :class:`PaymentService`."""
+    """Private raw insert of one ``payments`` row: no validation and no posting. Only this module and the
+    materialisation use it; every other write goes through :class:`PaymentService`."""
     row: Record = dict(
         document_id=invoice_id,
         date=date,
@@ -72,7 +73,10 @@ def _out(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _cents(amount: Decimal) -> int:
-    return int(amount * 100)
+    scaled = amount * 100
+    if scaled != scaled.to_integral_value():
+        raise ServiceError(422, "The amount has at most 2 decimal places")
+    return int(scaled)
 
 
 class PaymentService:
@@ -155,7 +159,7 @@ class PaymentService:
         rows = self.store.find("payments", document_id=inv["id"])
         if sum(int(r["amount_cents"]) for r in rows) + signed < 0:
             raise ServiceError(422, "The cash kept for this invoice cannot become negative")
-        row = insert_payment_row(
+        row = _insert_row(
             self.store,
             inv["id"],
             date=day,
@@ -255,16 +259,27 @@ class PaymentService:
             user=user,
         )
 
-    def reverse_all_payments(self, invoice_id: str, user: Mapping[str, Any] | None = None) -> None:
-        """The legacy ``paid`` -> ``sent`` translation (spec 2.2): reverse every payment row that is not reversed yet,
-        each on its own date (a legacy date may precede the invoice date, so no date rule applies)."""
+    def reverse_legacy(
+        self,
+        invoice_id: str,
+        user: Mapping[str, Any] | None = None,
+        date: str | None = None,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        """Spec 2.2/2.3: materialise the legacy virtual payment, then reverse exactly that row (the payment carrying
+        the legacy note). 409 when there is none or it is already reversed. A legacy date may precede the invoice
+        date, so the advance-payment rule does not apply to it; the date still cannot lie in the future."""
         with self.store.transaction():
             inv = self.materialize(self._invoice(invoice_id), user)
             rows = self.store.find("payments", document_id=inv["id"])
-            done = {r.get("reverses_id") for r in rows}
-            for row in rows:
-                if row["kind"] == "payment" and row["id"] not in done:
-                    self._reverse_row(inv, row, str(row["date"]), None, user, check_date=False)
+            legacy = [r for r in rows if r.get("kind") == "payment" and r.get("note") == invoice_state.LEGACY_NOTE]
+            if not legacy:
+                raise ServiceError(409, "The invoice has no legacy payment to reverse")
+            row = legacy[0]
+            day = date or str(row["date"])
+            if day > self.today().isoformat():
+                raise ServiceError(422, "The payment date cannot be in the future")
+            return self._reverse_row(inv, row, day, note, user, check_date=False)
 
     # ---------- reads (last: the name shadows the builtin inside the class body)
     def list(self, invoice_id: str) -> builtins.list[dict[str, Any]]:

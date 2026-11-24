@@ -400,3 +400,46 @@ def test_payment_with_an_employee_without_write_rights_is_refused(app, clients, 
     r = clients["employee"].post(pay_url(inv), json={"date": "2026-02-05", "amount": "1.00"})
     assert r.status_code == 403
     assert clients["accountant"].post(pay_url(inv), json={"date": "2026-02-05", "amount": "1.00"}).status_code == 201
+
+
+# ---------------------------------------------------------------- atomicity and exact cents
+def _forced_failure(monkeypatch):
+    from permita38.core.service.journal import JournalService
+
+    def boom(*a, **k):
+        raise ServiceError(409, "forced")
+
+    monkeypatch.setattr(JournalService, "post", boom)
+
+
+def test_a_failed_posting_leaves_no_payments_row(repo, sales, pay, monkeypatch):
+    init(repo, income="accrual", vat="ist")
+    inv = sales.finalize("invoices", draft(repo, "2026-02-01", [line("100.00")])["id"])
+    ok = pay.record(inv["id"], date="2026-02-03", amount=Decimal("50.00"), user=BOSS)
+    before = repo.find("payments", document_id=inv["id"])
+    _forced_failure(monkeypatch)
+    with pytest.raises(ServiceError):
+        pay.record(inv["id"], date="2026-02-04", amount=Decimal("10.00"), user=BOSS)
+    with pytest.raises(ServiceError):
+        pay.reverse(ok["payment"]["id"], user=BOSS)
+    assert repo.find("payments", document_id=inv["id"]) == before
+
+
+def test_a_legacy_reversal_with_a_failed_posting_leaves_no_row(repo, sales, pay, monkeypatch):
+    init(repo, income="accrual", vat="ist")
+    inv = sales.finalize("invoices", draft(repo, "2026-02-01", [line("100.00")])["id"])
+    repo.save("invoices", {**repo.get("invoices", inv["id"]), "status": "paid", "paid_date": "2026-02-03"})
+    _forced_failure(monkeypatch)
+    with pytest.raises(ServiceError):
+        pay.reverse_legacy(inv["id"], BOSS)
+    assert repo.find("payments", document_id=inv["id"]) == []  # the materialisation rolled back too
+
+
+def test_more_than_two_decimals_is_refused_not_truncated(repo, sales, pay):
+    inv = sales.finalize("invoices", draft(repo, "2026-02-01", [line("100.00")])["id"])
+    with pytest.raises(ServiceError) as err:
+        pay.record(inv["id"], date="2026-02-03", amount=Decimal("1.005"), user=BOSS)
+    assert err.value.status == 422
+    assert repo.find("payments", document_id=inv["id"]) == []
+    out = pay.record(inv["id"], date="2026-02-03", amount=Decimal("1.50"), user=BOSS)
+    assert out["payment"]["amount"] == "1.50"

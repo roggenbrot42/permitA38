@@ -203,9 +203,12 @@ def reverse_payment(
     dependencies=[SessionOnly],
     name="reverse_legacy_payment",
 )
-def reverse_legacy_payment(rid: str, body: models.PaymentReverseIn, user: PaymentWrite, services: ServicesDep):
+def reverse_legacy_payment(
+    rid: str, body: models.PaymentReverseIn, user: PaymentWrite, services: ServicesDep
+) -> dict[str, Any]:
     """Reverse the virtual payment of a legacy paid invoice (credit-notes-payments.md 2.3)."""
-    not_implemented()
+    result = services.sales.payments.reverse_legacy(rid, user, date=body.date, note=body.note)
+    return _payment_result(services, result)
 
 
 @payments_router.post("/invoices/{rid}/settle-discount", dependencies=[SessionOnly], name="settle_discount")

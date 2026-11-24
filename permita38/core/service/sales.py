@@ -14,7 +14,7 @@ from permita38.core.settings import accounting_start, effective_settings
 
 from . import invoice_state
 from .numbering import NumberingService
-from .payments import PaymentService, insert_payment_row
+from .payments import PaymentService, _insert_row
 from .planner.service import PlannerService
 from .postings import IssuePostingService, build_snapshot
 from .project_customer import check_billable_project, check_project_customer, project_kind
@@ -69,33 +69,6 @@ def _user_id(user: Mapping[str, Any] | None) -> str:
     return str((user or {}).get("id") or "system")
 
 
-def record_payment_row(
-    store: Repository,
-    invoice_id: str,
-    *,
-    date: str,
-    amount_cents: int,
-    kind: str = "payment",
-    method: str = "bank",
-    note: str | None = None,
-    reverses_id: str | None = None,
-    user: Mapping[str, Any] | None = None,
-) -> dict:
-    """Insert one ``payments`` row without validation or posting (tests and the materialisation). Production writes go
-    through ``PaymentService``, which also posts the event (accounting 9.2)."""
-    return insert_payment_row(
-        store,
-        invoice_id,
-        date=date,
-        amount_cents=amount_cents,
-        kind=kind,
-        method=method,
-        note=note,
-        reverses_id=reverses_id,
-        user=user,
-    )
-
-
 def gross_cents_of(invoice: Mapping[str, Any], settings: Mapping[str, Any]) -> int:
     """The gross of an issued invoice in cents: the snapshot's, else the current totals (legacy invoice)."""
     issued = invoice.get("issued")
@@ -122,7 +95,7 @@ def materialize_legacy_payment(
         if inv.get("status") == "paid" and not store.find("payments", document_id=inv["id"]):
             gross = int(inv["issued"]["gross"])
             if gross != 0:
-                row = record_payment_row(
+                row = _insert_row(
                     store,
                     inv["id"],
                     date=invoice_state.legacy_payment_date(inv),
@@ -307,7 +280,7 @@ class SalesService:
                     user=me,
                 )
             elif action == "reverse":
-                self.payments.reverse_all_payments(rid, me)
+                self.payments.reverse_legacy(rid, me)
                 changes["status"], changes["paid_date"] = data["status"], None
         elif action == "label":
             changes["status"] = data["status"]

@@ -484,6 +484,7 @@ IMPLEMENTED = {
     ("GET", "/api/invoices/{rid}/payments"),
     ("POST", "/api/invoices/{rid}/payments"),
     ("POST", "/api/payments/{payment_id}/reverse"),
+    ("POST", "/api/invoices/{rid}/payments/legacy/reverse"),
 }
 
 
@@ -556,7 +557,11 @@ def test_payment_dependency_is_the_either_or_rule(app):
                 assert err.value.status_code == 403
 
 
-_PAYMENT_IMPLEMENTED = {"/api/invoices/{rid}/payments", "/api/payments/{payment_id}/reverse"}  # 404: dummy id
+_PAYMENT_IMPLEMENTED = {
+    "/api/invoices/{rid}/payments",
+    "/api/payments/{payment_id}/reverse",
+    "/api/invoices/{rid}/payments/legacy/reverse",
+}  # 404: dummy id
 PAYMENT_WRITE_ROUTES = [
     ("POST", "/api/invoices/{rid}/payments", _PAY),
     ("POST", "/api/payments/{payment_id}/reverse", {}),
