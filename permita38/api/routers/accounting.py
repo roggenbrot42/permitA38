@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.api.responses import present
 from permita38.core import models, rights
+from permita38.core.service.manual_entries import EntryTemplate
 
 router = APIRouter(prefix="/accounting", tags=["accounting"])
 payments_router = APIRouter(tags=["accounting"])
@@ -104,14 +105,31 @@ def journal(
     not_implemented()
 
 
-@router.post("/entries", status_code=201, dependencies=[SessionOnly], name="create_manual_entry")
+@router.post(
+    "/entries",
+    status_code=201,
+    dependencies=[SessionOnly],
+    name="create_manual_entry",
+    response_model=models.JournalEntry,
+)
 def create_entry(body: models.ManualEntryIn, user: Write, services: ServicesDep):
-    not_implemented()
+    return services.manual_entries.post(body, user)
 
 
-@router.post("/entries/{entry_id}/reverse", status_code=201, dependencies=[SessionOnly], name="reverse_entry")
+@router.get("/entry-templates", name="list_entry_templates", response_model=list[EntryTemplate])
+def entry_templates(user: Read, services: ServicesDep):
+    return services.manual_entries.templates()
+
+
+@router.post(
+    "/entries/{entry_id}/reverse",
+    status_code=201,
+    dependencies=[SessionOnly],
+    name="reverse_entry",
+    response_model=models.JournalEntry,
+)
 def reverse_entry(entry_id: str, body: models.EntryReverseIn, user: Write, services: ServicesDep):
-    not_implemented()
+    return services.manual_entries.reverse(entry_id, body.date, body.text, user)
 
 
 @router.get("/accounts", name="list_accounts")
