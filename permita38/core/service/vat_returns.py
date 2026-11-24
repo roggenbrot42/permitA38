@@ -24,6 +24,8 @@ from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service.locks import LockService
+from permita38.core.service.special_prepayment import stored_cents
+from permita38.core.service.tax_bookings import TaxBookingService
 from permita38.core.settings import effective_settings
 from permita38.core.vat import ustva
 from permita38.core.vat.deadlines import PeriodKind, period_bounds, ustva_due
@@ -114,9 +116,11 @@ class VatReturnService:
         locks: LockService,
         today: Callable[[], date] = date.today,
         clock: Callable[[], float] = time.time,
+        bookings: TaxBookingService | None = None,
     ):
         self.store = store
         self.locks = locks
+        self.bookings = bookings or TaxBookingService(store)
         self.today = today
         self.clock = clock
 
@@ -257,7 +261,7 @@ class VatReturnService:
     def _live(self, row: Record) -> Record:
         """A draft as the API shows it: the stored row with the boxes computed now."""
         fy = self._year(int(row["year"]))
-        credit = self._credit(row)
+        credit = self._credit(row, fy)
         result, _rules, used, _bounds = self._compute(fy, str(row["period_kind"]), int(row["period_no"]), credit)
         return {
             **row,
@@ -269,13 +273,36 @@ class VatReturnService:
             "rounding_difference_cents": result.rounding_difference,
         }
 
-    def _credit(self, row: Record) -> int:
-        """The Kz 39 credit an amended return keeps: the one of the return it amends, until the special prepayment
-        (O4) replaces it."""
-        if not row.get("amends_id"):
+    @staticmethod
+    def _special_credit(fy: Record, kind: str, no: int) -> int:
+        """Kz 39: the year's stored special prepayment, only in the December (monthly) or Q4 (quarterly) return of a
+        year with Dauerfrist (never for a small business)."""
+        last = (kind == "month" and no == 12) or (kind == "quarter" and no == 4)
+        if not last or not fy.get("dauerfrist") or fy.get("small_business"):
             return 0
-        orig = self.store.get(COLLECTION, str(row["amends_id"]))
-        return int(orig.get("special_prepayment_credit_cents") or 0) if orig else 0
+        return stored_cents(fy)
+
+    def _credit(self, row: Record, fy: Record) -> int:
+        """The Kz 39 credit: the stored special prepayment for the last period of the year; an amended return keeps
+        the one of the return it amends (already posted, never posted again)."""
+        if row.get("amends_id"):
+            orig = self.store.get(COLLECTION, str(row["amends_id"]))
+            return int(orig.get("special_prepayment_credit_cents") or 0) if orig else 0
+        return self._special_credit(fy, str(row["period_kind"]), int(row["period_no"]))
+
+    def _credit_slot(self, rid: str) -> tuple[str, bool]:
+        """The id the Kz 39 credit entry (``vat:<id>:credit``) of this return is booked under and whether that entry
+        is live. A reopen reverses the entry; finalising again needs a fresh key, so the id gets a generation suffix
+        (``<rid>``, ``<rid>-g2``, ...)."""
+        cand, n = rid, 1
+        while True:
+            key = f"vat:{cand}:credit"
+            if self.store.get_journal_entry_by_event_key(key) is None:
+                return cand, False
+            if self.store.get_journal_entry_by_event_key(key + ":rev") is None:
+                return cand, True
+            n += 1
+            cand = f"{rid}-g{n}"
 
     @staticmethod
     def _boxes(result: ustva.UstvaResult, amended: bool) -> dict[str, dict[str, Any]]:
@@ -346,7 +373,8 @@ class VatReturnService:
     def preview(self, year: int, kind: str, no: int) -> Record:
         fy = self._year(year)
         self._check_period(fy, kind, no)
-        result, _rules, used, (lo, hi) = self._compute(fy, kind, no)
+        credit = self._special_credit(fy, kind, no)
+        result, _rules, used, (lo, hi) = self._compute(fy, kind, no, credit)
         if not result.required:
             raise ServiceError(422, "No return is required for this period (small business without § 13b lines)")
         return {
@@ -362,7 +390,7 @@ class VatReturnService:
             "boxes": {kz: _box_json(f) for kz, f in result.boxes.items()},
             **self._sources_json([s.line_id for s in used]),
             "result_cents": result.result_cents,
-            "special_prepayment_credit_cents": 0,
+            "special_prepayment_credit_cents": credit,
             "rounding_difference_cents": result.rounding_difference,
         }
 
@@ -370,7 +398,53 @@ class VatReturnService:
         row = self._row(rid)
         if row.get("status") != "final":
             return self._live(row)
-        return {**self._view(row), "drift": self._drift(row)}
+        return {**self._view(row), "drift": self._drift(row), **self._payments(row)}
+
+    # ---------- payments (accounting.md 9.6: manual entries ``vat:<uuid>``, several per return)
+    def _payments(self, row: Record) -> Record:
+        """The payments and refunds of a final return, read from the journal by source (reversed ones are listed,
+        flagged, and do not count), with the net paid amount and what is still open of Kz 83."""
+        out: list[Record] = []
+        paid = 0
+        for e in self.store.find("journal_entries", source_coll=COLLECTION, source_id=str(row["id"])):
+            if e.get("event") not in ("vat_payment", "vat_refund"):
+                continue
+            full = self.store.get_journal_entry_by_event_key(str(e["event_key"])) or e
+            cents = sum(int(ln["amount_cents"]) for ln in full.get("lines", []) if ln.get("role") == "vat_prepayments")
+            reversed_ = self.store.get_journal_entry_by_event_key(f"{e['event_key']}:rev") is not None
+            if not reversed_:
+                paid += cents
+            out.append(
+                {
+                    "entry_id": e["id"],
+                    "event_key": e["event_key"],
+                    "date": str(e.get("document_date")),
+                    "kind": "refund" if cents < 0 else "payment",
+                    "amount": money(abs(cents)),
+                    "reversed": reversed_,
+                }
+            )
+        out.sort(key=lambda p: (p["date"], p["event_key"]))
+        result = int(row.get("result_cents") or 0)
+        open_cents = result - paid
+        if not out and result == 0:
+            state = "none"
+        elif open_cents == 0:
+            state = "paid"
+        elif result != 0 and (open_cents > 0) == (result > 0):
+            state = "open"
+        else:
+            state = "overpaid"
+        return {"payments": out, "paid": money(paid), "open": money(open_cents), "payment_state": state}
+
+    def pay(self, rid: str, day: date, amount_cents: int, kind: str, user: Mapping[str, Any]) -> Record:
+        """Record a payment to / refund from the tax office for a final return."""
+        with self.store.transaction():
+            row = self._row(rid)
+            if row.get("status") != "final":
+                raise ServiceError(409, "Only a final return can be paid")
+            self.bookings.vat_payment(rid, day, amount_cents, kind, user)  # type: ignore[arg-type]
+        return self.get(rid)
 
     def _drift(self, row: Record) -> Record:
         """Journal changes a final return does not contain (ustva.md "Drift"). A normal return: the lines of the period
@@ -515,7 +589,7 @@ class VatReturnService:
                 raise ServiceError(409, "The return is already final")
             fy = self._year(int(row["year"]))
             kind, no = str(row["period_kind"]), int(row["period_no"])
-            credit = self._credit(row)
+            credit = self._credit(row, fy)
             result, rules, used, (lo, hi) = self._compute(fy, kind, no, credit)
             to_lock = self.locks.preview_lock_up_to(hi.year, hi.month)  # 422: not ended / before the start
             gap = [f"{y}-{m:02d}" for y, m in to_lock if (y, m) < (lo.year, lo.month)]
@@ -549,18 +623,23 @@ class VatReturnService:
                     "finalised_by": user.get("id"),
                 },
             )
+            if credit and orig is None:  # an amended return keeps the credit of the original, booked already
+                self.bookings.special_prepayment_credit(int(row["year"]), self._credit_slot(rid)[0], credit, user)
             self.locks.lock_up_to(hi.year, hi.month, f"vat_return:{rid}", str(user.get("id")))
             if orig is not None:
                 self.store.save(COLLECTION, {**orig, "replaced_by": rid})
             return self._view(saved)
 
-    def reopen(self, rid: str) -> Record:
+    def reopen(self, rid: str, user: Mapping[str, Any] | None = None) -> Record:
         with self.store.transaction():
             row = self._row(rid)
             if row.get("status") != "final":
                 raise ServiceError(409, "Only a final return can be reopened")
             if row.get("filed_on"):
                 raise ServiceError(409, "A filed return cannot be reopened; file an amended return")
+            slot, live = self._credit_slot(rid)
+            if live and not row.get("amends_id"):
+                self.bookings.special_prepayment_credit_reverse(int(row["year"]), slot, user or {})
             saved = self.store.save(
                 COLLECTION,
                 {
