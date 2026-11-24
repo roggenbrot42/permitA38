@@ -545,7 +545,7 @@ still frozen and credit notes and payments are recorded (they post on initialisa
 
 New areas in `core/rights.py`: `accounting` (journal, reports, manual entries, locks, fiscal years, init, DATEV) and
 `vat` (returns, ZM). Matrix: boss (A, A); **accountant (A, A)** (maintainer decision: full bookkeeping); employee
-(N, N). Payments and credit notes require write on `invoices` **or** `accounting` (the accountant has the latter).
+(N, N). Payments and credit notes require write on `invoices` **or** `accounting` (the accountant has the latter); reading them needs read on `invoices` (they are part of the invoice).
 `init` and `close year` need boss. The rbac route table, `docs/roles.md` and the every-route-as-every-role test are
 extended. API tokens: read scopes follow the existing token rules; no write to `accounting`/`vat` through tokens in v1.
 
