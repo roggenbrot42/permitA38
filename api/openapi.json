@@ -25632,6 +25632,17 @@
               }
             ],
             "title": "Items Actual Total"
+          },
+          "post_rev": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Rev"
           }
         },
         "additionalProperties": true,
