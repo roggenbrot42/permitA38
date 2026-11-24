@@ -74,7 +74,8 @@ def row(db, id_):
 def test_kinds_are_registered():
     assert {"frozen_when", "set_once"} <= set(GUARD_KINDS)
     assert TRANSITION_KINDS == {"frozen_when", "set_once"}
-    assert not {g.kind for g in schema.GUARDS} & TRANSITION_KINDS  # not attached to a table yet (next work package)
+    attached = {g.table for g in schema.GUARDS if g.kind in TRANSITION_KINDS}
+    assert attached == {"vat_returns", "zm_reports", "fiscal_years"}  # migration accounting_row_state
 
 
 def test_validation():

@@ -796,6 +796,7 @@ def _build_guards() -> tuple[Guard, ...]:
     out += _planning_guards()  # migration 0018-project_planning, after 0017-reference_guards
     out += _accounting_guards()  # migration 0019-accounting_journal
     out += _accounting_document_guards()  # migration 0020-accounting_documents
+    out += _accounting_row_state_guards()  # migration 0021-accounting_row_state
     return tuple(out)
 
 
@@ -947,6 +948,35 @@ def _accounting_document_guards() -> list[Guard]:
         ref("zm_reports", "replaced_by", "zm_reports"),
     ]
     return out
+
+
+def _accounting_row_state_guards() -> list[Guard]:
+    """Guards of migration accounting_row_state (docs/specs/accounting.md section 8.1, docs/specs/db-constraints.md)."""
+    mutable = ("filed_on", "reference", "note", "replaced_by", "updated")
+    clears = ("finalised_at", "finalised_by", "boxes", "source_lines")
+
+    def frozen(table: str, clears_: tuple[str, ...], **exempt: Any) -> Guard:
+        return Guard(
+            f"guard_{table}_frozen",
+            table,
+            "frozen_when",
+            ("status",),
+            "state.frozen",
+            values=("final",),
+            mutable=mutable,
+            reopen_if_null="filed_on",
+            reopen_clears=clears_,
+            **exempt,
+        )
+
+    return [
+        frozen("vat_returns", clears, exempt_when=(("external", True),), exempt_until_set="replaced_by"),
+        frozen("zm_reports", ("finalised_at", "finalised_by", "lines", "source_lines")),
+        Guard("guard_vat_returns_filed_on_once", "vat_returns", "set_once", ("filed_on",), "state.set_once"),
+        Guard("guard_zm_reports_filed_on_once", "zm_reports", "set_once", ("filed_on",), "state.set_once"),
+        Guard("guard_fiscal_years_closed_at_once", "fiscal_years", "set_once", ("closed_at",), "state.set_once"),
+        Guard("guard_fiscal_years_closed_by_once", "fiscal_years", "set_once", ("closed_by",), "state.set_once"),
+    ]
 
 
 def _model_literal(model: Any, field_name: str) -> Any:
