@@ -106,7 +106,8 @@ CREATE TABLE "period_locks" (
     "locked_at" INTEGER,
     "locked_by" TEXT,
     "reason" TEXT,
-    "extra" TEXT
+    "extra" TEXT,
+    CONSTRAINT "period_locks_reason_vocab" CHECK ("reason" IN ('manual', 'year_close') OR "reason" LIKE 'vat_return:%')
 );
 CREATE UNIQUE INDEX "idx_period_locks_year_month" ON "period_locks" ("year", "month");
 
@@ -239,6 +240,22 @@ CREATE TRIGGER "guard_fiscal_years_closed_by_implies_upd" BEFORE UPDATE OF "clos
 WHEN (COALESCE((NEW."closed_at" IS NOT NULL AND trim(NEW."closed_at", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0) AND NOT COALESCE((NEW."closed_by" IS NOT NULL AND trim(NEW."closed_by", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
  AND (NEW."closed_at" IS NOT OLD."closed_at" OR NEW."closed_by" IS NOT OLD."closed_by")
 BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_fiscal_years_closed_by_implies'); END;
+CREATE TRIGGER "guard_fiscal_years_closed_at_implies_ins" BEFORE INSERT ON "fiscal_years"
+WHEN (COALESCE((NEW."closed_by" IS NOT NULL AND trim(NEW."closed_by", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0) AND NOT COALESCE((NEW."closed_at" IS NOT NULL AND trim(NEW."closed_at", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+ AND NOT EXISTS (SELECT 1 FROM "fiscal_years" WHERE "id" = NEW."id" AND "closed_by" IS NEW."closed_by" AND "closed_at" IS NEW."closed_at")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_fiscal_years_closed_at_implies'); END;
+CREATE TRIGGER "guard_fiscal_years_closed_at_implies_upd" BEFORE UPDATE OF "closed_by", "closed_at" ON "fiscal_years"
+WHEN (COALESCE((NEW."closed_by" IS NOT NULL AND trim(NEW."closed_by", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0) AND NOT COALESCE((NEW."closed_at" IS NOT NULL AND trim(NEW."closed_at", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+ AND (NEW."closed_by" IS NOT OLD."closed_by" OR NEW."closed_at" IS NOT OLD."closed_at")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_fiscal_years_closed_at_implies'); END;
+CREATE TRIGGER "guard_fiscal_years_year_range_ins" BEFORE INSERT ON "fiscal_years"
+WHEN (NEW."year" IS NOT NULL AND NEW."year" <> '' AND (NEW."year" < 2000 OR NEW."year" > 2100))
+ AND NOT EXISTS (SELECT 1 FROM "fiscal_years" WHERE "id" = NEW."id" AND "year" IS NEW."year")
+BEGIN SELECT RAISE(ABORT, 'permita38:range.bounds'); END;
+CREATE TRIGGER "guard_fiscal_years_year_range_upd" BEFORE UPDATE OF "year" ON "fiscal_years"
+WHEN (NEW."year" IS NOT NULL AND NEW."year" <> '' AND (NEW."year" < 2000 OR NEW."year" > 2100))
+ AND (NEW."year" IS NOT OLD."year")
+BEGIN SELECT RAISE(ABORT, 'permita38:range.bounds'); END;
 CREATE TRIGGER "guard_journal_entries_fiscal_year_required_ins" BEFORE INSERT ON "journal_entries"
 WHEN (NOT (NEW."fiscal_year" IS NOT NULL AND trim(NEW."fiscal_year", ' ' || char(9, 10, 11, 12, 13)) <> ''))
  AND NOT EXISTS (SELECT 1 FROM "journal_entries" WHERE "id" = NEW."id" AND "fiscal_year" IS NEW."fiscal_year")
@@ -359,6 +376,22 @@ CREATE TRIGGER "guard_journal_entries_origin_one_of_upd" BEFORE UPDATE OF "origi
 WHEN ((NEW."origin" IS NOT NULL AND trim(NEW."origin", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NEW."origin" NOT IN ('auto', 'manual', 'opening'))
  AND (NEW."origin" IS NOT OLD."origin")
 BEGIN SELECT RAISE(ABORT, 'permita38:vocab.unknown'); END;
+CREATE TRIGGER "guard_journal_entries_fiscal_year_range_ins" BEFORE INSERT ON "journal_entries"
+WHEN (NEW."fiscal_year" IS NOT NULL AND NEW."fiscal_year" <> '' AND (NEW."fiscal_year" < 2000 OR NEW."fiscal_year" > 2100))
+ AND NOT EXISTS (SELECT 1 FROM "journal_entries" WHERE "id" = NEW."id" AND "fiscal_year" IS NEW."fiscal_year")
+BEGIN SELECT RAISE(ABORT, 'permita38:range.bounds'); END;
+CREATE TRIGGER "guard_journal_entries_fiscal_year_range_upd" BEFORE UPDATE OF "fiscal_year" ON "journal_entries"
+WHEN (NEW."fiscal_year" IS NOT NULL AND NEW."fiscal_year" <> '' AND (NEW."fiscal_year" < 2000 OR NEW."fiscal_year" > 2100))
+ AND (NEW."fiscal_year" IS NOT OLD."fiscal_year")
+BEGIN SELECT RAISE(ABORT, 'permita38:range.bounds'); END;
+CREATE TRIGGER "guard_journal_entries_entry_no_range_ins" BEFORE INSERT ON "journal_entries"
+WHEN (NEW."entry_no" IS NOT NULL AND NEW."entry_no" <> '' AND (NEW."entry_no" < 1))
+ AND NOT EXISTS (SELECT 1 FROM "journal_entries" WHERE "id" = NEW."id" AND "entry_no" IS NEW."entry_no")
+BEGIN SELECT RAISE(ABORT, 'permita38:range.bounds'); END;
+CREATE TRIGGER "guard_journal_entries_entry_no_range_upd" BEFORE UPDATE OF "entry_no" ON "journal_entries"
+WHEN (NEW."entry_no" IS NOT NULL AND NEW."entry_no" <> '' AND (NEW."entry_no" < 1))
+ AND (NEW."entry_no" IS NOT OLD."entry_no")
+BEGIN SELECT RAISE(ABORT, 'permita38:range.bounds'); END;
 CREATE TRIGGER "guard_journal_entries_reverses_id_ref_ins" BEFORE INSERT ON "journal_entries"
 WHEN (NEW."reverses_id" IS NOT NULL AND trim(NEW."reverses_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "journal_entries" WHERE "id" = NEW."reverses_id")
  AND NOT EXISTS (SELECT 1 FROM "journal_entries" WHERE "id" = NEW."id" AND "reverses_id" IS NEW."reverses_id")
@@ -430,6 +463,22 @@ CREATE TRIGGER "guard_journal_lines_tax_kind_one_of_upd" BEFORE UPDATE OF "tax_k
 WHEN ((NEW."tax_kind" IS NOT NULL AND trim(NEW."tax_kind", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NEW."tax_kind" NOT IN ('tax', 'input', 'base_only'))
  AND (NEW."tax_kind" IS NOT OLD."tax_kind")
 BEGIN SELECT RAISE(ABORT, 'permita38:vocab.unknown'); END;
+CREATE TRIGGER "guard_journal_lines_tax_key_one_of_ins" BEFORE INSERT ON "journal_lines"
+WHEN ((NEW."tax_key" IS NOT NULL AND trim(NEW."tax_key", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NEW."tax_key" NOT IN ('EU_SVC', 'KU', 'NONE', 'RC_3C_SVC', 'RC_EU_SVC', 'S19', 'S7', 'SX', 'VST'))
+ AND NOT EXISTS (SELECT 1 FROM "journal_lines" WHERE "id" = NEW."id" AND "tax_key" IS NEW."tax_key")
+BEGIN SELECT RAISE(ABORT, 'permita38:vocab.unknown'); END;
+CREATE TRIGGER "guard_journal_lines_tax_key_one_of_upd" BEFORE UPDATE OF "tax_key" ON "journal_lines"
+WHEN ((NEW."tax_key" IS NOT NULL AND trim(NEW."tax_key", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NEW."tax_key" NOT IN ('EU_SVC', 'KU', 'NONE', 'RC_3C_SVC', 'RC_EU_SVC', 'S19', 'S7', 'SX', 'VST'))
+ AND (NEW."tax_key" IS NOT OLD."tax_key")
+BEGIN SELECT RAISE(ABORT, 'permita38:vocab.unknown'); END;
+CREATE TRIGGER "guard_journal_lines_line_no_range_ins" BEFORE INSERT ON "journal_lines"
+WHEN (NEW."line_no" IS NOT NULL AND NEW."line_no" <> '' AND (NEW."line_no" < 1))
+ AND NOT EXISTS (SELECT 1 FROM "journal_lines" WHERE "id" = NEW."id" AND "line_no" IS NEW."line_no")
+BEGIN SELECT RAISE(ABORT, 'permita38:range.bounds'); END;
+CREATE TRIGGER "guard_journal_lines_line_no_range_upd" BEFORE UPDATE OF "line_no" ON "journal_lines"
+WHEN (NEW."line_no" IS NOT NULL AND NEW."line_no" <> '' AND (NEW."line_no" < 1))
+ AND (NEW."line_no" IS NOT OLD."line_no")
+BEGIN SELECT RAISE(ABORT, 'permita38:range.bounds'); END;
 CREATE TRIGGER "guard_journal_lines_entry_id_ref_ins" BEFORE INSERT ON "journal_lines"
 WHEN (NEW."entry_id" IS NOT NULL AND trim(NEW."entry_id", ' ' || char(9, 10, 11, 12, 13)) <> '') AND NOT EXISTS (SELECT 1 FROM "journal_entries" WHERE "id" = NEW."entry_id")
  AND NOT EXISTS (SELECT 1 FROM "journal_lines" WHERE "id" = NEW."id" AND "entry_id" IS NEW."entry_id")
@@ -450,11 +499,11 @@ WHEN (COALESCE((NEW."tax_kind" IS NOT NULL AND trim(NEW."tax_kind", ' ' || char(
  AND (NEW."tax_kind" IS NOT OLD."tax_kind" OR NEW."tax_key" IS NOT OLD."tax_key")
 BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_journal_lines_tax_kind_key_implies'); END;
 CREATE TRIGGER "guard_journal_lines_tax_key_vat_date_implies_ins" BEFORE INSERT ON "journal_lines"
-WHEN (COALESCE(NEW."tax_key" IN ('S19', 'S7', 'SX', 'KU', 'EU_SVC', 'VST', 'RC_EU_SVC', 'RC_3C_SVC'), 0) AND NOT COALESCE((NEW."vat_date" IS NOT NULL AND trim(NEW."vat_date", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+WHEN (COALESCE(NEW."tax_key" IN ('EU_SVC', 'KU', 'RC_3C_SVC', 'RC_EU_SVC', 'S19', 'S7', 'SX', 'VST'), 0) AND NOT COALESCE((NEW."vat_date" IS NOT NULL AND trim(NEW."vat_date", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
  AND NOT EXISTS (SELECT 1 FROM "journal_lines" WHERE "id" = NEW."id" AND "tax_key" IS NEW."tax_key" AND "vat_date" IS NEW."vat_date")
 BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_journal_lines_tax_key_vat_date_implies'); END;
 CREATE TRIGGER "guard_journal_lines_tax_key_vat_date_implies_upd" BEFORE UPDATE OF "tax_key", "vat_date" ON "journal_lines"
-WHEN (COALESCE(NEW."tax_key" IN ('S19', 'S7', 'SX', 'KU', 'EU_SVC', 'VST', 'RC_EU_SVC', 'RC_3C_SVC'), 0) AND NOT COALESCE((NEW."vat_date" IS NOT NULL AND trim(NEW."vat_date", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
+WHEN (COALESCE(NEW."tax_key" IN ('EU_SVC', 'KU', 'RC_3C_SVC', 'RC_EU_SVC', 'S19', 'S7', 'SX', 'VST'), 0) AND NOT COALESCE((NEW."vat_date" IS NOT NULL AND trim(NEW."vat_date", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
  AND (NEW."tax_key" IS NOT OLD."tax_key" OR NEW."vat_date" IS NOT OLD."vat_date")
 BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_journal_lines_tax_key_vat_date_implies'); END;
 CREATE TRIGGER "guard_journal_lines_append_only_upd" BEFORE UPDATE ON "journal_lines"
@@ -571,6 +620,14 @@ CREATE TRIGGER "guard_payments_reversal_reverses_implies_upd" BEFORE UPDATE OF "
 WHEN (COALESCE(NEW."kind" = 'reversal', 0) AND NOT COALESCE((NEW."reverses_id" IS NOT NULL AND trim(NEW."reverses_id", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0))
  AND (NEW."kind" IS NOT OLD."kind" OR NEW."reverses_id" IS NOT OLD."reverses_id")
 BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_payments_reversal_reverses_implies'); END;
+CREATE TRIGGER "guard_payments_reverses_reversal_implies_ins" BEFORE INSERT ON "payments"
+WHEN (COALESCE((NEW."reverses_id" IS NOT NULL AND trim(NEW."reverses_id", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0) AND NOT COALESCE(NEW."kind" = 'reversal', 0))
+ AND NOT EXISTS (SELECT 1 FROM "payments" WHERE "id" = NEW."id" AND "reverses_id" IS NEW."reverses_id" AND "kind" IS NEW."kind")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_payments_reverses_reversal_implies'); END;
+CREATE TRIGGER "guard_payments_reverses_reversal_implies_upd" BEFORE UPDATE OF "reverses_id", "kind" ON "payments"
+WHEN (COALESCE((NEW."reverses_id" IS NOT NULL AND trim(NEW."reverses_id", ' ' || char(9, 10, 11, 12, 13)) <> ''), 0) AND NOT COALESCE(NEW."kind" = 'reversal', 0))
+ AND (NEW."reverses_id" IS NOT OLD."reverses_id" OR NEW."kind" IS NOT OLD."kind")
+BEGIN SELECT RAISE(ABORT, 'permita38:state.implies:guard_payments_reverses_reversal_implies'); END;
 CREATE TRIGGER "guard_payments_append_only_upd" BEFORE UPDATE ON "payments"
 BEGIN SELECT RAISE(ABORT, 'permita38:state.append_only'); END;
 CREATE TRIGGER "guard_payments_append_only_del" BEFORE DELETE ON "payments"

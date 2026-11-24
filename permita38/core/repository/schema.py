@@ -709,14 +709,13 @@ def _build_guards() -> tuple[Guard, ...]:
     return tuple(out)
 
 
-# every tax key of docs/specs/accounting.md section 6 except NONE (the keys that need a VAT date)
-_VAT_TAX_KEYS = ("S19", "S7", "SX", "KU", "EU_SVC", "VST", "RC_EU_SVC", "RC_3C_SVC")
-
-
 def _accounting_guards() -> list[Guard]:
     """Guards of migration accounting_journal (docs/specs/accounting.md sections 7 and 8.1)."""
     from permita38.core.accounting.types import IncomeBasis, VatBasis
-    from permita38.core.vat_rules import TaxKind
+    from permita38.core.vat_rules import TAX_KEYS, TaxKind
+
+    tax_keys = tuple(sorted(TAX_KEYS))  # all keys of docs/specs/accounting.md section 6, incl. NONE
+    vat_keys = tuple(sorted(TAX_KEYS - {"NONE"}))  # the keys that need a VAT date
 
     def required(table: str, *cols: str) -> list[Guard]:
         return [Guard(f"guard_{table}_{c}_required", table, "required", (c,), "state.required") for c in cols]
@@ -730,6 +729,9 @@ def _accounting_guards() -> list[Guard]:
     def implies(table: str, stem: str, if_: Condition, then: Condition) -> Guard:
         name = f"guard_{table}_{stem}_implies"
         return Guard(name, table, "implies", (), f"state.implies:{name}", if_=if_, then=then)
+
+    def bounds(table: str, col: str, lo: int, hi: int | None = None) -> Guard:
+        return Guard(f"guard_{table}_{col}_range", table, "range", (col,), "range.bounds", lo=lo, hi=hi)
 
     def ref(table: str, col: str, target: str) -> Guard:
         return Guard(f"guard_{table}_{col}_ref", table, "reference", (col,), "ref.dangling", target=target)
@@ -746,6 +748,8 @@ def _accounting_guards() -> list[Guard]:
         one_of("fiscal_years", "vat_basis", get_args(VatBasis)),
         one_of("fiscal_years", "vat_frequency", ("month", "quarter", "none")),
         implies("fiscal_years", "closed_by", IsSet("closed_at"), IsSet("closed_by")),
+        implies("fiscal_years", "closed_at", IsSet("closed_by"), IsSet("closed_at")),
+        bounds("fiscal_years", "year", 2000, 2100),
     ]
     out += required(
         "journal_entries", "fiscal_year", "entry_no", "document_date", "booking_date", "event", "event_key",
@@ -754,6 +758,8 @@ def _accounting_guards() -> list[Guard]:
     out += dates("journal_entries", "document_date", "booking_date")
     out += [
         one_of("journal_entries", "origin", ("auto", "manual", "opening")),
+        bounds("journal_entries", "fiscal_year", 2000, 2100),
+        bounds("journal_entries", "entry_no", 1),
         ref("journal_entries", "reverses_id", "journal_entries"),
         Guard("guard_journal_entries_append_only", "journal_entries", "append_only", (), "state.append_only"),
     ]
@@ -761,9 +767,11 @@ def _accounting_guards() -> list[Guard]:
     out += dates("journal_lines", "vat_date", "income_date")
     out += [
         one_of("journal_lines", "tax_kind", get_args(TaxKind)),
+        one_of("journal_lines", "tax_key", tax_keys),
+        bounds("journal_lines", "line_no", 1),
         ref("journal_lines", "entry_id", "journal_entries"),
         implies("journal_lines", "tax_kind_key", IsSet("tax_kind"), IsSet("tax_key")),
-        implies("journal_lines", "tax_key_vat_date", In("tax_key", _VAT_TAX_KEYS), IsSet("vat_date")),
+        implies("journal_lines", "tax_key_vat_date", In("tax_key", vat_keys), IsSet("vat_date")),
         Guard("guard_journal_lines_append_only", "journal_lines", "append_only", (), "state.append_only"),
     ]
     out += required("payments", "document_id", "date", "amount_cents", "method", "kind", "created_at", "created_by")
@@ -774,6 +782,7 @@ def _accounting_guards() -> list[Guard]:
         ref("payments", "document_id", "invoices"),
         ref("payments", "reverses_id", "payments"),
         implies("payments", "reversal_reverses", Eq("kind", "reversal"), IsSet("reverses_id")),
+        implies("payments", "reverses_reversal", IsSet("reverses_id"), Eq("kind", "reversal")),
         Guard("guard_payments_append_only", "payments", "append_only", (), "state.append_only"),
     ]
     out += required("period_locks", "year", "month", "locked_at", "locked_by", "reason")
@@ -864,6 +873,10 @@ CHECKS = {
         '("user_id" IS NOT NULL AND "supplier_id" IS NULL) OR ("user_id" IS NULL AND "supplier_id" IS NOT NULL)',
     ),
     "payments": ("payments_amount_nonzero", '"amount_cents" <> 0'),
+    "period_locks": (
+        "period_locks_reason_vocab",
+        "\"reason\" IN ('manual', 'year_close') OR \"reason\" LIKE 'vat_return:%'",
+    ),
 }
 
 # internal per-user collections that are not exposed through the CRUD API

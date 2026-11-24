@@ -106,7 +106,8 @@ CREATE TABLE "period_locks" (
     "locked_at" BIGINT,
     "locked_by" TEXT,
     "reason" TEXT,
-    "extra" JSONB
+    "extra" JSONB,
+    CONSTRAINT "period_locks_reason_vocab" CHECK ("reason" IN ('manual', 'year_close') OR "reason" LIKE 'vat_return:%')
 );
 CREATE UNIQUE INDEX "idx_period_locks_year_month" ON "period_locks" ("year", "month");
 
@@ -127,6 +128,8 @@ ALTER TABLE "fiscal_years" ADD CONSTRAINT "guard_fiscal_years_income_basis_one_o
 ALTER TABLE "fiscal_years" ADD CONSTRAINT "guard_fiscal_years_vat_basis_one_of" CHECK (NOT COALESCE((("vat_basis" IS NOT NULL AND btrim(CAST("vat_basis" AS TEXT), E' \t\n\r\f\v') <> '') AND "vat_basis" NOT IN ('soll', 'ist')), FALSE));
 ALTER TABLE "fiscal_years" ADD CONSTRAINT "guard_fiscal_years_vat_frequency_one_of" CHECK (NOT COALESCE((("vat_frequency" IS NOT NULL AND btrim(CAST("vat_frequency" AS TEXT), E' \t\n\r\f\v') <> '') AND "vat_frequency" NOT IN ('month', 'quarter', 'none')), FALSE));
 ALTER TABLE "fiscal_years" ADD CONSTRAINT "guard_fiscal_years_closed_by_implies" CHECK (NOT COALESCE((COALESCE(("closed_at" IS NOT NULL AND btrim(CAST("closed_at" AS TEXT), E' \t\n\r\f\v') <> ''), FALSE) AND NOT COALESCE(("closed_by" IS NOT NULL AND btrim(CAST("closed_by" AS TEXT), E' \t\n\r\f\v') <> ''), FALSE)), FALSE));
+ALTER TABLE "fiscal_years" ADD CONSTRAINT "guard_fiscal_years_closed_at_implies" CHECK (NOT COALESCE((COALESCE(("closed_by" IS NOT NULL AND btrim(CAST("closed_by" AS TEXT), E' \t\n\r\f\v') <> ''), FALSE) AND NOT COALESCE(("closed_at" IS NOT NULL AND btrim(CAST("closed_at" AS TEXT), E' \t\n\r\f\v') <> ''), FALSE)), FALSE));
+ALTER TABLE "fiscal_years" ADD CONSTRAINT "guard_fiscal_years_year_range" CHECK (NOT COALESCE(("year" IS NOT NULL AND ("year" < 2000 OR "year" > 2100)), FALSE));
 ALTER TABLE "journal_entries" ADD CONSTRAINT "guard_journal_entries_fiscal_year_required" CHECK (NOT COALESCE((NOT ("fiscal_year" IS NOT NULL AND btrim(CAST("fiscal_year" AS TEXT), E' \t\n\r\f\v') <> '')), FALSE));
 ALTER TABLE "journal_entries" ADD CONSTRAINT "guard_journal_entries_entry_no_required" CHECK (NOT COALESCE((NOT ("entry_no" IS NOT NULL AND btrim(CAST("entry_no" AS TEXT), E' \t\n\r\f\v') <> '')), FALSE));
 ALTER TABLE "journal_entries" ADD CONSTRAINT "guard_journal_entries_document_date_required" CHECK (NOT COALESCE((NOT ("document_date" IS NOT NULL AND btrim(CAST("document_date" AS TEXT), E' \t\n\r\f\v') <> '')), FALSE));
@@ -142,6 +145,8 @@ ALTER TABLE "journal_entries" ADD CONSTRAINT "guard_journal_entries_hash_require
 ALTER TABLE "journal_entries" ADD CONSTRAINT "guard_journal_entries_document_date_date" CHECK ("document_date" IS NULL OR "document_date" = '' OR "document_date" ~ '^[0-9]{4}-[01][0-9]-[0-3][0-9]$');
 ALTER TABLE "journal_entries" ADD CONSTRAINT "guard_journal_entries_booking_date_date" CHECK ("booking_date" IS NULL OR "booking_date" = '' OR "booking_date" ~ '^[0-9]{4}-[01][0-9]-[0-3][0-9]$');
 ALTER TABLE "journal_entries" ADD CONSTRAINT "guard_journal_entries_origin_one_of" CHECK (NOT COALESCE((("origin" IS NOT NULL AND btrim(CAST("origin" AS TEXT), E' \t\n\r\f\v') <> '') AND "origin" NOT IN ('auto', 'manual', 'opening')), FALSE));
+ALTER TABLE "journal_entries" ADD CONSTRAINT "guard_journal_entries_fiscal_year_range" CHECK (NOT COALESCE(("fiscal_year" IS NOT NULL AND ("fiscal_year" < 2000 OR "fiscal_year" > 2100)), FALSE));
+ALTER TABLE "journal_entries" ADD CONSTRAINT "guard_journal_entries_entry_no_range" CHECK (NOT COALESCE(("entry_no" IS NOT NULL AND ("entry_no" < 1)), FALSE));
 CREATE FUNCTION "guard_journal_entries_reverses_id_ref_chk"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF (NEW."reverses_id" IS NOT NULL AND btrim(CAST(NEW."reverses_id" AS TEXT), E' \t\n\r\f\v') <> '') AND NOT EXISTS (SELECT 1 FROM "journal_entries" WHERE "id" = NEW."reverses_id") AND NOT EXISTS (SELECT 1 FROM "journal_entries" WHERE "id" = NEW."id" AND "reverses_id" IS NOT DISTINCT FROM NEW."reverses_id") THEN
@@ -177,6 +182,8 @@ ALTER TABLE "journal_lines" ADD CONSTRAINT "guard_journal_lines_amount_cents_req
 ALTER TABLE "journal_lines" ADD CONSTRAINT "guard_journal_lines_vat_date_date" CHECK ("vat_date" IS NULL OR "vat_date" = '' OR "vat_date" ~ '^[0-9]{4}-[01][0-9]-[0-3][0-9]$');
 ALTER TABLE "journal_lines" ADD CONSTRAINT "guard_journal_lines_income_date_date" CHECK ("income_date" IS NULL OR "income_date" = '' OR "income_date" ~ '^[0-9]{4}-[01][0-9]-[0-3][0-9]$');
 ALTER TABLE "journal_lines" ADD CONSTRAINT "guard_journal_lines_tax_kind_one_of" CHECK (NOT COALESCE((("tax_kind" IS NOT NULL AND btrim(CAST("tax_kind" AS TEXT), E' \t\n\r\f\v') <> '') AND "tax_kind" NOT IN ('tax', 'input', 'base_only')), FALSE));
+ALTER TABLE "journal_lines" ADD CONSTRAINT "guard_journal_lines_tax_key_one_of" CHECK (NOT COALESCE((("tax_key" IS NOT NULL AND btrim(CAST("tax_key" AS TEXT), E' \t\n\r\f\v') <> '') AND "tax_key" NOT IN ('EU_SVC', 'KU', 'NONE', 'RC_3C_SVC', 'RC_EU_SVC', 'S19', 'S7', 'SX', 'VST')), FALSE));
+ALTER TABLE "journal_lines" ADD CONSTRAINT "guard_journal_lines_line_no_range" CHECK (NOT COALESCE(("line_no" IS NOT NULL AND ("line_no" < 1)), FALSE));
 CREATE FUNCTION "guard_journal_lines_entry_id_ref_chk"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF (NEW."entry_id" IS NOT NULL AND btrim(CAST(NEW."entry_id" AS TEXT), E' \t\n\r\f\v') <> '') AND NOT EXISTS (SELECT 1 FROM "journal_entries" WHERE "id" = NEW."entry_id") AND NOT EXISTS (SELECT 1 FROM "journal_lines" WHERE "id" = NEW."id" AND "entry_id" IS NOT DISTINCT FROM NEW."entry_id") THEN
@@ -198,7 +205,7 @@ END;
 $$;
 CREATE TRIGGER "guard_journal_lines_entry_id_ref_del" BEFORE DELETE ON "journal_entries" FOR EACH ROW EXECUTE FUNCTION "guard_journal_lines_entry_id_ref_use"();
 ALTER TABLE "journal_lines" ADD CONSTRAINT "guard_journal_lines_tax_kind_key_implies" CHECK (NOT COALESCE((COALESCE(("tax_kind" IS NOT NULL AND btrim(CAST("tax_kind" AS TEXT), E' \t\n\r\f\v') <> ''), FALSE) AND NOT COALESCE(("tax_key" IS NOT NULL AND btrim(CAST("tax_key" AS TEXT), E' \t\n\r\f\v') <> ''), FALSE)), FALSE));
-ALTER TABLE "journal_lines" ADD CONSTRAINT "guard_journal_lines_tax_key_vat_date_implies" CHECK (NOT COALESCE((COALESCE("tax_key" IN ('S19', 'S7', 'SX', 'KU', 'EU_SVC', 'VST', 'RC_EU_SVC', 'RC_3C_SVC'), FALSE) AND NOT COALESCE(("vat_date" IS NOT NULL AND btrim(CAST("vat_date" AS TEXT), E' \t\n\r\f\v') <> ''), FALSE)), FALSE));
+ALTER TABLE "journal_lines" ADD CONSTRAINT "guard_journal_lines_tax_key_vat_date_implies" CHECK (NOT COALESCE((COALESCE("tax_key" IN ('EU_SVC', 'KU', 'RC_3C_SVC', 'RC_EU_SVC', 'S19', 'S7', 'SX', 'VST'), FALSE) AND NOT COALESCE(("vat_date" IS NOT NULL AND btrim(CAST("vat_date" AS TEXT), E' \t\n\r\f\v') <> ''), FALSE)), FALSE));
 CREATE FUNCTION "guard_journal_lines_append_only_fn"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   RAISE EXCEPTION 'permita38:state.append_only' USING ERRCODE = '23000';
@@ -258,6 +265,7 @@ END;
 $$;
 CREATE TRIGGER "guard_payments_reverses_id_ref_del" BEFORE DELETE ON "payments" FOR EACH ROW EXECUTE FUNCTION "guard_payments_reverses_id_ref_use"();
 ALTER TABLE "payments" ADD CONSTRAINT "guard_payments_reversal_reverses_implies" CHECK (NOT COALESCE((COALESCE("kind" = 'reversal', FALSE) AND NOT COALESCE(("reverses_id" IS NOT NULL AND btrim(CAST("reverses_id" AS TEXT), E' \t\n\r\f\v') <> ''), FALSE)), FALSE));
+ALTER TABLE "payments" ADD CONSTRAINT "guard_payments_reverses_reversal_implies" CHECK (NOT COALESCE((COALESCE(("reverses_id" IS NOT NULL AND btrim(CAST("reverses_id" AS TEXT), E' \t\n\r\f\v') <> ''), FALSE) AND NOT COALESCE("kind" = 'reversal', FALSE)), FALSE));
 CREATE FUNCTION "guard_payments_append_only_fn"() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   RAISE EXCEPTION 'permita38:state.append_only' USING ERRCODE = '23000';

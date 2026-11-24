@@ -230,3 +230,58 @@ def test_an_invoice_with_payments_and_an_entry_with_lines_cannot_be_deleted(db):
     for table, pk in (("invoices", "inv1"), ("journal_entries", "e1")):
         with pytest.raises(sqlite3.IntegrityError):
             db.execute(f'DELETE FROM "{table}" WHERE "id" = ?', [pk])
+
+
+def test_tax_key_vocabulary_matches_the_rule_data(db):
+    from permita38.core.vat_rules import TAX_KEYS
+
+    seed(db)
+    line = {**LINE, "id": "x", "line_no": 2}
+    refused(db, "journal_lines", {**line, "tax_key": "S21"}, r"^permita38:vocab\.unknown$")
+    assert len(TAX_KEYS) == 9 and "NONE" in TAX_KEYS
+    for n, key in enumerate(sorted(TAX_KEYS - {"NONE"}), start=3):  # every real key is accepted with a VAT date
+        row = {**line, "id": f"k{n}", "line_no": n, "tax_key": key, "tax_kind": "tax", "vat_date": "2026-01-05"}
+        insert(db, "journal_lines", row)
+    insert(db, "journal_lines", {**line, "id": "none", "line_no": 20, "tax_key": "NONE", "tax_kind": "base_only"})
+
+
+def test_reverses_id_needs_kind_reversal(db):
+    seed(db)
+    refused(db, "payments", {**PAYMENT, "id": "x", "reverses_id": "p1"}, IMPLIES_MSG)  # kind payment
+    refused(db, "payments", {**PAYMENT, "id": "x", "reverses_id": "p1", "kind": "refund"}, IMPLIES_MSG)
+    dangling = {**PAYMENT, "id": "x", "kind": "reversal", "reverses_id": "nope", "amount_cents": -1}
+    refused(db, "payments", dangling, DANGLING_MSG)
+
+
+def test_closed_by_needs_closed_at(db):
+    seed(db)
+    refused(db, "fiscal_years", {**FISCAL_YEAR, "id": "fy3", "year": 2028, "closed_by": "u1"}, IMPLIES_MSG)
+
+
+def test_period_lock_reason_vocabulary(db):
+    seed(db)
+    refused(db, "period_locks", {**LOCK, "id": "x", "month": 2, "reason": "other"}, "period_locks_reason_vocab")
+    refused(db, "period_locks", {**LOCK, "id": "x", "month": 2, "reason": "Manual"}, "period_locks_reason_vocab")
+    insert(db, "period_locks", {**LOCK, "id": "k2", "month": 2, "reason": "year_close"})
+    insert(db, "period_locks", {**LOCK, "id": "k3", "month": 3, "reason": "vat_return:abc"})
+
+
+def test_numbers_and_years_are_in_range(db):
+    seed(db)
+    bounds = r"^permita38:range\.bounds$"
+    refused(db, "journal_entries", {**ENTRY, "id": "x", "entry_no": 0, "event_key": "k"}, bounds)
+    refused(db, "journal_lines", {**LINE, "id": "x", "line_no": 0}, bounds)
+    for year in (1999, 2101):
+        refused(db, "fiscal_years", {**FISCAL_YEAR, "id": "x", "year": year}, bounds)
+        refused(db, "journal_entries", {**ENTRY, "id": "x", "fiscal_year": year, "event_key": "k"}, bounds)
+    insert(db, "fiscal_years", {**FISCAL_YEAR, "id": "fy2000", "year": 2000})
+    insert(db, "fiscal_years", {**FISCAL_YEAR, "id": "fy2100", "year": 2100})
+
+
+def test_every_date_column_is_format_checked(db):
+    seed(db)
+    bad, msg = "05.01.2026", r"^permita38:format\.date$"
+    refused(db, "journal_entries", {**ENTRY, "id": "x", "event_key": "k", "booking_date": bad}, msg)
+    refused(db, "journal_lines", {**LINE, "id": "x", "line_no": 2, "vat_date": bad}, msg)
+    refused(db, "journal_lines", {**LINE, "id": "x", "line_no": 2, "income_date": bad}, msg)
+    refused(db, "fiscal_years", {**FISCAL_YEAR, "id": "x", "year": 2027, "vat_regular_from": bad}, msg)
