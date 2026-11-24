@@ -33,6 +33,7 @@ from permita38.core.charts import Chart, ChartMissing, ChartName, Role, chart_fo
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 from permita38.core.repository.base import JournalConflict, Record
+from permita38.core.service.locks import first_unlocked_from
 from permita38.core.vat_rules import TAX_KEYS, TaxKind
 
 ZERO_HASH = "0" * 64
@@ -76,6 +77,7 @@ class PostLine:
     income_date: date | None = None
     open_item_id: str | None = None
     treatment: str | None = None
+    drift: bool = False  # an allowed drift line (accounting 11): its vat_date lies in a locked month; not hashed
 
 
 @dataclass(frozen=True)
@@ -142,11 +144,8 @@ class JournalService:
         lock whole months in order, so the first unlocked month follows the latest locked one; without locks: the
         document date. Closing-date exception: when that date falls into a later fiscal year while the document's
         own year is not closed, the entry is booked on 31 December of the document's year."""
-        locks = self.store.list("period_locks")
-        booking = document_date
-        if locks:
-            year, month = max((int(r["year"]), int(r["month"])) for r in locks)
-            booking = max(document_date, date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1))
+        first_open = first_unlocked_from(self.store.list("period_locks"))
+        booking = document_date if first_open is None else max(document_date, first_open)
         own = self.store.find("fiscal_years", year=document_date.year)
         own_closed = bool(own) and own[0].get("closed_at") is not None
         if booking.year > document_date.year and not own_closed:
@@ -251,6 +250,38 @@ class JournalService:
             return False
         return self._content(existing, existing["lines"]) == self._content(entry, resolved)
 
+    def _check_manual_vat_dates(self, source: JournalSource, lines: Sequence[PostLine]) -> None:
+        """A manual entry never drifts: a vat_date in a locked month is refused (accounting 11)."""
+        if source.origin != "manual":
+            return
+        first_open = first_unlocked_from(self.store.list("period_locks"))
+        for i, ln in enumerate(lines, start=1):
+            if ln.drift:
+                raise ServiceError(422, f"Line {i}: a manual entry cannot carry VAT drift")
+            if first_open is not None and ln.vat_date is not None and ln.vat_date < first_open:
+                raise ServiceError(422, f"Line {i}: vat_date {ln.vat_date.isoformat()} lies in a locked month")
+
+    @staticmethod
+    def _drift_warnings(lines: Sequence[PostLine]) -> list[str]:
+        return [
+            f"Line {i}: vat_date {ln.vat_date.isoformat() if ln.vat_date else '-'} lies in a locked month (drift)"
+            for i, ln in enumerate(lines, start=1)
+            if ln.drift
+        ]
+
+    def check_reversible(self, entry: Mapping[str, Any] | models.JournalEntry) -> None:
+        """409 when the entry's booking date lies in a locked month (or a closed year): corrections are new
+        entries. This holds for a closing-date entry too once its December is locked."""
+        raw = entry.get("booking_date") if isinstance(entry, Mapping) else entry.booking_date
+        booking = date.fromisoformat(str(raw))
+        first_open = first_unlocked_from(self.store.list("period_locks"))
+        rows = self.store.find("fiscal_years", year=booking.year)
+        closed = bool(rows) and rows[0].get("closed_at") is not None
+        if closed or (first_open is not None and booking < first_open):
+            raise ServiceError(
+                409, f"The booking date {booking.isoformat()} lies in a locked period; book a correction"
+            )
+
     # ---------- write
     def post(
         self,
@@ -325,7 +356,11 @@ class JournalService:
                 raise ServiceError(409, f"Fiscal year {year} is not open")
             if rows[0].get("closed_at") is not None:
                 raise ServiceError(409, f"Fiscal year {year} is closed")
+            self._check_manual_vat_dates(source, lines)
             resolved = self._resolve(self._chart(rows[0], year), lines)
+            warnings = self._drift_warnings(lines)
+            if warnings:
+                entry["warnings"] = warnings  # unknown field: kept in the row's extra JSON, not hashed
             entry.update(
                 fiscal_year=year,
                 booking_date=booking.isoformat(),

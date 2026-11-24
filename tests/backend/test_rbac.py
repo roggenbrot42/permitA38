@@ -479,6 +479,8 @@ IMPLEMENTED = {
     ("GET", "/api/accounting/years"),
     ("POST", "/api/accounting/years"),
     ("GET", "/api/accounting/years/{year}"),
+    ("GET", "/api/accounting/locks"),
+    ("POST", "/api/accounting/locks"),
 }
 
 

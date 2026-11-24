@@ -647,3 +647,125 @@ def test_lost_race_on_entry_no_is_a_409_retry_not_a_500(svc, repo, monkeypatch):
             post(svc, key="b")
     assert (err.value.status, err.value.message) == (409, "concurrent write, retry")
     assert post(svc, key="b").entry_no == 2  # the retry works
+
+
+# ---------------------------------------------------------------- E7: drift, manual VAT dates, reversal, A15/A16
+ORACLE = json.loads((Path(__file__).parent / "fixtures" / "accounting_oracle.json").read_text())
+CASES = {c["id"]: c for c in ORACLE["journal_cases"]}
+
+
+def _fixture_lines(entry: dict, vat_kind: str, day: date, first_open: date) -> tuple[list[PostLine], list[dict]]:
+    """The PostLines of one fixture entry; every taxed line's vat_date comes from vat_date_for, the fixture's
+    value is returned separately for the comparison."""
+    from permita38.core.service.locks import vat_date_for
+
+    lines, expected = [], []
+    for role, cents, opt in ((ln + [{}])[:3] for ln in entry["lines"]):
+        vat_date = drift = None
+        if opt.get("tax_key"):
+            vat_date, drift = vat_date_for(vat_kind, day, first_open)
+        lines.append(
+            PostLine(
+                role=role, amount_cents=cents, tax_key=opt.get("tax_key"), tax_kind=opt.get("tax_kind"),
+                tax_rate="19" if opt.get("tax_key") in ("S19", "VST") else None,
+                tax_base_cents=opt.get("tax_base"), vat_date=vat_date,
+                income_date=date.fromisoformat(opt["income_date"]) if opt.get("income_date") else None,
+                drift=bool(drift),
+            )
+        )  # fmt: skip
+        expected.append(
+            {"role": role, "amount": cents, "vat_date": opt.get("vat_date"), "income": opt.get("income_date")}
+        )
+    return lines, expected
+
+
+def _stored(e) -> list[dict]:
+    return [
+        {"role": ln.role, "amount": int(ln.amount * 100), "vat_date": ln.vat_date, "income": ln.income_date}
+        for ln in e.lines
+    ]
+
+
+def test_oracle_a15_late_bill_after_lock(svc, repo):
+    case = CASES["A15-late-bill-after-lock"]
+    for ym in case["locked_months"]:
+        lock(repo, int(ym[:4]), int(ym[5:]))
+    exp = case["entries"][0]
+    day = date.fromisoformat(case["events"][0]["date"])
+    lines, expected = _fixture_lines(exp, "input_vat", day, date(2026, 2, 1))
+    e = svc.post("expense:x15:bill:r0", day, "Bill", JournalSource(event="expense_bill", created_by="u1x000"), lines)
+    assert (e.document_date, e.booking_date) == (exp["document_date"], exp["booking_date"])
+    assert _stored(e) == expected
+    assert e.warnings == []  # input VAT never drifts
+
+
+def test_oracle_a16_late_ist_payment_after_lock(svc, repo):
+    case = CASES["A16-late-ist-payment-after-lock"]
+    first, second = case["entries"]
+    issue_lines = [
+        PostLine(role=r, amount_cents=c, income_date=date.fromisoformat(o["income_date"]) if o.get("income_date") else None)
+        for r, c, o in ((ln + [{}])[:3] for ln in first["lines"])
+    ]  # fmt: skip
+    src = JournalSource(event="issue", created_by="u1x000")
+    a = svc.post("issue:inv16", date(2026, 1, 5), "Invoice", src, issue_lines)
+    assert a.booking_date == first["booking_date"]
+    lock(repo, 2026, 1)  # the fixture's "lock" event
+    day = date.fromisoformat(case["events"][2]["date"])
+    lines, expected = _fixture_lines(second, "cash_event", day, date(2026, 2, 1))
+    b = svc.post("payment:p16", day, "Payment", JournalSource(event="payment", created_by="u1x000"), lines)
+    assert (b.document_date, b.booking_date) == (second["document_date"], second["booking_date"])
+    assert _stored(b) == expected  # vat_date stays 2026-01-30 (drift case 2)
+    assert len(b.warnings) == 1 and "Line 4" in b.warnings[0] and "2026-01-30" in b.warnings[0]
+    assert case["drift"] == {"2026-01": 19000}
+    assert svc.get_by_event_key("payment:p16").warnings == b.warnings  # kept in the row, not hashed
+    assert svc.verify_chain(2026) == []
+
+
+def test_drift_flag_is_not_hashed(svc, repo):
+    plain = post(svc, key="a")
+    flagged_lines = sale()
+    flagged_lines[2] = replace(flagged_lines[2], drift=True)
+    flagged = post(svc, key="b", lines=flagged_lines)
+    assert plain.warnings == [] and len(flagged.warnings) == 1
+    assert svc.verify_chain(2026) == []
+
+
+def test_manual_entry_with_vat_date_in_a_locked_month_is_422(svc, repo):
+    lock(repo, 2026, 1)
+    manual = JournalSource(event="manual", origin="manual", created_by="u1x000")
+    with pytest.raises(ServiceError) as err:
+        svc.post("manual:1", date(2026, 2, 3), "m", manual, sale())  # vat_date 2026-01-15
+    assert err.value.status == 422 and repo.list("journal_entries") == []
+    ok = [replace(ln, vat_date=date(2026, 2, 3)) if ln.vat_date else ln for ln in sale()]
+    assert svc.post("manual:2", date(2026, 2, 3), "m", manual, ok).booking_date == "2026-02-03"
+    drifting = [replace(ln, drift=True) if ln.vat_date else ln for ln in ok]
+    with pytest.raises(ServiceError) as err:
+        svc.post("manual:3", date(2026, 2, 3), "m", manual, drifting)
+    assert err.value.status == 422
+
+
+def test_check_reversible_refuses_a_locked_booking_date(svc, repo):
+    early = post(svc, key="e", day=date(2026, 1, 15))
+    late = post(svc, key="l", day=date(2026, 2, 15))
+    svc.check_reversible(early)  # nothing locked
+    lock(repo, 2026, 1)
+    with pytest.raises(ServiceError) as err:
+        svc.check_reversible(early)
+    assert err.value.status == 409
+    svc.check_reversible(late)
+    svc.check_reversible({"booking_date": "2026-02-15"})
+    with pytest.raises(ServiceError) as err:
+        svc.check_reversible({"booking_date": "2026-01-31"})
+    assert err.value.status == 409
+
+
+def test_closing_date_entry_is_reversible_until_december_is_locked(svc, repo):
+    repo.save("fiscal_years", fiscal_year(2027))
+    for m in range(1, 12):
+        lock(repo, 2026, m)
+    e = post(svc, key="c", day=date(2026, 12, 20))
+    svc.check_reversible(e)
+    lock(repo, 2026, 12)
+    with pytest.raises(ServiceError) as err:
+        svc.check_reversible(e)  # the closing-date exception does not make a locked month reversible
+    assert err.value.status == 409
