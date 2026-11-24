@@ -76,7 +76,7 @@ pretty = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["permita38.core.accounting.*", "permita38.core.vat.*", "permita38.core.vat_rules.*", "permita38.core.charts.*", "permita38.core.service.fiscal_years", "permita38.core.service.journal", "permita38.core.service.locks", "permita38.core.service.postings", "permita38.core.service.invoice_state", "permita38.core.service.payments"]
+module = ["permita38.core.accounting.*", "permita38.core.vat.*", "permita38.core.vat_rules.*", "permita38.core.charts.*", "permita38.core.service.fiscal_years", "permita38.core.service.journal", "permita38.core.service.locks", "permita38.core.service.postings", "permita38.core.service.invoice_state", "permita38.core.service.payments", "permita38.core.service.trip_postings"]
 # mypy has no per-module `strict`; these are the flags `--strict` enables
 strict_equality = true
 disallow_any_generics = true

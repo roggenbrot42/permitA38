@@ -18,11 +18,12 @@ from permita38.core.rights import Scope
 from permita38.core.trip_rates import RateTableMissing, load_checklist, load_rates
 
 from .project_customer import check_project_customer
+from .trip_postings import TripPostingService
 
 #: figures computed by the server: never taken from the request
 _COMPUTED = ("allowance_total", "mileage_km", "mileage_total", "rules_version", "days")
 #: response-only fields: ignored when a client sends them
-_RESPONSE_ONLY = ("bills", "checklist", "mileage_rate", "items_expected_total", "items_actual_total")
+_RESPONSE_ONLY = ("post_rev", "bills", "checklist", "mileage_rate", "items_expected_total", "items_actual_total")
 #: checklist lines that a user may mark "Not needed"; the allowance and the cost centre cannot be skipped
 _SKIPPABLE = ("accommodation", "transportation", "food", "material")
 
@@ -112,8 +113,9 @@ def checklist(trip: dict, bills: list[dict]) -> list[dict[str, Any]]:
 
 
 class TripService:
-    def __init__(self, store: Repository):
+    def __init__(self, store: Repository, postings: TripPostingService | None = None):
         self.store = store
+        self.postings = postings or TripPostingService(store)
 
     # -- visibility -------------------------------------------------------------------------------------------
     @staticmethod
@@ -210,6 +212,8 @@ class TripService:
         data.setdefault("status", "draft")
         if old is not None:
             data["created"] = old.get("created")
+            if old.get("post_rev") is not None:  # server-owned: kept from the stored row
+                data["post_rev"] = old["post_rev"]
         return {k: v for k, v in data.items() if v is not None}
 
     @staticmethod
@@ -227,7 +231,9 @@ class TripService:
             raise ServiceError(403, "Forbidden")
         data = self._prepare(body, me["id"], None)
         self._guard_final(data, [], force)
-        return self._view(self.store.save("trips", data), [])
+        with self.store.transaction():
+            saved = self.postings.sync(dict(self.store.save("trips", data)), me)
+        return self._view(saved, [])
 
     def update(self, me: dict, rid: str, body: dict, force: bool = False) -> dict:
         old = self._get(me, rid, "write")
@@ -240,7 +246,9 @@ class TripService:
         if any(bill.get("trip_item_id") in removed for bill in bills):
             raise ServiceError(422, "Item has bills")
         self._guard_final(data, bills, force)
-        return self._view(self.store.save("trips", {**data, "id": rid}), bills)
+        with self.store.transaction():
+            saved = self.postings.sync(dict(self.store.save("trips", {**data, "id": rid})), me)
+        return self._view(saved, bills)
 
     def delete(self, me: dict, rid: str) -> None:
         old = self._get(me, rid, "write")
@@ -258,7 +266,9 @@ class TripService:
         old = self._get(me, rid, "write")
         if old.get("status") != "final":
             raise ServiceError(409, "Only a final trip can be reopened")
-        return self._view(self.store.save("trips", {**old, "status": "draft"}))
+        with self.store.transaction():
+            saved = self.postings.sync(dict(self.store.save("trips", {**old, "status": "draft"})), me)
+        return self._view(saved)
 
     # -- statement ------------------------------------------------------------------------------------------------------
     def statement(self, me: dict, rid: str) -> tuple[bytes, str]:
