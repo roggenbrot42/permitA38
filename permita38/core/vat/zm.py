@@ -4,6 +4,7 @@ Money is integer cents; the whole-euro amounts are rounded by the rules data ``b
 ``truncate_toward_zero`` is defined; an unknown mode raises ``ValueError``).
 """
 
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Literal
@@ -11,7 +12,7 @@ from typing import Literal
 from permita38.core.accounting.types import Line
 from permita38.core.vat_rules import vat_rules_for
 
-__all__ = ["ZmLine", "kz21_by_month", "zm_lines"]
+__all__ = ["ZmLine", "kz21_by_month", "normalize_vat_id", "zm_lines"]
 
 _EU_SVC = "EU_SVC"
 
@@ -25,6 +26,13 @@ class ZmLine:
     amount: int
     kind: Literal["S"]
     source: tuple[Line, ...]
+
+
+def normalize_vat_id(vat_id: str) -> str:
+    """Canonical VAT id: spaces, dots and dashes removed, ASCII letters upper-cased, a ``GR`` prefix becomes ``EL``."""
+    vid = re.sub(r"[ .\-]", "", vat_id)
+    vid = "".join(c.upper() if "a" <= c <= "z" else c for c in vid)
+    return "EL" + vid[2:] if vid.startswith("GR") else vid
 
 
 def _euros(cents: int, year: int) -> int:
@@ -43,10 +51,10 @@ def zm_lines(
     vat_id_of: Callable[[Line], str],
     corrected: bool = False,
 ) -> list[ZmLine]:
-    """Group the ``EU_SVC`` base lines whose ``vat_date`` lies in the quarter by customer VAT id.
+    """Group the ``EU_SVC`` base lines whose ``vat_date`` lies in the quarter by normalised customer VAT id.
 
     Amounts are whole euros per the rules' ``base_rounding`` (``truncate_toward_zero``; others raise ``ValueError``).
-    A total that rounds to 0 is omitted unless ``corrected``. An empty VAT id raises ``ValueError``.
+    Cents are summed per normalised id first and rounded once. A total that rounds to 0 is omitted unless ``corrected``. An empty VAT id raises ``ValueError``.
     Result sorted by VAT id.
     """
     if not 1 <= quarter <= 4:
@@ -61,7 +69,7 @@ def zm_lines(
             continue
         if d.year != year or not first_month <= d.month <= first_month + 2:
             continue
-        vid = vat_id_of(ln)
+        vid = normalize_vat_id(vat_id_of(ln))
         if not vid:
             raise ValueError("missing customer VAT id for an EU_SVC line")
         sums[vid] = sums.get(vid, 0) + int(base)

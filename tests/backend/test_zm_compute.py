@@ -9,7 +9,7 @@ import pytest
 
 from permita38.core.accounting.types import Cents, Line, Role, TaxKey
 from permita38.core.vat.deadlines import zm_due
-from permita38.core.vat.zm import kz21_by_month, zm_lines
+from permita38.core.vat.zm import kz21_by_month, normalize_vat_id, zm_lines
 
 ORACLE = json.loads((Path(__file__).parent / "fixtures" / "accounting_oracle.json").read_text(encoding="utf-8"))
 CASES: dict[str, Any] = {c["id"]: c for c in ORACLE["zm_cases"]}
@@ -162,3 +162,57 @@ def test_unknown_rounding_mode_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     ln = _line({"customer": "cust_A", "base": 10000, "vat_date": "2026-02-01"})
     with pytest.raises(ValueError, match="base_rounding"):
         zm_lines([ln], 2026, 1, vat_id_of=_vid)
+
+
+def _ids_lines(ids_cents: list[tuple[str, int]]) -> list[Line]:
+    return [
+        Line(
+            role=Role(vid),
+            amount_cents=Cents(0),
+            tax_key=TaxKey("EU_SVC"),
+            tax_kind="base_only",
+            tax_base_cents=Cents(c),
+            vat_date=date(2026, 2, 1),
+        )
+        for vid, c in ids_cents
+    ]
+
+
+def test_same_customer_spellings_sum_before_truncation() -> None:
+    # 101 + 408809 - 89 - 5 - 66789 = 342027 cents -> 3420 EUR (truncated once)
+    lines = _ids_lines(
+        [
+            ("NL4C3B342B", 101),
+            ("nl4c3b 342b", 408809),
+            ("NL-4C3B342B", -89),
+            ("NL.4C3B342B", -5),
+            ("nl4c3b342b", -66789),
+        ]
+    )
+    res = zm_lines(lines, 2026, 1, vat_id_of=_vid)
+    assert [(z.vat_id, z.country, z.amount, len(z.source)) for z in res] == [("NL4C3B342B", "NL", 3420, 5)]
+
+
+def test_two_sixty_cent_lines_make_one_euro() -> None:
+    res = zm_lines(_ids_lines([("ATU00000001", 60), ("atu 00000001", 60)]), 2026, 1, vat_id_of=_vid)
+    assert [(z.vat_id, z.amount) for z in res] == [("ATU00000001", 1)]
+
+
+def test_negative_total_from_several_lines() -> None:
+    # -60 - 60 - 95 = -215 cents -> -2 EUR (toward zero)
+    res = zm_lines(
+        _ids_lines([("ATU00000001", -60), ("ATU00000001", -60), ("atu00000001", -95)]), 2026, 1, vat_id_of=_vid
+    )
+    assert [(z.vat_id, z.amount) for z in res] == [("ATU00000001", -2)]
+
+
+def test_greece_gr_prefix_becomes_el() -> None:
+    res = zm_lines(_ids_lines([("GR123456789", 10000), ("el 123456789", 5000)]), 2026, 1, vat_id_of=_vid)
+    assert [(z.vat_id, z.country, z.amount) for z in res] == [("EL123456789", "EL", 150)]
+
+
+def test_normalize_vat_id() -> None:
+    assert normalize_vat_id("ATU12345678") == "ATU12345678"
+    assert normalize_vat_id(" fr-12.34 5") == "FR12345"
+    assert normalize_vat_id("gr123") == "EL123"
+    assert normalize_vat_id("ß1ı") == "ß1ı"  # only ASCII letters are upper-cased
