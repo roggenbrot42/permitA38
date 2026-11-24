@@ -11,7 +11,7 @@ from permita38.core.errors import ServiceError
 from permita38.core.service.journal import JournalService
 from permita38.core.service.manual_entries import ManualEntryService
 
-from .test_journal_service import BANK, FIXTURE, REVENUE, VAT_OUT, lock, post, repo, svc  # noqa: F401  (fixtures, helpers)
+from .test_journal_service import BANK, FIXTURE, REVENUE, VAT_OUT, fiscal_year, lock, post, repo, svc  # noqa: F401  (fixtures, helpers)
 from .test_rbac import clients  # noqa: F401  (fixture)
 
 USER = {"id": "u1x000", "role": "boss"}
@@ -121,12 +121,48 @@ def test_reverse_mirrors_lines_and_uses_the_rev_key(manual, repo):
     assert JournalService(repo).verify_chain(2026) == []
 
 
-def test_reverse_with_date_and_text_books_on_the_first_open_day(manual, repo):
-    orig = manual.post(entry_body(), USER)
+def test_reverse_with_date_and_text_never_books_before_the_original(manual, repo):
+    orig = manual.post(entry_body(), USER)  # booked 2026-03-10
     lock(repo, 2026, 1)
     lock(repo, 2026, 2)  # the original (03-10) stays reversible
     rev = manual.reverse(orig.id, "2026-01-05", "Wrong account", USER)
-    assert (rev.text, rev.document_date, rev.booking_date) == ("Wrong account", "2026-01-05", "2026-03-01")
+    assert (rev.text, rev.document_date, rev.booking_date) == ("Wrong account", "2026-03-10", "2026-03-10")
+
+
+def test_reverse_with_a_later_date_books_on_that_date(manual):
+    orig = manual.post(entry_body(), USER)
+    rev = manual.reverse(orig.id, "2026-04-02", None, USER)
+    assert (rev.document_date, rev.booking_date) == ("2026-04-02", "2026-04-02")
+
+
+def test_reverse_moves_a_locked_vat_date_to_the_booking_date(manual, repo):
+    lock(repo, 2026, 1)
+    orig = manual.post(tax_body(vat_date="2026-02-10"), USER)
+    lock(repo, 2026, 2)
+    rev = manual.reverse(orig.id, None, None, USER)
+    assert rev.booking_date == "2026-03-10"
+    assert rev.lines[2].vat_date == "2026-03-10"
+    stored = repo.get_journal_entry_by_event_key(orig.event_key + ":rev")
+    assert stored is not None and not stored.get("warnings")  # a correction, not drift
+
+
+def test_reverse_keeps_an_open_vat_date(manual, repo):
+    lock(repo, 2026, 1)
+    orig = manual.post(tax_body(vat_date="2026-03-05"), USER)
+    lock(repo, 2026, 2)
+    assert manual.reverse(orig.id, None, None, USER).lines[2].vat_date == "2026-03-05"
+
+
+def test_reverse_keeps_income_date_across_the_year_boundary_while_the_year_is_open(manual, repo):
+    repo.save("fiscal_years", fiscal_year(2027))
+    lines = [
+        {"account": BANK, "amount": "10.00"},
+        {"account": REVENUE, "amount": "-10.00", "income_date": "2026-12-10"},
+    ]
+    orig = manual.post(entry_body(date="2026-12-10", lines=lines), USER)
+    rev = manual.reverse(orig.id, "2027-01-05", None, USER)
+    assert (rev.fiscal_year, rev.booking_date) == (2027, "2027-01-05")
+    assert [ln.income_date for ln in rev.lines] == [None, "2026-12-10"]
 
 
 def test_reverse_twice_and_reversing_a_reversal_are_409(manual):
@@ -157,11 +193,35 @@ def test_automatic_entries_are_not_reversed_here_and_unknown_is_404(manual, svc)
     assert err.value.status == 404
 
 
-def test_templates_are_service_data(manual):
-    assert [t["key"] for t in manual.templates()] == [
+def test_templates_are_service_data_with_preset_lines(manual):
+    templates = manual.templates()
+    assert [t.key for t in templates] == [
         "opening_balance", "private_withdrawal", "private_deposit", "vat_payment", "income_taxes", "depreciation",
         "bank_fees",
     ]  # fmt: skip
+    by_key = {t.key: t for t in templates}
+    assert [(ln.role, ln.side, ln.amount) for ln in by_key["private_withdrawal"].lines] == [
+        ("private_withdrawal", "debit", "typed"),
+        ("bank", "credit", "balancing"),
+    ]
+    assert [(ln.role, ln.side) for ln in by_key["depreciation"].lines] == [("expense_other", "debit"), (None, "credit")]
+
+
+def test_entry_templates_route(clients):
+    for role, c in clients.items():
+        r = c.get("/api/accounting/entry-templates")
+        if role == "employee":
+            assert r.status_code == 403
+        else:
+            assert r.status_code == 200
+            assert r.json()[1] == {
+                "key": "private_withdrawal",
+                "label": "Private withdrawal",
+                "lines": [
+                    {"role": "private_withdrawal", "side": "debit", "amount": "typed"},
+                    {"role": "bank", "side": "credit", "amount": "balancing"},
+                ],
+            }
 
 
 # ------------------------------------------------------------------ API

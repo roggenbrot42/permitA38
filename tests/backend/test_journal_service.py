@@ -783,3 +783,28 @@ def test_closing_date_entry_of_an_open_year_is_reversible_before_december_is_loc
     for m in range(1, 12):
         lock(repo, 2026, m)
     svc.check_reversible({"booking_date": "2026-12-31"})
+
+
+# ---------------------------------------------------------------- closed-year income_date rule (accounting 11, 14.5)
+def _payment(income: date) -> list[PostLine]:
+    return [
+        PostLine(role="bank", amount_cents=100),
+        PostLine(role="revenue_s19", amount_cents=-100, income_date=income),
+    ]
+
+
+def test_income_date_of_a_closed_year_becomes_the_booking_date_under_accrual(svc, repo):
+    repo.save("fiscal_years", fiscal_year(2027, income_basis="accrual"))
+    year = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**year, "closed_at": 5, "closed_by": "u1x000", "income_basis": "accrual"})
+    e = post(svc, key="late-pay", day=date(2026, 11, 3), lines=_payment(date(2026, 11, 3)))
+    assert (e.fiscal_year, e.booking_date) == (2027, "2027-01-01")
+    assert [ln.income_date for ln in e.lines] == [None, "2027-01-01"]
+    assert post(svc, key="late-pay", day=date(2026, 11, 3), lines=_payment(date(2026, 11, 3))).id == e.id  # replay
+
+
+def test_income_date_mismatch_in_an_open_year_is_still_422_under_accrual(svc, repo):
+    year = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**year, "income_basis": "accrual"})  # 2025 stays open
+    err = err_of(svc, lines=_payment(date(2025, 12, 31)))
+    assert err.status == 422 and "income_date" in err.message

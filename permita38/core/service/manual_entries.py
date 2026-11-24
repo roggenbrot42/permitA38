@@ -9,27 +9,58 @@ invoices, payments, credit notes, expenses and trips are corrected through their
 import uuid
 from collections.abc import Mapping
 from datetime import date
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel
 
 from permita38.core import models
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service.journal import MAX_TEXT, JournalService, JournalSource, PostLine
+from permita38.core.service.locks import first_unlocked_from
 
 EVENT = "manual_entry"
 REVERSAL_EVENT = "manual_reversal"
 REVERSAL_SUFFIX = ":rev"
 
-# Templates named by accounting.md 9.8 (service data; no route in the contract yet). Lines are filled by the user.
-TEMPLATES: tuple[Mapping[str, str], ...] = (
-    {"key": "opening_balance", "label": "Opening balance"},
-    {"key": "private_withdrawal", "label": "Private withdrawal"},
-    {"key": "private_deposit", "label": "Private deposit"},
-    {"key": "vat_payment", "label": "VAT payment"},
-    {"key": "income_taxes", "label": "Income-related taxes (9.7)"},
-    {"key": "depreciation", "label": "Depreciation (AfA, amount typed by the user)"},
-    {"key": "bank_fees", "label": "Bank fees"},
+
+class TemplateLine(BaseModel):
+    """A preset line: the chart role (``None``: the user picks the account), the side and where the amount comes from
+    (``typed`` by the user, or ``balancing`` = whatever balances the entry)."""
+
+    role: str | None = None
+    side: Literal["debit", "credit"]
+    amount: Literal["typed", "balancing"]
+
+
+class EntryTemplate(BaseModel):
+    key: str
+    label: str
+    lines: list[TemplateLine]
+
+
+def _template(key: str, label: str, debit: str | None, credit: str | None) -> EntryTemplate:
+    """The user types the amount on the debit side; the credit side balances. ``None`` = the user picks the account."""
+    return EntryTemplate(
+        key=key,
+        label=label,
+        lines=[
+            TemplateLine(role=debit, side="debit", amount="typed"),
+            TemplateLine(role=credit, side="credit", amount="balancing"),
+        ],
+    )
+
+
+# Templates named by accounting.md 9.8 and 9.7 (the user types amount and date; accounts can be changed).
+TEMPLATES: tuple[EntryTemplate, ...] = (
+    _template("opening_balance", "Opening balance", None, "opening_balance"),
+    _template("private_withdrawal", "Private withdrawal", "private_withdrawal", "bank"),
+    _template("private_deposit", "Private deposit", "bank", "private_deposit"),
+    _template("vat_payment", "VAT payment", "vat_prepayments", "bank"),
+    _template("income_taxes", "Income-related taxes (9.7)", "trade_tax_expense", "bank"),
+    _template("depreciation", "Depreciation (AfA, amount typed by the user)", "expense_other", None),
+    _template("bank_fees", "Bank fees", "expense_other", "bank"),
 )
 
 
@@ -47,8 +78,8 @@ class ManualEntryService:
         self.journal = journal
 
     @staticmethod
-    def templates() -> list[dict[str, str]]:
-        return [dict(t) for t in TEMPLATES]
+    def templates() -> list[EntryTemplate]:
+        return [t.model_copy(deep=True) for t in TEMPLATES]
 
     def post(self, body: models.ManualEntryIn, user: Mapping[str, Any]) -> models.JournalEntry:
         lines = [
@@ -90,7 +121,9 @@ class ManualEntryService:
             if self.store.get_journal_entry_by_event_key(key + REVERSAL_SUFFIX) is not None:
                 raise ServiceError(409, "The entry is already reversed")
             self.journal.check_reversible(orig)
-            day = _date(date_) if date_ else _date(str(orig["booking_date"]))
+            original_day = _date(str(orig["booking_date"]))
+            # never before the original; the journal then moves it to the first open day (spec 9.8)
+            day = max(_date(date_) if date_ else original_day, original_day)
             booking = self.journal.booking_date(day)
             label = text if text else f"Reversal: {orig['text']}"
             lines = [self._flip(ln, orig, booking) for ln in sorted(orig["lines"], key=lambda r: int(r["line_no"]))]
@@ -104,10 +137,14 @@ class ManualEntryService:
         income_date: date | None = None
         if income:
             wanted = _date(str(income))
-            rows = self.store.find("fiscal_years", year=int(orig["fiscal_year"]))
+            rows = self.store.find("fiscal_years", year=wanted.year)
             closed = bool(rows) and rows[0].get("closed_at") is not None
-            # the original income date while its year is open and the reversal stays in that year (spec 9.8)
-            income_date = wanted if not closed and wanted.year == booking.year else booking
+            # the original income date while its year is open, the booking date once it is closed (spec 9.8, 11)
+            income_date = booking if closed else wanted
+        vat = None if not ln.get("vat_date") else _date(str(ln["vat_date"]))
+        first_open = first_unlocked_from(self.store.list("period_locks"))
+        if vat is not None and first_open is not None and vat < first_open:
+            vat = booking  # a reversal is a correction, not manual drift (spec 9.8)
         base = ln.get("tax_base_cents")
         return PostLine(
             amount_cents=-int(ln["amount_cents"]),
@@ -117,7 +154,7 @@ class ManualEntryService:
             tax_kind=ln.get("tax_kind"),
             tax_rate=None if ln.get("tax_rate") is None else str(ln["tax_rate"]),
             tax_base_cents=None if base is None else -int(base),
-            vat_date=None if not ln.get("vat_date") else _date(str(ln["vat_date"])),
+            vat_date=vat,
             income_date=income_date,
             open_item_id=ln.get("open_item_id"),
             treatment=ln.get("treatment"),

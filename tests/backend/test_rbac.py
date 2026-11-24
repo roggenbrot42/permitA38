@@ -331,6 +331,7 @@ NEW_ROUTES: list[tuple[str, str, str, str, bool, dict | None, str]] = [
     ("GET", "/api/accounting/journal", "accounting", "read", False, None, ""),
     ("POST", "/api/accounting/entries", "accounting", "write", False, _ENTRY, ""),
     ("POST", "/api/accounting/entries/{entry_id}/reverse", "accounting", "write", False, {}, ""),
+    ("GET", "/api/accounting/entry-templates", "accounting", "read", False, None, ""),
     ("GET", "/api/accounting/accounts", "accounting", "read", False, None, ""),
     ("GET", "/api/accounting/reports/trial-balance", "accounting", "read", False, None, ""),
     ("GET", "/api/accounting/reports/eur", "accounting", "read", False, None, ""),
@@ -461,7 +462,7 @@ def test_new_routes_are_exactly_the_documented_ones(app):
         if path.startswith(NEW_PREFIXES) or (path.startswith("/api/invoices/{") and path.endswith(NEW_INVOICE_SUFFIXES))
     }
     assert found == {(m, p) for m, p, *_ in NEW_ROUTES}
-    assert len(NEW_ROUTES) == 52
+    assert len(NEW_ROUTES) == 53
 
 
 def test_boss_only_routes_are_exactly_init_and_close_year(app):
@@ -481,6 +482,7 @@ IMPLEMENTED = {
     ("GET", "/api/accounting/years/{year}"),
     ("GET", "/api/accounting/locks"),
     ("POST", "/api/accounting/locks"),
+    ("GET", "/api/accounting/entry-templates"),
     ("POST", "/api/accounting/entries"),
     ("POST", "/api/accounting/entries/{entry_id}/reverse"),
     ("GET", "/api/invoices/{rid}/payments"),
