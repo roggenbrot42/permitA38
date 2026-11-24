@@ -352,9 +352,7 @@ def test_booking_date_moves_into_the_first_unlocked_month(svc, repo):
 
 
 def lock(repo, year: int, month: int):
-    repo.save(
-        "period_locks", {"year": year, "month": month, "locked_at": 1, "locked_by": "u1x000", "reason": "manual"}
-    )
+    repo.save("period_locks", {"year": year, "month": month, "locked_at": 1, "locked_by": "u1x000", "reason": "manual"})
 
 
 def test_a_december_lock_books_a_late_document_on_31_december_while_the_year_is_open(svc, repo):
