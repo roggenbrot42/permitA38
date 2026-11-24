@@ -5,10 +5,12 @@ without a table for the year it uses the nearest older (else the oldest) table a
 """
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from importlib import resources
+from types import MappingProxyType
 from typing import Literal, cast
 
 from permita38.core.vat_rules import TAX_KEYS
@@ -46,6 +48,8 @@ def _validate(raw: object, year: int) -> None:
     for key in _TOP_KEYS:
         if key not in raw:
             raise DatevRulesInvalid(f"{name}: file lacks required key '{key}'")
+    if isinstance(raw["year"], bool) or not isinstance(raw["year"], int):
+        raise DatevRulesInvalid(f"{name}: year must be an integer")
     if raw["year"] != year:
         raise DatevRulesInvalid(f"{name}: year {raw['year']} differs from the file name year {year}")
     header = raw["header"]
@@ -57,20 +61,28 @@ def _validate(raw: object, year: int) -> None:
     for key in ("extf_version", "category", "format_version"):
         if not isinstance(header[key], int) or isinstance(header[key], bool):
             raise DatevRulesInvalid(f"{name}: header.{key} must be an integer")
+    if raw["status"] not in ("to_verify", "verified"):
+        raise DatevRulesInvalid(f"{name}: status must be 'to_verify' or 'verified', not {raw['status']!r}")
+    _check_str(raw["source"], "source", name)
     _check_str(header["category_name"], "header.category_name", name)
     _check_str(raw["cancel_automatic_key"], "cancel_automatic_key", name)
     keys = raw["bu_keys"]
     if not isinstance(keys, dict):
         raise DatevRulesInvalid(f"{name}: bu_keys must be an object")
+    for tax_key in TAX_KEYS:
+        if tax_key not in keys:
+            raise DatevRulesInvalid(f"{name}: bu_keys lacks tax key '{tax_key}'")
     for tax_key, value in keys.items():
         if tax_key not in TAX_KEYS:
             raise DatevRulesInvalid(f"{name}: unknown tax key '{tax_key}'")
         if isinstance(value, dict):
             for rate, key in value.items():
                 try:
-                    Decimal(rate)
-                except InvalidOperation:
-                    raise DatevRulesInvalid(f"{name}: bu_keys.{tax_key}: rate '{rate}' is not a number") from None
+                    finite = Decimal(rate).is_finite()
+                except (InvalidOperation, TypeError):
+                    finite = False
+                if not finite:
+                    raise DatevRulesInvalid(f"{name}: bu_keys.{tax_key}: rate '{rate}' is not a number")
                 _check_str(key, f"bu_keys.{tax_key}[{rate}]", name)
         elif value is not None:
             _check_str(value, f"bu_keys.{tax_key}", name)
@@ -95,14 +107,18 @@ class DatevRules:
     status: RulesStatus
     header: ExtfHeader
     cancel_automatic_key: str
-    # tax key -> BU key (None: no key) or, for rate dependent keys, rate ("19", "7") -> BU key
-    bu_keys: dict[str, str | None | dict[str, str]]
+    # tax key -> BU key (None: no key) or, for rate dependent keys, rate ("19", "7") -> BU key; read-only
+    bu_keys: Mapping[str, str | None | Mapping[str, str]]
 
     def bu_key(self, tax_key: str, rate: Decimal | None = None) -> str | None:
         """BU key for a tax key (and rate for rate dependent keys); None when there is none."""
         value = self.bu_keys.get(tax_key)
-        if isinstance(value, dict):
-            return None if rate is None else value.get(_rate_key(rate))
+        if isinstance(value, Mapping):
+            if rate is None:
+                return None
+            if not rate.is_finite():
+                raise ValueError(f"rate must be finite, not {rate}")
+            return value.get(_rate_key(rate))
         return value
 
 
@@ -130,7 +146,9 @@ def _load(year: int) -> DatevRules:
             format_version=h["format_version"],
         ),
         cancel_automatic_key=raw["cancel_automatic_key"],
-        bu_keys=dict(raw["bu_keys"]),
+        bu_keys=MappingProxyType(
+            {k: MappingProxyType(dict(v)) if isinstance(v, dict) else v for k, v in raw["bu_keys"].items()}
+        ),
     )
 
 
@@ -146,8 +164,3 @@ def datev_rules_for(year: int) -> DatevRules:
         used = older[-1] if older else years[0]
         warning = f"No DATEV rules for {year}; using {used}."
     return replace(_load(used), requested_year=year, warning=warning)
-
-
-def bu_key(tax_key: str, rate: Decimal | None = None, year: int = 2026) -> str | None:
-    """Shortcut for ``datev_rules_for(year).bu_key(tax_key, rate)``."""
-    return datev_rules_for(year).bu_key(tax_key, rate)

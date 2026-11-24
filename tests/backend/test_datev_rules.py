@@ -40,7 +40,6 @@ def test_vst_key_depends_on_rate():
     assert r.bu_key("VST", Decimal("7.0")) == "8"
     assert r.bu_key("VST", Decimal("5")) is None
     assert r.bu_key("VST") is None
-    assert datev.bu_key("VST", Decimal("7")) == "8"
 
 
 @pytest.mark.parametrize("tax_key", ["SX", "EU_SVC", "RC_EU_SVC", "RC_3C_SVC", "KU", "NONE"])
@@ -114,3 +113,48 @@ def test_year_must_match_file_name(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     _variant(tmp_path, monkeypatch, lambda raw: raw.update(year=2025))
     with pytest.raises(DatevRulesInvalid, match="differs from the file name year"):
         datev_rules_for(2026)
+
+
+def test_rejects_invalid_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    cases = [
+        (lambda raw: raw.update(status="done"), "status"),
+        (lambda raw: raw.update(source=1), "source"),
+        (lambda raw: raw["bu_keys"].pop("S19"), "lacks tax key 'S19'"),
+        (lambda raw: raw["bu_keys"]["VST"].update({"abc": "1"}), "not a number"),
+        (lambda raw: raw["bu_keys"]["VST"].update({"NaN": "1"}), "not a number"),
+        (lambda raw: raw["bu_keys"]["VST"].update({"Infinity": "1"}), "not a number"),
+        (lambda raw: raw.update(bu_keys=[]), "bu_keys must be an object"),
+        (lambda raw: raw["header"].update(category="21"), "must be an integer"),
+        (lambda raw: raw["header"].update(extf_version=True), "must be an integer"),
+        (lambda raw: raw.update(year="2026"), "year must be an integer"),
+    ]
+    for mutate, message in cases:
+        datev._load.cache_clear()
+        _variant(tmp_path, monkeypatch, mutate)
+        with pytest.raises(DatevRulesInvalid, match=message):
+            datev_rules_for(2026)
+
+
+def test_rejects_non_object_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    (tmp_path / "2026.json").write_text("[]", encoding="utf-8")
+    monkeypatch.setattr(datev, "_DIR", tmp_path)
+    with pytest.raises(DatevRulesInvalid, match="file must be an object"):
+        datev_rules_for(2026)
+
+
+def test_rules_are_immutable():
+    r = datev_rules_for(2026)
+    with pytest.raises(TypeError):
+        r.bu_keys["S19"] = "x"  # type: ignore[index]
+    with pytest.raises(TypeError):
+        r.bu_keys["VST"]["19"] = "x"  # type: ignore[index]
+    with pytest.raises(AttributeError):
+        r.header.category = 1  # type: ignore[misc]
+    assert datev_rules_for(2026).bu_key("S19") == "3"
+    assert datev_rules_for(2026).bu_key("VST", Decimal("19")) == "9"
+
+
+@pytest.mark.parametrize("rate", ["NaN", "Infinity", "-Infinity"])
+def test_bu_key_refuses_non_finite_rate(rate: str):
+    with pytest.raises(ValueError, match="finite"):
+        datev_rules_for(2026).bu_key("VST", Decimal(rate))
