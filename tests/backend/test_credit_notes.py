@@ -259,7 +259,7 @@ def test_a_legacy_paid_invoice_is_materialised_before_the_credit_note(repo, sale
     assert view["status"] == "cancelled" and view["open_amount"] == "-119.00"  # owed back to the customer
 
 
-def test_only_issued_invoices_and_not_credit_notes_and_not_write_off(repo, sales, cn):
+def test_only_issued_invoices_and_not_credit_notes_and_not_discount(repo, sales, cn):
     init(repo)
     d = draft(repo, "2026-03-02", [line("100.00")])
     with pytest.raises(ServiceError) as exc:
@@ -274,8 +274,8 @@ def test_only_issued_invoices_and_not_credit_notes_and_not_write_off(repo, sales
         cn.create("nope", credit_kind="storno", date="2026-03-06", reason="x")
     assert exc.value.status == 404
     with pytest.raises(ServiceError) as exc:
-        cn.create(inv["id"], credit_kind="write_off", date="2026-03-06", reason="x")
-    assert exc.value.status == 501
+        cn.create(inv["id"], credit_kind="discount", date="2026-03-06", reason="x")  # only through settle-discount
+    assert exc.value.status == 422
 
 
 def test_the_date_is_not_before_the_invoice_and_not_in_the_future(repo, sales, cn):

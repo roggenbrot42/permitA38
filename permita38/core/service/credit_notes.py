@@ -1,12 +1,12 @@
-"""Credit notes of issued invoices: storno and partial (docs/specs/credit-notes-payments.md 4, accounting.md 9.2, 9.3, 11).
+"""Credit notes of issued invoices: storno, partial, write-off and discount (docs/specs/credit-notes-payments.md 4, accounting.md 9.2, 9.3, 11).
 
 A credit note is a document in ``invoices`` with ``kind = credit_note``, positive lines, ``corrects_id`` = the invoice
 and its own ``issued`` snapshot (``rates`` with net, VAT and gross in cents per rate group). The snapshot is the single
 source of the credited amounts: ``invoice_state.derive`` (credited amount, cancelled) and
 ``postings.invoice_state_of`` (the 9.2 target rule) read it, nothing else. A credit note is issued on creation: number
 from the sequence ``credit_note``, snapshot, posting through :class:`~permita38.core.service.postings.CreditPostingService`
-(event key ``credit:<id>``, once the accounting is initialised), all in one transaction. Write-off and discount are
-not here (E12).
+(event key ``credit:<id>``, once the accounting is initialised), all in one transaction. A ``write_off`` is an internal voucher
+(no number, no PDF); a ``discount`` is created by :meth:`CreditNoteService.settle_discount` only.
 """
 
 import builtins
@@ -17,8 +17,9 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from permita38.core.accounting.postings_credit import discount_amounts, write_off_amounts
 from permita38.core.accounting.postings_issue import rate_str
-from permita38.core.accounting.types import IssuedSnapshot
+from permita38.core.accounting.types import Cents, InvoiceState, IssuedSnapshot, RateGroup
 from permita38.core.errors import ServiceError
 from permita38.core.money import vat_amount
 from permita38.core.numbering import period_key
@@ -28,8 +29,8 @@ from permita38.core.service import invoice_state
 from permita38.core.service.journal import JournalService
 from permita38.core.service.locks import first_unlocked_from
 from permita38.core.service.numbering import NumberConfig, NumberingService
-from permita38.core.service.payments import PaymentService
-from permita38.core.service.postings import CreditPostingService, invoice_state_of, stored_snapshot
+from permita38.core.service.payments import MAX_PAYMENT_CENTS, PaymentService
+from permita38.core.service.postings import CreditPostingService, credit_snapshot, invoice_state_of, stored_snapshot
 from permita38.core.settings import effective_settings
 
 __all__ = ["CREDIT_NOTE_PATTERN", "CREDIT_NOTE_RESET", "CreditNoteNumbering", "CreditNoteService"]
@@ -186,19 +187,54 @@ class CreditNoteService:
     def _snapshot(
         self, inv: Mapping[str, Any], groups: builtins.list[tuple[Decimal, int, int]], day: str
     ) -> dict[str, Any]:
-        raw = inv["issued"]
-        return {
-            "regime": raw["regime"],
-            "treatment": raw["treatment"],
-            "rates": {rate_str(r): {"net": n, "vat": v, "gross": n + v} for r, n, v in groups},
-            "gross": sum(n + v for _r, n, v in groups),
-            "perf": day,
-            "customer": copy.deepcopy(raw.get("customer")),
-            "issued_at": int(self.now()),
-            "rules_version": raw.get("rules_version"),
-        }
+        return credit_snapshot(inv, groups, day, self.now())
 
     # ---------- writes
+    def _issue(
+        self,
+        inv: Mapping[str, Any],
+        *,
+        credit_kind: str,
+        day: str,
+        reason: str,
+        groups: builtins.list[tuple[Decimal, int, int]],
+        lines: builtins.list[dict[str, Any]] | None,
+        user: Mapping[str, Any] | None,
+    ) -> Record:
+        """Store and post one credit document. A write-off is an internal voucher: no number (its journal entry
+        identifies it), so no PDF is ever rendered for it; every other kind takes the next number."""
+        record: dict[str, Any] = {
+            "kind": "credit_note",
+            "credit_kind": credit_kind,
+            "corrects_id": inv["id"],
+            "customer_id": inv.get("customer_id"),
+            "date": day,
+            "status": "sent",
+            "lines": lines if lines is not None else [self._line(r, n, reason) for r, n, _v in groups],
+            "reason": reason,
+            "issued": self._snapshot(inv, groups, day),
+        }
+        if credit_kind != "write_off":
+            record["number"] = self.numbering.allocate(DOC_TYPE, date_of(day))
+        for key in ("project_id", "tax_treatment"):
+            if inv.get(key):
+                record[key] = inv[key]
+        note = self.store.save("invoices", record)
+        self.posting.post_credit(inv, note, user)
+        return note
+
+    def _state(self, inv: Mapping[str, Any]) -> tuple[IssuedSnapshot, builtins.list[Record], InvoiceState]:
+        snap = stored_snapshot(inv)
+        if snap is None:
+            raise ServiceError(409, "The invoice has no issued snapshot")
+        notes = self._notes(inv["id"])
+        kept = sum(int(r["amount_cents"]) for r in self.store.find("payments", document_id=inv["id"]))
+        return snap, notes, invoice_state_of(snap, notes, kept)
+
+    @staticmethod
+    def _nonzero(groups: tuple[RateGroup, ...]) -> builtins.list[tuple[Decimal, int, int]]:
+        return [(g.rate, int(g.net), int(g.vat)) for g in groups if g.net or g.vat]
+
     def create(
         self,
         invoice_id: str,
@@ -209,43 +245,77 @@ class CreditNoteService:
         amounts: Mapping[str, Decimal | str] | None = None,
         user: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Issue a ``storno`` (the whole remaining gross) or ``partial`` (the given net per rate group) credit note.
-        422 when it exceeds the remaining net of a rate group, 409 when the date lies in a locked month."""
-        if credit_kind not in ("storno", "partial"):
-            raise ServiceError(501, "not implemented yet")
+        """Issue a ``storno`` (the whole remaining gross), ``partial`` (the given net per rate group) or
+        ``write_off`` (the open amount, only when it is > 0) credit note. 422 when it exceeds the remaining net of a
+        rate group, 409 when the date lies in a locked month."""
+        if credit_kind not in ("storno", "partial", "write_off"):
+            raise ServiceError(422, "credit_kind must be storno, partial or write_off")
         with self.store.transaction():
             inv = self.payments.materialize(self._invoice(invoice_id), user)
             self._check_date(date, inv)
-            snap = stored_snapshot(inv)
-            if snap is None:
-                raise ServiceError(409, "The invoice has no issued snapshot")
-            notes = self._notes(inv["id"])
-            kept = sum(int(r["amount_cents"]) for r in self.store.find("payments", document_id=inv["id"]))
-            state = invoice_state_of(snap, notes, kept)
+            snap, notes, state = self._state(inv)
+            day = date[:10]
+            if credit_kind == "write_off":
+                groups = self._nonzero(write_off_amounts(state))
+                if not groups:
+                    raise ServiceError(422, "Nothing is open to write off")
+                return self._out(
+                    self._issue(
+                        inv, credit_kind=credit_kind, day=day, reason=reason, groups=groups, lines=None, user=user
+                    )
+                )
             groups = self._amounts(self._remaining(snap, state.credited), credit_kind, amounts)
+            lines = None
             if credit_kind == "storno" and not notes and inv.get("lines"):
                 lines = copy.deepcopy(inv["lines"])  # the whole invoice: the same lines, quantities and prices
-            else:
-                lines = [self._line(r, n, reason) for r, n, _v in groups]
-            day = date[:10]
-            record: dict[str, Any] = {
-                "kind": "credit_note",
-                "credit_kind": credit_kind,
-                "corrects_id": inv["id"],
-                "customer_id": inv.get("customer_id"),
-                "date": day,
-                "status": "sent",
-                "lines": lines,
-                "reason": reason,
-                "issued": self._snapshot(inv, groups, day),
-                "number": self.numbering.allocate(DOC_TYPE, date_of(day)),
-            }
-            for key in ("project_id", "tax_treatment"):
-                if inv.get(key):
-                    record[key] = inv[key]
-            note = self.store.save("invoices", record)
-            self.posting.post_credit(inv, note, user)
+            note = self._issue(
+                inv, credit_kind=credit_kind, day=day, reason=reason, groups=groups, lines=lines, user=user
+            )
             return self._out(note)
+
+    def settle_discount(
+        self,
+        invoice_id: str,
+        *,
+        date: str,
+        amount_paid: Decimal,
+        note: str | None = None,
+        user: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Settle with a cash discount (spec 3, accounting 9.3): first a numbered ``discount`` credit note for the
+        rest (the complement of the cumulative allocation, so the payment settles exactly), then the payment of
+        ``amount_paid``, in one transaction. 422 when ``amount_paid`` already covers the open amount."""
+        cents = _cents(amount_paid)
+        if cents <= 0 or cents > MAX_PAYMENT_CENTS:
+            raise ServiceError(422, "The amount must be greater than 0 and at most 10,000,000.00")
+        with self.store.transaction():
+            inv = self.payments.materialize(self._invoice(invoice_id), user)
+            self.payments._check_date(inv, date)
+            self._check_date(date, inv)
+            _snap, _notes, state = self._state(inv)
+            groups = self._nonzero(discount_amounts(state, Cents(cents)))
+            if not groups:
+                raise ServiceError(422, "The amount paid covers the open amount; record a payment instead")
+            credit = self._issue(
+                inv,
+                credit_kind="discount",
+                day=date[:10],
+                reason=note or "Cash discount",
+                groups=groups,
+                lines=None,
+                user=user,
+            )
+            result = self.payments.record(
+                invoice_id,
+                date=date,
+                amount=amount_paid,
+                kind="payment",
+                method="bank",
+                note=note,
+                user=user,
+            )
+            result["credit_note"] = self._out(credit)
+            return result
 
     # ---------- reads (last: the name shadows the builtin inside the class body)
     def list(self, invoice_id: str) -> builtins.list[dict[str, Any]]:

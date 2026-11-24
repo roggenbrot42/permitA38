@@ -4,7 +4,7 @@ Every write materialises a legacy virtual payment first, inserts one append-only
 signed: payments positive, refunds and reversals negative) and, when the accounting is initialised and the invoice is on
 or after the start, posts the 9.2 target delta through :class:`~permita38.core.service.postings.PaymentPostingService`
 in the same transaction (event key ``payment:<payment id>``). Before the initialisation the rows are only stored.
-Settle-discount and write-off recovery (E12) are not here.
+A payment on a written-off invoice first stores and posts the write-off reversal record (spec 3, accounting 9.2).
 """
 
 import builtins
@@ -15,12 +15,20 @@ from decimal import Decimal
 from typing import Any
 
 from permita38.core import models
+from permita38.core.accounting.postings_credit import write_off_reversal_amounts
+from permita38.core.accounting.types import Cents, PaymentEvent
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service import invoice_state
 from permita38.core.service.journal import JournalService
-from permita38.core.service.postings import PaymentPostingService
+from permita38.core.service.postings import (
+    CreditPostingService,
+    PaymentPostingService,
+    credit_snapshot,
+    invoice_state_of,
+    stored_snapshot,
+)
 from permita38.core.settings import effective_settings
 
 __all__ = ["PaymentService"]
@@ -89,6 +97,7 @@ class PaymentService:
         self.store = store
         self.today = today
         self.posting = PaymentPostingService(store, journal)
+        self.credit_posting = CreditPostingService(store, journal)
 
     # ---------- helpers
     def _invoice(self, invoice_id: str) -> Record:
@@ -136,13 +145,50 @@ class PaymentService:
                 }
             )
         if entry is not None and entry.warnings:
-            out.append(
-                {
-                    "code": "vat_drift",
-                    "message": "The payment date lies in a locked month: the VAT changes that month's return",
-                }
-            )
+            out.append(self._drift_warning())
         return out
+
+    @staticmethod
+    def _drift_warning() -> dict[str, str]:
+        return {
+            "code": "vat_drift",
+            "message": "The payment date lies in a locked month: the VAT changes that month's return",
+        }
+
+    def _write_off_reversal(
+        self, inv: Record, day: str, cents: int, user: Mapping[str, Any] | None
+    ) -> models.JournalEntry | None:
+        """The write-off reversal record a payment of ``cents`` on ``day`` triggers (accounting 9.2): negative
+        amounts, no number, dated the payment date, posted before the payment. ``None`` when nothing is written off
+        or this payment adds nothing above the current gross; else its journal entry (``None`` before the
+        initialisation)."""
+        snap = stored_snapshot(inv)
+        if snap is None:
+            return None
+        notes = invoice_state.credit_notes_of(self.store.find("invoices", corrects_id=inv["id"]))
+        if not any(n.get("credit_kind") == "write_off" for n in notes):
+            return None
+        kept = sum(int(r["amount_cents"]) for r in self.store.find("payments", document_id=inv["id"]))
+        before = invoice_state_of(snap, notes, kept)
+        groups = write_off_reversal_amounts(before, PaymentEvent("pending", date.fromisoformat(day[:10]), Cents(cents)))
+        if not any(g.net or g.vat for g in groups):
+            return None
+        record: dict[str, Any] = {
+            "kind": "credit_note",
+            "credit_kind": "write_off_reversal",
+            "corrects_id": inv["id"],
+            "customer_id": inv.get("customer_id"),
+            "date": day[:10],
+            "status": "sent",
+            "lines": [],
+            "reason": "Write-off reversed by a payment",
+            "issued": credit_snapshot(inv, [(g.rate, int(g.net), int(g.vat)) for g in groups], day[:10], time.time()),
+        }
+        for key in ("project_id", "tax_treatment"):
+            if inv.get(key):
+                record[key] = inv[key]
+        note = self.store.save("invoices", record)
+        return self.credit_posting.post_credit(inv, note, user)
 
     def _insert(
         self,
@@ -204,7 +250,8 @@ class PaymentService:
                 kept = sum(int(r["amount_cents"]) for r in self.store.find("payments", document_id=inv["id"]))
                 if cents > kept:
                     raise ServiceError(422, f"A refund cannot exceed the cash kept ({invoice_state.cents_str(kept)})")
-            return self._insert(
+            recovered = self._write_off_reversal(inv, date, cents, user) if kind == "payment" else None
+            result = self._insert(
                 inv,
                 day=date,
                 signed=cents if kind == "payment" else -cents,
@@ -214,6 +261,13 @@ class PaymentService:
                 reverses_id=None,
                 user=user,
             )
+            if (
+                recovered is not None
+                and recovered.warnings
+                and not any(w["code"] == "vat_drift" for w in result["warnings"])
+            ):
+                result["warnings"].append(self._drift_warning())
+            return result
 
     def reverse(
         self,

@@ -10800,6 +10800,7 @@
           "accounting"
         ],
         "summary": "Settle Discount",
+        "description": "Settle with a cash discount: a discount credit note for the rest, then the payment, in one transaction.",
         "operationId": "settle_discount_api_invoices__rid__settle_discount_post",
         "security": [
           {
@@ -10828,11 +10829,15 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Settle Discount Api Invoices  Rid  Settle Discount Post"
+                }
               }
             }
           },
@@ -10908,7 +10913,7 @@
           "accounting"
         ],
         "summary": "Create Credit Note",
-        "description": "Issue a storno or partial credit note (number, snapshot and posting in one transaction).",
+        "description": "Issue a storno, partial or write-off credit note (a write-off has no number); snapshot, number and posting in\none transaction.",
         "operationId": "create_credit_note_api_invoices__rid__credit_notes_post",
         "security": [
           {
