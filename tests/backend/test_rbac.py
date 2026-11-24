@@ -490,6 +490,9 @@ IMPLEMENTED = {
     ("POST", "/api/vat-returns/{rid}/filed"),
     ("DELETE", "/api/vat-returns/{rid}"),
     ("GET", "/api/vat-returns/{rid}/boxes/{kz}"),
+    ("GET", "/api/vat-returns/{rid}/export.pdf"),
+    ("GET", "/api/vat-returns/{rid}/export.csv"),
+    ("GET", "/api/vat-returns/{rid}/export.json"),
 }
 
 

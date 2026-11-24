@@ -13,6 +13,7 @@ from permita38.api.routers.accounting import not_implemented
 from permita38.core import models
 from permita38.core.service.vat_returns import VatReturnListItem
 from permita38.core.validation import VatPeriodKind
+from permita38.core.vat import ustva_export
 
 returns = APIRouter(prefix="/vat-returns", tags=["vat"])
 special = APIRouter(prefix="/vat", tags=["vat"])
@@ -82,19 +83,57 @@ def pay_return(rid: str, body: models.VatReturnPaymentIn, user: Write, services:
     not_implemented()
 
 
-@returns.get("/{rid}/export.pdf", name="export_vat_return_pdf")
+def _export_view(rid: str, services: ServicesDep) -> tuple[dict, dict[str, list[dict]]]:
+    """The return as the API shows it and its source lines per box."""
+    ret = models.VatReturn(**services.vat_returns.get(rid)).model_dump(mode="json")
+    lines = {kz: services.vat_returns.lines(rid, kz)["lines"] for kz in ret["boxes"]}
+    return ret, lines
+
+
+def _export_name(ret: dict, ext: str) -> str:
+    return f"ustva-{ret['year']}-{ret.get('period_kind') or 'period'}{int(ret.get('period_no') or 0):02d}.{ext}"
+
+
+@returns.get(
+    "/{rid}/export.pdf",
+    response_class=Response,
+    responses={200: {"content": {"application/pdf": {}}}},
+    name="export_vat_return_pdf",
+)
 def export_return_pdf(rid: str, user: Read, services: ServicesDep):
-    not_implemented()
+    ret, lines = _export_view(rid, services)
+    cfg = services.settings.get()
+    data = ustva_export.return_pdf(
+        ret,
+        lines,
+        business=str(cfg.get("company_name") or ""),
+        tax_number=str(cfg.get("tax_number") or ""),
+        unconfirmed=ustva_export.rules_unconfirmed(int(ret["year"])),
+    )
+    disp = f'inline; filename="{_export_name(ret, "pdf")}"'
+    return Response(data, media_type="application/pdf", headers={"Content-Disposition": disp})
 
 
-@returns.get("/{rid}/export.csv", name="export_vat_return_csv")
-def export_return_csv(rid: str, user: Read, services: ServicesDep):
-    not_implemented()
+@returns.get(
+    "/{rid}/export.csv",
+    response_class=Response,
+    responses={200: {"content": {"text/csv": {}}}},
+    name="export_vat_return_csv",
+)
+def export_return_csv(
+    rid: str, user: Read, services: ServicesDep, lines: Annotated[bool, Query(description="the source lines")] = False
+):
+    ret, by_box = _export_view(rid, services)
+    data = ustva_export.return_csv(ret, by_box if lines else None)
+    name = "export-lines.csv" if lines else _export_name(ret, "csv")
+    return Response(
+        data, media_type="text/csv; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="{name}"'}
+    )
 
 
-@returns.get("/{rid}/export.json", name="export_vat_return_json")
+@returns.get("/{rid}/export.json", name="export_vat_return_json", response_model=models.VatReturn)
 def export_return_json(rid: str, user: Read, services: ServicesDep):
-    not_implemented()
+    return models.VatReturn(**ustva_export.return_json(services.vat_returns.get(rid)))
 
 
 # ------------------------------------------------------------------ special prepayment (Dauerfristverlaengerung)
