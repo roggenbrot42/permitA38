@@ -121,6 +121,20 @@ def _payment_out(row: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _creditable(doc: Mapping[str, Any], notes: Sequence[Mapping[str, Any]]) -> dict[str, str] | None:
+    """Per rate string the net still creditable (the rule of the over-credit check, shared); None without a snapshot."""
+    from permita38.core.accounting.postings_issue import rate_str
+    from permita38.core.service.postings import creditable_nets, stored_snapshot
+
+    try:
+        snap = stored_snapshot(doc)
+        if snap is None:
+            return None
+        return {rate_str(r): cents_str(net) for r, net, _vat in creditable_nets(snap, notes)}
+    except (KeyError, ValueError, TypeError, ArithmeticError):
+        return None
+
+
 def derive(
     doc: Mapping[str, Any],
     gross_cents: int,
@@ -196,12 +210,16 @@ def derive(
                 "date": n.get("date"),
                 "credit_kind": n.get("credit_kind"),
                 "gross": cents_str(credit_note_gross(n)),
+                "reason": n.get("reason"),
             }
             for n in notes
         ],
         "status": status,
     }
     fields["paid_date"] = paid_date  # the key is always present
+    creditable = _creditable(doc, notes)
+    if creditable is not None:
+        fields["creditable"] = creditable
     return Derived(fields, status, gross_cents, paid, credited, open_cents, paid_date, virtual, tuple(flags))
 
 

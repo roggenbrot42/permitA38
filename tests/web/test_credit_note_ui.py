@@ -160,7 +160,9 @@ def test_reason_is_rendered_as_text(browser, srv):
     api.post(f"invoices/{inv['id']}/credit-notes", {"credit_kind": "write_off", "date": INVOICE_DATE, "reason": payload})
     ctx, pg = open_page(browser, srv)
     goto_invoice(pg, srv, inv)
+    assert payload in pg.inner_text("#cn_list .cn-reason")  # the hostile text is really rendered, as text
     assert pg.locator("#cn_list img, #cn_list b, #cn_panel img").count() == 0
+    assert pg.evaluate("() => window.__xss") is None
     pg.goto(srv.base + "/#/sales/invoices")
     pg.wait_for_selector("tr.click")
     assert pg.locator("table img, table b > b").count() == 0
@@ -176,4 +178,76 @@ def test_reason_is_rendered_as_text(browser, srv):
     pg.wait_for_selector("#cn_list")
     assert api.get("invoices/" + inv2["id"])["credit_notes"][0]["credit_kind"] == "partial"
     assert pg.evaluate("() => window.__xss") is None
+    ctx.close()
+
+
+def test_written_off_then_paid_in_full_reads_paid(browser, srv):
+    api = Api(srv)
+    inv = api.issued_invoice()
+    api.post(f"invoices/{inv['id']}/credit-notes", {"credit_kind": "write_off", "date": INVOICE_DATE, "reason": "gone"})
+    api.post(f"invoices/{inv['id']}/payments", {"date": INVOICE_DATE, "amount": "119.00"})  # reverses the write-off
+    ctx, pg = open_page(browser, srv)
+    goto_invoice(pg, srv, inv)
+    assert text(pg, "h1 .pill") == "paid"
+    assert pg.locator("#cn_panel .pill:has-text('written off')").count() == 0
+    ctx.close()
+
+
+def test_partial_payment_after_a_write_off_is_not_written_off(browser, srv):
+    api = Api(srv)
+    inv = api.issued_invoice()  # due in the past
+    api.post(f"invoices/{inv['id']}/credit-notes", {"credit_kind": "write_off", "date": INVOICE_DATE, "reason": "gone"})
+    api.post(f"invoices/{inv['id']}/payments", {"date": INVOICE_DATE, "amount": "50.00"})
+    ctx, pg = open_page(browser, srv)
+    goto_invoice(pg, srv, inv)
+    assert text(pg, "#pay_open") == "0,00 €"  # the payment reversed only 50.00 of the write-off
+    assert text(pg, "h1 .pill") == "paid"  # the derived server status wins over "written off"
+    ctx.close()
+
+
+def test_partial_dialog_shows_and_prefills_the_creditable_net(browser, srv):
+    api = Api(srv)
+    inv = two_rate_invoice(api)
+    api.post(
+        f"invoices/{inv['id']}/credit-notes",
+        {"credit_kind": "partial", "date": INVOICE_DATE, "reason": "x", "amounts": {"19": "40.00"}},
+    )
+    ctx, pg = open_page(browser, srv)
+    goto_invoice(pg, srv, inv)
+    pg.click("[data-a=cnPartial]")
+    pg.wait_for_selector("#f_amt0")
+    assert pg.input_value("#f_amt0") == "100,00"  # 7 %: untouched
+    assert pg.input_value("#f_amt1") == "60,00"  # 19 %: 100.00 - 40.00
+    assert "still creditable 60,00" in text(pg, "label[for=f_amt1]")
+    ctx.close()
+
+
+def test_empty_reason_is_refused_before_any_request(browser, srv):
+    api = Api(srv)
+    inv = api.issued_invoice()
+    ctx, pg = open_page(browser, srv)
+    goto_invoice(pg, srv, inv)
+    pg.click("[data-a=cnWriteOff]")
+    fill_reason(pg, "   ")
+    pg.click("#m-save")
+    pg.wait_for_selector("#toast.on")
+    assert "reason" in pg.inner_text("#toast").lower()
+    assert pg.locator("#f_reason").count() == 1  # the dialog stays open
+    assert api.get("invoices/" + inv["id"])["credit_notes"] == []
+    ctx.close()
+
+
+def test_settle_note_is_sent_with_the_payment(browser, srv):
+    api = Api(srv)
+    inv = api.issued_invoice()
+    ctx, pg = open_page(browser, srv)
+    goto_invoice(pg, srv, inv)
+    pg.click("[data-a=cnSettle]")
+    pg.wait_for_selector("#f_amount_paid")
+    pg.fill("#f_amount_paid", "116,00")
+    pg.fill("#f_note", "Skonto agreed by phone")
+    pg.click("#m-save")
+    pg.wait_for_function("() => document.querySelector('#pay_open')?.textContent.includes('0,00')")
+    got = api.get("invoices/" + inv["id"])
+    assert [p.get("note") for p in got["payments"]] == ["Skonto agreed by phone"]
     ctx.close()

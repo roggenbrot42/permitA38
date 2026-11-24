@@ -207,6 +207,7 @@ class CreditNoteSummary(BaseModel):
     date: str | None = None
     credit_kind: str | None = None
     gross: v.Money = 0
+    reason: str | None = None
 
 
 class IssuedRate(BaseModel):
@@ -283,6 +284,7 @@ class Document(Record):
     open_amount: v.Money | None = None  # gross - credited - paid; negative = customer credit
     payments: list[Payment] | None = None
     credit_notes: list[CreditNoteSummary] | None = None
+    creditable: dict[str, v.Money] | None = None  # per rate: the net still creditable
 
 
 class Template(Record):
@@ -663,6 +665,7 @@ INTERNAL_DOCUMENT_FIELDS = (
     "open_amount",
     "payments",
     "credit_notes",
+    "creditable",
 )
 
 

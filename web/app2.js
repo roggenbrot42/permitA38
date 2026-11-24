@@ -125,10 +125,11 @@ const CN_KINDS = { storno: 'Cancellation', partial: 'Credit note', discount: 'Di
 const cnKindLabel = k => CN_KINDS[k] || 'Credit note';
 const negMoney = v => { const x = Money.str(v); return Money.isZero(x) ? x : Money.isNeg(x) ? Money.abs(x) : '-' + x; };
 const cnSigned = d => negMoney(d.issued && d.issued.gross != null ? d.issued.gross : docTotal(d));
-/** Derived in JS: a write-off exists (net of its reversals) and nothing is open any more (the server has no such state). */
+/** Derived in JS: the net write-off (write-offs minus reversals; the server returns reversals negative) is > 0, nothing is open
+ * any more and the derived server status is neither paid nor cancelled (those win). */
 function isWrittenOff(d) {
   const open = d && invOpenAmount(d);
-  if (!d || d.kind === 'credit_note' || open === null || Money.cmp(open, 0) > 0 || d.status === 'cancelled') return false;
+  if (!d || d.kind === 'credit_note' || open === null || Money.cmp(open, 0) > 0 || d.status === 'cancelled' || d.status === 'paid') return false;
   const wo = (d.credit_notes || []).filter(n => n.credit_kind === 'write_off' || n.credit_kind === 'write_off_reversal').map(n => Money.str(n.gross));
   return wo.length > 0 && Money.cmp(Money.sum(wo), 0) > 0;
 }
@@ -277,10 +278,10 @@ function paymentsPanel(d) {
 function creditPanel(d) {
   const open = invOpenAmount(d), cns = d.credit_notes || [];
   const canCredit = d.status !== 'cancelled' && Money.cmp(remainingGross(d), 0) > 0, canOpen = open !== null && Money.cmp(open, 0) > 0;
-  const rows = cns.map(n => `<tr data-cn="${esc(n.id || '')}"><td>${n.number ? `<a href="${esc(api.url('invoices/' + n.id + '/pdf'))}" target="_blank" class="cn-pdf">${esc(n.number)}</a>` : '<span class="muted">write-off</span>'}</td><td class="nowrap">${fmtDate(n.date)}</td><td>${esc(cnKindLabel(n.credit_kind))}</td><td class="num">${eur(n.gross)}</td></tr>`).join('');
+  const rows = cns.map(n => `<tr data-cn="${esc(n.id || '')}"><td>${n.number ? `<a href="${esc(api.url('invoices/' + n.id + '/pdf'))}" target="_blank" class="cn-pdf">${esc(n.number)}</a>` : '<span class="muted">write-off</span>'}</td><td class="nowrap">${fmtDate(n.date)}</td><td>${esc(cnKindLabel(n.credit_kind))}</td><td class="cn-reason">${esc(n.reason || '')}</td><td class="num">${eur(n.gross)}</td></tr>`).join('');
   return `<div class="card" id="cn_panel"><h2>Credit notes</h2>
     ${isWrittenOff(d) ? '<div class="small muted" style="margin-bottom:6px">This invoice is <span class="pill">written off</span>: nothing is open any more.</div>' : ''}
-    ${rows ? `<table id="cn_list"><tr><th>No.</th><th>Date</th><th>Kind</th><th class="num">Gross</th></tr>${rows}</table>` : '<div class="empty">No credit notes yet.</div>'}
+    ${rows ? `<table id="cn_list"><tr><th>No.</th><th>Date</th><th>Kind</th><th>Reason</th><th class="num">Gross</th></tr>${rows}</table>` : '<div class="empty">No credit notes yet.</div>'}
     <div class="row tight" style="margin-top:8px;flex-wrap:wrap">
       ${canCredit ? '<button class="sm" data-a="cnStorno">Cancel (storno)</button><button class="sm" data-a="cnPartial">Partial credit</button>' : ''}
       ${canOpen ? '<button class="sm" data-a="cnWriteOff">Write off</button><button class="sm" data-a="cnSettle">Settle with discount</button>' : ''}</div></div>`;
@@ -405,7 +406,7 @@ A.delLine = el => { syncDoc(); DOC.lines.splice(+el.dataset.i, 1); render(); };
 /** Warnings are response-only; never echo them back into a PUT body. */
 function stripWarnings(o) { delete o.sanity_warnings; delete o.planning_warnings; return o; }
 /** Fields the server derives (credit-notes-payments.md 2.3): never sent back. */
-const DERIVED_INVOICE = ['paid_amount', 'credited_amount', 'open_amount', 'payments', 'credit_notes'];
+const DERIVED_INVOICE = ['paid_amount', 'credited_amount', 'open_amount', 'payments', 'credit_notes', 'creditable'];
 async function persistDoc(setStatus) {
   syncDoc(); const d = DOC;
   if (!d.customer_id) throw new Error('Choose a customer first');
@@ -473,9 +474,10 @@ A.cnStorno = () => {
 A.cnPartial = () => {
   const d = DOC, rates = Object.entries((d.issued && d.issued.rates) || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
   if (!rates.length) { toast('This invoice has no VAT rate groups', true); return; }
-  const fields = [{ k: 'date', l: 'Date', t: 'date' }, ...rates.map(([r, g], i) => ({ k: 'amt' + i, l: `Net to credit at ${r} % VAT € (invoice net ${eur(g.net)})`, m: true })), ...cnReason];
+  const cr = d.creditable || {};   // the server's net still creditable per rate (decimal strings)
+  const fields = [{ k: 'date', l: 'Date', t: 'date' }, ...rates.map(([r, g], i) => ({ k: 'amt' + i, l: `Net to credit at ${r} % VAT € (invoice net ${eur(g.net)}, still creditable ${eur(cr[r] != null ? cr[r] : g.net)})`, m: true })), ...cnReason];
   cnDialog({ title: 'Partial credit note', saveLabel: 'Issue credit note', note: 'This issues a credit note for the net amounts you enter per VAT rate; the server adds the VAT. It cannot be undone.',
-    vals: { date: todayISO(), reason: '' }, fields,
+    vals: { date: todayISO(), reason: '', ...Object.fromEntries(rates.map(([r], i) => [`amt${i}`, cr[r] != null && Money.cmp(cr[r], 0) > 0 ? Money.str(cr[r]).replace('.', ',') : ''])) }, fields,
     save: async v => {
       needReason(v);
       const amounts = {};
