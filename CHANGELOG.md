@@ -5,6 +5,23 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Manual time entry** (#121): start, stop and duration always agree on the Today card and in the *Add time* dialog.
+  Editing start or stop sets the duration, editing the duration sets the stop (or the start when only the stop is
+  set), and a value saved with Enter counts as edited. Night work has its own stop date (next day at most, 24 h at
+  most); it is stored as before (`end` before `start`).
+- **Today card layout** (#122): the time card stays one row on wide screens in both modes; the mode buttons no longer
+  jump to a second row when switching to manual entry.
+- **Business trip bills** (#109, #110): opening a second trip right after the first could leave the page working on
+  the first trip, so *Add bill* preselected the wrong trip. A bill started from a trip now keeps that trip (the select
+  is locked), trip names in the select show the period and destination, and bills booked against a planned cost have
+  an *Edit bill* button.
+- **Side menu** (#102): on short windows the bottom of the menu (My settings, API tokens, Sign out) could not be
+  reached; the menu now scrolls on its own.
+- **Billable flag** (#102): moving an entry from an internal project to no project kept it unbillable.
+- **Nightly randomized tests** (#102): the API model knows the 24-hours-per-day limit; the browser journeys select the
+  allocation mode and do not wait for a re-render when the open page's link is clicked.
+
 ## [0.4.0-alpha.6] - 2026-11-06
 
 Sixth alpha. Highlights: project-centric planning (assignments instead of per-contract assignees, an *Overview*
