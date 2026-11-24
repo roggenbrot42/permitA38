@@ -179,7 +179,7 @@ def test_pill_texts_for_paid_written_off_and_partly_paid_overdue(browser, srv):
     pg.wait_for_selector("tr.click")
     assert pill(pg, partly) == "overdue"
     assert pill(pg, paid) == "paid"
-    assert pill(pg, written_off) == api.get("invoices/" + written_off["id"])["status"]
+    assert pill(pg, written_off) == "written off"
     assert pill(pg, written_off) != "overdue"
     ctx.close()
 

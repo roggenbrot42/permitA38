@@ -118,12 +118,24 @@ PAGES.customer = async id => {
 };
 function docTable(rows) {
   if (!rows.length) return '<div class="empty">Nothing here yet.</div>';
-  return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${d.number ? esc(d.number) : '<span class="muted">No number yet</span>'}</b>${d.imported ? ' <span class="pill">imported</span>' : ''}<div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${eur(docTotal(d))}</td><td>${statusPill(coll, d)}</td></tr>`).join('')}</table>`;
+  return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${d.number ? esc(d.number) : d.kind === 'credit_note' ? '<span class="muted">write-off</span>' : '<span class="muted">No number yet</span>'}</b>${d.imported ? ' <span class="pill">imported</span>' : ''}<div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : d.kind === 'credit_note' ? `<span class="pill warn" data-cn-kind="${esc(d.credit_kind || '')}">${esc(cnKindLabel(d.credit_kind))}</span>` : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${d.kind === 'credit_note' ? eur(cnSigned(d)) : eur(docTotal(d))}</td><td>${d.kind === 'credit_note' ? '' : statusPill(coll, d)}</td></tr>`).join('')}</table>`;
+}
+/** Credit notes (credit-notes-payments.md 4): the kind label, the gross as the issued snapshot says, shown negative in lists. */
+const CN_KINDS = { storno: 'Cancellation', partial: 'Credit note', discount: 'Discount', write_off: 'Write-off', write_off_reversal: 'Write-off reversal' };
+const cnKindLabel = k => CN_KINDS[k] || 'Credit note';
+const negMoney = v => { const x = Money.str(v); return Money.isZero(x) ? x : Money.isNeg(x) ? Money.abs(x) : '-' + x; };
+const cnSigned = d => negMoney(d.issued && d.issued.gross != null ? d.issued.gross : docTotal(d));
+/** Derived in JS: a write-off exists (net of its reversals) and nothing is open any more (the server has no such state). */
+function isWrittenOff(d) {
+  const open = d && invOpenAmount(d);
+  if (!d || d.kind === 'credit_note' || open === null || Money.cmp(open, 0) > 0 || d.status === 'cancelled') return false;
+  const wo = (d.credit_notes || []).filter(n => n.credit_kind === 'write_off' || n.credit_kind === 'write_off_reversal').map(n => Money.str(n.gross));
+  return wo.length > 0 && Money.cmp(Money.sum(wo), 0) > 0;
 }
 function statusPill(coll, d) {
-  const late = coll === 'invoices' && isOverdue(d);
-  const cls = late ? 'bad' : { paid: 'good', accepted: 'good', sent: 'blue', rejected: 'bad', cancelled: 'bad', draft: 'warn' }[d.status] || '';
-  return `<span class="pill ${cls}">${late ? 'overdue' : esc(d.status)}</span>`;
+  const late = coll === 'invoices' && isOverdue(d), wo = coll === 'invoices' && isWrittenOff(d);
+  const cls = late ? 'bad' : wo ? '' : { paid: 'good', accepted: 'good', sent: 'blue', rejected: 'bad', cancelled: 'bad', draft: 'warn' }[d.status] || '';
+  return `<span class="pill ${cls}">${late ? 'overdue' : wo ? 'written off' : esc(d.status)}</span>`;
 }
 
 /* ================= PROJECTS ================= */
@@ -259,7 +271,24 @@ function paymentsPanel(d) {
     <div class="grid g4"><div class="kpi"><div class="l">Total</div><div class="v small" id="pay_total">${[open, paid, credited].includes(null) ? '—' : eur(Money.sum([open, paid, credited]))}</div></div><div class="kpi"><div class="l">Paid</div><div class="v small" id="pay_paid">${amt(paid)}</div></div><div class="kpi"><div class="l">Credited</div><div class="v small" id="pay_credited">${amt(credited)}</div></div><div class="kpi ${open !== null && Money.cmp(open, 0) > 0 ? 'warn' : ''}"><div class="l">Open</div><div class="v small" id="pay_open">${amt(open)}</div></div></div>
     <div class="small muted" style="margin:6px 0">Status: <b id="pay_status">${esc(d.status)}</b>${d.paid_date ? ' · paid on ' + fmtDate(d.paid_date) : ''}</div>
     ${rows ? `<table id="pay_list"><tr><th>Date</th><th class="num">Amount</th><th>Kind</th><th>Method</th><th>Note</th><th></th></tr>${rows}</table>` : '<div class="empty">No payments yet.</div>'}
-    ${isCn ? '' : '<button class="sm primary" data-a="payRecord" style="margin-top:8px">Record payment</button>'}</div>`;
+    ${isCn ? '' : '<button class="sm primary" data-a="payRecord" style="margin-top:8px">Record payment</button>'}</div>${isCn ? '' : creditPanel(d)}`;
+}
+/** Credit notes of an issued invoice and the actions that issue them (credit-notes-payments.md 3, 4). */
+function creditPanel(d) {
+  const open = invOpenAmount(d), cns = d.credit_notes || [];
+  const canCredit = d.status !== 'cancelled' && Money.cmp(remainingGross(d), 0) > 0, canOpen = open !== null && Money.cmp(open, 0) > 0;
+  const rows = cns.map(n => `<tr data-cn="${esc(n.id || '')}"><td>${n.number ? `<a href="${esc(api.url('invoices/' + n.id + '/pdf'))}" target="_blank" class="cn-pdf">${esc(n.number)}</a>` : '<span class="muted">write-off</span>'}</td><td class="nowrap">${fmtDate(n.date)}</td><td>${esc(cnKindLabel(n.credit_kind))}</td><td class="num">${eur(n.gross)}</td></tr>`).join('');
+  return `<div class="card" id="cn_panel"><h2>Credit notes</h2>
+    ${isWrittenOff(d) ? '<div class="small muted" style="margin-bottom:6px">This invoice is <span class="pill">written off</span>: nothing is open any more.</div>' : ''}
+    ${rows ? `<table id="cn_list"><tr><th>No.</th><th>Date</th><th>Kind</th><th class="num">Gross</th></tr>${rows}</table>` : '<div class="empty">No credit notes yet.</div>'}
+    <div class="row tight" style="margin-top:8px;flex-wrap:wrap">
+      ${canCredit ? '<button class="sm" data-a="cnStorno">Cancel (storno)</button><button class="sm" data-a="cnPartial">Partial credit</button>' : ''}
+      ${canOpen ? '<button class="sm" data-a="cnWriteOff">Write off</button><button class="sm" data-a="cnSettle">Settle with discount</button>' : ''}</div></div>`;
+}
+/** Gross still creditable: invoice gross minus what was credited. */
+function remainingGross(d) {
+  const gross = Money.str(d.issued && d.issued.gross != null ? d.issued.gross : docTotal(d)), cr = d.credited_amount == null ? '0.00' : Money.str(d.credited_amount);
+  return Money.sum([gross, negMoney(cr)]);
 }
 PAGES.doc = async (coll, id) => {
   await loadAll(['customers', 'projects', 'users', 'offers', 'invoices']);
@@ -422,6 +451,54 @@ A.payRecord = () => {
       await payResult(await api('POST', `invoices/${d.id}/payments`, { date: v.date, amount: a.value, kind: v.kind, method: v.method, note: (v.note || '').trim() || null }), 'Payment recorded');
     }
   });
+};
+/** A credit-note action: the dialog is the confirmation (it states what will happen); API errors show as a message (toast). */
+function cnDialog({ title, saveLabel, note, fields, vals, save }) {
+  openForm({ title, saveLabel, vals, fields, note: `<p class="small" id="cn_confirm">${note}</p>`, save });
+}
+const cnReason = [{ k: 'reason', l: 'Reason', t: 'area', rows: 2 }];
+const needReason = v => { if (!(v.reason || '').trim()) throw new Error('Enter a reason'); if (!v.date) throw new Error('Enter the date'); };
+async function cnResult(msg) {
+  const inv = await api('GET', `invoices/${DOC.id}`);
+  DOC = { coll: 'invoices', ...stripWarnings({ ...inv }) };
+  PAY_WARN = { id: DOC.id, list: [] };
+  await loadAll(['invoices']); toast(msg); render();
+}
+A.cnStorno = () => {
+  const d = DOC, rest = remainingGross(d);
+  cnDialog({ title: 'Cancel invoice (storno)', saveLabel: 'Issue cancellation', note: `This issues a cancellation credit note for the remaining <b>${esc(eur(rest))}</b> and cancels the invoice. It cannot be undone.`,
+    vals: { date: todayISO(), reason: '' }, fields: [{ k: 'date', l: 'Date', t: 'date' }, ...cnReason],
+    save: async v => { needReason(v); await api('POST', `invoices/${d.id}/credit-notes`, { credit_kind: 'storno', date: v.date, reason: v.reason.trim() }); await cnResult('Invoice cancelled'); } });
+};
+A.cnPartial = () => {
+  const d = DOC, rates = Object.entries((d.issued && d.issued.rates) || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+  if (!rates.length) { toast('This invoice has no VAT rate groups', true); return; }
+  const fields = [{ k: 'date', l: 'Date', t: 'date' }, ...rates.map(([r, g], i) => ({ k: 'amt' + i, l: `Net to credit at ${r} % VAT € (invoice net ${eur(g.net)})`, m: true })), ...cnReason];
+  cnDialog({ title: 'Partial credit note', saveLabel: 'Issue credit note', note: 'This issues a credit note for the net amounts you enter per VAT rate; the server adds the VAT. It cannot be undone.',
+    vals: { date: todayISO(), reason: '' }, fields,
+    save: async v => {
+      needReason(v);
+      const amounts = {};
+      rates.forEach(([r], i) => { const a = v['amt' + i]; if (a !== null && a !== undefined && a !== '') amounts[r] = a; });
+      if (!Object.keys(amounts).length) throw new Error('Enter an amount for at least one VAT rate');
+      await api('POST', `invoices/${d.id}/credit-notes`, { credit_kind: 'partial', date: v.date, reason: v.reason.trim(), amounts }); await cnResult('Credit note issued');
+    } });
+};
+A.cnWriteOff = () => {
+  const d = DOC, open = invOpenAmount(d);
+  cnDialog({ title: 'Write off', saveLabel: 'Write off', note: `This writes off the open amount of <b>${esc(eur(open))}</b> (an internal voucher: no number, no PDF). It cannot be undone.`,
+    vals: { date: todayISO(), reason: '' }, fields: [{ k: 'date', l: 'Date', t: 'date' }, ...cnReason],
+    save: async v => { needReason(v); await api('POST', `invoices/${d.id}/credit-notes`, { credit_kind: 'write_off', date: v.date, reason: v.reason.trim() }); await cnResult('Written off'); } });
+};
+A.cnSettle = () => {
+  const d = DOC, open = invOpenAmount(d);
+  cnDialog({ title: 'Settle with discount', saveLabel: 'Settle', note: `Open: <b>${esc(eur(open))}</b>. This records the payment you enter and a discount credit note for the rest, so the invoice is settled exactly (open 0,00 €).`,
+    vals: { date: todayISO(), amount_paid: '', note: '' }, fields: [{ k: 'date', l: 'Date', t: 'date', row: 1 }, { k: 'amount_paid', l: 'Amount paid €', m: true, row: 1 }, { k: 'note', l: 'Note' }],
+    save: async v => {
+      if (v.amount_paid === null || v.amount_paid === undefined || v.amount_paid === '') throw new Error('Enter the amount paid');
+      if (!v.date) throw new Error('Enter the date');
+      await api('POST', `invoices/${d.id}/settle-discount`, { date: v.date, amount_paid: v.amount_paid, note: (v.note || '').trim() || null }); await cnResult('Settled with discount');
+    } });
 };
 A.payReverse = async el => {
   if (!window.confirm('Reverse this payment? Use this only for an entry made by mistake; a returned transfer is a refund.')) return;
