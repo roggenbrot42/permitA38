@@ -61,10 +61,11 @@ class TripPostingService:
         return bool(rows) and rows[0].get("closed_at") is not None
 
     def _payee(self, trip: Mapping[str, Any]) -> Literal["owner", "employee"]:
-        """A trip of a team member (role ``employee``) is owed to that person; anyone else is the owner."""
+        """Spec 9.5: the owner is a user with the role boss (``private_deposit``); any other traveller, accountant
+        included, or an unknown user is owed money as ``payables_employee``."""
         user = self.store.get("users", str(trip["user_id"])) if trip.get("user_id") else None
         role = rights.normalize_role(user.get("role")) if user else ""
-        return "employee" if role == rights.EMPLOYEE else "owner"
+        return "owner" if role == rights.BOSS else "employee"
 
     def _event(self, trip: Mapping[str, Any], rev: int) -> TripEvent | None:
         """The engine input for a final trip ending on/after the accounting start, else ``None``."""
@@ -147,6 +148,7 @@ class TripPostingService:
             event_key=str(stored["event_key"]),
         )
         first_open = first_unlocked_from(self.store.list("period_locks")) or date.min
+        # booked into a later year because the document's own year was closed: income_date follows the booking date
         closed = self._closed(original.document_date)
         reversal = trip_reversal_entry(original, first_open_day=first_open, year_closed=closed)
         source = dataclasses.replace(self._source(trip, user, True), reverses_id=str(stored["id"]))
@@ -157,18 +159,6 @@ class TripPostingService:
             source,
             [post_line(ln) for ln in reversal.lines],
         )
-
-    @staticmethod
-    def _unchanged(new: Entry, live: Record) -> bool:
-        """Spec 9.5 / 10: the would-be entry equals the stored one in lines and document date."""
-        if new.document_date.isoformat() != str(live["document_date"])[:10]:
-            return False
-        stored = [(ln["role"], int(ln["amount_cents"])) for ln in live["lines"]]
-        mine = [(str(ln.role), int(ln.amount_cents)) for ln in new.lines]
-        if stored != mine:
-            return False
-        incomes = {str(ln["income_date"])[:10] for ln in live["lines"] if ln.get("income_date")}
-        return incomes <= {new.document_date.isoformat(), str(live["booking_date"])[:10]}
 
     # ---------- the hook
     def sync(self, saved: dict[str, Any], user: Mapping[str, Any] | None = None) -> dict[str, Any]:
@@ -181,8 +171,8 @@ class TripPostingService:
         new = self._entry(saved, rev + 1)
         if live is None and new is None:
             return saved
-        if live is not None and new is not None and self._unchanged(new, live):
-            return saved
+        # a final trip cannot be updated (TripService), so a live entry only meets ``new is None`` (reopen)
+        # or ``new`` with ``live is None`` (finalise / refinalise): no "unchanged" case exists
         if live is not None:
             self._reverse(saved, live, user)
         if new is None:

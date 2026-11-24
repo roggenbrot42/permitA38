@@ -17,6 +17,7 @@ from permita38.core.errors import ServiceError
 from permita38.core.repository import create_repository
 from permita38.core.service.journal import JournalService
 from permita38.core.service.locks import LockService
+from permita38.core.service.trip_postings import TripPostingService
 from permita38.core.service.trips import TripService
 from permita38.core.settings import ACCOUNTING_START_KEY
 
@@ -187,3 +188,78 @@ def test_post_rev_is_not_accepted_from_a_client(repo):
     trips.reopen(me, tid)
     out = trips.update(me, tid, {**body(), "post_rev": 7})
     assert out["post_rev"] == 2
+
+
+def accountant(repo) -> dict:
+    return repo.save("users", {"username": "acc1", "name": "Demo Accountant", "role": "accountant"})
+
+
+def test_accountant_traveller_credits_payables_employee(repo):
+    init(repo)
+    acc = accountant(repo)
+    # the accountant has no write right on trips (so TripService refuses): the hook is fed a final trip directly
+    trip = repo.save("trips", {**body(), "user_id": acc["id"], "allowance_total": "56.00", "mileage_total": "3.00"})
+    TripPostingService(repo).sync(trip, acc)
+    (entry,) = rows(repo)
+    assert [(ln[0], ln[1]) for ln in lines_of(entry)] == [("travel_costs", 5900), ("payables_employee", -5900)]
+
+
+def test_unknown_user_credits_payables_employee(repo):
+    init(repo)
+    ghost = {"id": "ghost0", "username": "ghost", "role": "boss"}  # not stored: no role can be looked up
+    TripService(repo).create(ghost, body())
+    (entry,) = rows(repo)
+    assert lines_of(entry)[1][:2] == ("payables_employee", -5900)
+
+
+def test_role_change_between_posting_and_refinalise(repo):
+    init(repo)
+    me = boss(repo)
+    trips = TripService(repo)
+    tid = trips.create(me, body())["id"]
+    trips.reopen(me, tid)
+    repo.save("users", {**repo.get("users", me["id"]), "role": "accountant"})
+    trips.update(me, tid, body())
+    r1, rev, r2 = rows(repo)
+    # the reversal mirrors the original (private_deposit), the new posting uses the role now
+    assert [(ln[0], ln[1]) for ln in lines_of(r1)] == [("travel_costs", 5900), ("private_deposit", -5900)]
+    assert [(ln[0], ln[1]) for ln in lines_of(rev)] == [("travel_costs", -5900), ("private_deposit", 5900)]
+    assert [(ln[0], ln[1]) for ln in lines_of(r2)] == [("travel_costs", 5900), ("payables_employee", -5900)]
+
+
+def test_trip_ending_in_a_locked_month_books_on_the_first_open_day(repo):
+    init(repo)
+    lock_through(repo, 11)  # November is locked; the trip ends 11 Nov
+    me = boss(repo)
+    out = TripService(repo).create(me, body())
+    (entry,) = rows(repo)
+    assert str(entry.document_date) == "2026-11-11"
+    assert str(entry.booking_date) == "2026-12-01"
+    assert lines_of(entry)[0] == ("travel_costs", 5900, "2026-11-11")  # open year: income_date = trip end date
+    assert out["post_rev"] == 1
+
+
+def test_trip_ending_in_a_closed_year_uses_the_booking_date_as_income_date(repo):
+    init(repo)
+    repo.save("fiscal_years", {**repo.find("fiscal_years", year=2026)[0], "closed_at": 5, "closed_by": "u1x000"})
+    me = boss(repo)
+    trips = TripService(repo)
+    tid = trips.create(me, body())["id"]
+    (entry,) = JournalService(repo).entries(2027)
+    assert str(entry.document_date) == "2026-11-11" and str(entry.booking_date) == "2027-01-01"
+    assert lines_of(entry)[0] == ("travel_costs", 5900, "2027-01-01")
+    trips.reopen(me, tid)
+    rev = [e for e in JournalService(repo).entries(2027) if e.event_key.endswith(":rev")][0]
+    assert str(rev.booking_date) == "2027-01-01"
+    assert lines_of(rev)[0] == ("travel_costs", -5900, "2027-01-01")
+
+
+def test_before_start_trip_reopened_and_refinalised_posts_nothing(repo):
+    init(repo, start="2026-12-01")
+    me = boss(repo)
+    trips = TripService(repo)
+    tid = trips.create(me, body())["id"]
+    trips.reopen(me, tid)
+    out = trips.update(me, tid, body())
+    assert repo.find("journal_entries") == []
+    assert out.get("post_rev") is None
