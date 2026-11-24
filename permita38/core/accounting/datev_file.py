@@ -239,7 +239,11 @@ def _data_line(row: DatevRow) -> str:
 
 
 def _file_text(rows: Sequence[DatevRow], params: DatevHeaderParams) -> str:
-    lines = [_header_line(params, _locked_flag(rows, params.locked_if_empty)), ";".join(COLUMN_HEADER), *(_data_line(r) for r in rows)]
+    lines = [
+        _header_line(params, _locked_flag(rows, params.locked_if_empty)),
+        ";".join(COLUMN_HEADER),
+        *(_data_line(r) for r in rows),
+    ]
     return "".join(line + _EOL for line in lines)
 
 
