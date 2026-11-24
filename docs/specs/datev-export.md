@@ -69,6 +69,11 @@ accounts or BU keys. The conversion per entry:
 7. Rows are ordered by booking date and entry number; `Belegdatum` = booking date (`DDMM`). A batch covers **one
    fiscal year**: a range that crosses a year boundary is refused (422).
 
+**Rates.** The export takes the VAT rate of every tax line from the line's `tax_rate`; an `S19`/`S7` line without
+one uses the box rate of the year's VAT rules (`computed_tax_rate` of Kz 81/86); any other tax line without a rate is
+an export error (422 listing the entries) — the posting engine always writes `tax_rate` on § 13b and `SX` lines. No
+rate is hardcoded in the export.
+
 ## Self-check (in the export and in tests)
 
 A **DATEV simulation** in the export module re-splits every row by its automatic account or BU key with the VAT rates
