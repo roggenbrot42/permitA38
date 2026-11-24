@@ -648,6 +648,7 @@ class ExpenseLineIn(v.StrictRecord):
 # Fields the server owns: a client (also one that sends a whole record back) cannot set them. They are dropped
 # silently before validation, so a round-tripped response is accepted and the stored value is never overwritten.
 INTERNAL_EXPENSE_FIELDS = ("bill_rev", "pay_rev")
+INTERNAL_TRIP_FIELDS = ("post_rev",)
 INTERNAL_DOCUMENT_FIELDS = (
     "issued",
     "kind",
@@ -1565,6 +1566,7 @@ class Trip(Record):
     checklist: list[TripChecklistItem] | None = None  # response-only, computed on every read
     items_expected_total: v.Money | None = None  # response-only: sum of the items' expected (planning only)
     items_actual_total: v.Money | None = None  # response-only: gross of all linked bills (planned and unplanned)
+    post_rev: int | None = None  # server-owned: the highest journal revision posted (docs/specs/accounting.md 9.5)
 
 
 class TripPlaceIn(v.StrictRecord):
@@ -1641,6 +1643,11 @@ class TripIn(v.StrictRecord):
     not_needed: Annotated[list[v.Short], Field(max_length=20)] = []
     cost_centre: Literal["project", "general"] | None = None
     status: Literal["draft", "final"] = "draft"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        return _without(data, INTERNAL_TRIP_FIELDS)
 
     @model_validator(mode="after")
     def _period(self):
