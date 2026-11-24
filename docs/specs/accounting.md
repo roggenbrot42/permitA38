@@ -758,6 +758,7 @@ maintainer's sign-off of these specs (PR #124).
 | F8 | Expense bill/pay engine, § 13b, meals, private share (A5, A6, A14, A17) | F | F5 |
 | F9 | Trips, VAT payments, special prepayment, taxes §9.5–9.7 | F | F5 |
 | F10 | Fraction oracle (hypothesis, 4 bases), fixture coverage test, CI guard that the fixture changes only in architect commits; **separate agent that has not seen the engine** | F (test + logic) | F6, F7 |
+| F1b | Guard kind for row states: a row with a given state may change only listed columns (`final`/filed rows of vat_returns and zm_reports, accounting 8.1) and a column may be set only once (`fiscal_years.closed_*`); triggers in all three dialects | S | F1 |
 | **M2a storage + skeleton** (`feat/accounting`) | | | |
 | E1 | Migration A: years, journal, payments, locks, indexes, sequences | S | F1 |
 | E2 | Migration B: invoice/expense columns, `vat_returns`, `zm_reports`, final-row guard | S | E1 |
