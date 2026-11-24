@@ -48,6 +48,12 @@ def sample(table: Table, i: int = 0) -> dict:
     for g in GUARDS:  # the database refuses dates in another format
         if g.table == table.name and g.kind == "date":
             rec[g.columns[0]] = "2026-01-05"
+        if (
+            g.table == table.name and g.kind == "range"
+        ):  # a number inside its bounds (the sample 40 / 41 may be outside)
+            col = g.columns[0]
+            if (g.lo is not None and rec[col] < g.lo) or (g.hi is not None and rec[col] > g.hi):
+                rec[col] = g.lo if g.lo is not None else g.hi
     if table.name == "allocations":
         rec.pop("supplier_id")  # a row has exactly one owner (the allocations_one_owner check)
         # the guards of migration project_planning: one hour field, a known status, no cancel date while active,
@@ -61,6 +67,18 @@ def sample(table: Table, i: int = 0) -> dict:
     elif table.name == "projects":
         rec.pop("customer_id")  # an internal project has no customer
         rec.update(kind="internal", status="active")
+    elif table.name == "fiscal_years":  # the guards of migration accounting_journal
+        rec.update(chart="skr03", income_basis="eur", vat_basis="soll", vat_frequency="month")
+    elif table.name == "journal_entries":
+        rec.pop("reverses_id")
+        rec.update(origin="auto")
+    elif table.name == "journal_lines":
+        rec.update(tax_kind="tax", tax_key="S19")
+    elif table.name == "payments":
+        rec.pop("reverses_id")
+        rec.update(method="bank", kind="payment")
+    elif table.name == "period_locks":
+        rec.update(month=5, reason="manual")
     return rec
 
 
@@ -91,6 +109,8 @@ def seed_references(repo, table: Table, rec: dict) -> None:
         if g.table == table.name and g.kind == "reference" and rec.get(g.columns[0]) is not None:
             if repo.get(g.target, rec[g.columns[0]]) is None:
                 target = {"id": rec[g.columns[0]], "name": "Demo"}
+                if g.target in ("journal_entries", "payments"):  # accounting rows have required fields
+                    target = {**sample(TABLES[g.target]), "id": rec[g.columns[0]]}
                 if g.target == "projects":
                     target.update(kind="internal", status="active")  # an internal project needs no customer
                 repo.save(g.target, target)
