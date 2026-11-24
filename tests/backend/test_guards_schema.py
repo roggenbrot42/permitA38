@@ -8,7 +8,7 @@ import pytest
 
 from permita38.core import database
 from permita38.core.repository import TABLES, ConstraintViolation
-from permita38.core.repository.dialect import DIALECTS, ROW_LOCAL_KINDS, SQLiteDialect
+from permita38.core.repository.dialect import DIALECTS, ROW_LOCAL_KINDS, TRANSITION_KINDS, SQLiteDialect
 from permita38.core.repository.schema import CHECKS, GUARD_KINDS, GUARDS
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service import integrity
@@ -38,8 +38,14 @@ DOCUMENT_COLUMNS = {  # the columns and tables of migration accounting_documents
 DOCUMENT_TABLES = ("vat_returns", "zm_reports")
 
 
+def is_row_state_guard(g) -> bool:
+    return g.kind in TRANSITION_KINDS  # attached by migration accounting_row_state only
+
+
 def is_document_guard(g) -> bool:
-    return g.table in DOCUMENT_TABLES or any(c in DOCUMENT_COLUMNS.get(g.table, ()) for c in g.columns)
+    return not is_row_state_guard(g) and (
+        g.table in DOCUMENT_TABLES or any(c in DOCUMENT_COLUMNS.get(g.table, ()) for c in g.columns)
+    )
 
 
 GUARD_MIGRATIONS = ("guards", "project_planning")  # the migrations that create guards
@@ -60,7 +66,7 @@ def test_guard_declarations_are_well_formed():
     used = {g.kind for g in GUARDS}
     assert used <= set(GUARD_KINDS)  # no unknown kind
     # no dead kind: used by a real guard, or a row-local kind (exercised by test_guards_v2_kinds.py)
-    assert set(GUARD_KINDS) <= used | ROW_LOCAL_KINDS
+    assert set(GUARD_KINDS) <= used | ROW_LOCAL_KINDS | TRANSITION_KINDS  # transition kinds: test_guard_row_state.py
     # every row-local kind is covered by the check-db rule (it raises for a kind it does not know)
     samples = {case[0].kind: case[0] for case in V2_CASES.values()}
     for kind in ROW_LOCAL_KINDS:
@@ -84,6 +90,8 @@ def test_guard_declarations_are_well_formed():
         "range.bounds",
         "ref.dangling",
         "state.append_only",
+        "state.frozen",
+        "state.set_once",
     }
     for g in GUARDS:
         if g.kind == "reference":
@@ -103,6 +111,14 @@ def guard_suffixes(g, dialect: str = "sqlite") -> tuple[str, ...]:
             "postgresql": ("_fn", "_upd", "_del", "_trunc"),
             "mariadb": ("_upd", "_del"),
         }[dialect]
+    if g.kind == "frozen_when":
+        return {
+            "sqlite": ("_upd", "_del"),
+            "postgresql": ("_upd_fn", "_upd", "_del_fn", "_del"),
+            "mariadb": ("_upd", "_del"),
+        }[dialect]
+    if g.kind == "set_once":
+        return {"sqlite": ("_upd",), "postgresql": ("_upd_fn", "_upd"), "mariadb": ("_upd",)}[dialect]
     return ("_ins", "_upd", "_del") if g.kind == "reference" else ("_ins", "_upd")
 
 
@@ -127,17 +143,27 @@ def test_sqlite_migration_file_is_exactly_the_generated_statements(tmp_path):
     refs = next(m for m in CHAIN if m.name == "reference_guards").sql()
     acc = next(m for m in CHAIN if m.name == "accounting_journal").sql()
     docs = next(m for m in CHAIN if m.name == "accounting_documents").sql()
-    old = [g for g in GUARDS if g.table not in ACCOUNTING_TABLES and not is_document_guard(g)]
+    rows = next(m for m in CHAIN if m.name == "accounting_row_state").sql()
+    for g in GUARDS:  # the row-state guards live in migration accounting_row_state only
+        if is_row_state_guard(g):
+            for s in d.guard_sql(g):
+                assert s in rows and s not in docs and s not in acc and s not in v1 and s not in refs
+    assert rows.count("CREATE TRIGGER") == sum(len(d.guard_sql(g)) for g in GUARDS if is_row_state_guard(g))
+    old = [
+        g for g in GUARDS if g.table not in ACCOUNTING_TABLES and not is_document_guard(g) and not is_row_state_guard(g)
+    ]
     for g in GUARDS:
         if is_document_guard(g):  # the document and return guards live in migration accounting_documents only
             for s in d.guard_sql(g):
                 assert s in docs and s not in acc and s not in v1 and s not in refs
     assert docs.count("CREATE TRIGGER") == sum(len(d.guard_sql(g)) for g in GUARDS if is_document_guard(g))
     for g in GUARDS:  # the accounting guards (all kinds) live in migration accounting_journal only
-        if g.table in ACCOUNTING_TABLES:
+        if g.table in ACCOUNTING_TABLES and not is_row_state_guard(g):
             for s in d.guard_sql(g):
                 assert s in acc and s not in v1 and s not in refs
-    assert acc.count("CREATE TRIGGER") == sum(len(d.guard_sql(g)) for g in GUARDS if g.table in ACCOUNTING_TABLES)
+    assert acc.count("CREATE TRIGGER") == sum(
+        len(d.guard_sql(g)) for g in GUARDS if g.table in ACCOUNTING_TABLES and not is_row_state_guard(g)
+    )
     v1_statements = [s for g in old if g.kind != "reference" for s in d.guard_sql(g)]
     ref_statements = [s for g in old if g.kind == "reference" for s in d.guard_sql(g)]
     assert ref_statements
@@ -158,7 +184,12 @@ def test_native_dialects_cover_every_guard(dialect):
     ref_sql = next(m for m in migrations if m.name == "reference_guards").sql()
     acc_sql = next(m for m in migrations if m.name == "accounting_journal").sql()
     doc_sql = next(m for m in migrations if m.name == "accounting_documents").sql()
+    row_sql = next(m for m in migrations if m.name == "accounting_row_state").sql()
     for g in GUARDS:
+        if is_row_state_guard(g):
+            for s in d.guard_sql(g):
+                assert s in row_sql and s not in doc_sql and s not in acc_sql and s not in sql and s not in ref_sql
+            continue
         if is_document_guard(g):
             for s in d.guard_sql(g):
                 assert s in doc_sql and s not in acc_sql and s not in sql and s not in ref_sql

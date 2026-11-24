@@ -339,8 +339,9 @@ def test_finalising_and_unfinalising_by_update(db, table):
     update_refused(db, table, rid, {"status": "final"}, IMPLIES_MSG)
     update_refused(db, table, rid, {"status": "final", "finalised_at": 1760000000}, IMPLIES_MSG)
     update(db, table, rid, FINAL)
-    update_refused(db, table, rid, {"finalised_at": None}, IMPLIES_MSG)
-    update_refused(db, table, rid, {"finalised_by": ""}, IMPLIES_MSG)
+    # a final row is frozen by migration accounting_row_state; either guard refuses these
+    update_refused(db, table, rid, {"finalised_at": None}, r"^permita38:state\.(frozen|implies:)")
+    update_refused(db, table, rid, {"finalised_by": ""}, r"^permita38:state\.(frozen|implies:)")
     update(db, table, rid, {"status": "draft", "finalised_at": None, "finalised_by": None})
 
 
