@@ -66,13 +66,31 @@ def context(store):
 
 
 # -- offers / invoices -------------------------------------------------------
+def snapshot_totals(issued: dict) -> dict:
+    """Totals in the shape of :func:`doc_totals` from an ``issued`` snapshot (integer cents, accounting.md 9.1)."""
+
+    def eur(cents) -> float:
+        return to_float(dec(int(cents)) / 100)
+
+    rates = issued["rates"]
+    net = sum(int(v["net"]) for v in rates.values())
+    vat = sum(int(v["vat"]) for v in rates.values())
+    return dict(
+        net=eur(net),
+        vat={float(r): eur(v["vat"]) for r, v in rates.items()},
+        vat_total=eur(vat),
+        gross=eur(net + vat),
+        by_rate={float(r): eur(v["net"]) for r, v in rates.items()},
+    )
+
+
 def doc_totals(doc, settings):
     """Net, VAT per rate and gross of an offer/invoice, in exact cents (rule: see :mod:`permita38.core.money`).
 
     Also fills ``amount`` on every line. Returned amounts are floats with at most 2 decimals; ``vat`` and
     ``by_rate`` are keyed by the VAT rate.
     """
-    klein = bool(settings.get("kleinunternehmer"))
+    klein = bool(settings.get("kleinunternehmer")) or doc.get("tax_treatment") in ("small_business", "eu_b2b_service")
     if klein:
         default_vat = ZERO
     else:
@@ -90,6 +108,9 @@ def doc_totals(doc, settings):
         raw_vat = ln.get("vat")
         rate = ZERO if klein else (dec(raw_vat) if raw_vat not in (None, "") else default_vat)
         by_rate[rate] += amt
+    issued = doc.get("issued")
+    if isinstance(issued, dict) and isinstance(issued.get("rates"), dict):
+        return snapshot_totals(issued)  # an issued document keeps its frozen figures (no retroactive repricing)
     vat = {r: vat_amount(a, r) for r, a in by_rate.items()}
     vat_total = sum(vat.values(), ZERO)
     return dict(

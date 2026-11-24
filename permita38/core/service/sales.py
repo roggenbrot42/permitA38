@@ -11,13 +11,21 @@ from permita38.core.settings import effective_settings
 
 from .numbering import NumberingService
 from .planner.service import PlannerService
+from .postings import IssuePostingService, build_snapshot
 from .project_customer import check_billable_project, check_project_customer, project_kind
 from .records import RecordService
 
 
 class SalesService:
-    def __init__(self, store: Repository, records: RecordService, numbering: NumberingService | None = None):
+    def __init__(
+        self,
+        store: Repository,
+        records: RecordService,
+        numbering: NumberingService | None = None,
+        postings: IssuePostingService | None = None,
+    ):
         self.store = store
+        self.postings = postings or IssuePostingService(store)
         self.records = records
         self.numbering = numbering or NumberingService(store)
 
@@ -51,6 +59,12 @@ class SalesService:
                 doc["due_date"] = (base + timedelta(days=int(st["payment_days"]))).isoformat()
             if coll == "offers" and not doc.get("valid_until"):
                 doc["valid_until"] = (base + timedelta(days=int(st["offer_valid_days"]))).isoformat()
+            if coll == "invoices":
+                if not doc.get("issued"):  # written once, in the transaction of the number, never changed
+                    doc["issued"] = build_snapshot(self.store, {**doc, "date": base.isoformat()}, st, base)
+                doc = self.store.save(coll, doc)
+                self.postings.post_issue({**doc, "date": base.isoformat()})
+                return doc
             return self.store.save(coll, doc)
 
     def pdf(self, coll: str, rid: str) -> tuple[bytes, str]:
