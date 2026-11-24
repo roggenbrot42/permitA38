@@ -10467,6 +10467,7 @@
           "accounting"
         ],
         "summary": "Datev Export",
+        "description": "DATEV EXTF export of the bookings in the range (one fiscal year) as a zip with the report.",
         "operationId": "datev_export_api_accounting_datev_get",
         "security": [
           {
@@ -10480,34 +10481,20 @@
           {
             "name": "from",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "string",
+              "format": "date",
               "title": "From"
             }
           },
           {
             "name": "to",
             "in": "query",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
+              "type": "string",
+              "format": "date",
               "title": "To"
             }
           }
@@ -10516,9 +10503,7 @@
           "200": {
             "description": "Successful Response",
             "content": {
-              "application/json": {
-                "schema": {}
-              }
+              "application/zip": {}
             }
           },
           "422": {

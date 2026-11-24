@@ -5,9 +5,10 @@ API tokens: reads follow the owner's rights; every route that changes something 
 `accounting` or `vat` through tokens in v1).
 """
 
+from datetime import date
 from typing import Annotated, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.core import models, rights
@@ -150,14 +151,21 @@ def lock_period(body: models.PeriodLockIn, user: Write, services: ServicesDep):
     return [models.PeriodLock(**r) for r in services.locks.lock_up_to(body.year, body.month, "manual", str(user["id"]))]
 
 
-@router.get("/datev", name="datev_export")
+@router.get(
+    "/datev", name="datev_export", response_class=Response, responses={200: {"content": {"application/zip": {}}}}
+)
 def datev(
     user: Read,
     services: ServicesDep,
-    date_from: Annotated[str | None, Query(alias="from", max_length=10)] = None,
-    date_to: Annotated[str | None, Query(alias="to", max_length=10)] = None,
+    date_from: Annotated[date, Query(alias="from")],
+    date_to: Annotated[date, Query(alias="to")],
 ):
-    not_implemented()
+    """DATEV EXTF export of the bookings in the range (one fiscal year) as a zip with the report."""
+    data = services.datev_export.export(date_from, date_to, user)
+    name = f"datev-export_{date_from.isoformat()}_{date_to.isoformat()}.zip"
+    return Response(
+        data, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'}
+    )
 
 
 @router.get("/integrity", name="accounting_integrity")

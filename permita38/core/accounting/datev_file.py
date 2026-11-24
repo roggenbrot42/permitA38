@@ -23,6 +23,7 @@ __all__ = [
     "COLUMN_HEADER",
     "DatevHeaderParams",
     "datev_zip",
+    "datev_zip_files",
     "extf_csv",
     "extf_filename",
     "self_check_report",
@@ -256,8 +257,9 @@ def unencodable_characters(rows: Sequence[DatevRow], header_params: DatevHeaderP
     return tuple(sorted(_unencodable_in(_file_text(rows, header_params))))
 
 
-def extf_filename(date_from: date, date_to: date) -> str:
-    return f"EXTF_Buchungsstapel_{_ymd(date_from)}_{_ymd(date_to)}.csv"
+def extf_filename(date_from: date, date_to: date, suffix: str = "") -> str:
+    """``EXTF_Buchungsstapel_<from>_<to>.csv``; ``suffix`` (e.g. ``_locked``) tells two files of one export apart."""
+    return f"EXTF_Buchungsstapel_{_ymd(date_from)}_{_ymd(date_to)}{suffix}.csv"
 
 
 _BANNER = (
@@ -311,14 +313,19 @@ def self_check_report(
     return "\n".join(out) + "\n"
 
 
-def datev_zip(csv: bytes, report: str, date_from: date, date_to: date) -> bytes:
-    """Zip with the EXTF file and ``export-report.txt``; fixed names, timestamps and attributes (byte-identical)."""
+def datev_zip_files(files: Sequence[tuple[str, bytes]], report: str) -> bytes:
+    """Zip with the named EXTF files and ``export-report.txt``; fixed timestamps and attributes (byte-identical)."""
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for name, data in ((extf_filename(date_from, date_to), csv), (REPORT_NAME, report.encode("utf-8"))):
+        for name, data in (*files, (REPORT_NAME, report.encode("utf-8"))):
             info = zipfile.ZipInfo(name, _ZIP_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             info.create_system = 3
             info.external_attr = 0o644 << 16
             zf.writestr(info, data)
     return buf.getvalue()
+
+
+def datev_zip(csv: bytes, report: str, date_from: date, date_to: date) -> bytes:
+    """Zip with the EXTF file and ``export-report.txt``; fixed names, timestamps and attributes (byte-identical)."""
+    return datev_zip_files([(extf_filename(date_from, date_to), csv)], report)
