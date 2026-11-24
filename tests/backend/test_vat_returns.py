@@ -175,7 +175,7 @@ def test_preview_and_create_validate_the_period(svc, repo):
     assert err.value.status == 422 and svc.list(2027) == []
     with pytest.raises(ServiceError) as err:
         svc.create_draft(2026, "month", 1, amends_id="x1y2z3")
-    assert err.value.status == 422
+    assert err.value.status == 404
 
 
 def test_duplicate_period_is_409_and_a_deleted_draft_frees_it(svc):

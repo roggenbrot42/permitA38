@@ -31,6 +31,7 @@ from permita38.core.vat_rules import VatRules, VatRulesMissing, vat_rules_for
 
 COLLECTION = "vat_returns"
 MAX_SOURCE_LINES = 20_000
+EXTERNAL_MAX_CENTS = 10**13  # bound of the entered Kz 83 (absolute) and Kz 39
 DUE_SOON_DAYS = 7
 IGNORED_KEYS = frozenset({"NONE", "KU"})
 
@@ -165,7 +166,7 @@ class VatReturnService:
         )
 
     def _compute(
-        self, fy: Record, kind: str, no: int
+        self, fy: Record, kind: str, no: int, credit_cents: int = 0
     ) -> tuple[ustva.UstvaResult, VatRules, list[_Source], tuple[date, date]]:
         year = int(fy["year"])
         lo, hi = period_bounds(year, kind, no)  # type: ignore[arg-type]
@@ -178,6 +179,7 @@ class VatReturnService:
                 hi,
                 rules,
                 small_business=bool(fy.get("small_business")),
+                special_prepayment_credit_cents=credit_cents,
             )
         except ValueError as e:
             raise ServiceError(422, str(e)) from None
@@ -255,22 +257,31 @@ class VatReturnService:
     def _live(self, row: Record) -> Record:
         """A draft as the API shows it: the stored row with the boxes computed now."""
         fy = self._year(int(row["year"]))
-        result, _rules, used, _bounds = self._compute(fy, str(row["period_kind"]), int(row["period_no"]))
+        credit = self._credit(row)
+        result, _rules, used, _bounds = self._compute(fy, str(row["period_kind"]), int(row["period_no"]), credit)
         return {
             **row,
             **self._snapshot(fy),
             "boxes": self._boxes(result, bool(row.get("amends_id"))),
             **self._sources_json([s.line_id for s in used]),
             "result_cents": result.result_cents,
-            "special_prepayment_credit_cents": 0,
+            "special_prepayment_credit_cents": credit,
             "rounding_difference_cents": result.rounding_difference,
         }
 
+    def _credit(self, row: Record) -> int:
+        """The Kz 39 credit an amended return keeps: the one of the return it amends, until the special prepayment
+        (O4) replaces it."""
+        if not row.get("amends_id"):
+            return 0
+        orig = self.store.get(COLLECTION, str(row["amends_id"]))
+        return int(orig.get("special_prepayment_credit_cents") or 0) if orig else 0
+
     @staticmethod
-    def _boxes(result: ustva.UstvaResult, amended: bool) -> dict[str, dict[str, str]]:
-        boxes = {kz: _box_json(f) for kz, f in result.boxes.items()}
+    def _boxes(result: ustva.UstvaResult, amended: bool) -> dict[str, dict[str, Any]]:
+        boxes: dict[str, dict[str, Any]] = {kz: _box_json(f) for kz, f in result.boxes.items()}
         if amended:
-            boxes["10"] = {"amount": "1"}  # Kz 10: amended return (enter 1)
+            boxes["10"] = {"flag": 1}  # Kz 10: amended return, a marker (the integer 1), no amount
         return boxes
 
     def _state(self, row: Record | None, due: date) -> str:
@@ -363,17 +374,22 @@ class VatReturnService:
 
     def _drift(self, row: Record) -> Record:
         """Journal changes a final return does not contain (ustva.md "Drift"). A normal return: the lines of the period
-        whose entry was created after ``finalised_at``. An external return: the journal is compared with the entered
+        that are not among the stored source lines (by ``created_at`` only if the list was truncated). An external return: the journal is compared with the entered
         figures, so every period line is listed when the result differs. ``tax`` is the Kz 83 the journal gives now minus
         the stored Kz 83, a decimal string. Nothing is moved automatically."""
         fy = self._year(int(row["year"]))
         result, _rules, used, _bounds = self._compute(fy, str(row["period_kind"]), int(row["period_no"]))
-        diff = int(result.result_cents) - int(row.get("result_cents") or 0)
+        credit = int(row.get("special_prepayment_credit_cents") or 0)
+        diff = int(result.result_cents) - credit - int(row.get("result_cents") or 0)
+        stored = row.get("source_lines")
         if row.get("external"):
             late = used if diff != 0 else []
-        else:
+        elif isinstance(stored, dict):  # truncated source list: only then the creation time decides
             cutoff = int(row.get("finalised_at") or 0)
             late = [s for s in used if int(s.entry.get("created_at") or 0) > cutoff]
+        else:
+            known = set(stored or [])
+            late = [s for s in used if s.line_id not in known]
         late = sorted(late, key=lambda s: (str(s.entry.get("booking_date")), int(s.entry.get("entry_no") or 0)))
         lines = [
             {
@@ -481,7 +497,7 @@ class VatReturnService:
     def _check_amendable(self, amends_id: str, year: int, kind: str, no: int) -> Record:
         orig = self.store.get(COLLECTION, amends_id)
         if orig is None:
-            raise ServiceError(422, "amends_id does not point at a return")
+            raise ServiceError(404, "The return to amend was not found")
         if (int(orig["year"]), orig["period_kind"], int(orig["period_no"])) != (year, kind, no):
             raise ServiceError(409, "An amended return must be for the same period as the original")
         if orig.get("status") != "final" or not orig.get("filed_on"):
@@ -499,7 +515,8 @@ class VatReturnService:
                 raise ServiceError(409, "The return is already final")
             fy = self._year(int(row["year"]))
             kind, no = str(row["period_kind"]), int(row["period_no"])
-            result, rules, used, (lo, hi) = self._compute(fy, kind, no)
+            credit = self._credit(row)
+            result, rules, used, (lo, hi) = self._compute(fy, kind, no, credit)
             to_lock = self.locks.preview_lock_up_to(hi.year, hi.month)  # 422: not ended / before the start
             gap = [f"{y}-{m:02d}" for y, m in to_lock if (y, m) < (lo.year, lo.month)]
             if gap and not confirm_gap:
@@ -526,7 +543,7 @@ class VatReturnService:
                     "boxes": self._boxes(result, bool(row.get("amends_id"))),
                     "source_lines": self._stored_sources(ids),
                     "result_cents": int(result.result_cents),
-                    "special_prepayment_credit_cents": 0,
+                    "special_prepayment_credit_cents": credit,
                     "rounding_difference_cents": int(result.rounding_difference),
                     "finalised_at": now,
                     "finalised_by": user.get("id"),
@@ -585,9 +602,14 @@ class VatReturnService:
             self.store.delete(COLLECTION, rid)
 
     # ---------- external returns (filed outside the app, accounting.md 16 step 5b)
-    @staticmethod
-    def _editable_external(row: Record) -> bool:
-        return bool(row.get("external")) and row.get("status") == "final" and not row.get("replaced_by")
+    def _editable_external(self, row: Record) -> bool:
+        """Editable and deletable until an amended return (draft or final) points at it (accounting 8.1)."""
+        return (
+            bool(row.get("external"))
+            and row.get("status") == "final"
+            and not row.get("replaced_by")
+            and not self.store.find(COLLECTION, amends_id=str(row["id"]))
+        )
 
     @staticmethod
     def _external_boxes(kz83_cents: int, kz39_cents: int) -> dict[str, dict[str, str]]:
@@ -597,9 +619,11 @@ class VatReturnService:
         return boxes
 
     @staticmethod
-    def _check_external_amounts(kz39_cents: int) -> None:
-        if kz39_cents < 0:
-            raise ServiceError(422, "Kz 39 must not be negative")
+    def _check_external_amounts(kz83_cents: int, kz39_cents: int) -> None:
+        if abs(kz83_cents) > EXTERNAL_MAX_CENTS:
+            raise ServiceError(422, "Kz 83 is out of range")
+        if not 0 <= kz39_cents <= EXTERNAL_MAX_CENTS:
+            raise ServiceError(422, "Kz 39 must be between 0 and 10^13 cents")
 
     def create_external(
         self, year: int, kind: str, no: int, kz83_cents: int, kz39_cents: int, filed_on: str, user: Mapping[str, Any]
@@ -608,7 +632,7 @@ class VatReturnService:
         months up to the period are locked (reason ``vat_return:<id>``); differences to the journal show as drift."""
         fy = self._year(year)
         self._check_period(fy, kind, no)
-        self._check_external_amounts(kz39_cents)
+        self._check_external_amounts(kz83_cents, kz39_cents)
         try:
             date.fromisoformat(filed_on)
         except ValueError:
@@ -648,7 +672,7 @@ class VatReturnService:
     def update_external(self, rid: str, kz83_cents: int, kz39_cents: int) -> Record:
         """Correct the entered figures of an external return until an amended return replaces it. ``filed_on`` is
         set once (database guard); to change it, delete and enter the return again."""
-        self._check_external_amounts(kz39_cents)
+        self._check_external_amounts(kz83_cents, kz39_cents)
         with self.store.transaction():
             row = self._row(rid)
             if not self._editable_external(row):

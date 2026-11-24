@@ -8,11 +8,15 @@ from typing import Any
 import pytest
 
 from permita38.core.errors import ServiceError
-from permita38.core.service.journal import JournalService
+from permita38.core.service.journal import (
+    JournalService,
+    PostLine,  # noqa: E402
+)
 from permita38.core.service.locks import LockService
 
 from .test_vat_returns import (  # noqa: F401  (fixtures)
     CASES,
+    SRC,
     USER,
     clients,
     fiscal_year,
@@ -70,7 +74,7 @@ def test_u16_drift_then_amended_return(svc, journal, repo):
     am = svc.create_draft(2026, "month", 1, amends_id=orig)
     assert am["amends_id"] == orig and am["amends_key"] == orig and am["status"] == "draft"
     want = U16["amended"]
-    assert am["boxes"]["10"] == {"amount": str(want["10"])}
+    assert am["boxes"]["10"] == {"flag": want["10"]} and want["10"] == 1
     assert am["boxes"]["81"]["base"] == money(want["81"]["base"] * 100)
     assert am["boxes"]["81"]["tax"] == money(want["81"]["tax"]) == "684.00"
     assert am["boxes"]["66"] == {"amount": money(want["66"])}
@@ -79,7 +83,7 @@ def test_u16_drift_then_amended_return(svc, journal, repo):
 
     svc.clock = lambda: LATE_CLOCK + 100  # finalised after the late entry was created
     fin = svc.finalize(am["id"], USER)
-    assert fin["status"] == "final" and fin["result_cents"] == want["83"] and fin["boxes"]["10"]["amount"] == "1"
+    assert fin["status"] == "final" and fin["result_cents"] == want["83"] and fin["boxes"]["10"] == {"flag": 1}
     assert repo_row(svc, orig)["replaced_by"] == am["id"]
     assert svc.get(am["id"])["drift"]["entries"] == 0
     item = svc.list(2026)[0]
@@ -104,7 +108,7 @@ def test_amend_unfiled_or_other_period_or_unknown_is_refused(svc, journal):
     assert err.value.status == 409
     with pytest.raises(ServiceError) as err:
         svc.create_draft(2026, "month", 1, amends_id="x1y2z3")
-    assert err.value.status == 422
+    assert err.value.status == 404
 
 
 def test_double_amend_is_409_and_reopen_frees_the_original(svc, journal):
@@ -152,9 +156,9 @@ def test_external_return_create_edit_delete_and_drift(svc, journal, repo):
     assert d["tax_cents"] == 1900 and d["tax"] == "19.00" and d["entries"] == 3 and len(d["lines"]) == 3
     assert svc.list(2026)[0]["state"] == "filed" and svc.list(2026)[0]["result"] == "570.00"
 
-    fixed = svc.update_external(ext["id"], 58900, 1500)  # typo corrected, Kz 39 entered
-    assert fixed["result_cents"] == 58900 and fixed["special_prepayment_credit_cents"] == 1500
-    assert fixed["boxes"] == {"83": {"amount": "589.00"}, "39": {"amount": "15.00"}}
+    fixed = svc.update_external(ext["id"], 57400, 1500)  # typo corrected, Kz 39 entered (589.00 - 15.00 = 574.00)
+    assert fixed["result_cents"] == 57400 and fixed["special_prepayment_credit_cents"] == 1500
+    assert fixed["boxes"] == {"83": {"amount": "574.00"}, "39": {"amount": "15.00"}}
     assert fixed["drift"] == {"entries": 0, "tax_cents": 0, "tax": "0.00", "lines": []}
     with pytest.raises(ServiceError) as err:
         svc.create_external(2026, "month", 1, 1, 0, "2026-02-08", USER)  # the period is taken
@@ -169,8 +173,14 @@ def test_external_return_is_replaced_by_an_amended_return(svc, journal, repo):
     post_case(journal, CASES["U1"], date(2026, 1, 15))
     ext = svc.create_external(2026, "month", 1, 57000, 0, "2026-02-08", USER)
     am = svc.create_draft(2026, "month", 1, amends_id=ext["id"])  # an external return counts as filed
-    assert am["result_cents"] == 58900 and am["boxes"]["10"] == {"amount": "1"}
-    svc.update_external(ext["id"], 56000, 0)  # still editable while the amendment is a draft
+    assert am["result_cents"] == 58900 and am["boxes"]["10"] == {"flag": 1}
+    for call in (lambda: svc.update_external(ext["id"], 56000, 0), lambda: svc.delete(ext["id"])):
+        with pytest.raises(ServiceError) as err:  # a draft amendment points at it (also when it dangles)
+            call()
+        assert err.value.status == 409
+    svc.delete(am["id"])
+    svc.update_external(ext["id"], 57000, 0)  # editable again once nothing points at it
+    am = svc.create_draft(2026, "month", 1, amends_id=ext["id"])
     svc.finalize(am["id"], USER)
     assert repo_row(svc, ext["id"])["replaced_by"] == am["id"]
     for call in (lambda: svc.update_external(ext["id"], 1, 0), lambda: svc.delete(ext["id"])):
@@ -184,6 +194,16 @@ def test_external_return_validation(svc, journal):
     with pytest.raises(ServiceError) as err:
         svc.create_external(2026, "month", 1, 100, -1, "2026-02-08", USER)
     assert err.value.status == 422
+    for kz83, kz39 in ((10**13 + 1, 0), (-(10**13) - 1, 0), (0, 10**13 + 1)):
+        with pytest.raises(ServiceError) as err:
+            svc.create_external(2026, "month", 1, kz83, kz39, "2026-02-08", USER)
+        assert err.value.status == 422
+    ok = svc.create_external(2026, "month", 1, -(10**13), 10**13, "2026-02-08", USER)  # the bounds are inclusive
+    for kz83, kz39 in ((10**13 + 1, 0), (0, -1), (0, 10**13 + 1)):
+        with pytest.raises(ServiceError) as err:
+            svc.update_external(ok["id"], kz83, kz39)
+        assert err.value.status == 422
+    svc.delete(ok["id"])
     with pytest.raises(ServiceError) as err:
         svc.create_external(2026, "month", 1, 100, 0, "08.02.2026", USER)
     assert err.value.status == 422
@@ -207,6 +227,56 @@ def filed_january_other(svc) -> str:
     return str(d["id"])
 
 
+def test_drift_lists_a_line_created_in_the_second_of_finalising(svc, journal, repo):
+    orig = filed_january(svc, journal)  # finalised_at 1_800_000_000
+    j = JournalService(repo, clock=lambda: 1_800_000_000)  # the same second
+    late = U16["late_line"]
+    post_sale(
+        j,
+        "late:1",
+        date.fromisoformat(late["created"]),
+        date.fromisoformat(late["vat_date"]),
+        late["base"],
+        late["tax"],
+    )
+    assert svc.get(orig)["drift"]["entries"] == 1
+
+
+def test_drift_lists_lines_without_tax_effect(svc, journal, repo):
+    orig = filed_january(svc, journal)
+    j = JournalService(repo, clock=lambda: LATE_CLOCK)
+    j.post(  # a base-only line (Kz 21): no tax effect, but it changes the boxes
+        "late:2", date(2026, 2, 20), "late:2", SRC,
+        [
+            PostLine(role="bank", amount_cents=10000),
+            PostLine(role="revenue_eu_svc", amount_cents=-10000),
+            PostLine(role="revenue_eu_svc", amount_cents=0, tax_key="EU_SVC", tax_kind="base_only",
+                     tax_base_cents=10000, vat_date=date(2026, 1, 28)),
+        ],
+    )  # fmt: skip
+    got = svc.get(orig)["drift"]
+    assert got["entries"] == 1 and got["tax_cents"] == 0
+    assert [x["tax_kind"] for x in got["lines"]] == ["base_only"]
+
+
+def test_external_december_with_kz39_has_no_drift_and_its_amendment_keeps_the_credit(repo, journal):
+    svc = make_service(repo, today=date(2027, 1, 15))
+    case = CASES["U10-december"]
+    post_case(journal, case, date(2026, 12, 15))
+    ext = svc.create_external(2026, "month", 12, 0, case["special_prepayment"], "2027-01-08", USER)
+    assert ext["boxes"]["39"] == {"amount": "600.00"} and ext["result_cents"] == 0
+    assert ext["drift"] == {"entries": 0, "tax_cents": 0, "tax": "0.00", "lines": []}  # journal 600.00 - credit
+    wrong = svc.update_external(ext["id"], 100, case["special_prepayment"])
+    assert wrong["drift"]["tax_cents"] == -100
+    svc.update_external(ext["id"], 0, case["special_prepayment"])
+    am = svc.create_draft(2026, "month", 12, amends_id=ext["id"])
+    assert am["special_prepayment_credit_cents"] == 60000 and am["result_cents"] == 0
+    assert am["boxes"]["39"] == {"amount": "600.00"} and am["boxes"]["10"] == {"flag": 1}
+    fin = svc.finalize(am["id"], USER, confirm_gap=True)
+    assert fin["special_prepayment_credit_cents"] == 60000 and fin["result_cents"] == 0
+    assert svc.get(am["id"])["drift"]["tax_cents"] == 0
+
+
 # ------------------------------------------------------------------ API and rights
 def test_api_amend_drift_and_rights(clients, app: Any):
     boss, acc, emp = clients["boss"], clients["accountant"], clients["employee"]
@@ -221,7 +291,7 @@ def test_api_amend_drift_and_rights(clients, app: Any):
     created = acc.post("/api/vat-returns", json=amend)
     assert created.status_code == 201, created.text
     am = created.json()
-    assert am["amends_id"] == first and am["boxes"]["10"]["amount"] == "1.00"
+    assert am["amends_id"] == first and am["boxes"]["10"]["flag"] == 1
     assert boss.post("/api/vat-returns", json=amend).status_code == 409  # already being amended
     assert acc.post(f"/api/vat-returns/{am['id']}/finalize").status_code == 200
     assert boss.get(f"/api/vat-returns/{first}").json()["replaced_by"] == am["id"]
