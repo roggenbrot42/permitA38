@@ -439,7 +439,8 @@ The Money page's reserve keeps working from `core/tax.py`; it additionally shows
 ### 9.8 Manual entries
 
 Reversals of trips, manual entries and template entries follow 7.8: booked on `max(requested date or original
-booking date, original booking date, first open day)` (a reversal never books before its original), with the original `income_date` while that year is open and the booking date once it is closed. A reversal
+booking date, original booking date, first open day)` (a reversal never books before its original), with the original `income_date` while that year is open and the booking date once it is closed — under accrual also
+when the reversal books into another fiscal year (an accrual line stays in its entry's year, 14.5). A reversal
 line whose original `vat_date` now lies in a locked month gets `vat_date` = the reversal's booking date (a reversal
 is a correction, not manual drift).
 
