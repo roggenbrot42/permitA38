@@ -94,7 +94,7 @@ class TripPostingService:
         entry = trip_entry(event, self._payee(trip))
         if entry is None or not self._closed(event.end_date):
             return entry
-        booking = self.journal._booking_date(event.end_date)
+        booking = self.journal.booking_date(event.end_date)
         lines = tuple(dataclasses.replace(ln, income_date=booking if ln.income_date else None) for ln in entry.lines)
         return dataclasses.replace(entry, lines=lines)
 

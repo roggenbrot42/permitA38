@@ -203,8 +203,7 @@ class ExpensePostingService:
         in (for change detection, so a lock set afterwards does not look like an edit)."""
         if stored is not None:
             return date.fromisoformat(str(stored["booking_date"]))
-        # TODO: make JournalService.booking_date public; called through the instance for now
-        booking = self.journal._booking_date(day)
+        booking = self.journal.booking_date(day)
         return booking if booking > day else (first_open or date.min)
 
     def _entries(
