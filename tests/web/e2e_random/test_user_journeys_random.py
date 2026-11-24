@@ -626,6 +626,7 @@ class Journey:
         self.nav(f"#/project/{p.id}")
         self.page.click(f"[data-a=allocations][data-project='{p.id}']")
         self.page.click("#modal-root [data-a=alNew]")
+        self.page.select_option("#al_mode", "week")  # the dialog proposes "in total" when the plan has missing hours
         self.page.fill("#al_hours", str(hours))
         self.page.fill("#al_start", start.isoformat())
         self.page.fill("#al_end", end.isoformat())
