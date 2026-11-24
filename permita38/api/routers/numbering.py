@@ -13,7 +13,7 @@ from permita38.core.numbering import MAX_NUMBER
 router = APIRouter(tags=["numbering"])
 routers = [router]
 
-DocType = Literal["invoice", "offer"]
+DocType = Literal["invoice", "offer", "credit_note"]
 Pattern = Annotated[str, StringConstraints(max_length=100)]
 
 

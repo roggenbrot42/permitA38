@@ -22,8 +22,11 @@ from permita38.core.numbering import MAX_NUMBER, Pattern, PatternError, parse_pa
 from permita38.core.repository import Repository
 from permita38.core.settings import effective_settings
 
-TYPES = {"invoice": "invoices", "offer": "offers"}
+TYPES = {"invoice": "invoices", "offer": "offers", "credit_note": "credit_note"}
+#: the settings prefix of each numbered collection (``<prefix>_pattern`` / ``<prefix>_reset``)
+_SETTINGS_KEY = {"invoices": "invoice", "offers": "offer", "credit_note": "credit_note"}
 PREVIEW_COUNT = 5
+CREDIT_NOTE = "credit_note"
 _NUMBER_COLLECTIONS = ("invoices", "offers")
 
 
@@ -36,12 +39,13 @@ class NumberConfig:
 
 
 def coll_for(doc_type: str) -> str:
-    """'invoice' / 'offer' (also 'invoices' / 'offers') -> collection name."""
+    """'invoice' / 'offer' / 'credit_note' (also 'invoices' / 'offers') -> counter collection name. Credit notes are rows of
+    ``invoices`` with ``kind = credit_note`` but have their own counter group ``credit_note``."""
     if doc_type in TYPES.values():
         return doc_type
     if doc_type in TYPES:
         return TYPES[doc_type]
-    raise ServiceError(400, "Unknown document type; use invoice or offer")
+    raise ServiceError(400, "Unknown document type; use invoice, offer or credit_note")
 
 
 def _parse_date(value) -> date | None:
@@ -62,8 +66,9 @@ class NumberingService:
     def config(self, doc_type: str) -> NumberConfig:
         coll = coll_for(doc_type)
         st = effective_settings(self.store.settings())
-        key = "invoice" if coll == "invoices" else "offer"
-        return NumberConfig(coll, st[f"{key}_pattern"], st[f"{key}_reset"], bool(st.get("numbering_shared")))
+        key = _SETTINGS_KEY[coll]
+        shared = bool(st.get("numbering_shared")) and coll != CREDIT_NOTE  # credit notes never share a sequence
+        return NumberConfig(coll, st[f"{key}_pattern"], st[f"{key}_reset"], shared)
 
     def _group(self, cfg: NumberConfig) -> str:
         return "shared" if cfg.shared else cfg.coll
@@ -73,10 +78,12 @@ class NumberingService:
 
     # ------------------------------------------------------------------ documents
     def _docs_in_scope(self, cfg: NumberConfig, period: str, reset: str) -> list[dict]:
-        colls = _NUMBER_COLLECTIONS if cfg.shared else (cfg.coll,)
+        colls = _NUMBER_COLLECTIONS if cfg.shared else ("invoices" if cfg.coll == CREDIT_NOTE else cfg.coll,)
         out = []
         for c in colls:
             for doc in self.store.list(c):
+                if (doc.get("kind") == "credit_note") != (cfg.coll == CREDIT_NOTE):
+                    continue  # credit notes live in ``invoices`` but count only for their own sequence
                 day = _parse_date(doc.get("date"))
                 if day is not None and period_key(reset, day) == period:
                     out.append(doc)
@@ -304,7 +311,7 @@ class NumberingService:
             before = {"pattern": cfg.pattern, "reset": cfg.reset, "next": before_next}
             if pattern is not None or reset is not None:
                 st = self.store.settings()
-                key = "invoice" if cfg.coll == "invoices" else "offer"
+                key = _SETTINGS_KEY[cfg.coll]
                 st[f"{key}_pattern"] = result["pattern"]
                 st[f"{key}_reset"] = result["reset"]
                 self.store.save_settings(effective_settings(st))
