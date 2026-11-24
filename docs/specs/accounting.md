@@ -320,13 +320,14 @@ cash date: the "VAT received" of the gross EÜR) and the declaration part (+ΔD_
 Both columns balance by construction: accrual P + (C − T) − (P − T) − CN − D − (CV − D) = 0; EÜR P − TN − D + (D − TV)
 − (P − T) = 0.
 
-**Write-off reversal.** A payment that raises `P` above `C` while write-offs exist first creates a write-off reversal
+**Write-off reversal.** A payment (a `payments` row of kind `payment`; reversing a refund does not count) that raises `P` above `C` while write-offs exist first creates a write-off reversal
 record (a credit document with `credit_kind = write_off_reversal`, negative amounts, `corrects_id` = the invoice,
 dated the payment date; event key `credit:<id>`) for `min(T_after − max(C, T_before), remaining written-off gross)`
 — bounded by what **this payment** adds above the current gross, so cash owed back to the customer after a credit
 note never reverses a write-off — allocated over the
-remaining written-off gross per rate group (largest remainder in cents, ties to the larger rate), its VAT in
-proportion, so a full recovery restores exactly the written-off net and VAT; then the payment posts. Reversing that payment later does
+remaining written-off gross per rate group (largest remainder in cents, ties to the larger rate), its VAT per group
+= half-up(remaining written-off VAT_r × reversed gross_r ÷ remaining written-off gross_r) (the whole remaining VAT
+when the whole remaining gross is reversed), so a full recovery restores exactly the written-off net and VAT; then the payment posts. Reversing that payment later does
 **not** restore the write-off: the receivable reopens and the user writes it off again if needed. Recovered cash is revenue again (accrual:
 credit `bad_debts`) and under Soll the VAT is due again at the receipt date (§ 17 Abs. 2 Nr. 1 Satz 2); under Ist the
 cash rule handles it.
