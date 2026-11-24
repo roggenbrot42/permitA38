@@ -153,7 +153,15 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
    new year has started. Instead the year closing (section 13) stores the year's last `hash` and `entry_no` in
    `fiscal_years.closing_hash` / `closing_entry_no` (set once; added by the E18 migration); verification checks each
    year's chain and, for a closed year, that the recomputed last hash and the entry count equal those columns (this
-   also detects a truncated closed year after a restore). Canonical JSON: sorted
+   also detects a truncated closed year after a restore). For an open year, verification also compares the last
+   `entry_no` with the year's `journal` counter in `number_sequences` (a deleted last entry leaves the counter ahead).
+   Hashed fields, in a JSON object with sorted keys: `fiscal_year`, `entry_no`, `document_date`, `booking_date`,
+   `event`, `event_key`, `source_coll`, `source_id`, `source_number`, `reverses_id`, `counterparty_id`, `cp_vat_id`,
+   `cp_country`, `text`, `origin`, `created_at`, `created_by`, `prev_hash`, and `lines`: a list ordered by `line_no`
+   of objects with `line_no`, `role`, `account`, `amount_cents`, `tax_key`, `tax_kind`, `tax_rate` (decimal string),
+   `tax_base_cents`, `vat_date`, `income_date`, `open_item_id`, `treatment`; absent values are `null`; row ids,
+   `entry_id` and the `extra` column are not hashed. Changing this list changes every hash: only with a new chain
+   version recorded on the fiscal year. Canonical JSON: sorted
    keys, no spaces, integers as integers, dates as `YYYY-MM-DD`, decimals as strings. `permita38 check-db` and the
    integrity service verify the chain; a break is an `error` finding ("journal changed outside the app or forked by a
    synced folder").
