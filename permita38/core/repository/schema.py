@@ -336,7 +336,7 @@ TABLES: dict[str, Table] = {
             _cols(
                 _BASE + "year:int chart:str income_basis:str vat_basis:str vat_frequency:str dauerfrist:bool "
                 "small_business:bool vat_regular_from:str rules_version:str opened_at:int opened_by:id "
-                "closed_at:int closed_by:id" + _EXTRA
+                "closed_at:int closed_by:id closing_hash:str closing_entry_no:int" + _EXTRA
             ),
             (Index("idx_fiscal_years_year", ("year",), unique=True),),
         ),
@@ -841,6 +841,7 @@ def _accounting_guards() -> list[Guard]:
         implies("fiscal_years", "closed_by", IsSet("closed_at"), IsSet("closed_by")),
         implies("fiscal_years", "closed_at", IsSet("closed_by"), IsSet("closed_at")),
         bounds("fiscal_years", "year", 2000, 2100),
+        bounds("fiscal_years", "closing_entry_no", 0, 2_000_000_000),
     ]
     out += required(
         "journal_entries", "fiscal_year", "entry_no", "document_date", "booking_date", "event", "event_key",
@@ -984,6 +985,11 @@ def _accounting_row_state_guards() -> list[Guard]:
         Guard("guard_zm_reports_filed_on_once", "zm_reports", "set_once", ("filed_on",), "state.set_once"),
         Guard("guard_fiscal_years_closed_at_once", "fiscal_years", "set_once", ("closed_at",), "state.set_once"),
         Guard("guard_fiscal_years_closed_by_once", "fiscal_years", "set_once", ("closed_by",), "state.set_once"),
+        Guard("guard_fiscal_years_closing_hash_once", "fiscal_years", "set_once", ("closing_hash",), "state.set_once"),
+        Guard(
+            "guard_fiscal_years_closing_entry_no_once", "fiscal_years", "set_once", ("closing_entry_no",),
+            "state.set_once",
+        ),
     ]
 
 

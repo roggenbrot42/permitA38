@@ -2081,6 +2081,8 @@ class FiscalYear(Record):
     opened_by: str | None = None
     closed_at: int | None = None
     closed_by: str | None = None
+    closing_hash: str | None = None
+    closing_entry_no: int | None = None
 
 
 class JournalLine(BaseModel):
