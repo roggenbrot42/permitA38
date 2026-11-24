@@ -23,6 +23,7 @@ from permita38.core.service.fiscal_years import FiscalYearService
 from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.integrity import Ctx, rule_numbering_duplicates
+from permita38.core.service.journal import JournalService
 from permita38.core.service.personal_tax import PersonalTaxService
 from permita38.core.service.planner.service import PlannerService
 from permita38.core.service.procurement import ProcurementService
@@ -74,6 +75,7 @@ class Services:
     tokens: TokenService
     audit: AuditService
     fiscal_years: FiscalYearService
+    journal: JournalService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
@@ -111,6 +113,7 @@ class Services:
             tokens=TokenService(store),
             audit=AuditService(store),
             fiscal_years=FiscalYearService(store),
+            journal=JournalService(store),
             impressum=ImpressumService(
                 SafeFetcher(user_agent),
                 enabled=config.features.impressum_lookup,

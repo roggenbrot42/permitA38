@@ -263,6 +263,13 @@ class Dialect:
     def select_one(self, table: Table) -> str:
         return self.select_all(table) + f" WHERE {self.quote(table.pk)} = {self.placeholder}"
 
+    # appended to a SELECT that must lock the rows it reads until the transaction ends; SQLite has no row locks
+    # (``BEGIN IMMEDIATE`` already serialises every writer)
+    for_update = " FOR UPDATE"
+
+    def select_one_for_update(self, table: Table) -> str:
+        return self.select_one(table) + self.for_update
+
     def delete_one(self, table: Table) -> str:
         return f"DELETE FROM {self.quote(table.name)} WHERE {self.quote(table.pk)} = {self.placeholder}"
 
@@ -274,6 +281,10 @@ class Dialect:
 
     def all_columns(self, table: Table) -> list[str]:
         return self._all_columns(table)
+
+    def insert(self, table: Table, columns: list[str]) -> str:
+        """A plain INSERT (never an upsert): an existing primary key or unique value is an error."""
+        return self._insert_head(table, columns)
 
     def _insert_head(self, table: Table, columns: list[str]) -> str:
         names = ", ".join(self.quote(c) for c in columns)
@@ -296,6 +307,7 @@ class Dialect:
 
 class SQLiteDialect(Dialect):
     name = "sqlite"
+    for_update = ""
     types = {ID: "TEXT", STR: "TEXT", TEXT: "TEXT", INT: "INTEGER", FLOAT: "REAL", BOOL: "INTEGER", JSON: "TEXT"}
 
     def _is_set(self, ref: str) -> str:
