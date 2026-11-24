@@ -16,6 +16,7 @@ from .schema import (
     INT,
     JSON,
     STR,
+    TABLES,
     TEXT,
     Column,
     Condition,
@@ -26,6 +27,7 @@ from .schema import (
     IsBlank,
     IsSet,
     Table,
+    column_type,
 )
 
 _DATE_GLOB = "[0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]"
@@ -41,6 +43,9 @@ _CALENDAR_DATE_REGEX = (
 
 #: guard kinds added in guards v2 that are row-local (rendered by `Dialect.guard_bad_sql`)
 ROW_LOCAL_KINDS = frozenset({"one_of", "exactly_one", "required", "max_days", "range", "implies"})
+
+#: transition guard kinds (docs/specs/db-constraints.md): triggers that compare OLD and NEW, never grandfathered
+TRANSITION_KINDS = frozenset({"frozen_when", "set_once"})
 
 
 class Dialect:
@@ -178,6 +183,51 @@ class Dialect:
             )
         raise ValueError(f"unknown guard kind {guard.kind!r}")
 
+    # ---- transition guards (frozen_when / set_once): conditions over OLD and NEW rows
+    def _ne(self, a: str, b: str, ctype: str | None = None) -> str:
+        """Null-safe 'a differs from b' (`ctype` lets MariaDB compare strings as bytes)."""
+        raise NotImplementedError
+
+    def _any(self, parts: list[str]) -> str:
+        return "(" + " OR ".join(parts) + ")" if parts else self._false()
+
+    def _changed(self, guard: Guard, col: str) -> str:
+        ctype = column_type(guard.table, col) or TEXT
+        return self._ne(self._ref(col, "NEW."), self._ref(col, "OLD."), ctype)
+
+    def frozen_conditions(self, guard: Guard) -> tuple[str, str]:
+        """(update_bad, delete_bad): SQL booleans over OLD / NEW that are true when a frozen_when guard refuses."""
+        table = TABLES.get(guard.table)
+        if table is None:
+            raise ValueError(
+                f"frozen_when guard {guard.name} needs table {guard.table!r} in TABLES (it locks the rest)"
+            )
+        state = guard.columns[0]
+        free = {state, *guard.mutable, *guard.reopen_clears}
+        every = [*table.column_names, *([table.extra_column] if table.extra_column else [])]
+        frozen = f"{self._exact(self._ref(state, 'OLD.'), guard.values)} = {self._literal(guard.values[0])}"
+        leaving = self._changed(guard, state)  # OLD is frozen, so a changed state leaves the frozen value
+        parts = [self._changed(guard, c) for c in every if c not in free]
+        if guard.reopen_clears:
+            parts.append(f"(NOT {leaving} AND {self._any([self._changed(guard, c) for c in guard.reopen_clears])})")
+        if guard.reopen_if_null is None:
+            parts.append(leaving)
+        else:
+            r = guard.reopen_if_null
+            parts.append(f"({leaving} AND ({self._is_set(self._ref(r, 'OLD.'))} OR {self._changed(guard, r)}))")
+        if guard.exempt_when:
+            pairs = [f"{self._exact(self._ref(c, 'OLD.'), (v,))} = {self._literal(v)}" for c, v in guard.exempt_when]
+            assert guard.exempt_until_set is not None
+            pairs.append(f"NOT {self._is_set(self._ref(guard.exempt_until_set, 'OLD.'))}")
+            # COALESCE: a NULL comparison must not make the row look exempt (NOT NULL is NULL, the guard would not fire)
+            frozen = f"{frozen} AND NOT COALESCE(({' AND '.join(pairs)}), {self._false()})"
+        return f"{frozen} AND {self._any(parts)}", frozen
+
+    def once_bad_sql(self, guard: Guard) -> str:
+        """True when a set_once column changes from a value (anything but NULL / blank) to anything else."""
+        c = guard.columns[0]
+        return f"{self._is_set(self._ref(c, 'OLD.'))} AND {self._changed(guard, c)}"
+
     def _check_guard_sql(self, guard: Guard) -> list[str]:
         """Native CHECK constraint for the row-local new kinds (PostgreSQL, MariaDB)."""
         cond = f"NOT COALESCE(({self.guard_bad_sql(guard)}), {self._false()})"
@@ -262,6 +312,9 @@ class SQLiteDialect(Dialect):
         updates = ", ".join(f"{self.quote(c)} = excluded.{self.quote(c)}" for c in columns if c != table.pk)
         return self._insert_head(table, columns) + f" ON CONFLICT ({self.quote(table.pk)}) DO UPDATE SET {updates}"
 
+    def _ne(self, a: str, b: str, ctype: str | None = None) -> str:
+        return f"{a} IS NOT {b}"
+
     def guard_sql(self, guard: Guard) -> list[str]:
         """The BEFORE INSERT and BEFORE UPDATE OF triggers of a guard (named `<guard.name>_ins` / `_upd`).
 
@@ -274,6 +327,18 @@ class SQLiteDialect(Dialect):
             return [
                 f"CREATE TRIGGER {q(guard.name + '_upd')} BEFORE UPDATE ON {t}\n{raise_}",
                 f"CREATE TRIGGER {q(guard.name + '_del')} BEFORE DELETE ON {t}\n{raise_}",
+            ]
+        if guard.kind in TRANSITION_KINDS:  # BEFORE UPDATE (and DELETE) triggers over OLD / NEW, no grandfathering
+            raise_ = f"BEGIN SELECT RAISE(ABORT, 'permita38:{guard.code}'); END;"
+            if guard.kind == "set_once":
+                return [
+                    f"CREATE TRIGGER {q(guard.name + '_upd')} BEFORE UPDATE OF {q(guard.columns[0])} ON {t}\n"
+                    f"WHEN {self.once_bad_sql(guard)}\n{raise_}"
+                ]
+            upd, dele = self.frozen_conditions(guard)
+            return [
+                f"CREATE TRIGGER {q(guard.name + '_upd')} BEFORE UPDATE ON {t}\nWHEN {upd}\n{raise_}",
+                f"CREATE TRIGGER {q(guard.name + '_del')} BEFORE DELETE ON {t}\nWHEN {dele}\n{raise_}",
             ]
         cols = [q(c) for c in guard.read_columns]
         c = cols[0]
@@ -350,6 +415,11 @@ class PostgresDialect(Dialect):
     def _false(self) -> str:
         return "FALSE"
 
+    def _literal(self, v: Any) -> str:
+        if isinstance(v, bool):  # a BOOLEAN column does not compare with 1
+            return "TRUE" if v else "FALSE"
+        return super()._literal(v)
+
     def upsert(self, table: Table, columns: list[str]) -> str:
         updates = ", ".join(f"{self.quote(c)} = EXCLUDED.{self.quote(c)}" for c in columns if c != table.pk)
         return self._insert_head(table, columns) + f" ON CONFLICT ({self.quote(table.pk)}) DO UPDATE SET {updates}"
@@ -367,6 +437,8 @@ class PostgresDialect(Dialect):
                 # TRUNCATE fires no row triggers, so it needs its own statement-level trigger
                 f"CREATE TRIGGER {q(guard.name + '_trunc')} BEFORE TRUNCATE ON {t} FOR EACH STATEMENT EXECUTE FUNCTION {fn}();",
             ]
+        if guard.kind in TRANSITION_KINDS:
+            return self._transition_triggers(guard)
         cols = [q(c) for c in guard.columns]
         c = cols[0]
         if guard.kind in ROW_LOCAL_KINDS:
@@ -385,6 +457,44 @@ class PostgresDialect(Dialect):
         else:
             raise ValueError(f"unknown guard kind {guard.kind!r}")
         return [f"ALTER TABLE {t} ADD CONSTRAINT {q(guard.name)} CHECK ({cond});"]
+
+    def _ne(self, a: str, b: str, ctype: str | None = None) -> str:
+        return f"{a} IS DISTINCT FROM {b}"
+
+    def _transition_triggers(self, guard: Guard) -> list[str]:
+        """Trigger functions and BEFORE UPDATE (and DELETE) triggers of a frozen_when / set_once guard."""
+        q, t = self.quote, self.quote(guard.table)
+
+        def fn(suffix: str, bad: str, ret: str) -> str:
+            return (
+                f"CREATE FUNCTION {q(guard.name + suffix + '_fn')}() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n"
+                f"  IF {bad} THEN\n    RAISE EXCEPTION 'permita38:{guard.code}' USING ERRCODE = '23000';\n  END IF;\n"
+                f"  RETURN {ret};\nEND;\n$$;"
+            )
+
+        def trg(suffix: str, event: str) -> str:
+            return (
+                f"CREATE TRIGGER {q(guard.name + suffix)} BEFORE {event} ON {t} FOR EACH ROW "
+                f"EXECUTE FUNCTION {q(guard.name + suffix + '_fn')}();"
+            )
+
+        if guard.kind == "set_once":
+            return [fn("_upd", self.once_bad_sql(guard), "NEW"), trg("_upd", f"UPDATE OF {q(guard.columns[0])}")]
+        upd, dele = self.frozen_conditions(guard)
+        trunc_fn = (
+            f"CREATE FUNCTION {q(guard.name + '_trunc_fn')}() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n"
+            f"  RAISE EXCEPTION 'permita38:{guard.code}' USING ERRCODE = '23000';\nEND;\n$$;"
+        )
+        return [
+            fn("_upd", upd, "NEW"),
+            trg("_upd", "UPDATE"),
+            fn("_del", dele, "OLD"),
+            trg("_del", "DELETE"),
+            # TRUNCATE fires no row triggers (like append_only): refuse it for the whole table
+            trunc_fn,
+            f"CREATE TRIGGER {q(guard.name + '_trunc')} BEFORE TRUNCATE ON {t} FOR EACH STATEMENT "
+            f"EXECUTE FUNCTION {q(guard.name + '_trunc_fn')}();",
+        ]
 
     def _reference_triggers(self, guard: Guard) -> list[str]:
         """Trigger functions and triggers of a reference guard (insert / update side and delete side)."""
@@ -468,6 +578,8 @@ class MariaDBDialect(Dialect):
                 f"CREATE TRIGGER {q(guard.name + '_upd')} BEFORE UPDATE ON {t} FOR EACH ROW\nBEGIN\n  {signal};\nEND;",
                 f"CREATE TRIGGER {q(guard.name + '_del')} BEFORE DELETE ON {t} FOR EACH ROW\nBEGIN\n  {signal};\nEND;",
             ]
+        if guard.kind in TRANSITION_KINDS:
+            return self._transition_triggers(guard)
         cols = [q(c) for c in guard.columns]
         c = cols[0]
         if guard.kind in ROW_LOCAL_KINDS:
@@ -490,6 +602,27 @@ class MariaDBDialect(Dialect):
         else:
             raise ValueError(f"unknown guard kind {guard.kind!r}")
         return [f"ALTER TABLE {t} ADD CONSTRAINT {q(guard.name)} CHECK ({cond});"]
+
+    def _ne(self, a: str, b: str, ctype: str | None = None) -> str:
+        if ctype in (ID, STR, TEXT, JSON):  # case-insensitive default collation: compare strings as bytes
+            a, b = f"BINARY {a}", f"BINARY {b}"
+        return f"NOT ({a} <=> {b})"
+
+    def _transition_triggers(self, guard: Guard) -> list[str]:
+        """BEFORE UPDATE (and DELETE) triggers of a frozen_when / set_once guard (SIGNAL carries the code)."""
+        q, t = self.quote, self.quote(guard.table)
+        signal = f"SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'permita38:{guard.code}'"
+
+        def trg(suffix: str, event: str, bad: str) -> str:
+            return (
+                f"CREATE TRIGGER {q(guard.name + suffix)} BEFORE {event} ON {t} FOR EACH ROW\nBEGIN\n"
+                f"  IF {bad} THEN {signal}; END IF;\nEND;"
+            )
+
+        if guard.kind == "set_once":
+            return [trg("_upd", "UPDATE", self.once_bad_sql(guard))]
+        upd, dele = self.frozen_conditions(guard)
+        return [trg("_upd", "UPDATE", upd), trg("_del", "DELETE", dele)]
 
     def _reference_triggers(self, guard: Guard) -> list[str]:
         """BEFORE INSERT / UPDATE / DELETE triggers of a reference guard (SIGNAL carries the code)."""

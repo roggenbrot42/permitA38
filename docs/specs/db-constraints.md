@@ -197,3 +197,32 @@ because TRUNCATE fires no row triggers. Caveats: SQLite `INSERT OR REPLACE` dele
 triggers (recursive triggers are off), so it would bypass the guard; the repository never uses it (it writes with
 `ON CONFLICT DO UPDATE`, which is refused). Services must therefore only INSERT into append-only tables: a re-save of an
 existing id is refused, not merged.
+
+## Guard kinds `frozen_when` and `set_once` (row state, accounting work package F1b)
+
+Transition guards: BEFORE UPDATE (and DELETE) triggers that compare `OLD` and `NEW`. Like `append_only` they are never
+grandfathered and not attached to a table yet (a later migration attaches them to `vat_returns`, `zm_reports` and
+`fiscal_years`). Codes `state.frozen` / `state.set_once`; SQLite `RAISE(ABORT)`, PostgreSQL `RAISE EXCEPTION`, MariaDB `SIGNAL`.
+
+- `Guard(name, table, "frozen_when", (state_col,), "state.frozen", values=(frozen,), mutable=(...), reopen_if_null=col,
+  reopen_clears=(...))`: while the stored `state_col` equals `frozen`, an UPDATE may change only the `mutable` columns;
+  every other column of the table (including the `extra` JSON) is locked, found through `TABLES[table]` at emit time.
+  Leaving the frozen value is allowed only while the stored `reopen_if_null` column is unset (NULL or blank); the same
+  UPDATE may then change the state, the `mutable` columns and `reopen_clears`, but must not change `reopen_if_null`.
+  `reopen_clears` change only together with such a reopen. Without `reopen_if_null` the state never leaves the frozen
+  value. DELETE of a frozen row is refused. Triggers `<name>_upd` / `<name>_del` (PostgreSQL: functions `<name>_upd_fn` /
+  `<name>_del_fn`). MariaDB compares strings as bytes (the default collation is case-insensitive).
+- `Guard(name, table, "set_once", (col,), "state.set_once")`: once `col` holds a value (not NULL, not blank) it cannot
+  change any more; going from unset to a value is allowed. Trigger `<name>_upd` on `UPDATE OF col`. Combined with
+  `frozen_when` it gives "filed_on: null to date, never back".
+- Exemption: `exempt_when=((col, value), ...)` together with `exempt_until_set=col`. A stored (OLD) row that matches all
+  pairs while `exempt_until_set` is unset (NULL or blank) is not frozen, for UPDATE and for DELETE alike. Example:
+  `exempt_when=(("external", True),), exempt_until_set="replaced_by"` keeps external returns editable and deletable until
+  an amended return points at them (spec 8.1); once `replaced_by` is set the row is frozen like any other. A NULL
+  comparison never makes a row exempt. The database enforces this itself, the service does not have to.
+- PostgreSQL also gets `<name>_trunc` (BEFORE TRUNCATE, statement level, function `<name>_trunc_fn`), like `append_only`:
+  TRUNCATE fires no row triggers, so it is refused for the whole table.
+- JSON columns are compared as text on SQLite and MariaDB (JSONB on PostgreSQL compares structurally). The repository must
+  therefore serialise JSON deterministically, so that saving an unchanged row writes byte-identical text; a later work
+  package adds a repository-level test when the guard is attached to a table.
+- Setting a state to the frozen value and changing other columns in the same UPDATE is allowed (the row is not frozen yet).

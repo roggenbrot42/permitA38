@@ -507,6 +507,8 @@ GUARD_KINDS = (
     "implies",
     "reference",
     "append_only",
+    "frozen_when",
+    "set_once",
 )
 
 # number of columns a guard of this kind names in `columns` (None = derived from its conditions)
@@ -523,6 +525,8 @@ _KIND_ARITY: dict[str, int | None] = {
     "implies": None,
     "reference": 1,
     "append_only": 0,  # table-level: refuses every UPDATE and DELETE
+    "frozen_when": 1,  # the state column; the frozen value is `values[0]`
+    "set_once": 1,  # the column that may change only from NULL
 }
 
 
@@ -555,12 +559,25 @@ class Guard:
     if_: Condition | None = None
     then: Condition | None = None
     target: str | None = None  # reference: the table whose `id` the column points to
+    # frozen_when (docs/specs/db-constraints.md): while the state column equals values[0] only `mutable` columns may
+    # change; the state may leave the frozen value only while `reopen_if_null` is unset, and then `reopen_clears` may
+    # change too (without `reopen_if_null` the state never leaves the frozen value)
+    mutable: tuple[str, ...] = ()
+    reopen_if_null: str | None = None
+    reopen_clears: tuple[str, ...] = ()
+    # frozen_when exemption: a row whose columns equal all `exempt_when` (column, value) pairs while `exempt_until_set`
+    # is unset (NULL or blank) is not frozen, neither for UPDATE nor DELETE (checked on the stored OLD row)
+    exempt_when: tuple[tuple[str, Any], ...] = ()
+    exempt_until_set: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in GUARD_KINDS:
             raise ValueError(f"unknown guard kind {self.kind!r}")
         object.__setattr__(self, "columns", tuple(self.columns))
         object.__setattr__(self, "values", tuple(self.values))
+        object.__setattr__(self, "mutable", tuple(self.mutable))
+        object.__setattr__(self, "reopen_clears", tuple(self.reopen_clears))
+        object.__setattr__(self, "exempt_when", tuple((c, v) for c, v in self.exempt_when))
         if self.kind == "implies":
             if self.if_ is None or self.then is None:
                 raise ValueError("an implies guard needs if_ and then")
@@ -608,6 +625,10 @@ class Guard:
                 raise ValueError(f"{self.table}.{self.columns[0]} does not exist")
         if self.kind == "append_only" and self.code != "state.append_only":
             raise ValueError(f"an append_only guard's code must be 'state.append_only', got {self.code!r}")
+        if self.kind == "set_once" and self.code != "state.set_once":
+            raise ValueError(f"a set_once guard's code must be 'state.set_once', got {self.code!r}")
+        if self.kind == "frozen_when":
+            self._check_frozen_when()
         if self.kind == "implies":
             if self.code != f"state.implies:{self.name}":
                 raise ValueError(f"an implies guard's code must be 'state.implies:{self.name}', got {self.code!r}")
@@ -617,6 +638,37 @@ class Guard:
                 elif isinstance(cond, In):
                     self._check_literals(cond.col, cond.values)
 
+    def _check_frozen_when(self) -> None:
+        if self.code != "state.frozen":
+            raise ValueError(f"a frozen_when guard's code must be 'state.frozen', got {self.code!r}")
+        if len(self.values) != 1:
+            raise ValueError("a frozen_when guard needs exactly one value (the frozen state)")
+        _check_scalar(self.values[0])
+        self._check_literals(self.columns[0], self.values)
+        state = self.columns[0]
+        named = (*self.mutable, *self.reopen_clears, *([self.reopen_if_null] if self.reopen_if_null else []))
+        if state in named:
+            raise ValueError("the state column cannot be mutable, cleared or the reopen condition")
+        if set(self.mutable) & set(self.reopen_clears):
+            raise ValueError("a column cannot be both mutable and cleared on reopen")
+        if self.reopen_clears and self.reopen_if_null is None:
+            raise ValueError("reopen_clears needs reopen_if_null")
+        if bool(self.exempt_when) != (self.exempt_until_set is not None):
+            raise ValueError("exempt_when and exempt_until_set go together")
+        exempt_cols = [c for c, _ in self.exempt_when]
+        for c, v in self.exempt_when:
+            _check_scalar(v)
+            self._check_literals(c, (v,))
+        if self.exempt_until_set is not None:
+            exempt_cols.append(self.exempt_until_set)
+        if state in exempt_cols:
+            raise ValueError("the state column cannot be part of the exemption")
+        table = TABLES.get(self.table)
+        if table is not None:
+            for c in (state, *named, *exempt_cols):
+                if not table.column(c):
+                    raise ValueError(f"{self.table}.{c} does not exist")
+
     def _check_parameters(self) -> None:
         """Reject parameters that the kind does not use (they would be silently ignored)."""
         used = {
@@ -625,6 +677,14 @@ class Guard:
             "max_days": {"days"},
             "implies": {"if_", "then"},
             "reference": {"target"},
+            "frozen_when": {
+                "values",
+                "mutable",
+                "reopen_if_null",
+                "reopen_clears",
+                "exempt_when",
+                "exempt_until_set",
+            },
         }
         defaults = {
             "values": (),
@@ -635,6 +695,11 @@ class Guard:
             "if_": None,
             "then": None,
             "target": None,
+            "mutable": (),
+            "reopen_if_null": None,
+            "reopen_clears": (),
+            "exempt_when": (),
+            "exempt_until_set": None,
         }
         for param, default in defaults.items():
             if param not in used.get(self.kind, set()) and getattr(self, param) != default:
