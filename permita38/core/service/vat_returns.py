@@ -361,6 +361,9 @@ class VatReturnService:
         stored: set[str] | None = None
         if final and not isinstance(row.get("source_lines"), dict):
             stored = set(row.get("source_lines") or [])  # may be empty: a final return without lines shows none
+        cutoff: int | None = None
+        if final and isinstance(row.get("source_lines"), dict) and row.get("finalised_at") is not None:
+            cutoff = int(row["finalised_at"])  # truncated: entries created later are drift, not source
         small = bool(row.get("small_business")) if final else bool(self._year(year).get("small_business"))
         mapping = {(m.tax_key, m.tax_kind): m for m in rules.map}
         out: list[dict[str, Any]] = []
@@ -371,6 +374,8 @@ class VatReturnService:
             if small and ln.tax_kind == "input":
                 continue  # a small business has no input VAT (as in _compute)
             if stored is not None and src.line_id not in stored:
+                continue
+            if cutoff is not None and int(src.entry.get("created_at") or 0) > cutoff:
                 continue
             m = mapping.get((ln.tax_key, ln.tax_kind)) if ln.tax_key and ln.tax_kind else None
             if m is None or kz not in (m.base_kz, m.tax_kz):
@@ -476,6 +481,9 @@ class VatReturnService:
                     "status": "draft",
                     "boxes": {},
                     "source_lines": None,
+                    "result_cents": None,
+                    "special_prepayment_credit_cents": None,
+                    "rounding_difference_cents": None,
                     "finalised_at": None,
                     "finalised_by": None,
                 },

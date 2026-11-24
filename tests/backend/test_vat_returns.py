@@ -249,6 +249,8 @@ def test_reopen_returns_to_draft_and_the_months_stay_locked(svc, repo):
     assert back["status"] == "draft" and back.get("finalised_at") is None and back.get("finalised_by") is None
     row = repo.get("vat_returns", d["id"])
     assert row is not None and row["status"] == "draft" and not row["boxes"] and row.get("source_lines") is None
+    assert row.get("result_cents") is None
+    assert row.get("special_prepayment_credit_cents") is None and row.get("rounding_difference_cents") is None
     assert [r["month"] for r in repo.list("period_locks")] == [1]
     again = svc.finalize(d["id"], USER)  # the months are locked already: no new lock rows
     assert again["status"] == "final" and len(repo.list("period_locks")) == 1
@@ -430,6 +432,9 @@ def test_source_line_limit_stores_sums_and_a_hash_never_a_silent_null(svc, journ
     assert next(r for r in svc.list(2026) if r["no"] == 2)["lines"] == 4
     assert len(svc.lines(d["id"], "81")["lines"]) == 1  # the drill-down queries the journal by period
     check_boxes(svc.get(d["id"]), CASES["U2"])  # the per-box sums are stored
+    late = JournalService(repo, clock=lambda: 1_800_000_100)  # created after finalised_at: drift, not source
+    post_case(late, CASES["U1"], date(2026, 2, 16))
+    assert len(svc.lines(d["id"], "81")["lines"]) == 1
     assert svc.reopen(d["id"])["source_lines_truncated"] is True  # a draft shows the cut again
     assert repo_row(svc, d["id"]).get("source_lines") is None
 
