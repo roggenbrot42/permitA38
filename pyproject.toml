@@ -58,6 +58,7 @@ include = ["permita38*"]
 "permita38.core.trip_rates" = ["*.json"]
 "permita38.core.tax_rules" = ["*.json"]
 "permita38.core.vat_rules" = ["*.json"]
+"permita38.core.datev" = ["*.json"]
 "permita38.core.charts" = ["*.json"]
 "permita38.core.schema" = ["migrations/*/*.sql"]
 
@@ -76,7 +77,7 @@ pretty = true
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["permita38.core.accounting.*", "permita38.core.vat.*", "permita38.core.vat_rules.*", "permita38.core.charts.*", "permita38.core.service.fiscal_years", "permita38.core.service.journal", "permita38.core.service.locks", "permita38.core.service.vat_returns"]
+module = ["permita38.core.accounting.*", "permita38.core.vat.*", "permita38.core.vat_rules.*", "permita38.core.datev.*", "permita38.core.charts.*", "permita38.core.service.fiscal_years", "permita38.core.service.journal", "permita38.core.service.locks", "permita38.core.service.vat_returns"]
 # mypy has no per-module `strict`; these are the flags `--strict` enables
 strict_equality = true
 disallow_any_generics = true
