@@ -12,7 +12,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.api.responses import present
 from permita38.core import models, rights
-from permita38.core.service.credit_notes import CreditNoteService
 
 router = APIRouter(prefix="/accounting", tags=["accounting"])
 payments_router = APIRouter(tags=["accounting"])
@@ -174,11 +173,6 @@ def _payment_result(services, result: dict) -> dict:
     return {**result, "invoice": present(models.Document, services.sales.invoice_view(inv))}
 
 
-def _credit_notes(services) -> CreditNoteService:
-    sales = services.sales
-    return CreditNoteService(services.store, sales.postings.journal, sales.payments)
-
-
 @payments_router.get("/invoices/{rid}/payments", name="list_payments")
 def list_payments(rid: str, user: InvoiceRead, services: ServicesDep) -> list[dict[str, Any]]:
     return services.sales.payments.list(rid)
@@ -224,7 +218,7 @@ def settle_discount(rid: str, body: models.SettleDiscountIn, user: PaymentWrite,
 
 @payments_router.get("/invoices/{rid}/credit-notes", name="list_credit_notes")
 def list_credit_notes(rid: str, user: InvoiceRead, services: ServicesDep) -> list[dict[str, Any]]:
-    return _credit_notes(services).list(rid)
+    return services.credit_notes.list(rid)
 
 
 @payments_router.post(
@@ -234,7 +228,7 @@ def create_credit_note(
     rid: str, body: models.CreditNoteIn, user: PaymentWrite, services: ServicesDep
 ) -> dict[str, Any]:
     """Issue a storno or partial credit note (number, snapshot and posting in one transaction)."""
-    return _credit_notes(services).create(
+    return services.credit_notes.create(
         rid,
         credit_kind=body.credit_kind,
         date=body.date,

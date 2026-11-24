@@ -14,7 +14,7 @@ import copy
 import time
 from collections.abc import Callable, Mapping
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from permita38.core.accounting.postings_issue import rate_str
@@ -69,6 +69,16 @@ class CreditNoteNumbering(NumberingService):
         return out
 
 
+def _decimal(value: Any, what: str) -> Decimal:
+    try:
+        out = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        raise ServiceError(422, f"{what} is not a number") from None
+    if not out.is_finite():
+        raise ServiceError(422, f"{what} is not a number")
+    return out
+
+
 def _cents(amount: Decimal) -> int:
     scaled = amount * 100
     if scaled != scaled.to_integral_value():
@@ -112,9 +122,21 @@ class CreditNoteService:
             out["issued"] = invoice_state.present_snapshot(out["issued"])
         return out
 
-    def _check_date(self, day: str) -> None:
+    @staticmethod
+    def _parse_day(day: Any) -> date:
+        try:
+            return date.fromisoformat(str(day)[:10])
+        except ValueError:
+            raise ServiceError(422, "The credit note date is not a valid date") from None
+
+    def _check_date(self, day: str, inv: Mapping[str, Any]) -> None:
+        d = self._parse_day(day)
+        if d < self._parse_day(inv.get("date")):
+            raise ServiceError(422, "The credit note date lies before the invoice date")
+        if d > self.payments.today():
+            raise ServiceError(422, "The credit note date lies in the future")
         first_open = first_unlocked_from(self.store.list("period_locks"))
-        if first_open is not None and date.fromisoformat(day[:10]) < first_open:
+        if first_open is not None and d < first_open:
             raise ServiceError(409, "The credit note date lies in a locked period; use a date in an open month")
 
     @staticmethod
@@ -139,13 +161,13 @@ class CreditNoteService:
         out = []
         seen: set[Decimal] = set()
         for key, amount in (amounts or {}).items():
-            rate = Decimal(key)
+            rate = _decimal(key, f"The rate {key}")
             if rate not in by_rate:
                 raise ServiceError(422, f"The invoice has no rate group {key}")
             if rate in seen:
                 raise ServiceError(422, f"The rate {key} is given twice")
             seen.add(rate)
-            net = _cents(Decimal(str(amount)))
+            net = _cents(_decimal(amount, f"The amount for {key} %"))
             left_net, left_vat = by_rate[rate]
             if net <= 0:
                 raise ServiceError(422, "The credited amount must be greater than 0")
@@ -193,7 +215,7 @@ class CreditNoteService:
             raise ServiceError(501, "not implemented yet")
         with self.store.transaction():
             inv = self.payments.materialize(self._invoice(invoice_id), user)
-            self._check_date(date)
+            self._check_date(date, inv)
             snap = stored_snapshot(inv)
             if snap is None:
                 raise ServiceError(409, "The invoice has no issued snapshot")

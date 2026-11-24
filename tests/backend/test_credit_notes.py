@@ -5,6 +5,7 @@ The expected journal lines are read from the hand-computed oracle ``fixtures/acc
 Write-off and discount credit notes (A9, A10, A13, P3) are another work package.
 """
 
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
@@ -232,7 +233,8 @@ def test_nothing_posts_before_the_initialisation_but_the_credit_note_counts(repo
     assert (view["credited_amount"], view["open_amount"], view["status"]) == ("47.60", "71.40", "sent")
 
 
-def test_the_numbers_follow_the_settings_with_defaults(repo, sales, cn):
+def test_the_numbers_follow_the_settings_with_defaults(repo, sales, cn, pay):
+    pay.today = lambda: date(2027, 6, 30)  # the second invoice lies in 2027
     init(repo)
     inv = two_group_invoice(repo, sales)
     other = two_group_invoice(repo, sales, "2027-01-04")
@@ -274,6 +276,70 @@ def test_only_issued_invoices_and_not_credit_notes_and_not_write_off(repo, sales
     with pytest.raises(ServiceError) as exc:
         cn.create(inv["id"], credit_kind="write_off", date="2026-03-06", reason="x")
     assert exc.value.status == 501
+
+
+def test_the_date_is_not_before_the_invoice_and_not_in_the_future(repo, sales, cn):
+    init(repo)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("100.00")])["id"])
+    for day in ("2026-03-01", "2027-01-01"):  # TODAY is 2026-12-31
+        with pytest.raises(ServiceError) as exc:
+            cn.create(inv["id"], credit_kind="storno", date=day, reason="x", user=BOSS)
+        assert exc.value.status == 422
+    assert cn.list(inv["id"]) == []
+    assert (
+        cn.create(inv["id"], credit_kind="storno", date="2026-03-02", reason="x", user=BOSS)["number"] == "RK-2026-0001"
+    )
+
+
+def test_malformed_input_from_a_direct_caller_is_422(repo, sales, cn):
+    init(repo)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("100.00")])["id"])
+    cases: list[dict[str, Any]] = [
+        {"date": "nope"},
+        {"date": None},
+        {"amounts": {"19": "abc"}},
+        {"amounts": {"19": "NaN"}},
+        {"amounts": {"19": None}},
+        {"amounts": {"x": "1.00"}},
+    ]
+    for case in cases:
+        args = {"credit_kind": "partial", "date": "2026-03-05", "reason": "x", "amounts": {"19": "1.00"}, **case}
+        with pytest.raises(ServiceError) as exc:
+            cn.create(inv["id"], **args)
+        assert exc.value.status == 422, case
+    assert cn.list(inv["id"]) == []
+
+
+def test_a_failed_posting_leaves_no_credit_note_and_the_number_is_gapless(repo, sales, cn, monkeypatch):
+    init(repo)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("100.00")])["id"])
+    with monkeypatch.context() as m:
+
+        def boom(*a, **k):
+            raise ServiceError(409, "forced")
+
+        m.setattr(type(cn.posting), "post_credit", boom)
+        with pytest.raises(ServiceError):
+            cn.create(inv["id"], credit_kind="storno", date="2026-03-05", reason="x", user=BOSS)
+    assert cn.list(inv["id"]) == [] and len(entries(repo)) == 1
+    ok = cn.create(inv["id"], credit_kind="storno", date="2026-03-05", reason="x", user=BOSS)
+    assert ok["number"] == "RK-2026-0001"
+
+
+def test_the_last_cent_of_a_group_takes_the_remaining_vat(repo, sales, cn):
+    # Net 10.00 @ 19 % -> VAT 1.90. Partials: 3.33 -> 0.6327 = 0.63; again 0.63 (remaining VAT 1.27);
+    # 3.34 is the whole remaining net -> exactly the remaining VAT 1.90 - 0.63 - 0.63 = 0.64 (not 0.6346 = 0.63).
+    init(repo)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("10.00")])["id"])
+    vats = [
+        cn.create(inv["id"], credit_kind="partial", date="2026-03-05", reason="x", amounts={"19": net})["issued"][
+            "rates"
+        ]["19"]["vat"]
+        for net in ("3.33", "3.33", "3.34")
+    ]
+    assert vats == ["0.63", "0.63", "0.64"]
+    view = sales.invoice_view(repo.get("invoices", inv["id"]))
+    assert (view["credited_amount"], view["open_amount"]) == ("11.90", "0.00")  # no VAT residue left open
 
 
 # ---------------------------------------------------------------- API
@@ -330,6 +396,14 @@ def test_api_errors(boss_client, cust):
         == 404
     )
     assert boss_client.get(url({"id": "nope"})).status_code == 404
+
+
+def test_api_date_bounds(boss_client, cust):
+    inv = issue(boss_client, cust)  # dated 2026-02-01
+    for day in ("2026-01-31", "2999-01-01"):
+        r = boss_client.post(url(inv), json={"credit_kind": "storno", "date": day, "reason": "x"})
+        assert r.status_code == 422, day
+    assert boss_client.get(url(inv)).json() == []
 
 
 def test_api_rights(clients, cust, boss_client):
