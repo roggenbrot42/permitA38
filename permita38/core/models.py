@@ -22,6 +22,7 @@ from pydantic import (
     model_validator,
 )
 
+from . import money
 from . import validation as v
 from .holidays import STATES
 from .numbering import PatternError, parse_pattern
@@ -1955,6 +1956,16 @@ class AdoptVendorsIn(v.CheckedBody):
 # ---------------------------------------------------------------------------------------------------------------------
 
 
+def _cents_to_money(cents: Any) -> Decimal | None:
+    """A stored cents value (int, numeric string, float-like) as exact euros; only an unparseable value gives None."""
+    if isinstance(cents, bool) or cents is None:
+        return None
+    try:
+        return money.dec(cents, default=None).scaleb(-2)
+    except ValueError:
+        return None
+
+
 def _from_cents(data: Any, pairs: dict[str, str]) -> Any:
     """Stored ``<name>_cents`` (int) -> ``<name>`` (Money). A value already given under the new name is kept."""
     if not isinstance(data, dict) or not any(k in data for k in pairs):
@@ -1964,8 +1975,7 @@ def _from_cents(data: Any, pairs: dict[str, str]) -> Any:
         if old in out:
             cents = out.pop(old)
             if new not in out:
-                ok = isinstance(cents, int) and not isinstance(cents, bool)
-                out[new] = float(Decimal(cents).scaleb(-2)) if ok else None
+                out[new] = _cents_to_money(cents)
     return out
 
 
@@ -2076,8 +2086,8 @@ class ManualLineIn(v.StrictRecord):
         if bool(self.account) == bool(self.role):
             raise ValueError("give exactly one of account and role")
         taxed = self.tax_key is not None and self.tax_key != "NONE"
-        if self.tax_key is None and (self.tax_kind or self.tax_base is not None or self.tax_rate or self.vat_date):
-            raise ValueError("tax_kind, tax_rate, tax_base and vat_date need a tax_key")
+        if not taxed and (self.tax_kind or self.tax_base is not None or self.tax_rate or self.vat_date):
+            raise ValueError("tax_kind, tax_rate, tax_base and vat_date need a tax_key other than NONE")
         if taxed:
             if self.tax_kind is None:
                 raise ValueError("a line with a tax_key needs tax_kind")
@@ -2199,6 +2209,8 @@ class VatReturn(Record):
     @model_validator(mode="before")
     @classmethod
     def _cents(cls, data: Any) -> Any:
+        if isinstance(data, dict) and isinstance(data.get("boxes"), dict):
+            data = {**data, "boxes": {k: b for k, b in data["boxes"].items() if isinstance(b, dict)}}
         return _from_cents(
             data,
             {
@@ -2246,6 +2258,13 @@ class ZmReport(Record):
     finalised_at: int | None = None
     finalised_by: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _skip_bad_lines(cls, data: Any) -> Any:
+        if isinstance(data, dict) and isinstance(data.get("lines"), list):
+            data = {**data, "lines": [x for x in data["lines"] if isinstance(x, dict)]}
+        return data
+
 
 class OpeningBalanceIn(v.CheckedBody):
     """One opening balance of an accrual start; ``amount`` signed like a journal line (debit positive)."""
@@ -2287,6 +2306,16 @@ class AccountingInitIn(v.CheckedBody):
     accounting_start: v.OptDate = None  # null = 1 January of the current year (service)
     opening_balances: Annotated[list[OpeningBalanceIn], Field(max_length=200)] = []
     review_resolutions: Annotated[list[ReviewResolutionIn], Field(max_length=5000)] = []
+
+    @model_validator(mode="after")
+    def _no_duplicates(self):
+        keys = [r.key for r in self.review_resolutions]
+        if len(keys) != len(set(keys)):
+            raise ValueError("review_resolutions: duplicate key")
+        targets = [("account", b.account) if b.account else ("role", b.role) for b in self.opening_balances]
+        if len(targets) != len(set(targets)):
+            raise ValueError("opening_balances: duplicate account or role")
+        return self
 
 
 # collection -> (response model: lenient, request model: strict) of the typed CRUD collections

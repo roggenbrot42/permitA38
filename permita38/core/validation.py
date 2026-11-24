@@ -510,7 +510,18 @@ def check_period(start: str | None, end: str | None, what: str = "end") -> None:
 # ---- accounting journal primitives (docs/specs/accounting.md 4, 8.1, 9.8, 11) ----
 AccountNo = Annotated[str, StringConstraints(pattern=r"^[0-9A-Za-z_.-]{1,20}$")]  # a chart account number
 RoleName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,59}$")]  # a stable role name of the chart
-TaxKeyName = Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]{0,29}$")]  # S19, VST, EU_SVC, RC_EU_SVC, NONE
+
+
+def _known_tax_key(value: str) -> str:
+    from permita38.core.vat_rules import TAX_KEYS
+
+    if value not in TAX_KEYS:
+        raise ValueError(f"unknown tax key; use one of {sorted(TAX_KEYS)}")
+    return value
+
+
+# S19, VST, EU_SVC, RC_EU_SVC, NONE ... (the keys of docs/specs/accounting.md 6)
+TaxKeyName = Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]{0,29}$"), AfterValidator(_known_tax_key)]
 TaxKind = Literal["tax", "input", "base_only"]
 TaxRateText = Annotated[str, StringConstraints(pattern=r"^[0-9]{1,2}(\.[0-9]{1,2})?$")]
 EntryText = Annotated[str, StringConstraints(min_length=1, max_length=200), AfterValidator(_not_blank)]

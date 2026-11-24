@@ -438,3 +438,72 @@ def test_zm_response_money():
     }
     out = json.loads(ZmReport(**row).model_dump_json())
     assert out["lines"][0]["amount"] == "1500.00" and out["status"] == "draft"
+
+
+# ---------------------------------------------------------------- review fixes
+
+
+def _line(**kw):
+    return {"account": "1776", "amount": "-19.00", **kw}
+
+
+def test_manual_line_unknown_tax_key_and_kind():
+    full = {"tax_key": "S19", "tax_kind": "tax", "tax_base": "100.00", "vat_date": "2026-03-05"}
+    bad(ManualEntryIn, **{**ENTRY, "lines": [D, C1, _line(**{**full, "tax_key": "S99"})]})
+    bad(ManualEntryIn, **{**ENTRY, "lines": [D, C1, _line(**{**full, "tax_key": "s19"})]})
+    bad(ManualEntryIn, **{**ENTRY, "lines": [D, C1, _line(**{**full, "tax_kind": "bogus"})]})
+    assert ManualEntryIn(**{**ENTRY, "lines": [D, C1, _line(**full)]})
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"tax_kind": "tax"},
+        {"tax_base": "100.00"},
+        {"tax_rate": "19"},
+        {"vat_date": "2026-03-05"},
+    ],
+)
+@pytest.mark.parametrize("key", [{"tax_key": "NONE"}, {}])
+def test_manual_line_none_key_refuses_tax_fields(key, extra):
+    bad(ManualEntryIn, **{**ENTRY, "lines": [D, C1, _line(**key, **extra)]})
+
+
+def test_manual_line_none_key_plain_ok():
+    assert ManualEntryIn(**{**ENTRY, "lines": [D, C1, _line(tax_key="NONE")]})
+
+
+def test_init_refuses_duplicates():
+    base = {"chart": "skr03", "income_basis": "eur"}
+    rr = {"key": "a", "action": "confirm"}
+    bad(AccountingInitIn, **base, review_resolutions=[rr, rr])
+    bad(AccountingInitIn, **base, opening_balances=[{"account": "1200", "amount": "1"}] * 2)
+    bad(AccountingInitIn, **base, opening_balances=[{"role": "bank", "amount": "1"}] * 2)
+    ok = AccountingInitIn(
+        **base,
+        review_resolutions=[rr, {**rr, "key": "b"}],
+        opening_balances=[{"account": "1200", "amount": "1"}, {"role": "bank", "amount": "-1"}],
+    )
+    assert len(ok.opening_balances) == 2
+
+
+@pytest.mark.parametrize("stored, shown", [("58900", "589.00"), (58900.0, "589.00"), (-10, "-0.10"), ("1999", "19.99")])
+def test_cents_numeric_string_and_float_kept(stored, shown):
+    out = json.loads(VatReturn(year=2026, result_cents=stored).model_dump_json())
+    assert out["result"] == shown
+
+
+@pytest.mark.parametrize("stored", ["abc", None, True, float("nan")])
+def test_cents_unparseable_is_none(stored):
+    assert json.loads(VatReturn(year=2026, result_cents=stored).model_dump_json())["result"] is None
+
+
+def test_vat_return_and_zm_skip_non_dict_entries():
+    out = VatReturn(year=2026, boxes={"81": {"base": "1.00"}, "66": "junk", "67": None})
+    assert list(out.boxes) == ["81"]
+    z = ZmReport(
+        year=2026,
+        quarter=1,
+        lines=[{"vat_id": "FR1", "country": "FR", "amount": "2.00"}, "junk", None],
+    )
+    assert len(z.lines) == 1
