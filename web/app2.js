@@ -382,6 +382,30 @@ const isoDay = v => {   // a real calendar day as YYYY-MM-DD, else ''  (the back
   return t.getUTCFullYear() === +m[1] && t.getUTCMonth() === +m[2] - 1 && t.getUTCDate() === +m[3] ? m[0] : '';
 };
 // Bills only: the trip amounts that calc.finance adds to the expenses are not part of this tile.
+/* Tax treatment of a bill (docs/specs/credit-notes-payments.md section 5, accounting.md 9.4). '' = automatic: the server derives it. */
+const EXP_TREATMENTS = [
+  ['', 'Automatic (the server decides)'], ['standard', 'Standard: input VAT as on the bill'], ['no_input_vat', 'No input VAT'],
+  ['reverse_charge_eu_service', 'Reverse charge § 13b: service from the EU'], ['reverse_charge_third_country', 'Reverse charge § 13b: service from a third country']];
+const EXP_TREATMENT_HELP = {
+  '': 'Automatic: the server derives the treatment from the supplier and the reverse-charge flag.',
+  standard: 'Domestic bill with VAT: the input VAT is reclaimed.',
+  no_input_vat: 'The bill shows no VAT you may reclaim (e.g. a small-business supplier): the gross is the cost.',
+  reverse_charge_eu_service: 'Service from an EU supplier without VAT: you owe the VAT yourself and reclaim it (§ 13b), dated by the service date.',
+  reverse_charge_third_country: 'Service from a supplier outside the EU: you owe the VAT yourself and reclaim it (§ 13b).' };
+const EXP_RC_TREATMENTS = ['reverse_charge_eu_service', 'reverse_charge_third_country'];
+const EXP_TREATMENT_TAG = { no_input_vat: 'no input VAT', reverse_charge_eu_service: '§ 13b EU', reverse_charge_third_country: '§ 13b third country' };
+/** Short tag of the treatment in the list; a standard bill gets none; an old bill with only the reverse-charge flag keeps its tag. */
+function treatmentTag(e) {
+  const t = EXP_TREATMENT_TAG[e.tax_treatment] || (e.reverse_charge && !e.tax_treatment ? 'reverse charge' : '');
+  return t ? ` <span class="pill warn" data-treatment="${esc(e.tax_treatment || 'reverse_charge')}">${esc(t)}</span>` : '';
+}
+/** Warnings of a saved bill (accounting_warnings, never stored): shown longer than a normal toast. */
+function showAccountingWarnings(list) {
+  const msgs = (Array.isArray(list) ? list : []).map(w => w && w.message).filter(Boolean);
+  if (!msgs.length) return;
+  toast('Saved. ' + msgs.join(' '), true);
+  clearTimeout(toast.t); toast.t = setTimeout(() => { $('#toast').className = ''; }, 9000);
+}
 function expenseTiles(list, y) {
   const accrual = S.settings.accounting === 'accrual', klein = !!S.settings.kleinunternehmer, year = String(y);
   let cost = 0n, vat = 0n;   // whole cents (BigInt)
@@ -403,7 +427,7 @@ PAGES.expenses = async () => {
   const y = new Date().getFullYear(), list = S.d.expenses.sort((a, b) => a.date < b.date ? 1 : -1), tiles = expenseTiles(list, y);
   return `<div class="head"><div><h1>Expenses</h1><div class="muted">Bills you pay – general or tied to a project.</div></div><div class="rcpt-actions">${RCPT.uploadButton()}<button class="primary" data-a="editExpense">+ Add bill</button></div></div>
   ${RCPT.pageTop()}<div class="grid g3"><div class="card kpi"><div class="l">${y} ${S.settings.kleinunternehmer ? 'bills (gross)' : 'net bills'}</div><div class="v">${eur(tiles.cost)}</div></div><div class="card kpi"><div class="l">Input VAT ${y}</div><div class="v">${S.settings.kleinunternehmer ? '–' : eur(tiles.vat)}</div></div></div>
-  ${RCPT.flaggedSection()}<div class="card">${list.length ? `<table><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Project</th><th class="num">Net</th><th class="num">VAT</th><th></th></tr>${list.map(e => `<tr class="click" data-a="editExpense" data-id="${e.id}"><td class="nowrap">${fmtDate(e.date)}</td><td><b>${esc(e.vendor || '')}</b>${e.supplier_id ? ` <a href="#/suppliers/${esc(e.supplier_id)}" class="pill sup-tag" data-stop>supplier</a>` : ''}${e.reverse_charge ? ' <span class="pill warn">reverse charge</span>' : ''}${RCPT.pills(e)}<div class="small muted">${esc(e.description || '')}</div>${e.lines?.length ? `<div class="small muted">${e.lines.length === 1 ? '1 item' : e.lines.length + ' items'}</div>` : ''}</td><td>${esc(e.category || '')}</td><td>${esc(nameOf('projects', e.project_id) || 'General')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td><td>${e.attachment ? `<a href="${api.url('attachments/' + e.attachment)}" target="_blank" data-stop>📎</a>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses yet.</div>'}</div>`;
+  ${RCPT.flaggedSection()}<div class="card">${list.length ? `<table><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Project</th><th class="num">Net</th><th class="num">VAT</th><th></th></tr>${list.map(e => `<tr class="click" data-a="editExpense" data-id="${e.id}"><td class="nowrap">${fmtDate(e.date)}</td><td><b>${esc(e.vendor || '')}</b>${e.supplier_id ? ` <a href="#/suppliers/${esc(e.supplier_id)}" class="pill sup-tag" data-stop>supplier</a>` : ''}${treatmentTag(e)}${RCPT.pills(e)}<div class="small muted">${esc(e.description || '')}</div>${e.lines?.length ? `<div class="small muted">${e.lines.length === 1 ? '1 item' : e.lines.length + ' items'}</div>` : ''}</td><td>${esc(e.category || '')}</td><td>${esc(nameOf('projects', e.project_id) || 'General')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td><td>${e.attachment ? `<a href="${api.url('attachments/' + e.attachment)}" target="_blank" data-stop>📎</a>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses yet.</div>'}</div>`;
 };
 /* ----- itemised bills: lines table, live totals, bill preview (docs/specs/itemised-expenses.md) ----- */
 const LINE_RATES = [19, 7, 0], MAX_LINES = 50;
@@ -621,6 +645,28 @@ A.editExpense = el => {
   const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: el?.dataset?.category || EXP_CATS[0], project_id: el?.dataset?.project || '', trip_id: el?.dataset?.trip || '', trip_item_id: el?.dataset?.item || '' };
   expenseDialog(e, null);
 };
+/** A refused save stays in the dialog as an alert (the locked-period 409 included); the toast shows it too. */
+function showSaveError(msg) {
+  let box = $('#e_save_err');
+  if (!box) { box = document.createElement('div'); box.id = 'e_save_err'; box.className = 'small'; box.setAttribute('role', 'alert'); box.style.color = 'var(--bad, #c0392b)'; $('#modal-root .modal-scroll')?.appendChild(box); }
+  box.textContent = msg;
+}
+/** Help text of the treatment, the bound of the service date, and the read-only VAT for the reverse-charge treatments. */
+function bindTreatment(hasSup) {
+  const sel = $('#f_tax_treatment'), sd = $('#f_service_date'), dt = $('#f_date'); if (!sel || !sd || !dt) return;
+  sel.closest('.field').insertAdjacentHTML('beforeend', '<div class="muted small" id="e_tt_help"></div><div class="small" id="e_rc_note" hidden>VAT: calculated by the server from the net amount and the VAT %.</div>');
+  sd.closest('.field').insertAdjacentHTML('beforeend', '<div class="muted small" id="e_sd_help"></div>');
+  const sync = () => {
+    const rc = EXP_RC_TREATMENTS.includes(sel.value);
+    $('#e_tt_help').textContent = EXP_TREATMENT_HELP[sel.value] || '';
+    $('#e_rc_note').hidden = !rc;
+    const rv = $('#f_rc_vat'); if (rv) { rv.readOnly = rc; if (rc) rv.value = ''; }
+    const cb = $('#f_reverse_charge'); if (cb) cb.disabled = !!sel.value;
+    const last = /^\d{4}-\d{2}-\d{2}$/.test(dt.value) ? addDays(dt.value, 366) : '';
+    $('#e_sd_help').textContent = 'Empty = the bill date. At most 366 days after the bill date' + (last ? ' (latest ' + last + ')' : '') + '.';
+  };
+  sel.addEventListener('change', sync); dt.addEventListener('input', sync); dt.addEventListener('change', sync); sync();
+}
 /** The bill dialog. scan: a flagged receipt ("Check receipt", draft filled in, Save confirms it) or null (a manual or booked bill). */
 function expenseDialog(e, scan) {
   const cats = e.category && !EXP_CATS.includes(e.category) ? [...EXP_CATS, e.category] : EXP_CATS;   // keep a category entered elsewhere
@@ -630,7 +676,7 @@ function expenseDialog(e, scan) {
     const { description, gross, vat_rate, deductible, vat_deductible, net, vat, ...extra } = l;
     return { description: description ?? '', gross: String(gross ?? ''), vat_rate: String(vat_rate ?? 19), deductible: String(deductible ?? 100), vat_deductible: vat_deductible ?? null, extra };
   });
-  const v0 = { ...e, gross: e.net != null && !stored.length ? Money.sum([e.net, e.reverse_charge ? 0 : e.vat]) : (e.gross ?? ''), vat_rate: e.vat_rate ?? 19, itemise: stored.length > 0, rc_vat: e.reverse_charge ? e.vat : '' };
+  const v0 = { ...e, gross: e.net != null && !stored.length ? Money.sum([e.net, e.reverse_charge ? 0 : e.vat]) : (e.gross ?? ''), vat_rate: e.vat_rate ?? 19, itemise: stored.length > 0, rc_vat: e.reverse_charge ? e.vat : '', tax_treatment: e.tax_treatment || '', service_date: e.service_date || '' };
   const hasSup = !!window.SUP && can('suppliers');   // supplier, allocation and reverse-charge fields (docs/contracts/subcontractors.md)
   const supFields = hasSup ? [{ k: 'supplier_id', l: 'Supplier', t: 'select', o: [['', '— none (free-text vendor) —'], ...SUP.options(e.supplier_id)] },
     { k: 'allocation_id', l: 'Subcontractor allocation', t: 'select', o: [['', '— none —']] },
@@ -641,6 +687,7 @@ function expenseDialog(e, scan) {
     fields: [{ k: 'date', l: 'Bill date', t: 'date', row: 1 }, { k: 'paid_on', l: 'Paid on', t: 'date', h: 'Empty = same as the bill date.', row: 1 }, { k: 'invoice_no', l: 'Invoice number', row: 1 }, { k: 'vendor', l: 'Vendor' }, { k: 'description', l: 'Description' }, ...supFields,
       { k: 'itemise', l: 'Itemise this bill (several lines, e.g. a hotel invoice with different VAT rates)', t: 'check' },
       { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', m: true, row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: e.vat_rate != null && !LINE_RATES.includes(+e.vat_rate) ? [...LINE_RATES, e.vat_rate] : LINE_RATES, row: 2 },
+      { k: 'tax_treatment', l: 'Tax treatment', t: 'select', o: EXP_TREATMENTS, row: 5 }, { k: 'service_date', l: 'Service date (optional)', t: 'date', row: 5 },
       { k: 'category', l: 'Category', t: 'select', o: cats, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
       { k: 'trip_id', l: 'Business trip', t: 'select', o: [['', '— no trip —'], ...tripOptions(e.trip_id)], row: 4 },
       { k: 'trip_item_id', l: 'Planned item of the trip', t: 'select', o: [['', '— not planned —'], ...tripItemOptions(e.trip_id)], row: 4 },
@@ -673,7 +720,12 @@ function expenseDialog(e, scan) {
       // a planned item belongs to the trip it was listed under: switching the trip drops the item
       v.trip_item_id = v.trip_id && v.trip_id === (e.trip_id || null) ? (v.trip_item_id || null) : null;
       const rcVat = v.rc_vat; delete v.rc_vat;
+      v.tax_treatment = v.tax_treatment || null;   // null = automatic: the server decides
+      v.service_date = v.service_date || null;
+      const rcExplicit = EXP_RC_TREATMENTS.includes(v.tax_treatment);
       if (hasSup) { v.supplier_id = v.supplier_id || null; v.allocation_id = v.supplier_id ? (v.allocation_id || null) : null; v.reverse_charge = !!(v.supplier_id && v.reverse_charge); }
+      if (v.tax_treatment) v.reverse_charge = rcExplicit;   // an explicit treatment wins over the old checkbox
+      const rc = rcExplicit || (!v.tax_treatment && !!v.reverse_charge);
       v.vat_deductible = bmeal ? 100 : null;   // the 30 % that is not deductible does not touch the input VAT
       if (itemised) {
         if (!LN.length) throw new Error('Add at least one line');
@@ -688,17 +740,23 @@ function expenseDialog(e, scan) {
         const r = +v.vat_rate || 0;
         if (Money.isNeg(gross)) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
         if (!v.date) throw new Error('Pick the bill date');
-        Object.assign(v, Money.splitGrossStr(gross, v.reverse_charge ? 0 : r)); v.vat_rate = v.reverse_charge ? 0 : r;
-        if (v.reverse_charge) v.vat = rcVat != null && mPos(rcVat) ? rcVat : '0';   // the self-assessed VAT, as typed
+        Object.assign(v, Money.splitGrossStr(gross, rc ? 0 : r)); v.vat_rate = rc && !rcExplicit ? 0 : r;
+        if (rcExplicit) v.vat = '0';   // computed by the server from the net amount and the VAT %
+        else if (rc) v.vat = rcVat != null && mPos(rcVat) ? rcVat : '0';   // the self-assessed VAT, as typed
       }
       if (scan) return RCPT.confirm(scan, v);   // POST /api/receipts/{id}/confirm; the server sets attachment and external_id
       const f = $('#e_file').files[0];
       if (f) v.attachment = (await api.upload(f)).name;
-      await save('expenses', v); render();
+      let r;
+      try { r = await api.upsert('expenses', v); }   // not through save(): a refused save keeps the dialog and the input
+      catch (err) { showSaveError(err.message); throw err; }
+      toast('Saved'); await loadAll(['expenses']); render();
+      showAccountingWarnings(r && r.accounting_warnings);
     },
     del: e.id && !scan ? async () => { await api('DELETE', 'expenses/' + e.id); await loadAll(['expenses']); render(); } : null
   });
   if (hasSup) SUP.bindExpense(e);
+  bindTreatment(hasSup);
   const modalEl = $('#modal-root .modal');
   closeModal.onClose = () => { PV_GEN++; pvRelease(); LN = []; RCPT.closeDialog(); };
   bindExpenseDialog(modalEl);
