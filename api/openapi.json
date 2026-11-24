@@ -4301,7 +4301,8 @@
             "schema": {
               "enum": [
                 "invoice",
-                "offer"
+                "offer",
+                "credit_note"
               ],
               "type": "string",
               "default": "invoice",
@@ -4358,7 +4359,8 @@
             "schema": {
               "enum": [
                 "invoice",
-                "offer"
+                "offer",
+                "credit_note"
               ],
               "type": "string",
               "default": "invoice",
@@ -4512,7 +4514,8 @@
                 {
                   "enum": [
                     "invoice",
-                    "offer"
+                    "offer",
+                    "credit_note"
                   ],
                   "type": "string"
                 },
@@ -20174,7 +20177,8 @@
             "type": "string",
             "enum": [
               "invoice",
-              "offer"
+              "offer",
+              "credit_note"
             ],
             "title": "Type"
           },
@@ -20244,7 +20248,8 @@
             "type": "string",
             "enum": [
               "invoice",
-              "offer"
+              "offer",
+              "credit_note"
             ],
             "title": "Type"
           },
@@ -22454,6 +22459,16 @@
             "title": "Offer Pattern",
             "default": "AN-{year}-{n:04d}"
           },
+          "credit_note_pattern": {
+            "type": "string",
+            "title": "Credit Note Pattern",
+            "default": "RK-{year}-{n:04d}"
+          },
+          "credit_note_reset": {
+            "type": "string",
+            "title": "Credit Note Reset",
+            "default": "yearly"
+          },
           "invoice_reset": {
             "type": "string",
             "title": "Invoice Reset",
@@ -22683,6 +22698,22 @@
             "title": "Offer Pattern",
             "default": "AN-{year}-{n:04d}"
           },
+          "credit_note_pattern": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Credit Note Pattern",
+            "default": "RK-{year}-{n:04d}"
+          },
+          "credit_note_reset": {
+            "type": "string",
+            "enum": [
+              "never",
+              "yearly",
+              "monthly"
+            ],
+            "title": "Credit Note Reset",
+            "default": "yearly"
+          },
           "invoice_reset": {
             "type": "string",
             "enum": [
@@ -22903,6 +22934,16 @@
             "type": "string",
             "title": "Offer Pattern",
             "default": "AN-{year}-{n:04d}"
+          },
+          "credit_note_pattern": {
+            "type": "string",
+            "title": "Credit Note Pattern",
+            "default": "RK-{year}-{n:04d}"
+          },
+          "credit_note_reset": {
+            "type": "string",
+            "title": "Credit Note Reset",
+            "default": "yearly"
           },
           "invoice_reset": {
             "type": "string",

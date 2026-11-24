@@ -248,12 +248,23 @@ def _day(value: Any) -> date | None:
         return None
 
 
+_CN = "credit_note"  # counter group of the credit notes: rows of ``invoices`` with kind = credit_note
+
+
 def _scopes(ctx: Ctx) -> dict[str, tuple[str, ...]]:
     return {"shared": _DOC_COLLS} if ctx.settings.get("numbering_shared") else {c: (c,) for c in _DOC_COLLS}
 
 
-def _numbered(ctx: Ctx, colls: Sequence[str]) -> list[tuple[str, dict]]:
-    return [(c, r) for c in colls for r in ctx.rows(c) if isinstance(r.get("number"), str) and r["number"]]
+def _numbered(ctx: Ctx, colls: Sequence[str], group: str | None = None) -> list[tuple[str, dict]]:
+    """Numbered rows; with ``group`` credit notes belong to their own group only, never to the invoice ones."""
+    return [
+        (c, r)
+        for c in colls
+        for r in ctx.rows(c)
+        if isinstance(r.get("number"), str)
+        and r["number"]
+        and (group is None or (r.get("kind") == "credit_note") == (group == _CN))
+    ]
 
 
 def rule_numbering_duplicates(ctx: Ctx) -> Iterable[Finding]:
@@ -302,7 +313,7 @@ def rule_numbering_state(ctx: Ctx) -> Iterable[Finding]:
 
 def _patterns(ctx: Ctx) -> dict[str, tuple[Pattern, str]] | None:
     out = {}
-    for coll, key in (("invoices", "invoice"), ("offers", "offer")):
+    for coll, key in (("invoices", "invoice"), ("offers", "offer"), (_CN, "credit_note")):
         try:
             out[coll] = (parse_pattern(ctx.settings[f"{key}_pattern"], strict=False), ctx.settings[f"{key}_reset"])
         except (PatternError, KeyError):
@@ -316,10 +327,10 @@ def _sequence_numbers(ctx: Ctx) -> dict[tuple[str, str], list[int]] | None:
     if patterns is None:
         return None
     out: dict[tuple[str, str], list[int]] = {}
-    for group, colls in _scopes(ctx).items():
-        for coll, d in _numbered(ctx, colls):
+    for group, colls in {**_scopes(ctx), _CN: ("invoices",)}.items():  # credit notes never share a sequence
+        for coll, d in _numbered(ctx, colls, group):
             day = _day(d.get("date"))
-            pattern, reset = patterns[coll]
+            pattern, reset = patterns[_CN if group == _CN else coll]
             n = pattern.match(d["number"])
             if day is not None and n and pattern.date_consistent(d["number"], day):
                 out.setdefault((group, period_key(reset, day)), []).append(n)
