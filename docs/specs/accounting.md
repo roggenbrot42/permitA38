@@ -251,7 +251,8 @@ half-up(`N_r` × rate). **Zero amounts:** a group with `N_r` = 0 posts no lines;
 (e.g. 0.05 at 7 %) posts its revenue line and, instead of a 0 VAT line, a statistical line (amount 0, same `tax_key`,
 `tax_kind` base_only, base `N_r`, same `vat_date`) so the base still reaches Kz 81/86 — under Soll only; under Ist the
 issue carries no tax line at all and the payment posts the base (9.2); no `vat_not_due` or clearing line of 0 is
-written, and no later event posts a 0 line other than a base_only statistical line.
+written, and no later event posts a 0 line other than a base_only statistical line. A statistical line carries the
+same `vat_date` and `income_date` as the tax line it stands for (amount 0, so it changes no EÜR figure).
 Small-business status of the year forces `treatment = small_business` and rate 0.
 
 | Basis | Lines (one entry, booking date = invoice date) |
