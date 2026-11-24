@@ -1,7 +1,7 @@
 """Period locks (docs/specs/accounting.md 7.8, 8.1, 11, 17-18).
 
-``period_locks`` rows lock whole months **in order** from the accounting start (the January of the earliest fiscal
-year); there is no unlock. :class:`LockService` reads and writes them; :func:`vat_date_for` is the pure rule that moves
+``period_locks`` rows lock whole months **in order** from the accounting start (settings key ``accounting.start``; unset: the
+January of the earliest fiscal year); there is no unlock. :class:`LockService` reads and writes them; :func:`vat_date_for` is the pure rule that moves
 a VAT date out of a locked month (or allows the drift cases). No SQL here.
 """
 
@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
+from permita38.core.settings import accounting_start
 
 COLLECTION = "period_locks"
 REASON_MANUAL = "manual"
@@ -80,6 +81,11 @@ class LockService:
         return first_unlocked_from(self.store.list(COLLECTION)) or date.min
 
     def _start(self) -> tuple[int, int]:
+        """The first lockable month: ``accounting.start`` from the settings (accounting.md 16 step 1). While that is
+        unset, the fallback is 1 January of the earliest fiscal year (409 when there is none)."""
+        start = accounting_start(self.store.settings())
+        if start is not None:
+            return start.year, start.month
         years = [int(r["year"]) for r in self.store.list("fiscal_years")]
         if not years:
             raise ServiceError(409, "No fiscal year exists yet")
@@ -104,7 +110,8 @@ class LockService:
     def lock_up_to(self, year: int, month: int, reason: str, by: str) -> list[Record]:
         """Lock every unlocked month from the accounting start up to ``year``-``month``, in order, in one
         transaction. Already locked months are skipped (idempotent). Returns the new rows."""
-        if reason not in (REASON_MANUAL, REASON_YEAR_CLOSE) and not reason.startswith(REASON_VAT_PREFIX):
+        vat_id = reason[len(REASON_VAT_PREFIX) :] if reason.startswith(REASON_VAT_PREFIX) else ""
+        if reason not in (REASON_MANUAL, REASON_YEAR_CLOSE) and not vat_id.strip():
             raise ServiceError(422, f"Unknown lock reason '{reason}'")
         with self.store.transaction():
             todo = self.preview_lock_up_to(year, month)

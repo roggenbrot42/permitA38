@@ -8,6 +8,7 @@ from permita38.core.config import Config
 from permita38.core.errors import ServiceError
 from permita38.core.repository import create_repository
 from permita38.core.service.locks import LockService, first_unlocked_from, vat_date_for
+from permita38.core.settings import ACCOUNTING_START_KEY, accounting_start
 
 from .test_rbac import PASSWORD, _login
 
@@ -87,9 +88,10 @@ def test_bad_month_reason_start_and_no_fiscal_year(svc, repo, tmp_path):
     with pytest.raises(ServiceError) as err:
         svc.lock_up_to(2024, 12, "manual", "u1x000")  # before the accounting start (January 2025)
     assert err.value.status == 422
-    with pytest.raises(ServiceError) as err:
-        svc.lock_up_to(2025, 1, "because", "u1x000")
-    assert err.value.status == 422
+    for reason in ("because", "vat_return:", "vat_return:  ", "Manual"):
+        with pytest.raises(ServiceError) as err:
+            svc.lock_up_to(2025, 1, reason, "u1x000")
+        assert err.value.status == 422
     empty = create_repository(Config(data_dir=tmp_path / "other", secret_key="x" * 16))
     empty.startup()
     with pytest.raises(ServiceError) as err:
@@ -117,6 +119,26 @@ def test_locks_cannot_be_updated_or_deleted(svc, repo):
     with pytest.raises(Exception, match="(?i)append|refus|not allowed"):
         repo.delete("period_locks", row["id"])
     assert len(repo.list("period_locks")) == 1
+
+
+def test_accounting_start_accessor():
+    assert accounting_start({}) is None
+    assert accounting_start({ACCOUNTING_START_KEY: "2026-06-01"}) == date(2026, 6, 1)
+    assert accounting_start({ACCOUNTING_START_KEY: "2026-06-15"}) is None  # not a first of month
+    assert accounting_start({ACCOUNTING_START_KEY: "garbage"}) is None
+
+
+def test_mid_year_accounting_start(svc, repo):
+    s = repo.settings()
+    s[ACCOUNTING_START_KEY] = "2025-06-01"
+    repo.save_settings(s)
+    assert svc.preview_lock_up_to(2025, 8) == [(2025, 6), (2025, 7), (2025, 8)]
+    with pytest.raises(ServiceError) as err:
+        svc.lock_up_to(2025, 5, "manual", "u1x000")  # before the start
+    assert err.value.status == 422
+    assert months(svc.lock_up_to(2025, 6, "manual", "u1x000")) == [(2025, 6)]  # only June, not January..May
+    assert svc.first_unlocked_day() == date(2025, 7, 1)
+    assert [r["month"] for r in repo.list("period_locks")] == [6]
 
 
 # ------------------------------------------------------------------ vat_date_for

@@ -77,7 +77,6 @@ class PostLine:
     income_date: date | None = None
     open_item_id: str | None = None
     treatment: str | None = None
-    drift: bool = False  # an allowed drift line (accounting 11): its vat_date lies in a locked month; not hashed
 
 
 @dataclass(frozen=True)
@@ -256,17 +255,19 @@ class JournalService:
             return
         first_open = first_unlocked_from(self.store.list("period_locks"))
         for i, ln in enumerate(lines, start=1):
-            if ln.drift:
-                raise ServiceError(422, f"Line {i}: a manual entry cannot carry VAT drift")
             if first_open is not None and ln.vat_date is not None and ln.vat_date < first_open:
                 raise ServiceError(422, f"Line {i}: vat_date {ln.vat_date.isoformat()} lies in a locked month")
 
-    @staticmethod
-    def _drift_warnings(lines: Sequence[PostLine]) -> list[str]:
+    def _drift_warnings(self, lines: Sequence[PostLine]) -> list[str]:
+        """Computed here, never by the caller (accounting 7.8): every line whose vat_date lies before the first
+        unlocked day drifts."""
+        first_open = first_unlocked_from(self.store.list("period_locks"))
+        if first_open is None:
+            return []
         return [
             f"Line {i}: vat_date {ln.vat_date.isoformat() if ln.vat_date else '-'} lies in a locked month (drift)"
             for i, ln in enumerate(lines, start=1)
-            if ln.drift
+            if ln.vat_date is not None and ln.vat_date < first_open
         ]
 
     def check_reversible(self, entry: Mapping[str, Any] | models.JournalEntry) -> None:

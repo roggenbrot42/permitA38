@@ -661,16 +661,15 @@ def _fixture_lines(entry: dict, vat_kind: str, day: date, first_open: date) -> t
 
     lines, expected = [], []
     for role, cents, opt in ((ln + [{}])[:3] for ln in entry["lines"]):
-        vat_date = drift = None
+        vat_date = None
         if opt.get("tax_key"):
-            vat_date, drift = vat_date_for(vat_kind, day, first_open)
+            vat_date, _ = vat_date_for(vat_kind, day, first_open)
         lines.append(
             PostLine(
                 role=role, amount_cents=cents, tax_key=opt.get("tax_key"), tax_kind=opt.get("tax_kind"),
                 tax_rate="19" if opt.get("tax_key") in ("S19", "VST") else None,
                 tax_base_cents=opt.get("tax_base"), vat_date=vat_date,
                 income_date=date.fromisoformat(opt["income_date"]) if opt.get("income_date") else None,
-                drift=bool(drift),
             )
         )  # fmt: skip
         expected.append(
@@ -721,12 +720,16 @@ def test_oracle_a16_late_ist_payment_after_lock(svc, repo):
     assert svc.verify_chain(2026) == []
 
 
-def test_drift_flag_is_not_hashed(svc, repo):
-    plain = post(svc, key="a")
-    flagged_lines = sale()
-    flagged_lines[2] = replace(flagged_lines[2], drift=True)
-    flagged = post(svc, key="b", lines=flagged_lines)
-    assert plain.warnings == [] and len(flagged.warnings) == 1
+def test_caller_cannot_suppress_drift_and_the_warning_is_not_hashed(svc, repo):
+    plain = post(svc, key="a")  # nothing locked: vat_date 2026-01-15 is open
+    assert plain.warnings == []
+    lock(repo, 2026, 1)
+    src = JournalSource(event="payment", created_by="u1x000")
+    late = svc.post("auto:late", date(2026, 2, 3), "late", src, sale())  # the taxed line keeps 2026-01-15
+    assert len(late.warnings) == 1 and "2026-01-15" in late.warnings[0]
+    plain_lines = sale()[:2] + [PostLine(role="vat_out_s19", amount_cents=-1900)]  # no tax_key, no vat_date
+    assert svc.post("auto:nodate", date(2026, 2, 3), "x", src, plain_lines).warnings == []  # never drifts
+    assert not hasattr(PostLine(amount_cents=0), "drift")
     assert svc.verify_chain(2026) == []
 
 
@@ -738,10 +741,6 @@ def test_manual_entry_with_vat_date_in_a_locked_month_is_422(svc, repo):
     assert err.value.status == 422 and repo.list("journal_entries") == []
     ok = [replace(ln, vat_date=date(2026, 2, 3)) if ln.vat_date else ln for ln in sale()]
     assert svc.post("manual:2", date(2026, 2, 3), "m", manual, ok).booking_date == "2026-02-03"
-    drifting = [replace(ln, drift=True) if ln.vat_date else ln for ln in ok]
-    with pytest.raises(ServiceError) as err:
-        svc.post("manual:3", date(2026, 2, 3), "m", manual, drifting)
-    assert err.value.status == 422
 
 
 def test_check_reversible_refuses_a_locked_booking_date(svc, repo):
@@ -769,3 +768,18 @@ def test_closing_date_entry_is_reversible_until_december_is_locked(svc, repo):
     with pytest.raises(ServiceError) as err:
         svc.check_reversible(e)  # the closing-date exception does not make a locked month reversible
     assert err.value.status == 409
+
+
+def test_closed_year_with_an_unlocked_month_is_not_reversible(svc, repo):
+    e = post(svc, key="c", day=date(2026, 3, 10))
+    row = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**row, "closed_at": 1_800_000_000, "closed_by": "u1x000"})
+    with pytest.raises(ServiceError) as err:
+        svc.check_reversible(e)  # March is not locked, the year is closed
+    assert err.value.status == 409
+
+
+def test_closing_date_entry_of_an_open_year_is_reversible_before_december_is_locked(svc, repo):
+    for m in range(1, 12):
+        lock(repo, 2026, m)
+    svc.check_reversible({"booking_date": "2026-12-31"})
