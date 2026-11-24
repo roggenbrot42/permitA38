@@ -215,6 +215,12 @@ class Dialect:
         else:
             r = guard.reopen_if_null
             parts.append(f"({leaving} AND ({self._is_set(self._ref(r, 'OLD.'))} OR {self._changed(guard, r)}))")
+        if guard.exempt_when:
+            pairs = [f"{self._exact(self._ref(c, 'OLD.'), (v,))} = {self._literal(v)}" for c, v in guard.exempt_when]
+            assert guard.exempt_until_set is not None
+            pairs.append(f"NOT {self._is_set(self._ref(guard.exempt_until_set, 'OLD.'))}")
+            # COALESCE: a NULL comparison must not make the row look exempt (NOT NULL is NULL, the guard would not fire)
+            frozen = f"{frozen} AND NOT COALESCE(({' AND '.join(pairs)}), {self._false()})"
         return f"{frozen} AND {self._any(parts)}", frozen
 
     def once_bad_sql(self, guard: Guard) -> str:
@@ -409,6 +415,11 @@ class PostgresDialect(Dialect):
     def _false(self) -> str:
         return "FALSE"
 
+    def _literal(self, v: Any) -> str:
+        if isinstance(v, bool):  # a BOOLEAN column does not compare with 1
+            return "TRUE" if v else "FALSE"
+        return super()._literal(v)
+
     def upsert(self, table: Table, columns: list[str]) -> str:
         updates = ", ".join(f"{self.quote(c)} = EXCLUDED.{self.quote(c)}" for c in columns if c != table.pk)
         return self._insert_head(table, columns) + f" ON CONFLICT ({self.quote(table.pk)}) DO UPDATE SET {updates}"
@@ -470,7 +481,20 @@ class PostgresDialect(Dialect):
         if guard.kind == "set_once":
             return [fn("_upd", self.once_bad_sql(guard), "NEW"), trg("_upd", f"UPDATE OF {q(guard.columns[0])}")]
         upd, dele = self.frozen_conditions(guard)
-        return [fn("_upd", upd, "NEW"), trg("_upd", "UPDATE"), fn("_del", dele, "OLD"), trg("_del", "DELETE")]
+        trunc_fn = (
+            f"CREATE FUNCTION {q(guard.name + '_trunc_fn')}() RETURNS trigger LANGUAGE plpgsql AS $$\nBEGIN\n"
+            f"  RAISE EXCEPTION 'permita38:{guard.code}' USING ERRCODE = '23000';\nEND;\n$$;"
+        )
+        return [
+            fn("_upd", upd, "NEW"),
+            trg("_upd", "UPDATE"),
+            fn("_del", dele, "OLD"),
+            trg("_del", "DELETE"),
+            # TRUNCATE fires no row triggers (like append_only): refuse it for the whole table
+            trunc_fn,
+            f"CREATE TRIGGER {q(guard.name + '_trunc')} BEFORE TRUNCATE ON {t} FOR EACH STATEMENT "
+            f"EXECUTE FUNCTION {q(guard.name + '_trunc_fn')}();",
+        ]
 
     def _reference_triggers(self, guard: Guard) -> list[str]:
         """Trigger functions and triggers of a reference guard (insert / update side and delete side)."""

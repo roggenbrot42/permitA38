@@ -215,6 +215,14 @@ grandfathered and not attached to a table yet (a later migration attaches them t
 - `Guard(name, table, "set_once", (col,), "state.set_once")`: once `col` holds a value (not NULL, not blank) it cannot
   change any more; going from unset to a value is allowed. Trigger `<name>_upd` on `UPDATE OF col`. Combined with
   `frozen_when` it gives "filed_on: null to date, never back".
-- Not expressible: a per-row exemption (e.g. `vat_returns.external = true` rows until an amended return points at
-  them); the service has to enforce it, or the exempt rows stay mutable by being outside the frozen state. Setting a state
-  to the frozen value and changing other columns in the same UPDATE is allowed (the row is not frozen yet).
+- Exemption: `exempt_when=((col, value), ...)` together with `exempt_until_set=col`. A stored (OLD) row that matches all
+  pairs while `exempt_until_set` is unset (NULL or blank) is not frozen, for UPDATE and for DELETE alike. Example:
+  `exempt_when=(("external", True),), exempt_until_set="replaced_by"` keeps external returns editable and deletable until
+  an amended return points at them (spec 8.1); once `replaced_by` is set the row is frozen like any other. A NULL
+  comparison never makes a row exempt. The database enforces this itself, the service does not have to.
+- PostgreSQL also gets `<name>_trunc` (BEFORE TRUNCATE, statement level, function `<name>_trunc_fn`), like `append_only`:
+  TRUNCATE fires no row triggers, so it is refused for the whole table.
+- JSON columns are compared as text on SQLite and MariaDB (JSONB on PostgreSQL compares structurally). The repository must
+  therefore serialise JSON deterministically, so that saving an unchanged row writes byte-identical text; a later work
+  package adds a repository-level test when the guard is attached to a table.
+- Setting a state to the frozen value and changing other columns in the same UPDATE is allowed (the row is not frozen yet).

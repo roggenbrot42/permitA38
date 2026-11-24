@@ -564,6 +564,10 @@ class Guard:
     mutable: tuple[str, ...] = ()
     reopen_if_null: str | None = None
     reopen_clears: tuple[str, ...] = ()
+    # frozen_when exemption: a row whose columns equal all `exempt_when` (column, value) pairs while `exempt_until_set`
+    # is unset (NULL or blank) is not frozen, neither for UPDATE nor DELETE (checked on the stored OLD row)
+    exempt_when: tuple[tuple[str, Any], ...] = ()
+    exempt_until_set: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in GUARD_KINDS:
@@ -572,6 +576,7 @@ class Guard:
         object.__setattr__(self, "values", tuple(self.values))
         object.__setattr__(self, "mutable", tuple(self.mutable))
         object.__setattr__(self, "reopen_clears", tuple(self.reopen_clears))
+        object.__setattr__(self, "exempt_when", tuple((c, v) for c, v in self.exempt_when))
         if self.kind == "implies":
             if self.if_ is None or self.then is None:
                 raise ValueError("an implies guard needs if_ and then")
@@ -647,9 +652,19 @@ class Guard:
             raise ValueError("a column cannot be both mutable and cleared on reopen")
         if self.reopen_clears and self.reopen_if_null is None:
             raise ValueError("reopen_clears needs reopen_if_null")
+        if bool(self.exempt_when) != (self.exempt_until_set is not None):
+            raise ValueError("exempt_when and exempt_until_set go together")
+        exempt_cols = [c for c, _ in self.exempt_when]
+        for c, v in self.exempt_when:
+            _check_scalar(v)
+            self._check_literals(c, (v,))
+        if self.exempt_until_set is not None:
+            exempt_cols.append(self.exempt_until_set)
+        if state in exempt_cols:
+            raise ValueError("the state column cannot be part of the exemption")
         table = TABLES.get(self.table)
         if table is not None:
-            for c in (state, *named):
+            for c in (state, *named, *exempt_cols):
                 if not table.column(c):
                     raise ValueError(f"{self.table}.{c} does not exist")
 
@@ -661,7 +676,14 @@ class Guard:
             "max_days": {"days"},
             "implies": {"if_", "then"},
             "reference": {"target"},
-            "frozen_when": {"values", "mutable", "reopen_if_null", "reopen_clears"},
+            "frozen_when": {
+                "values",
+                "mutable",
+                "reopen_if_null",
+                "reopen_clears",
+                "exempt_when",
+                "exempt_until_set",
+            },
         }
         defaults = {
             "values": (),
@@ -675,6 +697,8 @@ class Guard:
             "mutable": (),
             "reopen_if_null": None,
             "reopen_clears": (),
+            "exempt_when": (),
+            "exempt_until_set": None,
         }
         for param, default in defaults.items():
             if param not in used.get(self.kind, set()) and getattr(self, param) != default:

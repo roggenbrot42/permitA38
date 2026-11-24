@@ -15,7 +15,7 @@ TABLE = Table(
     "returns",
     tuple(Column(n, t) for n, t in [("id", "id"), ("status", "str"), ("amount", "int"), ("filed_on", "str")])
     + tuple(Column(n, "str") for n in ("reference", "note", "finalised_at", "replaced_by"))
-    + (Column("boxes", "json"),),
+    + (Column("boxes", "json"), Column("external", "bool")),
     pk="id",
 )
 FROZEN = Guard(
@@ -28,6 +28,19 @@ FROZEN = Guard(
     mutable=("filed_on", "reference", "note", "replaced_by"),
     reopen_if_null="filed_on",
     reopen_clears=("finalised_at", "boxes"),
+)
+EXEMPT = Guard(
+    "guard_returns_frozen",
+    "returns",
+    "frozen_when",
+    ("status",),
+    "state.frozen",
+    values=("final",),
+    mutable=("filed_on", "reference", "note", "replaced_by"),
+    reopen_if_null="filed_on",
+    reopen_clears=("finalised_at", "boxes"),
+    exempt_when=(("external", True),),
+    exempt_until_set="replaced_by",
 )
 ONCE = Guard("guard_returns_filed_on_once", "returns", "set_once", ("filed_on",), "state.set_once")
 FROZEN_RE = r"^permita38:state\.frozen$"
@@ -219,12 +232,17 @@ def test_sqlite_triggers():
 def test_postgresql_ddl():
     d = DIALECTS["postgresql"]
     f = d.guard_sql(FROZEN)
-    assert len(f) == 4
+    assert len(f) == 6
     assert "CREATE FUNCTION" in f[0] and "RAISE EXCEPTION 'permita38:state.frozen'" in f[0] and "RETURN NEW;" in f[0]
     assert 'NEW."amount" IS DISTINCT FROM OLD."amount"' in f[0]
     assert 'BEFORE UPDATE ON "returns" FOR EACH ROW EXECUTE FUNCTION "guard_returns_frozen_upd_fn"()' in f[1]
     assert "RETURN OLD;" in f[2] and "RAISE EXCEPTION 'permita38:state.frozen'" in f[2]
     assert 'BEFORE DELETE ON "returns" FOR EACH ROW EXECUTE FUNCTION "guard_returns_frozen_del_fn"()' in f[3]
+    assert "RAISE EXCEPTION 'permita38:state.frozen'" in f[4] and "IF " not in f[4]  # unconditional
+    assert (
+        'CREATE TRIGGER "guard_returns_frozen_trunc" BEFORE TRUNCATE ON "returns" FOR EACH STATEMENT '
+        'EXECUTE FUNCTION "guard_returns_frozen_trunc_fn"();'
+    ) == f[5]
     o = d.guard_sql(ONCE)
     assert len(o) == 2 and "RAISE EXCEPTION 'permita38:state.set_once'" in o[0]
     assert 'BEFORE UPDATE OF "filed_on" ON "returns"' in o[1]
@@ -256,3 +274,90 @@ def test_a_frozen_guard_needs_its_table_spec():
     other = Guard("g_other", "unknown_table", "frozen_when", ("status",), "state.frozen", values=("final",))
     with pytest.raises(ValueError, match="needs table"):
         DIALECT.guard_sql(other)
+
+
+def exempt_db() -> sqlite3.Connection:
+    db = new_db((EXEMPT, ONCE))
+    db.execute("INSERT INTO returns (id, status, amount, external) VALUES ('x', 'final', 3, 1)")
+    db.execute("INSERT INTO returns (id, status, amount, external) VALUES ('n', 'final', 4, 0)")
+    return db
+
+
+def test_exemption_validation():
+    base = dict(values=("final",))
+    with pytest.raises(ValueError):  # one without the other
+        Guard("g", "returns", "frozen_when", ("status",), "state.frozen", exempt_when=(("external", True),), **base)
+    with pytest.raises(ValueError):
+        Guard("g", "returns", "frozen_when", ("status",), "state.frozen", exempt_until_set="replaced_by", **base)
+    with pytest.raises(ValueError):  # unknown column
+        Guard(
+            "g", "returns", "frozen_when", ("status",), "state.frozen",
+            exempt_when=(("nope", True),), exempt_until_set="replaced_by", **base,
+        )  # fmt: skip
+    with pytest.raises(ValueError):  # wrong literal type
+        Guard(
+            "g", "returns", "frozen_when", ("status",), "state.frozen",
+            exempt_when=(("external", "yes"),), exempt_until_set="replaced_by", **base,
+        )  # fmt: skip
+    with pytest.raises(ValueError):  # not for other kinds
+        Guard("g", "returns", "set_once", ("filed_on",), "state.set_once", exempt_until_set="replaced_by")
+
+
+def test_external_final_row_is_editable_and_deletable_until_replaced():
+    db = exempt_db()
+    db.execute("UPDATE returns SET amount = 99, finalised_at = 'z' WHERE id = 'x'")
+    db.execute("UPDATE returns SET status = 'draft' WHERE id = 'x'")
+    db.execute("UPDATE returns SET status = 'final' WHERE id = 'x'")
+    db.execute("DELETE FROM returns WHERE id = 'x'")
+    assert db.execute("SELECT id FROM returns WHERE id = 'x'").fetchall() == []
+
+
+def test_external_final_row_is_frozen_once_replaced_by_is_set():
+    db = exempt_db()
+    db.execute("UPDATE returns SET replaced_by = 'r2' WHERE id = 'x'")  # the amendment points at it
+    for sql in ("UPDATE returns SET amount = 1 WHERE id = 'x'", "DELETE FROM returns WHERE id = 'x'"):
+        with pytest.raises(sqlite3.IntegrityError, match=FROZEN_RE):
+            db.execute(sql)
+    db.execute("UPDATE returns SET note = 'ok' WHERE id = 'x'")  # mutable columns stay mutable
+
+
+def test_blank_replaced_by_does_not_freeze_an_external_row():
+    db = exempt_db()
+    db.execute("UPDATE returns SET replaced_by = '  ' WHERE id = 'x'")
+    db.execute("UPDATE returns SET amount = 1 WHERE id = 'x'")
+
+
+def test_non_external_final_rows_stay_frozen():
+    db = exempt_db()
+    for sql in (
+        "UPDATE returns SET amount = 1 WHERE id = 'n'",  # external = 0
+        "UPDATE returns SET amount = 1 WHERE id = 'f'",  # external NULL
+        "DELETE FROM returns WHERE id = 'n'",
+        "DELETE FROM returns WHERE id = 'f'",
+    ):
+        with pytest.raises(sqlite3.IntegrityError, match=FROZEN_RE):
+            db.execute(sql)
+
+
+def test_whole_row_upsert_of_a_frozen_row_is_checked_by_content():
+    db = new_db()
+    cols = TABLE.column_names
+    stored = dict(
+        zip(cols, db.execute(f"SELECT {', '.join(cols)} FROM returns WHERE id = 'f'").fetchone(), strict=True)
+    )
+    db.execute(DIALECT.upsert(TABLE, cols), [stored[c] for c in cols])  # unchanged: passes
+    changed = {**stored, "amount": stored["amount"] + 1}
+    with pytest.raises(sqlite3.IntegrityError, match=FROZEN_RE):
+        db.execute(DIALECT.upsert(TABLE, cols), [changed[c] for c in cols])
+    changed = {**stored, "note": "n"}  # a mutable column may change in the same whole-row write
+    db.execute(DIALECT.upsert(TABLE, cols), [changed[c] for c in cols])
+
+
+def test_exemption_ddl_in_every_dialect():
+    lit = {"sqlite": "= 1", "postgresql": "= TRUE", "mariadb": "= 1"}
+    for name, d in DIALECTS.items():
+        upd, dele = d.frozen_conditions(EXEMPT)
+        for cond in (upd, dele):
+            assert "NOT COALESCE((" in cond and d.quote("external") in cond and lit[name] in cond, (name, cond)
+            assert d.quote("replaced_by") in cond and "OLD." in cond.split("NOT COALESCE((")[1], name
+        assert "NOT COALESCE" not in d.frozen_conditions(FROZEN)[0]  # no exemption, no clause
