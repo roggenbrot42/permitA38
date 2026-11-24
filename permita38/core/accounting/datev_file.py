@@ -137,6 +137,8 @@ class DatevHeaderParams:
     date_from: date
     date_to: date
     label: str
+    #: Festschreibung of an empty file (no rows to derive it from); ignored when rows are present
+    locked_if_empty: bool = False
 
 
 def _quote(text: str) -> str:
@@ -174,8 +176,12 @@ def _signed_comma(cents: int) -> str:
     return ("-" if cents < 0 else "") + _comma(abs(cents))
 
 
-def _locked_flag(rows: Sequence[DatevRow]) -> str:
-    """Header Festschreibung: ``1`` only if every row is locked; mixed rows must be split by the caller."""
+def _locked_flag(rows: Sequence[DatevRow], locked_if_empty: bool = False) -> str:
+    """Header Festschreibung: ``1`` only if every row is locked; mixed rows must be split by the caller.
+
+    Without rows the flag comes from ``locked_if_empty`` (the lock state of the range)."""
+    if not rows:
+        return "1" if locked_if_empty else "0"
     flags = {r.festschreibung for r in rows}
     if len(flags) > 1:
         raise ValueError("rows mix locked and unlocked months; export them as separate batches")
@@ -233,7 +239,7 @@ def _data_line(row: DatevRow) -> str:
 
 
 def _file_text(rows: Sequence[DatevRow], params: DatevHeaderParams) -> str:
-    lines = [_header_line(params, _locked_flag(rows)), ";".join(COLUMN_HEADER), *(_data_line(r) for r in rows)]
+    lines = [_header_line(params, _locked_flag(rows, params.locked_if_empty)), ";".join(COLUMN_HEADER), *(_data_line(r) for r in rows)]
     return "".join(line + _EOL for line in lines)
 
 

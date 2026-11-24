@@ -72,18 +72,6 @@ def _number(raw: object, key: str, low: int, high: int) -> int | None:
     return value
 
 
-#: position of the Festschreibung flag in the EXTF header line (``extf_csv`` derives it from the rows only)
-_HEADER_FESTSCHREIBUNG = 20
-
-
-def _header_locked(data: bytes) -> bytes:
-    """The EXTF file with Festschreibung 1 in the header (for an empty batch, which has no rows to derive it from)."""
-    head, sep, rest = data.partition(b"\r\n")
-    fields = head.split(b";")
-    fields[_HEADER_FESTSCHREIBUNG] = b"1"
-    return b";".join(fields) + sep + rest
-
-
 def _rate_text(rate: Decimal) -> str:
     return format(rate.normalize(), "f")
 
@@ -254,7 +242,16 @@ class DatevExportService:
             batches = [(all(m in locked_months for m in months), [])]
         created = self.now()
         params = DatevHeaderParams(
-            rules.header, created, consultant, client, date(year, 1, 1), length, date_from, date_to, label
+            rules.header,
+            created,
+            consultant,
+            client,
+            date(year, 1, 1),
+            length,
+            date_from,
+            date_to,
+            label,
+            locked_if_empty=batches[0][0] if not batches[0][1] else False,
         )
         split = len(batches) > 1
         files: list[tuple[str, bytes]] = []
@@ -262,8 +259,6 @@ class DatevExportService:
         for flag, rows in batches:
             suffix = (LOCKED_SUFFIX if flag else OPEN_SUFFIX) if split else ""
             data = extf_csv(rows, params)
-            if flag and not rows:
-                data = _header_locked(data)
             files.append((extf_filename(date_from, date_to, suffix), data))
             all_rows += rows
         report = self_check_report(entries, all_rows, chart, rules, rates, header_params=params)

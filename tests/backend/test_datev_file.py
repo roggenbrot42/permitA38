@@ -130,6 +130,21 @@ def test_header_follows_the_rules_file_and_locked_flag() -> None:
     assert extf_csv([], PARAMS).decode("cp1252").count("\r\n") == 2
 
 
+def test_empty_file_takes_festschreibung_from_locked_if_empty() -> None:
+    empty_open = extf_csv([], PARAMS).decode("cp1252").split("\r\n")[0]
+    assert empty_open == HEADER_LINE and empty_open.split(";")[20] == "0"
+    locked = extf_csv([], DatevHeaderParams(**{**PARAMS.__dict__, "locked_if_empty": True}))
+    first = locked.decode("cp1252").split("\r\n")[0]
+    assert first == HEADER_LINE.replace(';"Q1 2026";"";1;0;0;', ';"Q1 2026";"";1;0;1;')
+    assert first.split(";")[20] == "1"  # field 21 (1-based); every other field is unchanged
+
+
+def test_locked_if_empty_is_ignored_when_rows_are_present() -> None:
+    p = DatevHeaderParams(**{**PARAMS.__dict__, "locked_if_empty": True})
+    unlocked = [row(100, "9001", "9003", None, "0101", "x")]
+    assert extf_csv(unlocked, p).decode("cp1252").split("\r\n")[0] == HEADER_LINE
+
+
 def header_flag(rows: list[DatevRow]) -> str:
     return extf_csv(rows, PARAMS).decode("cp1252").split("\r\n")[0].split(";")[20]
 
