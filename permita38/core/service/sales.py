@@ -1,21 +1,139 @@
 """Offers and invoices: numbering, finalizing, conversion, billing tracked time, PDF."""
 
-from collections.abc import Mapping
+import time
+from collections.abc import Iterable, Mapping
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from permita38.core import calc, documents
+from permita38.core import calc, documents, rights
 from permita38.core.errors import ServiceError
-from permita38.core.money import ZERO, dec, hours_from_minutes, to_float
+from permita38.core.models import INTERNAL_DOCUMENT_FIELDS, InvoiceIn
+from permita38.core.money import ZERO, dec, hours_from_minutes, q2, to_float
 from permita38.core.repository import Repository
 from permita38.core.settings import accounting_start, effective_settings
 
+from . import invoice_state
 from .numbering import NumberingService
 from .planner.service import PlannerService
 from .postings import IssuePostingService, build_snapshot
 from .project_customer import check_billable_project, check_project_customer, project_kind
-from .records import RecordService
+from .records import _IMPORT_FIELDS, RESPONSE_ONLY, RecordService, _valid_id
+
+FROZEN_MESSAGE = "The invoice is issued and cannot be changed; issue a credit note"
+REVERSE_MESSAGE = "The invoice is paid; reverse the payment instead"
+CANCEL_MESSAGE = "The invoice is issued; issue a cancellation (credit note) instead"
+PAID_NOTE = "recorded as paid"
+
+# docs/specs/credit-notes-payments.md 2.1: the only fields of an issued invoice a PUT may change
+_CHANGEABLE = ("due_date", "notes", "reference")
+_LABELS = ("sent", "accepted", "rejected")
+_SERVER_OWNED = {"id", "created", "updated", "number", *_IMPORT_FIELDS, *RESPONSE_ONLY, *INTERNAL_DOCUMENT_FIELDS}
+
+
+def _canon(value: Any) -> Any:
+    """A value in a comparable shape: empty = ``None``, numbers by value (``100``, ``100.0``, ``"100.00"`` agree)."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float, Decimal)):
+        return format(dec(value).normalize(), "f")
+    if isinstance(value, Mapping):
+        items = ((k, _canon(v)) for k, v in value.items())
+        return {k: v for k, v in items if v is not None}
+    if isinstance(value, list):
+        return [_canon(v) for v in value]
+    return value
+
+
+def _canon_lines(lines: Any) -> list[Any]:
+    """Invoice lines without the server-computed ``amount``; the defaults of a line are filled in."""
+    out = []
+    for ln in lines if isinstance(lines, list) else []:
+        row = {"description": "", "qty": 0, "price": 0, **(ln if isinstance(ln, Mapping) else {})}
+        row.pop("amount", None)
+        out.append(_canon(row))
+    return out
+
+
+def _same_frozen(key: str, new: Any, old: Any) -> bool:
+    if key == "lines":
+        return _canon_lines(new) == _canon_lines(old)
+    if key == "tax_treatment":
+        return (new or "standard") == (old or "standard")
+    return bool(_canon(new) == _canon(old))
+
+
+def _user_id(user: Mapping[str, Any] | None) -> str:
+    return str((user or {}).get("id") or "system")
+
+
+def record_payment_row(
+    store: Repository,
+    invoice_id: str,
+    *,
+    date: str,
+    amount_cents: int,
+    kind: str = "payment",
+    method: str = "bank",
+    note: str | None = None,
+    reverses_id: str | None = None,
+    user: Mapping[str, Any] | None = None,
+) -> dict:
+    """Insert one ``payments`` row (``amount_cents`` signed: refunds and reversals negative) and return it.
+
+    TODO(E10): when the accounting is initialised this must also post the payment event (accounting 9.2); the E8
+    postings adapter has no payment entry point yet, so before E10 only the row is written (the initialisation posts
+    stored payments, accounting 16 step 5).
+    """
+    row: dict[str, Any] = dict(
+        document_id=invoice_id,
+        date=date,
+        amount_cents=int(amount_cents),
+        method=method,
+        kind=kind,
+        created_at=int(time.time()),
+        created_by=_user_id(user),
+    )
+    if note:
+        row["note"] = note
+    if reverses_id:
+        row["reverses_id"] = reverses_id
+    return store.save("payments", row)
+
+
+def gross_cents_of(invoice: Mapping[str, Any], settings: Mapping[str, Any]) -> int:
+    """The gross of an issued invoice in cents: the snapshot's, else the current totals (legacy invoice)."""
+    issued = invoice.get("issued")
+    if isinstance(issued, Mapping) and issued.get("gross") is not None:
+        return int(issued["gross"])
+    return int(q2(dec(calc.doc_totals(dict(invoice), dict(settings))["gross"]) * 100))
+
+
+def materialize_legacy_payment(
+    store: Repository, invoice: dict, settings: Mapping[str, Any], user: Mapping[str, Any] | None = None
+) -> dict:
+    """Before the first write that acts on payments or credits of an issued invoice (spec 2.3): write the missing
+    ``issued`` snapshot, and turn a legacy virtual payment (stored ``paid``, no rows) into a real ``payments`` row,
+    in the caller's transaction. Idempotent. Returns the invoice as stored afterwards."""
+    with store.transaction():
+        inv = invoice
+        if not inv.get("issued"):
+            day = calc.d(inv.get("date")) or date.today()
+            inv = store.save("invoices", {**inv, "issued": build_snapshot(store, inv, dict(settings), day)})
+        if inv.get("status") == "paid" and not store.find("payments", document_id=inv["id"]):
+            gross = int(inv["issued"]["gross"])
+            if gross != 0:
+                record_payment_row(
+                    store,
+                    inv["id"],
+                    date=invoice_state.legacy_payment_date(inv),
+                    amount_cents=gross,
+                    note=invoice_state.LEGACY_NOTE,
+                    user=user,
+                )
+        return inv
 
 
 class SalesService:
@@ -29,6 +147,7 @@ class SalesService:
         self.store = store
         self.postings = postings or IssuePostingService(store)
         self.records = records
+        records.invoice_hook = self  # the generic invoice routes go through this service
         self.numbering = numbering or NumberingService(store)
 
     def settings(self) -> dict:
@@ -75,6 +194,170 @@ class SalesService:
                 return doc
             return self.store.save(coll, doc)
 
+    # -- issued invoices: derived payment fields, freeze (docs/specs/credit-notes-payments.md 2) ---------------------
+    def _derived(self, inv: Mapping[str, Any], st: Mapping[str, Any]) -> invoice_state.Derived:
+        pays = self.store.find("payments", document_id=inv["id"])
+        notes = invoice_state.credit_notes_of(self.store.find("invoices", corrects_id=inv["id"]))
+        return invoice_state.derive(inv, gross_cents_of(inv, st), pays, notes)
+
+    @staticmethod
+    def _with_fields(inv: dict, d: invoice_state.Derived) -> dict:
+        out = {k: v for k, v in inv.items() if k != "paid_date"}
+        return {**out, **d.fields}
+
+    @staticmethod
+    def _presented(inv: dict) -> dict:
+        """A copy whose ``issued`` snapshot is shown the API way (decimal strings, ISO datetime); the row is unchanged."""
+        if isinstance(inv.get("issued"), Mapping):
+            return {**inv, "issued": invoice_state.present_snapshot(inv["issued"])}
+        return inv
+
+    @staticmethod
+    def _shows_derived(inv: Mapping[str, Any]) -> bool:
+        return inv.get("status", "draft") != "draft" and inv.get("kind") != "credit_note"
+
+    def invoice_view(self, inv: dict) -> dict:
+        """The invoice as a response shows it: an issued invoice carries the derived payment fields."""
+        if not self._shows_derived(inv):
+            return self._presented(inv)
+        return self._presented(self._with_fields(inv, self._derived(inv, self.settings())))
+
+    def invoice_views(self, rows: Iterable[dict]) -> list[dict]:
+        """:meth:`invoice_view` for many invoices; payments and credit notes are loaded once."""
+        rows = list(rows)
+        st = self.settings()
+        pays = invoice_state.group_by(self.store.list("payments"), "document_id")
+        notes = invoice_state.group_by(invoice_state.credit_notes_of(self.store.list("invoices")), "corrects_id")
+        out = []
+        for inv in rows:
+            if not self._shows_derived(inv):
+                out.append(self._presented(inv))
+                continue
+            d = invoice_state.derive(inv, gross_cents_of(inv, st), pays.get(inv["id"], []), notes.get(inv["id"], []))
+            out.append(self._presented(self._with_fields(inv, d)))
+        return out
+
+    def get_invoice(self, me: dict, rid: str) -> dict:
+        return self.invoice_view(self.records.get_stored(me, "invoices", rid))
+
+    def list_invoices(self, me: dict) -> list[dict]:
+        return self.invoice_views(self.records.list_stored(me, "invoices"))
+
+    def delete_invoice(self, me: dict, rid: str) -> None:
+        old = self.store.get("invoices", rid) if _valid_id(rid) else None
+        if (
+            old
+            and not old.get("number")
+            and (old.get("status", "draft") != "draft" or old.get("kind") == "credit_note")
+        ):
+            raise ServiceError(409, "An issued invoice or credit note cannot be deleted; issue a credit note instead")
+        self.records.delete_stored(me, "invoices", rid)  # a numbered invoice: its own 409; a draft: deleted
+
+    def update_invoice(
+        self,
+        me: dict,
+        rid: str,
+        data: dict,
+        given: Mapping[str, Any] | None = None,
+        nulls: Iterable[str] = (),
+    ) -> dict:
+        """Update an invoice. A draft goes through the normal write rules (``data`` = the whole body). An issued
+        invoice is frozen (spec 2.1): ``given`` holds the keys the client sent (defaults left out), ``nulls`` the keys
+        sent as null; only the changeable fields, the legacy ``paid`` translation (2.2) and unknown extra fields apply.
+        """
+        old = self.store.get("invoices", rid) if _valid_id(rid) else None
+        if not old or old.get("status", "draft") == "draft":
+            if old and data.get("status", "draft") != "draft":
+                raise ServiceError(409, "A draft cannot get another status; finalize the draft instead")
+            return self.records.update_stored(me, "invoices", rid, data)
+        if rights.scope_for(me, "invoices", "write") != rights.Scope.ALL:
+            raise ServiceError(403, "Forbidden")
+        with self.store.transaction():
+            return self.invoice_view(
+                self._update_issued(me, rid, data, set(data if given is None else given), set(nulls))
+            )
+
+    def _update_issued(self, me: dict, rid: str, data: dict, sent: set[str], nulls: set[str]) -> dict:
+        old = self._get("invoices", rid)
+        st = self.settings()
+        d0 = self._derived(old, st)
+        known = set(InvoiceIn.model_fields)
+        changes: dict[str, Any] = {}
+        for key in sorted((sent | nulls) - _SERVER_OWNED):
+            value = None if key in nulls else data.get(key)
+            if key == "paid_date" or key == "status":
+                continue
+            if key in _CHANGEABLE:
+                changes[key] = value
+            elif key in known:
+                if not _same_frozen(key, value, old.get(key)):
+                    raise ServiceError(409, FROZEN_MESSAGE)
+            else:
+                changes[key] = value  # an unknown extra field round-trips; null clears it
+        action = self._status_action(old, d0, data.get("status") if "status" in sent else None, data, sent)
+        if action in ("pay", "reverse"):
+            old = materialize_legacy_payment(self.store, old, st, me)
+            d0 = self._derived(old, st)
+            if action == "pay" and d0.open_cents > 0:
+                paid_on = str(data["paid_date"])[:10]
+                record_payment_row(self.store, rid, date=paid_on, amount_cents=d0.open_cents, note=PAID_NOTE, user=me)
+            elif action == "reverse":
+                for row in self.store.find("payments", document_id=rid):
+                    if row["kind"] == "payment":
+                        record_payment_row(
+                            self.store,
+                            rid,
+                            date=row["date"],
+                            amount_cents=-int(row["amount_cents"]),
+                            kind="reversal",
+                            reverses_id=row["id"],
+                            user=me,
+                        )
+                changes["status"], changes["paid_date"] = data["status"], None
+        elif action == "label":
+            changes["status"] = data["status"]
+        new = {**old}
+        for key, value in changes.items():
+            if value is None:
+                new.pop(key, None)
+            else:
+                new[key] = value
+        return self.store.save("invoices", new) if new != old else old
+
+    def _status_action(
+        self, old: Mapping[str, Any], d0: invoice_state.Derived, req: Any, data: Mapping[str, Any], sent: set[str]
+    ) -> str | None:
+        """What the requested ``status`` / ``paid_date`` means for an issued invoice: ``pay`` (legacy paid -> a
+        payment of the open amount), ``reverse`` (paid back to a label, a legacy virtual payment), ``label``
+        (sent/accepted/rejected), or ``None`` (nothing). Refusals raise (spec 2.1, 2.2)."""
+        paid_date = data.get("paid_date") if "paid_date" in sent else None
+        if req is None or req == d0.status:
+            if paid_date and str(paid_date)[:10] != d0.paid_date:
+                raise ServiceError(409, "The payment date cannot be changed; reverse the payment instead")
+            return None
+        if old.get("kind") == "credit_note":
+            raise ServiceError(409, FROZEN_MESSAGE)
+        if req == "paid":
+            if not paid_date:
+                raise ServiceError(422, "paid_date is required when the invoice is marked as paid")
+            if d0.open_cents <= 0:
+                return None
+            paid_on = str(paid_date)[:10]
+            if paid_on < str(old.get("date") or "")[:10]:
+                raise ServiceError(422, "The payment date cannot be before the invoice date")
+            if paid_on > date.today().isoformat():
+                raise ServiceError(422, "The payment date cannot be in the future")
+            return "pay"
+        if req in _LABELS:
+            if d0.status == "paid":
+                if d0.virtual is None:
+                    raise ServiceError(409, REVERSE_MESSAGE)
+                return "reverse"
+            if d0.status == "cancelled":
+                raise ServiceError(409, FROZEN_MESSAGE)
+            return "label"
+        raise ServiceError(409, CANCEL_MESSAGE if req == "cancelled" else FROZEN_MESSAGE)
+
     def pdf(self, coll: str, rid: str) -> tuple[bytes, str]:
         doc = self._get(coll, rid)
         if doc.get("original_pdf"):  # imported: the original is the legal record, never re-rendered
@@ -83,7 +366,7 @@ class SalesService:
                 raise ServiceError(404, "The original PDF is missing")
             with open(path, "rb") as fh:
                 return fh.read(), (doc.get("number") or "original") + ".pdf"
-        data = documents.render(self.store, coll[:-1], doc)
+        data = documents.render(self.store, coll[:-1], calc.with_year_regime(self.store, doc))
         return data, (doc.get("number") or "draft") + ".pdf"
 
     def accept_offer(self, rid: str) -> dict:

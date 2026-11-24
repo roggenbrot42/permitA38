@@ -9,6 +9,7 @@ from permita38.api.deps import Needs, ServicesDep
 from permita38.api.responses import present
 from permita38.core import validation as v
 from permita38.core.models import Contract, Document, Project
+from permita38.core.service import invoice_state
 
 router = APIRouter(tags=["sales"])
 routers = [router]
@@ -22,6 +23,8 @@ class DocumentResult(Document):
 
 
 def _doc(services, coll: str, doc: dict, finalize: bool = False) -> dict:
+    if coll == "invoices" and isinstance(doc.get("issued"), dict):
+        doc = {**doc, "issued": invoice_state.present_snapshot(doc["issued"])}
     return money_out.convert_warnings(
         {
             **doc,

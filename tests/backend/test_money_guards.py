@@ -31,6 +31,10 @@ SCHEMA_NUMERIC_ALLOWLIST = {
     "last_used_at": "token last use epoch seconds",
     "revoked_at": "token revocation epoch seconds",
     "last_fetched": "calendar fetch epoch seconds",
+    "opened_at": "fiscal year opening epoch seconds",
+    "closed_at": "fiscal year closing epoch seconds",
+    "locked_at": "period lock epoch seconds",
+    "month": "calendar month number of a period lock",
     "next": "audit pagination cursor",
     "status": "audit entry HTTP status code",
     "year": "calendar year of a record reference",
@@ -559,6 +563,14 @@ SWEEP_ID_SKIP = {
     "/api/invoices/{rid}/pdf": "PDF",
     "/api/offers/{rid}/pdf": "PDF",
     "/api/trips/{rid}/statement.pdf": "PDF",
+    "/api/vat-returns/{rid}": "skeleton (501) until the VAT service lands",
+    "/api/vat-returns/{rid}/boxes/{kz}": "skeleton (501) until the VAT service lands",
+    "/api/vat-returns/{rid}/export.pdf": "skeleton (501), PDF",
+    "/api/vat-returns/{rid}/export.csv": "skeleton (501) until the VAT service lands",
+    "/api/vat-returns/{rid}/export.json": "skeleton (501) until the VAT service lands",
+    "/api/zm/{rid}": "skeleton (501) until the VAT service lands",
+    "/api/zm/{rid}/export.csv": "skeleton (501) until the VAT service lands",
+    "/api/zm/{rid}/export.pdf": "skeleton (501) until the VAT service lands",
     "/api/tasks/{rid}": "no money fields (task record without a rate in the seed)",
     "/api/absences/{rid}": "no money fields",
     "/api/templates/{rid}": "no money fields",
@@ -585,7 +597,13 @@ SWEEP_ID_RECORD = {
 }
 
 
+# GET routes parametrised by a calendar year, not by a record id: swept with the current year
+SWEEP_YEAR_ROUTES = {"/api/accounting/years/{year}"}
+
+
 def _id_url(path, ids):
+    if path in SWEEP_YEAR_ROUTES:
+        return path.replace("{year}", str(date.today().year))
     for prefix, kind in SWEEP_ID_RECORD.items():
         if path.startswith(prefix):
             return re.sub(r"\{[^}]+\}", ids[kind], path, count=1)
