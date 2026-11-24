@@ -15234,6 +15234,17 @@
             "format": "decimal",
             "title": "Gross",
             "default": "0.00"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           }
         },
         "additionalProperties": true,
@@ -16089,6 +16100,22 @@
               }
             ],
             "title": "Credit Notes"
+          },
+          "creditable": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                  "format": "decimal"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creditable"
           }
         },
         "additionalProperties": true,
@@ -16793,6 +16820,22 @@
               }
             ],
             "title": "Credit Notes"
+          },
+          "creditable": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                  "format": "decimal"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creditable"
           },
           "planning_warnings": {
             "anyOf": [
@@ -29307,6 +29350,22 @@
             ],
             "title": "Credit Notes"
           },
+          "creditable": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                  "format": "decimal"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creditable"
+          },
           "planning_warnings": {
             "anyOf": [
               {
@@ -29784,6 +29843,22 @@
               }
             ],
             "title": "Credit Notes"
+          },
+          "creditable": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                  "format": "decimal"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creditable"
           },
           "planning_warnings": {
             "anyOf": [
