@@ -9633,7 +9633,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -9752,7 +9754,9 @@
           "planned_net": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -9763,7 +9767,9 @@
           "invoiced_net": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -9774,7 +9780,9 @@
           "open_net": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -9989,6 +9997,10 @@
                 "type": "number",
                 "maximum": 10000.0,
                 "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
               },
               {
                 "type": "null"
@@ -11427,13 +11439,17 @@
             "title": "Date"
           },
           "net": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Net"
           },
           "vat": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Vat",
-            "default": 0
+            "default": "0.00"
           },
           "vat_rate": {
             "anyOf": [
@@ -11759,7 +11775,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -11866,6 +11884,10 @@
                 "type": "number",
                 "maximum": 10000.0,
                 "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
               },
               {
                 "type": "null"
@@ -12078,7 +12100,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -12262,6 +12286,10 @@
                 "type": "number",
                 "maximum": 10000.0,
                 "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
               },
               {
                 "type": "null"
@@ -13529,9 +13557,17 @@
       "EmploymentIn": {
         "properties": {
           "gross_year": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Gross Year"
           },
           "sv_liable": {
@@ -13553,30 +13589,62 @@
             "title": "Steuerklasse"
           },
           "bav_employee_year": {
-            "type": "number",
-            "maximum": 100000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Bav Employee Year",
             "default": 0
           },
           "bav_employer_year": {
-            "type": "number",
-            "maximum": 100000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Bav Employer Year",
             "default": 0
           },
           "vwl_employer_year": {
-            "type": "number",
-            "maximum": 10000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Vwl Employer Year",
             "default": 0
           },
           "werbungskosten_year": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Werbungskosten Year",
             "default": 0
           },
@@ -13586,6 +13654,10 @@
                 "type": "number",
                 "maximum": 1000000000.0,
                 "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
               },
               {
                 "type": "null"
@@ -13751,7 +13823,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -13875,6 +13949,10 @@
                 "minimum": 0.0
               },
               {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -13929,13 +14007,17 @@
             "title": "Date"
           },
           "net": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Net"
           },
           "vat": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Vat",
-            "default": 0
+            "default": "0.00"
           },
           "vat_rate": {
             "anyOf": [
@@ -14155,15 +14237,27 @@
                 "minimum": 0.0
               },
               {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              },
+              {
                 "type": "null"
               }
             ],
             "title": "Net"
           },
           "vat": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Vat",
             "default": 0
           },
@@ -14369,7 +14463,9 @@
           "gross": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -14391,7 +14487,9 @@
           "net": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -14402,7 +14500,9 @@
           "vat": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -14452,9 +14552,17 @@
             "default": ""
           },
           "gross": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Gross"
           },
           "vat_rate": {
@@ -14653,30 +14761,62 @@
             "title": "Zusatzbeitrag Percent"
           },
           "pkv_monthly": {
-            "type": "number",
-            "maximum": 100000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Pkv Monthly",
             "default": 0
           },
           "pkv_basis_monthly": {
-            "type": "number",
-            "maximum": 100000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Pkv Basis Monthly",
             "default": 0
           },
           "pkv_care_monthly": {
-            "type": "number",
-            "maximum": 100000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Pkv Care Monthly",
             "default": 0
           },
           "pkv_employer_subsidy_monthly": {
-            "type": "number",
-            "maximum": 100000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Pkv Employer Subsidy Monthly",
             "default": 0
           }
@@ -14785,9 +14925,17 @@
             "title": "Unit"
           },
           "unit_price": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Unit Price"
           }
         },
@@ -14904,7 +15052,9 @@
           "net_total": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -14926,7 +15076,9 @@
           "vat": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -14937,7 +15089,9 @@
           "gross_total": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -15374,9 +15528,11 @@
             "title": "Unit"
           },
           "price": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Price",
-            "default": 0
+            "default": "0.00"
           },
           "vat": {
             "anyOf": [
@@ -15392,7 +15548,9 @@
           "amount": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -15433,9 +15591,17 @@
             "title": "Unit"
           },
           "price": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": -1000000000.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": -1000000000.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Price",
             "default": 0
           },
@@ -15458,6 +15624,10 @@
                 "type": "number",
                 "maximum": 1000000000.0,
                 "minimum": -1000000000.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
               },
               {
                 "type": "null"
@@ -15747,9 +15917,17 @@
             "default": "none"
           },
           "fixed_monthly": {
-            "type": "number",
-            "maximum": 100000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Fixed Monthly",
             "default": 0
           }
@@ -15771,19 +15949,25 @@
             "default": 0
           },
           "other_income_year": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Other Income Year",
-            "default": 0
+            "default": "0.00"
           },
           "other_deductions_year": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Other Deductions Year",
-            "default": 0
+            "default": "0.00"
           },
           "other_insurance_year": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Other Insurance Year",
-            "default": 0
+            "default": "0.00"
           },
           "children": {
             "$ref": "#/components/schemas/PersonalTaxChildren"
@@ -15862,9 +16046,11 @@
       "PersonalTaxEmployment": {
         "properties": {
           "gross_year": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Gross Year",
-            "default": 0
+            "default": "0.00"
           },
           "sv_liable": {
             "type": "boolean",
@@ -15883,29 +16069,39 @@
             "title": "Steuerklasse"
           },
           "bav_employee_year": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Bav Employee Year",
-            "default": 0
+            "default": "0.00"
           },
           "bav_employer_year": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Bav Employer Year",
-            "default": 0
+            "default": "0.00"
           },
           "vwl_employer_year": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Vwl Employer Year",
-            "default": 0
+            "default": "0.00"
           },
           "werbungskosten_year": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Werbungskosten Year",
-            "default": 0
+            "default": "0.00"
           },
           "withheld_year": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -15942,24 +16138,32 @@
             "title": "Zusatzbeitrag Percent"
           },
           "pkv_monthly": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Pkv Monthly",
-            "default": 0
+            "default": "0.00"
           },
           "pkv_basis_monthly": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Pkv Basis Monthly",
-            "default": 0
+            "default": "0.00"
           },
           "pkv_care_monthly": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Pkv Care Monthly",
-            "default": 0
+            "default": "0.00"
           },
           "pkv_employer_subsidy_monthly": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Pkv Employer Subsidy Monthly",
-            "default": 0
+            "default": "0.00"
           }
         },
         "additionalProperties": true,
@@ -15985,23 +16189,47 @@
             "default": 0
           },
           "other_income_year": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Other Income Year",
             "default": 0
           },
           "other_deductions_year": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Other Deductions Year",
             "default": 0
           },
           "other_insurance_year": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Other Insurance Year",
             "default": 0
           },
@@ -16041,9 +16269,11 @@
             "default": "none"
           },
           "fixed_monthly": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Fixed Monthly",
-            "default": 0
+            "default": "0.00"
           }
         },
         "additionalProperties": true,
@@ -16119,7 +16349,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -16211,6 +16443,10 @@
                 "minimum": 0.0
               },
               {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -16292,7 +16528,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -16437,6 +16675,10 @@
                 "minimum": 0.0
               },
               {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -16555,15 +16797,27 @@
                 "minimum": 0.0
               },
               {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              },
+              {
                 "type": "null"
               }
             ],
             "title": "Net"
           },
           "vat": {
-            "type": "number",
-            "maximum": 1000000000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Vat",
             "default": 0
           },
@@ -17341,9 +17595,11 @@
             "default": 400
           },
           "default_rate": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Default Rate",
-            "default": 80
+            "default": "80.00"
           },
           "payment_days": {
             "type": "integer",
@@ -17386,9 +17642,11 @@
             "default": false
           },
           "planning_min_rate": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Planning Min Rate",
-            "default": 0
+            "default": "0.00"
           },
           "planning_default_win_probability": {
             "type": "number",
@@ -17551,9 +17809,17 @@
             "default": 400
           },
           "default_rate": {
-            "type": "number",
-            "maximum": 10000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Default Rate",
             "default": 80
           },
@@ -17615,9 +17881,17 @@
             "default": false
           },
           "planning_min_rate": {
-            "type": "number",
-            "maximum": 10000.0,
-            "minimum": 0.0,
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
             "title": "Planning Min Rate",
             "default": 0
           },
@@ -17771,9 +18045,11 @@
             "default": 400
           },
           "default_rate": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Default Rate",
-            "default": 80
+            "default": "80.00"
           },
           "payment_days": {
             "type": "integer",
@@ -17816,9 +18092,11 @@
             "default": false
           },
           "planning_min_rate": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Planning Min Rate",
-            "default": 0
+            "default": "0.00"
           },
           "planning_default_win_probability": {
             "type": "number",
@@ -18300,7 +18578,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -18639,6 +18919,10 @@
                 "minimum": 0.0
               },
               {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -18974,7 +19258,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -19099,7 +19385,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -19135,6 +19423,10 @@
                 "type": "number",
                 "maximum": 10000.0,
                 "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
               },
               {
                 "type": "null"
@@ -20230,7 +20522,9 @@
           "allowance_total": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -20252,13 +20546,28 @@
           "mileage_total": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
               }
             ],
             "title": "Mileage Total"
+          },
+          "mileage_rate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mileage Rate"
           },
           "rules_version": {
             "anyOf": [
@@ -20306,7 +20615,9 @@
           "items_expected_total": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -20317,7 +20628,9 @@
           "items_actual_total": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -20338,14 +20651,18 @@
             "default": 0
           },
           "net": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Net",
-            "default": 0
+            "default": "0.00"
           },
           "vat": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Vat",
-            "default": 0
+            "default": "0.00"
           }
         },
         "type": "object",
@@ -20381,9 +20698,11 @@
             "default": 0
           },
           "sum": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Sum",
-            "default": 0
+            "default": "0.00"
           }
         },
         "additionalProperties": true,
@@ -20422,7 +20741,9 @@
             "title": "Absence Hours"
           },
           "base": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Base"
           },
           "reductions": {
@@ -20434,7 +20755,9 @@
             "default": []
           },
           "amount": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Amount"
           },
           "note": {
@@ -20466,9 +20789,11 @@
             "default": []
           },
           "allowance_total": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Allowance Total",
-            "default": 0
+            "default": "0.00"
           },
           "mileage_km": {
             "type": "number",
@@ -20478,7 +20803,9 @@
           "mileage_rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -20487,9 +20814,11 @@
             "title": "Mileage Rate"
           },
           "mileage_total": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Mileage Total",
-            "default": 0
+            "default": "0.00"
           },
           "rules_version": {
             "anyOf": [
@@ -20754,7 +21083,9 @@
           "expected": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -20862,6 +21193,10 @@
                 "type": "number",
                 "maximum": 1000000000.0,
                 "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
               },
               {
                 "type": "null"
@@ -21260,7 +21595,9 @@
             "title": "Meal"
           },
           "amount": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Amount"
           }
         },
@@ -21412,6 +21749,10 @@
                 "minimum": 0.0
               },
               {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -21423,6 +21764,10 @@
                 "type": "number",
                 "maximum": 10000.0,
                 "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
               },
               {
                 "type": "null"
@@ -21620,7 +21965,9 @@
           "default_rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -21631,7 +21978,9 @@
           "cost_rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -22191,7 +22540,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -22317,7 +22668,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -22577,7 +22930,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -22718,7 +23073,9 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
               },
               {
                 "type": "null"
@@ -23544,13 +23901,17 @@
             "title": "Date"
           },
           "net": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Net"
           },
           "vat": {
-            "type": "number",
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
             "title": "Vat",
-            "default": 0
+            "default": "0.00"
           },
           "vat_rate": {
             "anyOf": [

@@ -1,6 +1,7 @@
 """Money & Taxes for a non-boss: business taxes only, no personal figures (live date, fake data)."""
 
 from datetime import date
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -84,10 +85,10 @@ def test_accountant_sees_business_taxes_only(browser, srv):
     boss_tok = httpx.post(srv.base + "/api/auth/login", json={"username": "boss", "password": PASSWORD}).json()["token"]
     boss = httpx.get(srv.base + "/api/finance", headers={"Authorization": "Bearer " + boss_tok}).json()
     assert (
-        "redacted" not in boss and boss["tax_actual"]["gewst"] == 3570.0 and boss["tax_actual"]["withheld"] == 4243.17
+        "redacted" not in boss and boss["tax_actual"]["gewst"] == "3570.00" and boss["tax_actual"]["withheld"] == "4243.17"
     )
-    seeded = [31337, 77123, 4243.17] + [
-        boss["tax_actual"][k] for k in ("zve", "est", "social", "tax_due", "emp_income")
+    seeded = [Decimal(x) for x in ("31337", "77123", "4243.17")] + [
+        Decimal(boss["tax_actual"][k]) for k in ("zve", "est", "social", "tax_due", "emp_income")
     ]
     for v in seeded:
         assert v > 1000

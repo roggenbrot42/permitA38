@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
 
 def test_full_business_flow(boss_client):
@@ -17,7 +18,7 @@ def test_full_business_flow(boss_client):
     assert abs(dash["worked"] - 2.5) < 1e-9
 
     inv = c.post("/api/invoices/from-time", json={"customer_id": cust["id"]}).json()
-    assert inv["lines"][0]["price"] == 100.0 and inv["lines"][0]["amount"] == 250.0
+    assert inv["lines"][0]["price"] == "100.00" and inv["lines"][0]["amount"] == "250.00"
     fin = c.post(f"/api/invoices/{inv['id']}/finalize").json()
     assert fin["number"].startswith("RE-") and fin["number"].endswith("-0001")
     pdf = c.get(f"/api/invoices/{inv['id']}/pdf")
@@ -32,9 +33,9 @@ def test_full_business_flow(boss_client):
     assert c.put(f"/api/invoices/{inv['id']}", json=fin).status_code == 200
     c.post("/api/expenses", json={"date": today, "net": 50, "vat": 9.5, "category": "Software"})
     f = c.get("/api/finance").json()
-    assert abs(f["totals"]["revenue"] - 250) < 0.01
-    assert abs(f["totals"]["profit"] - 200) < 0.01
-    assert abs(f["totals"]["vat_due"] - (47.5 - 9.5)) < 0.01
+    assert Decimal(f["totals"]["revenue"]) == Decimal("250")
+    assert Decimal(f["totals"]["profit"]) == Decimal("200")
+    assert Decimal(f["totals"]["vat_due"]) == Decimal("47.5") - Decimal("9.5")
 
     off = c.post(
         "/api/offers",

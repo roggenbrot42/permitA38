@@ -62,19 +62,19 @@ def test_banner_then_fill_save_reload_round_trip(browser, srv):
     got = stored(srv)
     assert got["stored"] is True
     assert got["assessment"] == "joint" and got["church_tax_percent"] == 9
-    assert got["other_income_year"] == 1200.5
+    assert got["other_income_year"] == "1200.50"
     assert got["children"] == {"count": 2, "full_allowance": False, "pv_parent": True, "pv_children_under_25": 1}
-    assert got["health"]["mode"] == "pkv" and got["health"]["pkv_basis_monthly"] == 400
-    assert got["pension"] == {"mode": "fixed", "fixed_monthly": 300}
+    assert got["health"]["mode"] == "pkv" and got["health"]["pkv_basis_monthly"] == "400.00"
+    assert got["pension"] == {"mode": "fixed", "fixed_monthly": "300.00"}
     assert got["unemployment"]["mode"] == "voluntary_half"
-    assert got["employment"]["steuerklasse"] == 3 and got["employment"]["bav_employee_year"] == 1200
-    assert got["employment"]["vwl_employer_year"] == 480 and got["employment"]["withheld_year"] is None
+    assert got["employment"]["steuerklasse"] == 3 and got["employment"]["bav_employee_year"] == "1200.00"
+    assert got["employment"]["vwl_employer_year"] == "480.00" and got["employment"]["withheld_year"] is None
     pg.reload()
     expect(pg.locator("#tp_assessment")).to_have_value("joint")
     expect(pg.locator("#tp_children_count")).to_have_value("2")
-    expect(pg.locator("#tp_health_pkv_monthly")).to_have_value("480")
+    expect(pg.locator("#tp_health_pkv_monthly")).to_have_value("480.00")
     expect(pg.locator("#tp_employment_steuerklasse")).to_have_value("3")
-    expect(pg.locator("#tp_employment_gross_year")).to_have_value("30000")
+    expect(pg.locator("#tp_employment_gross_year")).to_have_value("30000.00")
     expect(pg.locator("#tp-not-saved")).to_have_count(0)
     assert problems == []
     ctx.close()

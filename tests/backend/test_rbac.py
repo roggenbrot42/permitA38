@@ -459,7 +459,7 @@ def test_accountant_reads_money_and_books_expenses_but_changes_nothing_else(boss
                  "/api/settings", "/api/templates", "/api/entries", "/api/contracts", "/api/expenses"):  # fmt: skip
         assert acc.get(path).status_code == 200, path
     # full project records for the accountant (rates), not the restricted employee view
-    assert acc.get(f"/api/projects/{proj['id']}").json()["rate"] == 90
+    assert acc.get(f"/api/projects/{proj['id']}").json()["rate"] == "90.00"
     # expenses and bills: yes
     reply = acc.post("/api/expenses", json={"date": "2026-01-06", "description": "Paper", "net": 10})
     assert reply.status_code == 200

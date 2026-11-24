@@ -8,6 +8,7 @@ Replay a failure: re-run with the printed `@reproduce_failure(...)` blob, or `py
 """
 
 import copy
+import re
 import shutil
 import tempfile
 import time
@@ -78,7 +79,7 @@ DEFAULTS = {
     "customers": {}, "tasks": {}, "absences": {"kind": "vacation"},
     "projects": {"status": "active"},
     "entries": {"billable": True}, "contracts": {"status": "confirmed", "user_ids": []},
-    "expenses": {"vat": 0.0, "deductible": 100.0},
+    "expenses": {"vat": Decimal(0), "deductible": 100.0},
     "templates": {"layout": "classic", "accent": "#1f4e79", "language": "de", "show_logo": True},
     "offers": {"status": "draft", "lines": []}, "invoices": {"status": "draft", "lines": []},
 }  # fmt: skip
@@ -100,7 +101,58 @@ def settle_default_date(exp: dict, act: dict, days: set[str]) -> None:
         exp["date"] = act["date"]
 
 
+class Money(Decimal):
+    """A money value of the model. The API answers it as a decimal string; a request sends it as a JSON number or as
+    a decimal string (`as_str`), both of which the API must accept (spec decimal-money-api, rule 2)."""
+
+    as_str: bool = False
+
+    def __new__(cls, value, as_str: bool = False):
+        self = super().__new__(cls, value)
+        self.as_str = as_str
+        return self
+
+
+def M(value, as_str: bool = False) -> Money:
+    """A literal money value: ``M("60")``, ``M("90.5", True)``."""
+    return Money(Decimal(value), as_str)
+
+
+def money_st(cents):
+    """Money from a strategy of whole cents, sent as a number or as a string at random."""
+    return st.tuples(cents, st.booleans()).map(lambda t: Money(Decimal(t[0]).scaleb(-2), t[1]))
+
+
+def unit_price_st(thousandths):
+    """A unit price (line price, hourly rate) of up to three decimals, sent as a number or as a string at random."""
+    return st.tuples(thousandths, st.booleans()).map(lambda t: Money(Decimal(t[0]).scaleb(-3), t[1]))
+
+
+def wire(obj):
+    """The JSON body as it goes over the wire: a Money goes as a number or a string, a plain Decimal as a string."""
+    if isinstance(obj, Money) and not obj.as_str:
+        return float(obj)
+    if isinstance(obj, Decimal):
+        return format(obj, "f")
+    if isinstance(obj, dict):
+        return {k: wire(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [wire(v) for v in obj]
+    return obj
+
+
+MONEY_STR = re.compile(r"-?[0-9]+\.[0-9]{2,6}")
+
+
+def dec(act, path="") -> Decimal:
+    """The Decimal of a money string the API sent (and nothing else: a JSON number is a failure)."""
+    assert isinstance(act, str) and MONEY_STR.fullmatch(act), f"{path}: not a decimal money string: {act!r}"
+    return Decimal(act)
+
+
 def approx(a, b) -> bool:
+    """Tolerant comparison for hours and other non-money numbers; money is always compared exactly."""
+    assert not isinstance(a, Decimal) and not isinstance(b, Decimal), f"money reached approx(): {a!r} vs {b!r}"
     if isinstance(a, bool) or isinstance(b, bool):
         return a == b
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
@@ -120,6 +172,8 @@ def subset_eq(exp, act, path="") -> None:
         assert isinstance(act, list) and len(exp) == len(act), f"{path}: {exp!r} != {act!r}"
         for i, (x, y) in enumerate(zip(exp, act)):
             subset_eq(x, y, f"{path}[{i}]")
+    elif isinstance(exp, Decimal):
+        assert dec(act, path) == exp, f"{path}: expected {format(exp, 'f')!r}, got {act!r}"
     else:
         assert approx(exp, act), f"{path}: expected {exp!r}, got {act!r}"
 
@@ -133,9 +187,14 @@ DATES = st.one_of(iso_days(), iso_days(), iso_days(), st.sampled_from([f"{YEAR -
 TEXT = st.text(alphabet=st.characters(blacklist_categories=("Cs", "Cc")), min_size=1, max_size=18).filter(
     lambda t: t.strip()
 )  # names must not be blank
-RATE = st.sampled_from([0, 25, 60, 80, 95, 130, 42.5])
-QTY = st.integers(1, 160).map(lambda n: n / 4)  # quarter units: products are exact to the cent
-PRICE = st.integers(0, 300).map(float)
+HOURS_BUDGET = st.sampled_from([0, 25, 60, 80, 95, 130, 42.5])  # hours, not money
+# hourly rates and line prices are unit prices: whole cents or up to three decimals (decimal-money-api rule 1)
+RATE = st.one_of(
+    money_st(st.sampled_from([0, 2500, 6000, 8000, 9500, 13000, 4250])),
+    unit_price_st(st.sampled_from([24999, 59995, 80125, 129995, 42505])),
+)
+QTY = st.integers(1, 160).map(lambda n: n / 4)  # quarter units; qty x price is rounded half-up to cents per line
+PRICE = st.one_of(money_st(st.integers(0, 30000)), unit_price_st(st.integers(0, 300000)))
 VATS = st.sampled_from([0, 7, 19])
 # hour fields of a contract (exactly one is required: 0 < hpw <= 10000, 0 < total <= 100000) and of an offer plan (at
 # most one); the first entries are valid, the rest are what the API refuses with 422
@@ -163,27 +222,33 @@ def maybe_none(strategy):
 
 
 # ---------------------------------------------------------------- personal tax profile (PUT /settings/personal-tax)
+def _euros(top: int, bottom: int = 0):
+    """Money between ``bottom`` and ``top`` euros in exact cents."""
+    return money_st(st.integers(bottom * 100, top * 100))
+
+
+_ZERO = Decimal(0)
 PT_DEFAULTS = {
     "assessment": "single",
     "church_tax_percent": 0,
-    "other_income_year": 0,
-    "other_deductions_year": 0,
-    "other_insurance_year": 0,
+    "other_income_year": _ZERO,
+    "other_deductions_year": _ZERO,
+    "other_insurance_year": _ZERO,
     "children": {"count": 0, "full_allowance": False, "pv_parent": False, "pv_children_under_25": 0},
     "health": {
         "mode": "gkv",
         "krankengeld": True,
         "zusatzbeitrag_percent": None,
-        "pkv_monthly": 0,
-        "pkv_basis_monthly": 0,
-        "pkv_care_monthly": 0,
-        "pkv_employer_subsidy_monthly": 0,
+        "pkv_monthly": _ZERO,
+        "pkv_basis_monthly": _ZERO,
+        "pkv_care_monthly": _ZERO,
+        "pkv_employer_subsidy_monthly": _ZERO,
     },
-    "pension": {"mode": "none", "fixed_monthly": 0},
+    "pension": {"mode": "none", "fixed_monthly": _ZERO},
     "unemployment": {"mode": "none"},
     "employment": None,
 }
-_AMOUNT = st.integers(0, 5000)
+_AMOUNT = _euros(5000)
 
 
 @st.composite
@@ -202,20 +267,20 @@ def _health(draw):
     )
     if draw(st.booleans()):  # the basis share may not exceed the premium, so both are given together
         monthly = draw(_AMOUNT)
-        out |= {"pkv_monthly": monthly, "pkv_basis_monthly": draw(st.integers(0, monthly))}
+        out |= {"pkv_monthly": monthly, "pkv_basis_monthly": draw(money_st(st.integers(0, int(monthly.scaleb(2)))))}
     return out
 
 
 _EMPLOYMENT = st.fixed_dictionaries(
-    {"gross_year": st.integers(0, 200_000)},
+    {"gross_year": _euros(200_000)},
     optional={
         "sv_liable": st.booleans(),
         "steuerklasse": st.sampled_from([None, 1, 3, 4, 6]),
-        "bav_employee_year": st.integers(0, 8000),
-        "bav_employer_year": st.integers(0, 8000),
-        "vwl_employer_year": st.integers(0, 480),
-        "werbungskosten_year": st.integers(0, 5000),
-        "withheld_year": st.one_of(st.none(), st.integers(0, 50_000)),
+        "bav_employee_year": _euros(8000),
+        "bav_employer_year": _euros(8000),
+        "vwl_employer_year": _euros(480),
+        "werbungskosten_year": _euros(5000),
+        "withheld_year": st.one_of(st.none(), _euros(50_000)),
     },
 )
 PROFILE = st.fixed_dictionaries(
@@ -258,9 +323,21 @@ def assert_profile(got: dict, sent: dict) -> None:
         if isinstance(default, dict):
             value = default | value
         if key == "employment" and value is not None:
-            value = {"sv_liable": True, "steuerklasse": None, "bav_employee_year": 0, "bav_employer_year": 0,
-                     "vwl_employer_year": 0, "werbungskosten_year": 0, "withheld_year": None} | value  # fmt: skip
-        assert got[key] == value, (key, got[key], value)
+            value = {"sv_liable": True, "steuerklasse": None, "bav_employee_year": _ZERO, "bav_employer_year": _ZERO,
+                     "vwl_employer_year": _ZERO, "werbungskosten_year": _ZERO, "withheld_year": None} | value  # fmt: skip
+        exact_eq(got[key], value, key)
+
+
+def exact_eq(act, exp, path="") -> None:
+    """Equality of a whole structure; a Decimal in ``exp`` is a money value the API sends as a decimal string."""
+    if isinstance(exp, dict):
+        assert isinstance(act, dict) and act.keys() == exp.keys(), (path, act, exp)
+        for k, v in exp.items():
+            exact_eq(act[k], v, f"{path}.{k}")
+    elif isinstance(exp, Decimal):
+        assert dec(act, path) == exp, (path, act, exp)
+    else:
+        assert act == exp, (path, act, exp)
 
 
 class ApiMachine(RuleBasedStateMachine):
@@ -347,6 +424,8 @@ class ApiMachine(RuleBasedStateMachine):
         if session is not None:
             headers["Authorization"] = "Bearer " + session.token
         self.http.cookies.clear()  # the login cookie must not turn anonymous calls into authenticated ones
+        if "json" in kw:
+            kw["json"] = wire(kw["json"])
         r = self.http.request(method, "/api" + path, headers=headers, **kw)
         self.http.cookies.clear()
         assert r.status_code < 500, f"{method} {path} -> {r.status_code}: {r.text[:300]}"
@@ -453,7 +532,7 @@ class ApiMachine(RuleBasedStateMachine):
             opt = {k: maybe_none(TEXT) for k in OPTIONAL[coll] if k != "rate"} | {"rate": maybe_none(RATE)}
         elif coll == "projects":
             req = {"name": TEXT}
-            opt = dict(customer_id=self.ref("customers"), rate=maybe_none(RATE), budget_hours=maybe_none(RATE),
+            opt = dict(customer_id=self.ref("customers"), rate=maybe_none(RATE), budget_hours=maybe_none(HOURS_BUDGET),
                        color=maybe_none(st.just("#2563eb")), notes=maybe_none(TEXT),
                        kind=st.sampled_from([None, None, "customer", "internal"]),
                        status=st.sampled_from(["active", "paused", "done", "archived"]))  # fmt: skip
@@ -489,8 +568,8 @@ class ApiMachine(RuleBasedStateMachine):
             opt = dict(end=maybe_none(iso_days(11, 20)), note=maybe_none(TEXT),
                        kind=st.sampled_from(["vacation", "holiday", "sick", "other"]))  # fmt: skip
         elif coll == "expenses":
-            req = {"date": DATES, "net": st.integers(0, 2000).map(lambda n: n / 4)}
-            opt = dict(vat=st.integers(0, 400).map(lambda n: n / 4), vat_rate=maybe_none(VATS),
+            req = {"date": DATES, "net": money_st(st.integers(0, 2000).map(lambda n: n * 25))}
+            opt = dict(vat=money_st(st.integers(0, 400).map(lambda n: n * 25)), vat_rate=maybe_none(VATS),
                        vendor=maybe_none(TEXT), category=maybe_none(TEXT), project_id=self.ref("projects"),
                        deductible=st.sampled_from([100, 70, 50, 0]))  # fmt: skip
         elif coll == "templates":
@@ -561,6 +640,11 @@ class ApiMachine(RuleBasedStateMachine):
         for k in OPTIONAL[coll]:
             if k not in exp:
                 assert k not in act, f"{coll}.{k} should be absent, got {act[k]!r}"
+
+    @staticmethod
+    def line_to_model(ln: dict) -> dict:
+        """A document line as the API sent it (money as strings) in the model's own types."""
+        return {k: (dec(v, k) if k in ("price", "amount") else v) for k, v in ln.items()}
 
     def doc_expected(self, coll, body, old):
         exp = {k: v for k, v in body.items() if v is not None}
@@ -1326,10 +1410,12 @@ class ApiMachine(RuleBasedStateMachine):
         inv = r.json()
         want = sorted((p["name"] + (" – " + t["name"] if t else ""), round(mins / 60, 2), rate, "h")
                       for (_, _, rate), (mins, p, t) in groups.items())  # fmt: skip
-        got = sorted((ln["description"], ln["qty"], ln["price"], ln["unit"]) for ln in inv["lines"])
-        assert len(want) == len(got) and all(a[0] == b[0] and approx(a[1], b[1]) and approx(a[2], b[2]) and a[3] == b[3]
+        got = sorted((ln["description"], ln["qty"], dec(ln["price"], "price"), ln["unit"]) for ln in inv["lines"])
+        assert len(want) == len(got) and all(a[0] == b[0] and approx(a[1], b[1]) and a[2] == b[2] and a[3] == b[3]
                                              for a, b in zip(want, got)), (want, got)  # fmt: skip
-        assert approx(sum(ln["amount"] for ln in inv["lines"]), sum(oracle.line_amount(ln) for ln in inv["lines"]))
+        assert sum(dec(ln["amount"], "amount") for ln in inv["lines"]) == sum(
+            oracle.line_amount(ln) for ln in inv["lines"]
+        )
         dates = sorted(e["date"] for e in picked)
         assert inv["status"] == "draft" and inv["service_from"] == dates[0] and inv["service_to"] == dates[-1]
         assert inv["vat_rate"] == 19 and inv["date"] in days and ("number" not in inv)
@@ -1338,6 +1424,7 @@ class ApiMachine(RuleBasedStateMachine):
         for e in picked:
             e["invoice_id"] = inv["id"]
         body = {k: v for k, v in inv.items() if k not in ("id", "created", "updated", "number")}
+        body["lines"] = [self.line_to_model(ln) for ln in body["lines"]]
         exp = self.doc_expected("invoices", {**body, "status": "draft"}, None) | {"id": inv["id"]}
         self.m["invoices"][inv["id"]] = exp
         self.bodies[inv["id"]] = body
@@ -1413,9 +1500,14 @@ class ApiMachine(RuleBasedStateMachine):
             assert {k for k in ("hours_per_week", "total_hours") if c.get(k) is not None} == set(hours)
             for k, val in hours.items():
                 assert approx(c[k], val), (k, c, hours)
-            assert (c.get("rate") == plan.get("rate")) or approx(c.get("rate"), plan.get("rate")), (c, plan)
+            assert (c.get("rate") is None and plan.get("rate") is None) or dec(c["rate"], "rate") == plan["rate"], (
+                c,
+                plan,
+            )
             self.m["contracts"][c["id"]] = DEFAULTS["contracts"] | {
-                k: v for k, v in c.items() if v is not None and k not in ("created", "updated")
+                k: (dec(v, k) if k == "rate" else v)
+                for k, v in c.items()
+                if v is not None and k not in ("created", "updated")
             }
             self.dirty.add("contracts")
         else:
@@ -1676,7 +1768,7 @@ class ApiMachine(RuleBasedStateMachine):
             body["user_id"] = data.draw(st.sampled_from(list(self.m["users"]) + [DEAD_ID]))
         else:
             body["supplier_id"] = data.draw(st.sampled_from(list(self.sup) + [DEAD_ID]))
-            body["rate"] = data.draw(st.sampled_from([60.0, 90.5]))
+            body["rate"] = data.draw(st.sampled_from([M("60"), M("90.5", True), M("90.50"), M("60", True)]))
         r = self.call("POST", "/allocations", s, json=body)
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g
@@ -1690,8 +1782,8 @@ class ApiMachine(RuleBasedStateMachine):
         assert got["kind"] == ("external" if owner_kind == "subcontractor" else "employee")
         subset_eq(stored, got)
         if owner_kind == "subcontractor" and hours_kind == "total":  # M1: q2(total_hours x rate)
-            expected = (Decimal(str(amount)) * Decimal(str(body["rate"]))).quantize(Decimal("0.01"), ROUND_HALF_UP)
-            assert Decimal(str(got["planned_net"])) == expected
+            expected = (Decimal(str(amount)) * body["rate"]).quantize(Decimal("0.01"), ROUND_HALF_UP)
+            assert dec(got["planned_net"], "planned_net") == expected
         self.allocs[got["id"]] = stored
 
     @rule(
@@ -1711,7 +1803,7 @@ class ApiMachine(RuleBasedStateMachine):
                     user_id=user, hours_per_week=10.0)  # fmt: skip
         match why:
             case "both_owners":
-                body.update(supplier_id=sid, rate=60.0)
+                body.update(supplier_id=sid, rate=M("60"))
             case "no_owner":
                 del body["user_id"]
             case "both_hours":
@@ -1719,7 +1811,7 @@ class ApiMachine(RuleBasedStateMachine):
             case "no_hours":
                 del body["hours_per_week"]
             case "rate_on_employee":
-                body["rate"] = 60.0
+                body["rate"] = M("60", True)
             case "no_rate":
                 del body["user_id"]
                 body["supplier_id"] = sid
@@ -1750,7 +1842,7 @@ class ApiMachine(RuleBasedStateMachine):
                     end=(start + timedelta(days=span)).isoformat(), **self.alloc_hours(hours_kind, amount))  # fmt: skip
         to_external = external != switch
         if to_external:
-            body.update(supplier_id=data.draw(st.sampled_from(list(self.sup) or [DEAD_ID])), rate=60.0)
+            body.update(supplier_id=data.draw(st.sampled_from(list(self.sup) or [DEAD_ID])), rate=M("60"))
         else:
             body["user_id"] = data.draw(st.sampled_from(list(self.m["users"])))
         r = self.call("PUT", f"/allocations/{rid}", s, json=body)
@@ -1804,7 +1896,7 @@ class ApiMachine(RuleBasedStateMachine):
         )
         body = {"name": name, "kind": kind, "active": active, "country": "DE"}
         if kind == "person-capacity":
-            body.update(weekly_hours=40.0, workdays=[0, 1, 2, 3], rate=80.0)
+            body.update(weekly_hours=40.0, workdays=[0, 1, 2, 3], rate=M("80", True))
         r = self.call("POST", "/suppliers", s, json=body)
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g, r.text
@@ -1823,7 +1915,7 @@ class ApiMachine(RuleBasedStateMachine):
         old = self.sup.get(sid)
         body = {"name": old["name"] if old else "Renamed", "kind": old["kind"] if old else "company", "active": active}
         if old and old["kind"] == "person-capacity":
-            body.update(weekly_hours=40.0, workdays=[0, 1, 2, 3], rate=80.0)
+            body.update(weekly_hours=40.0, workdays=[0, 1, 2, 3], rate=M("80", True))
         r = self.call("PUT", f"/suppliers/{sid}", s, json=body)
         if (g := self.gate(s, boss_only=True)) is not None:
             assert r.status_code == g, r.text
@@ -1877,8 +1969,8 @@ class ApiMachine(RuleBasedStateMachine):
         sid = data.draw(st.sampled_from(list(self.sup) + [DEAD_ID]))
         pid = data.draw(st.sampled_from(list(self.m["projects"]))) if self.m["projects"] else None
         valid = TODAY - timedelta(days=3) if expired else TODAY + timedelta(days=30)
-        line = {"quantity": hours, "unit": "h", "unit_price": 80.0} if hours else {"quantity": 1, "unit": "flat",
-                                                                                 "unit_price": 500.0}  # fmt: skip
+        line = {"quantity": hours, "unit": "h", "unit_price": M("80", True)} if hours else {"quantity": 1, "unit": "flat",
+                                                                                 "unit_price": M("500")}  # fmt: skip
         body = {"supplier_id": sid, "received_on": "2026-02-20", "valid_until": valid.isoformat(), "lines": [line]}
         if pid:
             body["project_id"] = pid
@@ -1901,7 +1993,8 @@ class ApiMachine(RuleBasedStateMachine):
             got = r.json()
             assert got["status"] == "received" and "allocation_id" not in got
             assert got["effective_status"] == ("expired" if expired else "received")
-            assert (got["hours"], got["net_total"]) == (hours, round(hours * 80.0, 2) if hours else 500.0)
+            assert got["hours"] == hours
+            assert dec(got["net_total"], "net_total") == (Decimal(str(hours)) * 80 if hours else Decimal(500))
             self.inc[got["id"]] = dict(supplier_id=sid, project_id=pid, status="received", allocation_id=None,
                                        valid=valid, plan=plan, kind=sup["kind"], hours=hours)  # fmt: skip
 
@@ -2318,7 +2411,7 @@ class ApiMachine(RuleBasedStateMachine):
         boss = self._boss()
         klein, accrual = self.settings["kleinunternehmer"], self.settings["accounting"] == "accrual"
         for year in (YEAR, YEAR - 1):
-            rev = vat_out = recv = exp_cost = vat_in = 0.0
+            rev = vat_out = recv = exp_cost = vat_in = Decimal(0)
             for inv in self.m["invoices"].values():
                 if inv["status"] in ("draft", "cancelled"):
                     continue
@@ -2333,16 +2426,17 @@ class ApiMachine(RuleBasedStateMachine):
                     vat_out += t["vat"]
             for x in self.m["expenses"].values():
                 if x["date"].startswith(f"{year}-"):
-                    pct = x["deductible"] / 100
-                    exp_cost += (x["net"] + x["vat"]) * pct if klein else x["net"] * pct
-                    vat_in += 0 if klein else x["vat"] * pct
+                    cost, vat = oracle.expense_shares(x, klein)
+                    exp_cost += cost
+                    vat_in += vat
             f = self.call("GET", f"/finance?year={year}", boss).json()
             tot = f["totals"]
-            tol = 0.02 + 0.011 * (len(self.m["invoices"]) + len(self.m["expenses"]))
+            # exact: the server rounds VAT per document and rate group and each expense's deductible share per record
+            # half-up; oracle.doc_totals / oracle.expense_shares do the same, so the sums must agree to the cent
             for key, want in dict(revenue=rev, vat_out=vat_out, expenses=exp_cost, vat_in=vat_in, profit=rev - exp_cost,
                                   vat_due=0 if klein else vat_out - vat_in).items():  # fmt: skip
-                assert abs(tot[key] - want) <= tol, (year, key, tot[key], want, klein, accrual)
-            assert abs(f["open_receivables"] - recv) <= tol, (year, f["open_receivables"], recv)
+                assert dec(tot[key], key) == Decimal(want), (year, key, tot[key], want, klein, accrual)
+            assert dec(f["open_receivables"], "open_receivables") == recv, (year, f["open_receivables"], recv)
             assert f["year"] == year and f["kleinunternehmer"] == klein
 
     @invariant()

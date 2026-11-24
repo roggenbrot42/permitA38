@@ -5,6 +5,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse
 
+from permita38.api import money_out
 from permita38.api.deps import Needs, ServicesDep, SessionOnly
 from permita38.api.forms import check_form
 from permita38.core.errors import ServiceError
@@ -14,6 +15,13 @@ router = APIRouter(tags=["import"])
 routers = [router]
 
 ImportType = Literal["invoices", "offers", "customers", "expenses"]
+TOTALS_KEYS = frozenset({"net", "vat", "gross"})
+
+
+def _report(report: dict) -> dict:
+    """The import report with the money of ``rows[].totals`` (net, vat, gross) as decimal strings."""
+    rows = [{**r, "totals": money_out.money_strings(r.get("totals"), TOTALS_KEYS)} for r in report.get("rows") or []]
+    return {**report, "rows": rows}
 
 
 def _read(upload: UploadFile | None) -> bytes | None:
@@ -53,8 +61,16 @@ def preview(
         "decimal": decimal,
         "date_order": date_order,
     }
-    return services.imports.plan(
-        _read(file) or b"", file.filename or "", type, mapping=mapping, options=options, pdfs=_read(pdfs), sheet=sheet
+    return _report(
+        services.imports.plan(
+            _read(file) or b"",
+            file.filename or "",
+            type,
+            mapping=mapping,
+            options=options,
+            pdfs=_read(pdfs),
+            sheet=sheet,
+        )
     )
 
 
@@ -88,6 +104,7 @@ def run(
     report = services.imports.run(
         _read(file) or b"", file.filename or "", type, mapping=mapping, options=options, pdfs=_read(pdfs), sheet=sheet
     )
+    report = _report(report)
     if not report["applied"]:
         return JSONResponse(status_code=422, content={"detail": report})
     return report

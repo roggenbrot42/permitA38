@@ -44,7 +44,7 @@ class Customer(Record):
     email: str | None = None
     phone: str | None = None
     notes: str | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     external_id: str | None = None
     import_batch: str | None = None
 
@@ -53,7 +53,7 @@ class Project(Record):
     name: str
     customer_id: str | None = None
     kind: str = "customer"
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     budget_hours: float | None = None
     status: str = "active"
     color: str | None = None
@@ -67,7 +67,7 @@ class Project(Record):
 class Task(Record):
     project_id: str
     name: str
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
 
 
 class Entry(Record):
@@ -81,7 +81,7 @@ class Entry(Record):
     end: str | None = None
     billable: bool = True
     invoice_id: str | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
 
 
 class Contract(Record):
@@ -92,7 +92,7 @@ class Contract(Record):
     end: str
     hours_per_week: float | None = None
     total_hours: float | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     status: str = "confirmed"
     user_ids: list[str] = []
     offer_id: str | None = None
@@ -111,10 +111,10 @@ class ExpenseLine(BaseModel):
 
     model_config = ConfigDict(extra="allow")
     description: str = ""
-    gross: float | None = None
+    gross: v.Money | None = None
     vat_rate: float | None = None
-    net: float | None = None
-    vat: float | None = None
+    net: v.Money | None = None
+    vat: v.Money | None = None
     deductible: float = 100
     vat_deductible: float | None = None
     category: str | None = None
@@ -122,8 +122,8 @@ class ExpenseLine(BaseModel):
 
 class Expense(Record):
     date: str
-    net: float
-    vat: float = 0
+    net: v.Money
+    vat: v.Money = 0
     vat_rate: float | None = None
     vendor: str | None = None
     description: str | None = None
@@ -149,9 +149,9 @@ class Line(BaseModel):
     description: str = ""
     qty: float = 0
     unit: str | None = None
-    price: float = 0
+    price: v.UnitPrice = 0
     vat: float | None = None
-    amount: float | None = None
+    amount: v.Money | None = None
 
 
 class Plan(BaseModel):
@@ -161,7 +161,7 @@ class Plan(BaseModel):
     hours_per_week: float | None = None
     total_hours: float | None = None
     user_ids: list[str] = []
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     win_probability: float | None = None
 
 
@@ -231,8 +231,8 @@ class UserOut(Record):
     role: str | None = None
     weekly_hours: float | None = None
     workdays: list[int] | None = None
-    default_rate: float | None = None
-    cost_rate: float | None = None
+    default_rate: v.UnitPrice | None = None
+    cost_rate: v.UnitPrice | None = None
     color: str | None = None
     tracking_start: str | None = None
     active: bool | None = None
@@ -338,7 +338,7 @@ class Settings(BaseModel):
     vat_rate: float = 19
     state: str = ""
     hebesatz: float = 400
-    default_rate: float = 80
+    default_rate: v.UnitPrice = 80
     payment_days: int = 14
     offer_valid_days: int = 30
     default_template: str = "classic"
@@ -347,7 +347,7 @@ class Settings(BaseModel):
     invoice_reset: str = "yearly"  # never | yearly | monthly (see core/numbering.py)
     offer_reset: str = "yearly"
     numbering_shared: bool = False  # invoices and offers share one sequence
-    planning_min_rate: float = 0
+    planning_min_rate: v.UnitPrice = 0
     planning_default_win_probability: float = 100
     subcontractor_hint_hours_per_week: float = 30
     subcontractor_hint_weeks: int = 12
@@ -835,16 +835,16 @@ class PersonalTaxHealth(BaseModel):
     mode: str = "gkv"
     krankengeld: bool = True
     zusatzbeitrag_percent: float | None = None
-    pkv_monthly: float = 0
-    pkv_basis_monthly: float = 0
-    pkv_care_monthly: float = 0
-    pkv_employer_subsidy_monthly: float = 0
+    pkv_monthly: v.Money = 0
+    pkv_basis_monthly: v.Money = 0
+    pkv_care_monthly: v.Money = 0
+    pkv_employer_subsidy_monthly: v.Money = 0
 
 
 class PersonalTaxPension(BaseModel):
     model_config = ConfigDict(extra="allow")
     mode: str = "none"
-    fixed_monthly: float = 0
+    fixed_monthly: v.Money = 0
 
 
 class PersonalTaxUnemployment(BaseModel):
@@ -854,14 +854,14 @@ class PersonalTaxUnemployment(BaseModel):
 
 class PersonalTaxEmployment(BaseModel):
     model_config = ConfigDict(extra="allow")
-    gross_year: float = 0
+    gross_year: v.Money = 0
     sv_liable: bool = True
     steuerklasse: int | None = None
-    bav_employee_year: float = 0
-    bav_employer_year: float = 0
-    vwl_employer_year: float = 0
-    werbungskosten_year: float = 0
-    withheld_year: float | None = None
+    bav_employee_year: v.Money = 0
+    bav_employer_year: v.Money = 0
+    vwl_employer_year: v.Money = 0
+    werbungskosten_year: v.Money = 0
+    withheld_year: v.Money | None = None
 
 
 class PersonalTax(BaseModel):
@@ -870,9 +870,9 @@ class PersonalTax(BaseModel):
     model_config = ConfigDict(extra="allow")
     assessment: str = "single"
     church_tax_percent: float = 0
-    other_income_year: float = 0
-    other_deductions_year: float = 0
-    other_insurance_year: float = 0
+    other_income_year: v.Money = 0
+    other_deductions_year: v.Money = 0
+    other_insurance_year: v.Money = 0
     children: PersonalTaxChildren = Field(default_factory=PersonalTaxChildren)
     health: PersonalTaxHealth = Field(default_factory=PersonalTaxHealth)
     pension: PersonalTaxPension = Field(default_factory=PersonalTaxPension)
@@ -1160,7 +1160,7 @@ class Allocation(BaseModel):
     end: str
     hours_per_week: float | None = None
     total_hours: float | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     status: str = "active"
     cancelled_from: str | None = None
     cancel_reason: str | None = None
@@ -1173,9 +1173,9 @@ class Allocation(BaseModel):
     planned_hours: float | None = None
     planning_warnings: list[dict] | None = None  # only in POST/PUT answers
     # external allocations only (docs/contracts/subcontractors.md)
-    planned_net: float | None = None
-    invoiced_net: float | None = None
-    open_net: float | None = None
+    planned_net: v.Money | None = None
+    invoiced_net: v.Money | None = None
+    open_net: v.Money | None = None
     offer_reference: str | None = None
     days: list[dict] | None = None  # GET /api/allocations/{allocation_id}
 
@@ -1301,13 +1301,13 @@ class TripItem(BaseModel):
     from_: str | None = Field(None, alias="from")
     to: str | None = None
     text: str | None = None
-    expected: float | None = None
+    expected: v.Money | None = None
 
 
 class TripReduction(BaseModel):
     model_config = ConfigDict(extra="allow")
     meal: Literal["breakfast", "lunch", "dinner"]
-    amount: float
+    amount: v.Money
 
 
 class TripDay(BaseModel):
@@ -1318,9 +1318,9 @@ class TripDay(BaseModel):
     country: str  # the country whose rate row was used (LU after fallback)
     city: str | None = None  # omitted when the place has no city
     absence_hours: float
-    base: float
+    base: v.Money
     reductions: list[TripReduction] = []
-    amount: float
+    amount: v.Money
     note: str = ""
 
 
@@ -1328,8 +1328,8 @@ class TripBills(BaseModel):
     """The linked bills (expenses with this trip_id): count and sums of their net and VAT."""
 
     count: int = 0
-    net: float = 0
-    vat: float = 0
+    net: v.Money = 0
+    vat: v.Money = 0
 
 
 class TripChecklistItem(BaseModel):
@@ -1339,7 +1339,7 @@ class TripChecklistItem(BaseModel):
     hint: str
     state: Literal["added", "open", "not_needed"]
     count: int = 0
-    sum: float = 0
+    sum: v.Money = 0
 
 
 class TripFigures(BaseModel):
@@ -1347,10 +1347,10 @@ class TripFigures(BaseModel):
 
     model_config = ConfigDict(extra="allow")
     days: list[TripDay] = []
-    allowance_total: float = 0
+    allowance_total: v.Money = 0
     mileage_km: float = 0
-    mileage_rate: float | None = None
-    mileage_total: float = 0
+    mileage_rate: v.UnitPrice | None = None
+    mileage_total: v.Money = 0
     rules_version: str | None = None
 
 
@@ -1373,15 +1373,16 @@ class Trip(Record):
     not_needed: list[str] = []
     cost_centre: Literal["project", "general"] | None = None
     status: Literal["draft", "final"] = "draft"
-    allowance_total: float | None = None
+    allowance_total: v.Money | None = None
     mileage_km: float | None = None
-    mileage_total: float | None = None
+    mileage_total: v.Money | None = None
+    mileage_rate: v.UnitPrice | None = None
     rules_version: str | None = None
     days: list[TripDay] = []
     bills: TripBills | None = None  # response-only, computed on every read
     checklist: list[TripChecklistItem] | None = None  # response-only, computed on every read
-    items_expected_total: float | None = None  # response-only: sum of the items' expected (planning only)
-    items_actual_total: float | None = None  # response-only: gross of all linked bills (planned and unplanned)
+    items_expected_total: v.Money | None = None  # response-only: sum of the items' expected (planning only)
+    items_actual_total: v.Money | None = None  # response-only: gross of all linked bills (planned and unplanned)
 
 
 class TripPlaceIn(v.StrictRecord):
@@ -1665,7 +1666,7 @@ class Supplier(Record):
     tags: list[str] = []
     weekly_hours: float | None = None
     workdays: list[int] | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     unavailable: list[dict] | None = None
     login_user_id: str | None = None
     external_id: str | None = None
@@ -1744,10 +1745,10 @@ class IncomingOffer(Record):
     valid_until: str | None = None
     lines: list[dict] = []
     hours: float = 0.0
-    net_total: float | None = None
+    net_total: v.Money | None = None
     vat_rate: float | None = None
-    vat: float | None = None
-    gross_total: float | None = None
+    vat: v.Money | None = None
+    gross_total: v.Money | None = None
     vat_mode: str | None = None
     plan: dict | None = None
     project_id: str | None = None

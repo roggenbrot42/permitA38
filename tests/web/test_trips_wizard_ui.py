@@ -25,6 +25,11 @@ from tests.web.test_trips_ui import (  # noqa: E402
 )
 
 
+def _dec(value):
+    """Money crosses the API as a decimal string ('100' typed, '100.00' stored): compare by value."""
+    return None if value is None else Decimal(str(value))
+
+
 class WizardApi(FakeTripApi):
     """The trip and expense routes of docs/contracts/trips.md (items, itinerary, bills, totals); everything else is the
     base fake. Every request is logged like the base fake's."""
@@ -301,7 +306,7 @@ def test_expenses_add_items_set_expected_add_bill_from_the_row_and_totals(browse
     pg.click("#m-save")
     expect(pg.locator("tr[data-item]", has_text="Hotel Hamburg")).to_have_count(1)
     hotel = api.trip["items"][0]
-    assert hotel["category"] == "hotel" and hotel["date_to"] == "2026-11-10" and hotel["expected"] == 120
+    assert hotel["category"] == "hotel" and hotel["date_to"] == "2026-11-10" and _dec(hotel["expected"]) == 120
 
     # train, with from and to prefilled from the trip
     pg.select_option("#t_add_item", "train")
@@ -318,7 +323,7 @@ def test_expenses_add_items_set_expected_add_bill_from_the_row_and_totals(browse
     pg.fill(f'input[data-item-exp="{hotel["id"]}"]', "100")
     pg.locator(f'input[data-item-exp="{hotel["id"]}"]').press("Tab")
     pg.wait_for_function("() => document.querySelector('.trip-totals').innerText.includes('180,00')")
-    assert api.trip["items"][0]["expected"] == 100
+    assert _dec(api.trip["items"][0]["expected"]) == 100
 
     # a bill from the hotel row: the actual appears and the receipt is missing
     pg.locator("tr[data-item]", has_text="Hotel Hamburg").locator("button", has_text="Add bill").click()
@@ -623,7 +628,7 @@ def test_an_inline_expected_edit_does_not_swallow_the_next_click(browser):
     api.release()  # the inline save completes now; the queued Next then runs
     pg.wait_for_selector("#t_breakdown")
     assert pg.evaluate("location.hash").endswith("/review")
-    assert api.trip["items"][0]["expected"] == 100
+    assert _dec(api.trip["items"][0]["expected"]) == 100
     # Next from the Expenses step sends no PUT when nothing changed (N5): the inline save is the only PUT
     assert len(puts(api)) == 1 and api.held == []
     assert problems == []
@@ -702,7 +707,7 @@ def test_flight_taxi_and_other_dialogs_store_their_fields(browser):
     pg.click("#m-save")
     expect(pg.locator("tr[data-item]", has_text="Demo parking")).to_have_count(1)
     other = api.trip["items"][2]
-    assert other["category"] == "other" and other["expected"] == 12.5 and "from" not in other
+    assert other["category"] == "other" and _dec(other["expected"]) == Decimal("12.5") and "from" not in other
     assert problems == []
     ctx.close()
 
@@ -865,8 +870,8 @@ def test_two_quick_expected_edits_on_different_rows_are_both_saved(browser):
     wait_until(pg, lambda: len(puts(api)) == 2)
     saved = puts(api)
     assert len(saved) == 2, "the second edit is sent after the first answer, not dropped"
-    assert {i["id"]: i.get("expected") for i in saved[-1][3]["items"]} == {"i0000000001": 100, "i0000000002": 90}
-    assert {i["id"]: i.get("expected") for i in api.trip["items"]} == {"i0000000001": 100, "i0000000002": 90}
+    assert {i["id"]: _dec(i.get("expected")) for i in saved[-1][3]["items"]} == {"i0000000001": 100, "i0000000002": 90}
+    assert {i["id"]: _dec(i.get("expected")) for i in api.trip["items"]} == {"i0000000001": 100, "i0000000002": 90}
     assert problems == []
     ctx.close()
 
@@ -890,7 +895,7 @@ def test_an_item_dialog_save_waits_for_the_inline_write_and_keeps_both_figures(b
     pg.wait_for_timeout(200)
     api.release()
     wait_until(pg, lambda: len(puts(api)) == 2)
-    assert {i["id"]: i.get("expected") for i in api.trip["items"]} == {"i0000000001": 100, "i0000000002": 95}
+    assert {i["id"]: _dec(i.get("expected")) for i in api.trip["items"]} == {"i0000000001": 100, "i0000000002": 95}
     assert problems == []
     ctx.close()
 

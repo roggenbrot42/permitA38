@@ -73,7 +73,7 @@
       <div class="auto"><label for="al_end">To</label><input id="al_end" type="date" value="${esc(a.end || addDays(monday, 27))}"></div>
       <div class="auto"><label for="al_mode">Hours</label><select id="al_mode"><option value="week" ${total ? '' : 'selected'}>per week</option><option value="total" ${total ? 'selected' : ''}>in total</option></select></div>
       <div class="auto"><label for="al_hours">Amount of hours</label><input id="al_hours" type="number" min="0.25" max="${total ? 100000 : 80}" step="0.25" value="${esc(total ? a.total_hours : (a.hours_per_week ?? 10))}"></div>
-      <div class="auto" id="al_ratebox" ${isSup ? '' : 'hidden'}><label for="al_rate">Rate € per hour (net)</label><input id="al_rate" type="number" min="0" max="10000" step="0.01" value="${esc(rate ?? '')}"></div></div>
+      <div class="auto" id="al_ratebox" ${isSup ? '' : 'hidden'}><label for="al_rate">Rate € per hour (net)</label><input id="al_rate" type="text" autocomplete="off" inputmode="decimal" value="${esc(rate ?? '')}"></div></div>
       <div class="actions">${a.id && !a.incoming_offer_id ? '<button type="button" class="danger" data-a="alDelete" style="margin-right:auto">Delete</button>' : ''}<button type="button" data-a="alCancelEdit">Cancel</button><button type="button" class="primary" data-a="alSave" ${Al.busy ? 'disabled' : ''}>Save</button></div></form>`;
   }
 
@@ -125,8 +125,9 @@
     const b = { project_id: v('al_project'), start: v('al_start'), end: v('al_end') };
     b[k === 's' ? 'supplier_id' : 'user_id'] = oid;
     b[total ? 'total_hours' : 'hours_per_week'] = hrs;
-    if (k === 's') b.rate = Number(v('al_rate'));
-    return { b, kind: k, hrs, total, rate: v('al_rate') };
+    const rp = k === 's' ? Money.parseInput(v('al_rate')) : null;   // money: the typed decimal string goes to the API
+    if (rp && rp.ok && rp.value !== null) b.rate = rp.value;
+    return { b, kind: k, hrs, total, rate: v('al_rate'), rateOk: !!rp && rp.ok && rp.value !== null && !Money.isNeg(rp.value) && Money.cmp(rp.value, '10000') <= 0 };
   }
 
   A.allocations = el => open({ projectId: el.dataset.project || null, userId: el.dataset.user || null });
@@ -188,7 +189,7 @@
     if (!(b.user_id || b.supplier_id) || !b.project_id || !b.start || !b.end) { Al.error = 'Choose a person or subcontractor, a project and both dates.'; return paint(); }
     if (b.end < b.start) { Al.error = 'The end date is before the start date.'; return paint(); }
     if (r0.total ? !(r0.hrs > 0 && r0.hrs <= 100000) : !(r0.hrs >= 0.25 && r0.hrs <= 80)) { Al.error = r0.total ? 'Total hours must be above 0.' : 'Hours per week must be between 0.25 and 80.'; return paint(); }
-    if (r0.kind === 's' && (r0.rate === '' || !(b.rate >= 0 && b.rate <= 10000))) { Al.error = 'Enter the rate of the subcontractor.'; return paint(); }
+    if (r0.kind === 's' && !r0.rateOk) { Al.error = 'Enter the rate of the subcontractor.'; return paint(); }
     Al.busy = true;
     try {
       const r = await (id ? api.put('allocations/' + id, b) : api.post('allocations', b));

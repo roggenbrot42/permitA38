@@ -4,6 +4,7 @@ Skipped while the server has no suppliers route (the backend of docs/contracts/s
 Every number the UI shows is compared with what the server returned, never with a value computed here."""
 
 from datetime import date, timedelta
+from decimal import Decimal
 
 import httpx
 import pytest
@@ -25,7 +26,7 @@ def auth(token):
 
 def de(x):
     """The app's money format: 6.400,00"""
-    return f"{x:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{Decimal(str(x)):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 @pytest.fixture

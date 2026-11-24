@@ -12,8 +12,8 @@ window.RCPT = (() => {
   const CHECK_LABEL = { group_sum: 'Net plus VAT of a rate', group_vat: 'VAT of a rate', subtotal: 'Subtotal', groups_total: 'All rates together', item_line: 'Item line', items_group: 'Items of a rate', items_total: 'Items together', due: 'Amount due', tendered: 'Amount tendered', card: 'Card amount', net_total: 'Net of all rates', vat_total: 'VAT of all rates', qr_payment: 'QR code: rates and payment', qr_total: 'QR code: total' };
   // which box a form field of the dialog belongs to (focusing the field highlights the box)
   const FORM_BOX = { f_vendor: ['vendor'], f_date: ['date'], f_invoice_no: ['invoice_no'], f_gross: ['total'], f_paid_on: ['paid_date'], f_vat_rate: ['vat_group'] };
-  const num = x => (x === null || x === undefined || x === '' || Number.isNaN(Number(x))) ? null : Number(x);
-  const cents = x => Math.round(x * 100);
+  /** A money value from the API (decimal string) or null when absent or not a number; never a float. */
+  const dec = x => { if (x === null || x === undefined || x === '') return null; const r = Money.parseInput(x); return r.ok ? r.value : null; };
   const el = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
 
   /* ---------- capabilities and the list that needs a check ---------- */
@@ -59,8 +59,8 @@ window.RCPT = (() => {
   };
   const amountOf = d => {
     if (!d) return null;
-    if (Array.isArray(d.lines) && d.lines.length) return d.lines.reduce((a, l) => a + (num(l.gross) || 0), 0);
-    return num(d.gross);
+    if (Array.isArray(d.lines) && d.lines.length) return Money.sum(d.lines.map(l => l.gross));
+    return dec(d.gross);
   };
   R.flaggedSection = () => {
     if (!R.canUpload() || !R.flagged.length) return '';
@@ -104,7 +104,7 @@ window.RCPT = (() => {
     if (!running) run();
   };
   const money = e => {
-    const g = Array.isArray(e.lines) && e.lines.length ? e.lines.reduce((a, l) => a + (num(l.gross) || 0), 0) : (e.net || 0) + (e.vat || 0);
+    const g = Array.isArray(e.lines) && e.lines.length ? Money.sum(e.lines.map(l => l.gross)) : Money.sum([e.net, e.vat]);
     return eur(g);
   };
   async function run() {
@@ -170,21 +170,21 @@ window.RCPT = (() => {
       <div id="rcpt_err" class="banner bad" role="alert" hidden></div>`;
   };
   R.dialogAccept = scan => {
-    const pt = num(scan.doc?.printed_total);
+    const pt = dec(scan.doc?.printed_total);
     return `<div class="rcpt-accept">
       <div class="field" id="rcpt_acc_no_invoice_number" hidden><label><input type="checkbox" id="rcpt_ck_no_invoice_number"> This bill has no invoice number</label></div>
       <div class="field" id="rcpt_acc_total_differs" hidden><label><input type="checkbox" id="rcpt_ck_total_differs"> Book this although it differs from the printed total of ${pt === null ? '' : esc(eur(pt))}</label></div></div>`;
   };
   function currentGross() {
-    if ($('#e_itemised') && !$('#e_itemised').hidden) return Money.lineTotals(LN.map(l => [toNum(l.gross) || 0, l.vat_rate])).gross;
-    const g = toNum($('#f_gross')?.value);
-    return Number.isNaN(g) ? null : g;
+    if ($('#e_itemised') && !$('#e_itemised').hidden) return Money.str(Money.lineTotals(LN.map(l => [Money.parseInput(l.gross).value || 0, l.vat_rate])).gross);
+    const g = Money.parseInput($('#f_gross')?.value);
+    return g.ok ? g.value : null;
   }
   const forced = new Set();
   function refreshAccept(scan) {
-    const g = currentGross(), pt = num(scan.doc?.printed_total);
-    const noInv = (forced.has('no_invoice_number') || (g !== null && g > 250)) && !($('#f_invoice_no')?.value || '').trim();
-    const differs = forced.has('total_differs') || (pt !== null && g !== null && cents(g) !== cents(pt));
+    const g = currentGross(), pt = dec(scan.doc?.printed_total);
+    const noInv = (forced.has('no_invoice_number') || (g !== null && Money.cmp(g, '250') > 0)) && !($('#f_invoice_no')?.value || '').trim();
+    const differs = forced.has('total_differs') || (pt !== null && g !== null && Money.cents(g) !== Money.cents(pt));
     for (const [code, on] of [['no_invoice_number', noInv], ['total_differs', differs]]) {
       const box = $('#rcpt_acc_' + code); if (!box) continue;
       box.hidden = !on;
@@ -301,7 +301,7 @@ window.RCPT = (() => {
     const d = scan.draft || {}, doc = scan.doc || {};
     const v = { vendor: d.vendor, date: d.date, invoice_no: d.invoice_no, vat_id: doc.vat_id, total: doc.printed_total ?? d.gross, due_date: doc.due_date, paid_date: d.paid_on }[b.field];
     if (v === undefined || v === null || v === '') return '';
-    return b.field === 'total' && num(v) !== null ? eur(num(v)) : String(v);
+    return b.field === 'total' && dec(v) !== null ? eur(dec(v)) : String(v);
   };
   const pct = x => (Math.min(1, Math.max(0, Number(x) || 0)) * 100).toFixed(3) + '%';
   function buildLayer(c) {
@@ -340,10 +340,10 @@ window.RCPT = (() => {
     for (const [f, label, v] of expected) {
       if (have.has(f)) continue;
       const has = v !== undefined && v !== null && v !== '';
-      if (has) out.push(`${label}: ${f === 'total' && num(v) !== null ? eur(num(v)) : v}`);
+      if (has) out.push(`${label}: ${f === 'total' && dec(v) !== null ? eur(dec(v)) : v}`);
       else if (f !== 'vat_id') out.push(`${label}: not found`);
     }
-    for (const [k, label] of [['prepaid', 'Prepaid'], ['amount_due', 'Amount due'], ['card_amount', 'Card amount']]) if (num(doc[k]) !== null) out.push(`${label}: ${eur(num(doc[k]))}`);
+    for (const [k, label] of [['prepaid', 'Prepaid'], ['amount_due', 'Amount due'], ['card_amount', 'Card amount']]) if (dec(doc[k]) !== null) out.push(`${label}: ${eur(dec(doc[k]))}`);
     return out;
   }
   R.highlight = highlight;

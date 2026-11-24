@@ -7,8 +7,9 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 /** localStorage can be blocked or full: a remembered filter is a convenience, never a reason to fail. */
 const lsGet = (k, d = '') => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } };
-const eur = n => new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n || 0);
-const num = (n, d = 1) => new Intl.NumberFormat('de-DE', { maximumFractionDigits: d }).format(n || 0);
+/* Money arrives as decimal strings ("0.00" is truthy!): display goes through Money (web/money.js), never through `n || 0`. */
+const eur = n => Money.fmt(n);
+const num = (n, d = 1) => new Intl.NumberFormat('de-DE', { maximumFractionDigits: d }).format(Money.decNum(Money.parse(n)));
 const hm = h => { const m = Math.round(Math.abs(h) * 60); return (h < 0 ? '-' : '') + Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const todayISO = () => iso(new Date());
@@ -62,6 +63,7 @@ function fieldHTML(f, v) {
   if (f.t === 'select') inner = `<select id="${id}">${(f.o || []).map(o => { const [ov, ol] = Array.isArray(o) ? o : [o, o]; return `<option value="${esc(ov)}" ${String(ov) === String(val) ? 'selected' : ''}>${esc(ol)}</option>`; }).join('')}</select>`;
   else if (f.t === 'area') inner = `<textarea id="${id}" rows="${f.rows || 3}" placeholder="${esc(f.ph || '')}">${esc(val)}</textarea>`;
   else if (f.t === 'check') return `<div class="field"><label><input type="checkbox" id="${id}" ${val === true || val === 'true' ? 'checked' : ''}> ${esc(f.l)}</label>${f.h ? `<div class="muted small">${esc(f.h)}</div>` : ''}</div>`;
+  else if (f.m) inner = `<input id="${id}" type="text" inputmode="decimal" autocomplete="off" value="${esc(val)}" placeholder="${esc(f.ph || '')}">`;   // money: typed text, validated by Money.parseInput
   else inner = `<input id="${id}" type="${f.t || 'text'}" value="${esc(val)}" placeholder="${esc(f.ph || '')}" ${f.max ? `max="${f.max}"` : ''} ${f.step ? `step="${f.step}"` : f.t === 'number' ? 'step="any"' : ''}>`;
   return `<div class="field"><label for="${id}">${esc(f.l)}</label>${inner}${f.h ? `<div class="muted small">${esc(f.h)}</div>` : ''}</div>`;
 }
@@ -80,6 +82,11 @@ function readForm(fields, base) {
   for (const f of fields) {
     const el = $('#f_' + f.k); if (!el) continue;
     if (f.t === 'check') o[f.k] = el.checked;
+    else if (f.m) {   // money field (f.m): what was typed goes to the API as a decimal string
+      const r = Money.parseInput(el.value);
+      if (!r.ok) throw new Error(`${f.l}: ${r.error}`);
+      o[f.k] = r.value;
+    }
     else if (f.t === 'number') o[f.k] = el.value === '' ? null : parseFloat(el.value.replace(',', '.'));
     else o[f.k] = el.value;
   }
@@ -321,11 +328,11 @@ PAGES.today = async () => {
   if (isBoss()) {
     const inv = S.d.invoices, off = S.d.offers, rep = await api('GET', 'project-report');
     const overdue = inv.filter(i => i.status === 'sent' && i.due_date && i.due_date < now);
-    const unbilled = Object.values(rep).reduce((a, r) => a + r.unbilled_revenue, 0);
+    const unbilled = Money.sum(Object.values(rep).map(r => r.unbilled_revenue));
     const openOff = off.filter(o => o.status === 'sent');
-    extras = `<div class="grid g4"><div class="card kpi ${unbilled ? 'warn' : ''}"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a href="#/sales" class="small">Create invoice →</a></div>
-      <div class="card kpi ${overdue.length ? 'bad' : ''}"><div class="l">Overdue invoices</div><div class="v">${overdue.length}</div><span class="small muted">${eur(overdue.reduce((a, i) => a + docTotal(i), 0))}</span></div>
-      <div class="card kpi"><div class="l">Open offers</div><div class="v">${openOff.length}</div><span class="small muted">${eur(openOff.reduce((a, i) => a + docTotal(i), 0))}</span></div>
+    extras = `<div class="grid g4"><div class="card kpi ${Money.isZero(unbilled) ? '' : 'warn'}"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a href="#/sales" class="small">Create invoice →</a></div>
+      <div class="card kpi ${overdue.length ? 'bad' : ''}"><div class="l">Overdue invoices</div><div class="v">${overdue.length}</div><span class="small muted">${eur(Money.sum(overdue.map(docTotal)))}</span></div>
+      <div class="card kpi"><div class="l">Open offers</div><div class="v">${openOff.length}</div><span class="small muted">${eur(Money.sum(openOff.map(docTotal)))}</span></div>
       <div class="card kpi"><div class="l">Flex-time balance</div><div class="v">${dash.balance === null ? '–' : (dash.balance >= 0 ? '+' : '') + hm(dash.balance)}</div><span class="small muted">${dash.balance === null ? 'set "tracking since" in Team' : 'worked − target'}</span></div></div>`;
   }
   if (isBoss() && (!S.d.customers?.length || !S.d.projects?.length)) {
@@ -354,7 +361,7 @@ function projectsCard(list) {   // planned (assignments, rule S1) vs booked hour
   const row = p => `<tr><td title="${esc(p.kind === 'internal' ? 'Internal project' : 'Customer project')}"><b>${esc(p.name)}</b></td><td class="right">${h(p.planned_today)}</td><td class="right">${h(p.booked_today)}</td><td class="right">${h(p.planned_week)}</td><td class="right">${h(p.booked_week)}</td><td class="right" title="${esc(h(p.planned_week) + ' planned − ' + h(p.booked_week) + ' booked')}"><b>${h(p.left_week)}</b></td>${play(p.name, p.project_id || p.id)}</tr>${(p.tasks || []).map(t => taskRow(p, t)).join('')}`;
   return `<div class="card" id="proj-hours"><h2>Your projects this week</h2>${list.length ? `<table><tr><th>Project</th>${head}</tr>${list.map(row).join('')}<tr class="total"><td><b>Total</b></td><td class="right">${h(sum('planned_today'))}</td><td class="right">${h(sum('booked_today'))}</td><td class="right">${h(sum('planned_week'))}</td><td class="right">${h(sum('booked_week'))}</td><td class="right"><b>${h(left)}</b></td><td></td></tr></table>` : '<div class="empty">No assignments this week</div>'}</div>`;
 }
-const docTotal = d => Money.docGross(d, S.settings);
+const docTotal = d => Money.docGrossStr(d, S.settings);   // decimal string
 function entryRow(e, projects, withPlay) {   // withPlay: Today card only (the timesheet rows stay without a ▶)
   const p = projects[e.project_id];
   return `<tr class="click" data-a="editEntry" data-id="${e.id}"><td>${p ? `<span class="dot" style="background:${esc(p.color || '#888')}"></span><b>${esc(p.name)}</b>` : '<span class="muted">no project</span>'}${e.task_id ? ' · ' + esc(nameOf('tasks', e.task_id)) : ''}<div class="small muted">${esc(e.note || '')}</div></td>
@@ -408,7 +415,7 @@ function rateOf(pid) {
 /* Elapsed whole seconds x hourly rate, exact decimals, rounded half-up to cents. */
 function earned(rate) {
   const r = Money.parse(rate);
-  return eur(Money.toNumber(Money.roundDiv(BigInt(Math.floor(timerElapsed())) * r.n * 100n, 3600n * 10n ** BigInt(r.s))));
+  return eur(Money.fromCents(Money.roundDiv(BigInt(Math.floor(timerElapsed())) * r.n * 100n, 3600n * 10n ** BigInt(r.s))));
 }
 const activePid = () => (S.timer?.running ? S.timer.project_id : projIdOf());
 const hhmm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
@@ -621,7 +628,7 @@ function contractsView() {
   const cs = S.d.contracts;
   return `<div class="hint">Enter confirmed work as <b>hours per week</b> or a <b>total hour budget</b> between two dates. Open offers (with a plan) show up in the planning Overview as possible work; when you accept an offer, it becomes a contract.</div>
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Contracts</h2><div class="right auto"><button class="primary" data-a="editContract">+ New contract</button></div></div>
-  ${cs.length ? `<table><tr><th>Contract</th><th>Customer</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${cs.sort((a, b) => a.start < b.start ? -1 : 1).map(c => `<tr class="click" data-a="editContract" data-id="${c.id}"><td><b>${esc(c.title)}</b></td><td>${esc(nameOf('customers', c.customer_id))}</td><td class="nowrap">${contractPeriod(c)}</td><td class="num">${contractHours(c)}</td><td class="num">${c.rate ? eur(c.rate) : ''}</td><td>${contractPill(c)}</td></tr>`).join('')}</table>` : '<div class="empty">No contracts yet.</div>'}</div>`;
+  ${cs.length ? `<table><tr><th>Contract</th><th>Customer</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${cs.sort((a, b) => a.start < b.start ? -1 : 1).map(c => `<tr class="click" data-a="editContract" data-id="${c.id}"><td><b>${esc(c.title)}</b></td><td>${esc(nameOf('customers', c.customer_id))}</td><td class="nowrap">${contractPeriod(c)}</td><td class="num">${contractHours(c)}</td><td class="num">${c.rate != null && !Money.isZero(c.rate) ? eur(c.rate) : ''}</td><td>${contractPill(c)}</td></tr>`).join('')}</table>` : '<div class="empty">No contracts yet.</div>'}</div>`;
 }
 A.editContract = el => {
   const proj = el.dataset.proj ? S.d.projects.find(x => x.id === el.dataset.proj) : null;   // "+ New contract" on a project page
@@ -631,7 +638,7 @@ A.editContract = el => {
     fields: [{ k: 'title', l: 'Title' }, { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '—'], ...S.d.customers.map(x => [x.id, x.name])] },
       { k: 'project_id', l: 'Project', t: 'select', o: projectOptions(c.id && !c.project_id, undefined, c.project_id || null, true) },
       { k: 'start', l: 'Start', t: 'date', row: 1 }, { k: 'end', l: 'End', t: 'date', row: 1 },
-      { k: 'hours_per_week', l: 'Hours per week', t: 'number', row: 2, h: 'Either this… (entering one clears the other)' }, { k: 'total_hours', l: 'Total hours', t: 'number', row: 2, h: '…or this (spread over the period)' }, { k: 'rate', l: 'Hourly rate (€)', t: 'number', row: 2 },
+      { k: 'hours_per_week', l: 'Hours per week', t: 'number', row: 2, h: 'Either this… (entering one clears the other)' }, { k: 'total_hours', l: 'Total hours', t: 'number', row: 2, h: '…or this (spread over the period)' }, { k: 'rate', l: 'Hourly rate (€)', t: 'number', m: true, row: 2 },
       { k: 'status', l: 'Status', t: 'select', o: ['confirmed', 'done'] }],
     save: async v => { if (!v.title || !v.start || !v.end) throw new Error('Title, start and end are required'); if (!v.project_id) throw new Error('Choose a project'); if (!(v.hours_per_week > 0) && !(v.total_hours > 0)) throw new Error('Enter hours per week or total hours'); if (v.hours_per_week > 0) v.total_hours = null; else v.hours_per_week = null; await save('contracts', v); render(); },
     del: c.id ? async () => { await api('DELETE', 'contracts/' + c.id); await loadAll(['contracts']); render(); } : null

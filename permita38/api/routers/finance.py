@@ -3,6 +3,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Query
 
+from permita38.api import money_out
 from permita38.api.deps import Needs, ServicesDep
 from permita38.core import calc, rights
 from permita38.core.validation import ID_PATTERN
@@ -18,8 +19,8 @@ def finance(
     result = calc.finance(services.store, year or date.today().year)
     # only the boss in a session sees the private breakdown (church tax, children, insurance, employment)
     if rights.is_token(user) or rights.normalize_role(user.get("role")) != rights.BOSS:
-        return calc.redact_tax(result)
-    return result
+        return money_out.finance_response(calc.redact_tax(result))
+    return money_out.finance_response(result)
 
 
 @router.get("/project-report", summary="hours, revenue, costs and margin per project")
@@ -28,7 +29,7 @@ def project_report(_: Annotated[dict, Needs("finance")], services: ServicesDep) 
     committed = services.procurement.committed_by_project()
     for pid, row in rows.items():
         row["committed_external_cost"] = committed.get(pid, 0.0)
-    return rows
+    return money_out.project_report_response(rows)
 
 
 @router.get("/finance/commitments", summary="open commitments to suppliers and the customer share hint")
@@ -38,4 +39,4 @@ def commitments(
     supplier_id: Annotated[str | None, Query(pattern=ID_PATTERN)] = None,
     project_id: Annotated[str | None, Query(pattern=ID_PATTERN)] = None,
 ) -> dict[str, Any]:
-    return services.procurement.commitments(supplier_id, project_id)
+    return money_out.commitments_response(services.procurement.commitments(supplier_id, project_id))
