@@ -160,7 +160,7 @@ def test_update_before_the_first_entry_changes_every_basis(svc):
     assert (new["chart"], new["income_basis"], new["vat_basis"], new["vat_frequency"], new["dauerfrist"]) == (
         "skr04", "accrual", "ist", "quarter", True,
     )  # fmt: skip
-    assert new["rules_version"].startswith("skr04-")
+    assert new["rules_version"] == "skr04-none/vat-2026"  # no chart file on this branch yet: "none"
     assert svc.get(2026) == new
 
 
@@ -175,6 +175,39 @@ def test_update_after_an_entry_freezes_the_bases_only(svc, store):
     assert svc.update(2026, {"chart": "skr03"})["chart"] == "skr03"  # the same value is no change
     new = svc.update(2026, {"vat_frequency": "quarter", "dauerfrist": True})
     assert (new["vat_frequency"], new["dauerfrist"]) == ("quarter", True)
+
+
+def test_vat_frequency_fields_freeze_with_the_first_vat_return(svc, store):
+    make(svc)
+    patches = ({"vat_frequency": "quarter"}, {"dauerfrist": True}, {"vat_regular_from": "2026-07-01"})
+    assert svc.update(2026, {"vat_frequency": "quarter"})["vat_frequency"] == "quarter"  # allowed before
+    svc.update(2026, {"vat_frequency": "month"})
+    store.save(
+        "vat_returns",
+        {
+            "year": 2026, "period_kind": "month", "period_no": 1, "from_date": "2026-01-01", "to_date": "2026-01-31",
+            "due_date": "2026-02-10", "status": "draft", "amends_key": "",
+        },
+    )  # fmt: skip
+    for patch in patches:
+        with pytest.raises(ServiceError) as e:
+            svc.update(2026, patch)
+        assert e.value.status == 409, patch
+    assert svc.get(2026)["vat_frequency"] == "month"
+    assert svc.update(2026, {"vat_frequency": "month"})["vat_frequency"] == "month"  # the same value is no change
+    assert svc.update(2026, {"chart": "skr04"})["chart"] == "skr04"  # bases follow the entry rule only
+
+
+def test_a_return_in_another_year_does_not_freeze(svc, store):
+    make(svc)
+    store.save(
+        "vat_returns",
+        {
+            "year": 2025, "period_kind": "month", "period_no": 1, "from_date": "2025-01-01", "to_date": "2025-01-31",
+            "due_date": "2025-02-10", "status": "draft", "amends_key": "",
+        },
+    )  # fmt: skip
+    assert svc.update(2026, {"dauerfrist": True})["dauerfrist"] is True
 
 
 def test_an_entry_in_another_year_does_not_freeze(svc, store):

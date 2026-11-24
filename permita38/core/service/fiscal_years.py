@@ -21,11 +21,14 @@ from permita38.core.vat_rules import VatRulesMissing, vat_rules_for
 
 COLLECTION = "fiscal_years"
 ENTRIES = "journal_entries"
+VAT_RETURNS = "vat_returns"
 
 # fields a change may name; `year` is the identity and cannot change
 EDITABLE = ("chart", "income_basis", "vat_basis", "vat_frequency", "dauerfrist", "small_business", "vat_regular_from")
 # frozen as soon as the year has an entry (accounting.md 4: "a year's bases change only before its first entry")
 FROZEN_AFTER_ENTRY = ("chart", "income_basis", "vat_basis", "small_business")
+# frozen as soon as a VAT return record (draft or final) exists for the year (accounting.md 4)
+FROZEN_AFTER_RETURN = ("vat_frequency", "dauerfrist", "vat_regular_from")
 FORM_FIELDS = ("year", *EDITABLE)
 
 GMBH_MESSAGE = "A GmbH must use the accrual basis (income_basis = accrual)"
@@ -64,7 +67,12 @@ class FiscalYearService:
         return row
 
     def has_entries(self, year: int) -> bool:
+        # the Repository offers no exists/limit query; `find` is an indexed query, only the rows are read needlessly
         return bool(self.store.find(ENTRIES, fiscal_year=year))
+
+    def has_returns(self, year: int) -> bool:
+        """True when a VAT return record (draft or final) exists for ``year``; same note on `find` as above."""
+        return bool(self.store.find(VAT_RETURNS, year=year))
 
     # ---------- writes
     def _check_company(self, income_basis: str) -> None:
@@ -73,10 +81,10 @@ class FiscalYearService:
             raise ServiceError(422, GMBH_MESSAGE)
 
     def create(self, user: Mapping[str, object], body: models.FiscalYearIn) -> Record:
-        self._check_company(body.income_basis)
         with self.store.transaction():
             if self.find(body.year):
                 raise ServiceError(409, f"Fiscal year {body.year} already exists")
+            self._check_company(body.income_basis)
             row: Record = body.model_dump()
             row["rules_version"] = rules_version(body.chart, body.year)
             row["opened_at"] = int(time.time())
@@ -96,6 +104,10 @@ class FiscalYearService:
                 frozen = sorted(k for k in FROZEN_AFTER_ENTRY if k in changes and changes[k] != row.get(k))
                 if frozen:
                     raise ServiceError(409, f"Fiscal year {year} has entries; {', '.join(frozen)} cannot change")
+            if self.has_returns(year):
+                frozen = sorted(k for k in FROZEN_AFTER_RETURN if k in changes and changes[k] != row.get(k))
+                if frozen:
+                    raise ServiceError(409, f"Fiscal year {year} has a VAT return; {', '.join(frozen)} cannot change")
             merged = {k: row.get(k) for k in FORM_FIELDS if row.get(k) is not None}
             merged.update(changes)
             try:
