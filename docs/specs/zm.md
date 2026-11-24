@@ -72,14 +72,15 @@ the tax adviser or the BOP help — TA-41)*:
   shows `#v1.0` working; a different minor version is tolerated by the portal);
 - line 2 the header, which the portal does not read but always skips: `Laenderkennzeichen,USt-IdNr.,Betrag(EUR),Art der Leistung`;
 - then one line per customer VAT id, 1..1000 lines, no empty lines: country code (2 letters, `EL` for Greece, taken
-  from the VAT id prefix), VAT id without the prefix (A–Z, 0–9, 5..12 characters, spaces and dots removed, upper
-  case), the amount in whole euros (truncated as in Rules; no decimals, no separators; a `-` only for a negative
+  from the VAT id prefix), VAT id without the prefix (A–Z, 0–9, 5..12 characters; spaces, dots and dashes removed, upper
+  case ASCII; ids are aggregated after this normalisation, and a `GR` prefix is read as `EL`), the amount in whole euros (truncated as in Rules; no decimals, no separators; a `-` only for a negative
   total), and the type `S` (sonstige Leistung); example `FR,12345678901,1047,S`;
 - separator `,`, no quotes, encoding ISO-8859-15, line end CRLF, every line terminated;
 - rows are aggregated per country + VAT id before writing (the portal rejects duplicates);
 - the reporting period and the own VAT id are not in the file; they are entered in the portal form; a correction
-  (Berichtigung) uploads the full corrected list for the quarter and is marked as a correction in the form; rows that
-  dropped to 0 € in a correction are written with amount `0`;
+  (Berichtigung) uploads the full corrected list for the quarter and is marked as a correction in the form; customers that
+  were reported in the corrected report and dropped to 0 € are written with amount `0` (customers never reported
+  before are not listed when they are at 0);
 - more than 1000 lines or a VAT id that does not fit the pattern is an export error (422 listing the rows), never a
   silently shortened file.
 A second, readable CSV (`;`, decimal comma, BOM). PDF: header,
