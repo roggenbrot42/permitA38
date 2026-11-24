@@ -207,6 +207,38 @@ class CreditNoteSummary(BaseModel):
     gross: v.Money = 0
 
 
+class IssuedRate(BaseModel):
+    """One rate group of the issued snapshot (cent values are decimal strings in responses)."""
+
+    model_config = ConfigDict(extra="allow")
+    net: v.Money = 0
+    vat: v.Money = 0
+    gross: v.Money = 0
+
+
+class IssuedCustomer(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    name: str | None = None
+    vat_id: str | None = None
+    country: str | None = None
+
+
+class IssuedSnapshot(BaseModel):
+    """The snapshot taken when an invoice is issued (accounting spec 9.1). Stored in integer cents and epoch seconds;
+    responses show decimal strings and an ISO 8601 ``issued_at``. Never changed by a client."""
+
+    model_config = ConfigDict(extra="allow")
+    regime: str | None = None
+    treatment: str | None = None
+    rates: dict[str, IssuedRate] | None = None  # key = the rate in percent
+    gross: v.Money | None = None
+    perf: str | None = None
+    customer: IssuedCustomer | None = None
+    issued_at: str | None = None
+    rules_version: str | None = None
+
+
 class Document(Record):
     """An offer or an invoice."""
 
@@ -243,7 +275,7 @@ class Document(Record):
     credit_kind: str | None = None
     corrects_id: str | None = None
     tax_treatment: str | None = None  # null reads as `standard`
-    issued: dict[str, Any] | None = None  # the snapshot taken when the invoice is issued
+    issued: IssuedSnapshot | None = None  # the snapshot taken when the invoice is issued
     paid_amount: v.Money | None = None
     credited_amount: v.Money | None = None
     open_amount: v.Money | None = None  # gross - credited - paid; negative = customer credit

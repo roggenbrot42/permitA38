@@ -50,7 +50,7 @@ def put(c, inv, **changes):
 
 def test_whole_record_put_of_an_unchanged_issued_invoice_passes(boss_client, cust):
     inv = issue(boss_client, cust)
-    assert inv["status"] == "sent" and inv["issued"]["gross"] == 119000
+    assert inv["status"] == "sent" and inv["issued"]["gross"] == "1190.00"
     r = put(boss_client, inv)
     assert r.status_code == 200, r.text
     after = r.json()
@@ -339,7 +339,7 @@ def test_legacy_paid_back_to_sent_materialises_and_reverses(boss_client, cust, s
     assert r.status_code == 200, r.text
     out = r.json()
     assert out["status"] == "sent" and out["paid_amount"] == "0.00" and out["open_amount"] == "1190.00"
-    assert "paid_date" not in out
+    assert out["paid_date"] is None
     rows = sorted(store.find("payments", document_id=inv["id"]), key=lambda r: r["amount_cents"])
     assert [(r["kind"], r["amount_cents"]) for r in rows] == [("reversal", -119000), ("payment", 119000)]
     assert rows[0]["reverses_id"] == rows[1]["id"] and rows[1]["note"] == "migrated"
@@ -419,3 +419,47 @@ def test_draft_preview_respects_the_small_business_year_of_its_date(store, cust,
     assert seen[0]["tax_treatment"] == "small_business"
     assert calc.doc_totals(dict(seen[0]), st)["gross"] == 1000.0
     assert "tax_treatment" not in store.get("invoices", draft["id"])  # a preview never stores it
+
+
+def test_issued_snapshot_is_shown_as_decimal_strings_and_iso_datetime(boss_client, cust, store):
+    inv = issue(boss_client, cust)
+    snap = inv["issued"]
+    assert snap["gross"] == "1190.00" and snap["rates"]["19"] == {"net": "1000.00", "vat": "190.00", "gross": "1190.00"}
+    assert snap["issued_at"].endswith("Z") and snap["issued_at"][:2] == "20" and "T" in snap["issued_at"]
+    listed = next(r for r in boss_client.get("/api/invoices").json() if r["id"] == inv["id"])
+    assert listed["issued"] == snap
+    stored = store.get("invoices", inv["id"])["issued"]
+    assert stored["gross"] == 119000 and isinstance(stored["issued_at"], int)  # the row keeps cents and epoch seconds
+
+
+def test_finalize_response_shows_the_snapshot_as_decimal_strings(boss_client, cust):
+    inv = make_invoice(boss_client, cust)
+    out = boss_client.post(f"/api/invoices/{inv['id']}/finalize").json()
+    assert out["issued"]["gross"] == "1190.00" and out["issued"]["issued_at"].endswith("Z")
+
+
+def test_a_put_carrying_an_issued_object_cannot_change_the_stored_snapshot(boss_client, cust, store):
+    inv = issue(boss_client, cust)
+    before = store.get("invoices", inv["id"])["issued"]
+    r = put(boss_client, inv, issued={"gross": "1.00", "rates": {}, "issued_at": "2020-01-01T00:00:00Z", "x": 1})
+    assert r.status_code == 200, r.text
+    assert store.get("invoices", inv["id"])["issued"] == before
+    assert r.json()["issued"]["gross"] == "1190.00"
+    r = boss_client.put(f"/api/invoices/{inv['id']}", json={"issued": None, "notes": "n"})
+    assert r.status_code == 200 and store.get("invoices", inv["id"])["issued"] == before
+
+
+def test_a_draft_cannot_get_another_status_through_put(boss_client, cust):
+    inv = make_invoice(boss_client, cust)
+    r = put(boss_client, inv, status="sent")
+    assert r.status_code == 409 and "finalize the draft instead" in r.json()["detail"]
+    assert boss_client.get(f"/api/invoices/{inv['id']}").json()["status"] == "draft"
+
+
+def test_an_unknown_extra_field_of_an_issued_invoice_can_be_cleared_with_null(boss_client, cust, store):
+    inv = issue(boss_client, cust)
+    assert put(boss_client, inv, my_flag="x").status_code == 200
+    assert store.get("invoices", inv["id"])["my_flag"] == "x"
+    r = boss_client.put(f"/api/invoices/{inv['id']}", json={"my_flag": None})
+    assert r.status_code == 200, r.text
+    assert "my_flag" not in store.get("invoices", inv["id"])

@@ -206,14 +206,21 @@ class SalesService:
         return {**out, **d.fields}
 
     @staticmethod
+    def _presented(inv: dict) -> dict:
+        """A copy whose ``issued`` snapshot is shown the API way (decimal strings, ISO datetime); the row is unchanged."""
+        if isinstance(inv.get("issued"), Mapping):
+            return {**inv, "issued": invoice_state.present_snapshot(inv["issued"])}
+        return inv
+
+    @staticmethod
     def _shows_derived(inv: Mapping[str, Any]) -> bool:
         return inv.get("status", "draft") != "draft" and inv.get("kind") != "credit_note"
 
     def invoice_view(self, inv: dict) -> dict:
         """The invoice as a response shows it: an issued invoice carries the derived payment fields."""
         if not self._shows_derived(inv):
-            return inv
-        return self._with_fields(inv, self._derived(inv, self.settings()))
+            return self._presented(inv)
+        return self._presented(self._with_fields(inv, self._derived(inv, self.settings())))
 
     def invoice_views(self, rows: Iterable[dict]) -> list[dict]:
         """:meth:`invoice_view` for many invoices; payments and credit notes are loaded once."""
@@ -224,10 +231,10 @@ class SalesService:
         out = []
         for inv in rows:
             if not self._shows_derived(inv):
-                out.append(inv)
+                out.append(self._presented(inv))
                 continue
             d = invoice_state.derive(inv, gross_cents_of(inv, st), pays.get(inv["id"], []), notes.get(inv["id"], []))
-            out.append(self._with_fields(inv, d))
+            out.append(self._presented(self._with_fields(inv, d)))
         return out
 
     def get_invoice(self, me: dict, rid: str) -> dict:
@@ -260,6 +267,8 @@ class SalesService:
         """
         old = self.store.get("invoices", rid) if _valid_id(rid) else None
         if not old or old.get("status", "draft") == "draft":
+            if old and data.get("status", "draft") != "draft":
+                raise ServiceError(409, "A draft cannot get another status; finalize the draft instead")
             return self.records.update_stored(me, "invoices", rid, data)
         if rights.scope_for(me, "invoices", "write") != rights.Scope.ALL:
             raise ServiceError(403, "Forbidden")
@@ -283,8 +292,8 @@ class SalesService:
             elif key in known:
                 if not _same_frozen(key, value, old.get(key)):
                     raise ServiceError(409, FROZEN_MESSAGE)
-            elif value is not None:
-                changes[key] = value  # an unknown extra field round-trips
+            else:
+                changes[key] = value  # an unknown extra field round-trips; null clears it
         action = self._status_action(old, d0, data.get("status") if "status" in sent else None, data, sent)
         if action in ("pay", "reverse"):
             old = materialize_legacy_payment(self.store, old, st, me)

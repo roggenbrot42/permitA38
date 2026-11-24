@@ -33,8 +33,9 @@ def test_open_invoice():
     d = st.derive(inv(), 119000, [], [])
     assert d.fields == {
         "paid_amount": "0.00", "credited_amount": "0.00", "open_amount": "1190.00",
-        "payments": [], "credit_notes": [], "status": "sent",
+        "payments": [], "credit_notes": [], "status": "sent", "paid_date": None,
     }  # fmt: skip
+    assert "paid_date" in d.fields  # the key is always present
     assert d.paid_date is None and d.virtual is None and d.flags == ()
 
 
@@ -55,7 +56,7 @@ def test_p2_two_payments_and_reversal():
     assert (d.status, d.paid_date, d.fields["open_amount"], d.fields["paid_amount"]) == (
         "sent", None, "725.00", "1000.00"
     )  # fmt: skip
-    assert "paid_date" not in d.fields
+    assert d.fields["paid_date"] is None
     assert [p["amount"] for p in d.fields["payments"]] == ["1000.00", "725.00", "-725.00"]
 
 
@@ -154,7 +155,7 @@ def test_get_and_list_carry_the_derived_fields_as_decimal_strings(boss_client, c
     record_payment_row(store, a["id"], date="2026-02-03", amount_cents=100000)
     got = boss_client.get(f"/api/invoices/{a['id']}").json()
     assert (got["paid_amount"], got["credited_amount"], got["open_amount"]) == ("1000.00", "0.00", "190.00")
-    assert got["payments"][0]["amount"] == "1000.00" and got["status"] == "sent" and "paid_date" not in got
+    assert got["payments"][0]["amount"] == "1000.00" and got["status"] == "sent" and got["paid_date"] is None
     rows = {r["id"]: r for r in boss_client.get("/api/invoices").json()}
     assert rows[a["id"]]["open_amount"] == "190.00" and rows[b["id"]]["open_amount"] == "1190.00"
     assert "open_amount" not in rows[draft["id"]] and rows[draft["id"]]["status"] == "draft"
@@ -217,3 +218,48 @@ def test_response_only_derived_fields_sent_back_are_ignored(boss_client, cust, b
     r = boss_client.put(f"/api/invoices/{a['id']}", json={"paid_amount": "5.00", "open_amount": "1.00", "notes": bad})
     assert r.status_code == 200
     assert r.json()["open_amount"] == "1190.00" and r.json()["paid_amount"] == "0.00"
+
+
+def test_paid_date_ignores_a_reversal_dated_after_the_last_payment_on_an_overpaid_invoice():
+    rows = [pay(119000, "2026-02-03"), pay(5000, "2026-02-05")]
+    rows.append(pay(-5000, "2026-02-09", kind="reversal", reverses_id="p05"))
+    d = st.derive(inv(), 119000, rows, [])
+    assert (d.status, d.paid_date, d.fields["paid_date"], d.fields["open_amount"]) == (
+        "paid",
+        "2026-02-03",
+        "2026-02-03",
+        "0.00",
+    )
+
+
+def test_paid_date_skips_a_reversed_payment_and_a_refund():
+    rows = [
+        pay(119000, "2026-02-03"),
+        pay(119000, "2026-02-05"),
+        pay(-119000, "2026-02-06", kind="reversal", reverses_id="p05"),
+    ]
+    rows.append(pay(-1000, "2026-02-07", kind="refund"))
+    d = st.derive(inv(), 118000, rows, [])
+    assert d.fields["open_amount"] == "0.00" and d.paid_date == "2026-02-03"
+
+
+def test_payments_are_listed_by_date_then_created_at_then_id():
+    rows = [
+        {**pay(100, "2026-02-05"), "id": "b", "created_at": 2},
+        {**pay(200, "2026-02-05"), "id": "z", "created_at": 1},
+        {**pay(300, "2026-02-05"), "id": "a", "created_at": 2},
+        {**pay(400, "2026-02-01"), "id": "q", "created_at": 9},
+    ]
+    d = st.derive(inv(), 100000, rows, [])
+    assert [p["id"] for p in d.fields["payments"]] == ["q", "z", "a", "b"]
+
+
+def test_present_snapshot_shows_decimal_strings_and_iso_datetime_without_touching_the_stored_one():
+    stored = {
+        "gross": 119000, "issued_at": 1795517780, "perf": "2026-02-01", "rules_version": None,
+        "rates": {"19": {"net": 100000, "vat": 19000, "gross": 119000}},
+    }  # fmt: skip
+    out = st.present_snapshot(stored)
+    assert out["gross"] == "1190.00" and out["rates"]["19"] == {"net": "1000.00", "vat": "190.00", "gross": "1190.00"}
+    assert out["issued_at"] == "2026-11-24T10:56:20Z" and out["perf"] == "2026-02-01"
+    assert stored["gross"] == 119000 and stored["issued_at"] == 1795517780

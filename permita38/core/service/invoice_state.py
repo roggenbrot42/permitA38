@@ -12,7 +12,7 @@ tell the caller about the two suspicious cases (they go to the review list at th
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 __all__ = [
@@ -26,6 +26,7 @@ __all__ = [
     "derive",
     "group_by",
     "legacy_payment_date",
+    "present_snapshot",
 ]
 
 LEGACY_NOTE = "migrated"
@@ -53,6 +54,28 @@ def cents_str(cents: int) -> str:
     sign = "-" if cents < 0 else ""
     whole, frac = divmod(abs(int(cents)), 100)
     return f"{sign}{whole}.{frac:02d}"
+
+
+_SNAPSHOT_CENTS = frozenset({"gross", "net", "vat", "base", "tax"})
+
+
+def present_snapshot(issued: Any) -> Any:
+    """The ``issued`` snapshot as the API shows it (decimal-money-api.md): every cent value (``gross``, ``net``,
+    ``vat``, ``base``, ``tax``, also inside ``rates``) a decimal string, ``issued_at`` an ISO 8601 UTC datetime. A copy;
+    the stored snapshot (integer cents, epoch seconds) is unchanged. Anything that is not a mapping is returned as is."""
+    if not isinstance(issued, Mapping):
+        return issued
+    out: dict[str, Any] = {}
+    for key, value in issued.items():
+        if key in _SNAPSHOT_CENTS and isinstance(value, int) and not isinstance(value, bool):
+            out[key] = cents_str(value)
+        elif key == "issued_at" and isinstance(value, int | float) and not isinstance(value, bool):
+            out[key] = datetime.fromtimestamp(value, UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        elif key == "rates" and isinstance(value, Mapping):
+            out[key] = {rate: present_snapshot(group) for rate, group in value.items()}
+        else:
+            out[key] = value
+    return out
 
 
 def _iso(value: Any) -> str | None:
@@ -103,7 +126,10 @@ def derive(
     credit_notes: Iterable[Mapping[str, Any]],
 ) -> Derived:
     """The derived fields of one issued invoice (see the module docstring)."""
-    rows = sorted(payments, key=lambda r: (str(r.get("date") or ""), int(r.get("created_at") or 0)))
+    rows = sorted(
+        payments,
+        key=lambda r: (str(r.get("date") or ""), int(r.get("created_at") or 0), str(r.get("id") or "")),
+    )
     notes = sorted(credit_notes, key=lambda r: (str(r.get("date") or ""), str(r.get("number") or "")))
     stored_status = str(doc.get("status") or "sent")
 
@@ -133,7 +159,19 @@ def derive(
     storno = any(n.get("credit_kind") == "storno" for n in notes)
     paid_date: str | None = None
     if open_cents <= 0 and paid > 0:
-        paid_date = max((str(p["date"]) for p in cash if p.get("date")), default=None)
+        # the latest payment row that is not reversed (a refund or a reversal never sets it)
+        reversed_ids = {str(r["reverses_id"]) for r in rows if r.get("reverses_id")}
+        if virtual is not None:
+            paid_date = str(virtual["date"]) or None
+        else:
+            paid_date = max(
+                (
+                    str(r["date"])
+                    for r in rows
+                    if r.get("kind", "payment") == "payment" and r.get("date") and str(r.get("id")) not in reversed_ids
+                ),
+                default=None,
+            )
 
     if storno and credited >= gross_cents:
         status = "cancelled"
@@ -161,8 +199,7 @@ def derive(
         ],
         "status": status,
     }
-    if paid_date:
-        fields["paid_date"] = paid_date
+    fields["paid_date"] = paid_date  # the key is always present
     return Derived(fields, status, gross_cents, paid, credited, open_cents, paid_date, virtual, tuple(flags))
 
 
