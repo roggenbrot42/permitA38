@@ -278,6 +278,8 @@ def event_entry(before: InvoiceState | None, after: InvoiceState, bases: Bases, 
         has_tax = tgt.tax_kind is not None
         if d_amount == 0 and (d_base == 0 or not has_tax):
             continue
+        # a zero VAT delta that still moves the base is a statistical line, never a 0 tax line (spec 9.1)
+        tax_kind = "base_only" if d_amount == 0 else tgt.tax_kind
         role = tgt.role
         if role == "bank" and isinstance(event, PaymentEvent):
             role = event.cash_role
@@ -286,7 +288,7 @@ def event_entry(before: InvoiceState | None, after: InvoiceState, bases: Bases, 
                 role,
                 Cents(d_amount),
                 tax_key=tgt.tax_key,
-                tax_kind=tgt.tax_kind,
+                tax_kind=tax_kind,
                 tax_rate=tgt.tax_rate,
                 tax_base_cents=Cents(d_base) if has_tax else None,
                 vat_date=(snap.perf if is_issue and tgt.perf_at_issue else event.date) if has_tax else None,

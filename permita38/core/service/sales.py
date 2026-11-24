@@ -1,23 +1,33 @@
 """Offers and invoices: numbering, finalizing, conversion, billing tracked time, PDF."""
 
+from collections.abc import Mapping
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
 
 from permita38.core import calc, documents
 from permita38.core.errors import ServiceError
 from permita38.core.money import ZERO, dec, hours_from_minutes, to_float
 from permita38.core.repository import Repository
-from permita38.core.settings import effective_settings
+from permita38.core.settings import accounting_start, effective_settings
 
 from .numbering import NumberingService
 from .planner.service import PlannerService
+from .postings import IssuePostingService, build_snapshot
 from .project_customer import check_billable_project, check_project_customer, project_kind
 from .records import RecordService
 
 
 class SalesService:
-    def __init__(self, store: Repository, records: RecordService, numbering: NumberingService | None = None):
+    def __init__(
+        self,
+        store: Repository,
+        records: RecordService,
+        numbering: NumberingService | None = None,
+        postings: IssuePostingService | None = None,
+    ):
         self.store = store
+        self.postings = postings or IssuePostingService(store)
         self.records = records
         self.numbering = numbering or NumberingService(store)
 
@@ -33,7 +43,7 @@ class SalesService:
             raise ServiceError(404, "Not found")
         return doc
 
-    def finalize(self, coll: str, rid: str) -> dict:
+    def finalize(self, coll: str, rid: str, user: Mapping[str, Any] | None = None) -> dict:
         # the number is taken in the same transaction that saves the document: a failed finalize gives it back
         with self.store.transaction():
             doc = self._get(coll, rid)
@@ -43,6 +53,8 @@ class SalesService:
             if not doc.get("lines"):
                 raise ServiceError(400, "Add at least one line")
             base = calc.d(doc.get("date")) or date.today()
+            if not doc.get("date"):
+                doc["date"] = base.isoformat()  # the date it posts with is stored with it
             if not doc.get("number"):
                 doc["number"] = self.numbering.allocate(coll, base)
             if doc.get("status", "draft") == "draft":
@@ -51,6 +63,16 @@ class SalesService:
                 doc["due_date"] = (base + timedelta(days=int(st["payment_days"]))).isoformat()
             if coll == "offers" and not doc.get("valid_until"):
                 doc["valid_until"] = (base + timedelta(days=int(st["offer_valid_days"]))).isoformat()
+            if coll == "invoices":
+                start = accounting_start(self.store.settings())
+                if start is not None and base >= start and not doc.get("credit_kind"):
+                    # year N+1 opens (copied from N) before the snapshot reads its bases
+                    self.postings.journal.ensure_year(base.year, str((user or {}).get("id") or "system"))
+                if not doc.get("issued"):  # written once, in the transaction of the number, never changed
+                    doc["issued"] = build_snapshot(self.store, {**doc, "date": base.isoformat()}, st, base)
+                doc = self.store.save(coll, doc)
+                self.postings.post_issue({**doc, "date": base.isoformat()}, user)
+                return doc
             return self.store.save(coll, doc)
 
     def pdf(self, coll: str, rid: str) -> tuple[bytes, str]:
