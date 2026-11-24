@@ -137,11 +137,14 @@ Monthly filers with Dauerfrist only. Amount for year Y (§ 47 UStDV) *(verify al
 ```text
 base   = Σ Kz 83 of the returns of Y−1 (as filed, amended returns replace the originals) + Kz 39 of Y−1
          (a partial previous year is annualised: base × 12 / number of months with a business; a business starting
-         in Y: the user enters the estimate)
+         in Y: the user enters the estimate; "months with a business" = the months of Y−1 from the first month that has a
+         journal line or a return record (draft or final) up to December, at most 12 — never the count of final returns)
 amount = max(base, 0) / 11, rounded per rules data (default: to cents)
 ```
 
-The app proposes it from the stored returns (or lets the user enter it), shows a reminder for 10 February (shifted),
+Quarterly filers pay none and get no Kz 39. The app proposes it from the stored returns (or lets the user enter it;
+only for a monthly year with Dauerfrist, otherwise 422; once a payment is booked the amount changes only after that
+payment is reversed, 409), shows a reminder for 10 February (shifted),
 records its payment (accounting 9.6) and credits it as **Kz 39** in the December return (or the last period of the
 year, or the last period before the business ends). When `dauerfrist` is revoked during the year, the credit falls
 into the last period with the extension *(verify)*.
