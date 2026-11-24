@@ -131,7 +131,10 @@ Antwort:
 **TA-45 GoBD.** Das Journal ist unveränderlich (nur Gegenbuchungen, Hash-Kette). Mit dem Abschluss einer
 Voranmeldung werden deren Monate festgeschrieben; Belege, die danach kommen, landen im nächsten offenen Monat. Genügt
 das als Festschreibung? Reicht der gespeicherte Stand der Voranmeldung mit den zugehörigen Buchungen als
-Dokumentation?
+Dokumentation? Ausnahme: Solange das Wirtschaftsjahr nicht abgeschlossen ist, buchen wir verspätete Belege dieses
+Jahres und Abschlussbuchungen (Abschreibung, Rückstellungen, Abgrenzungen) mit Buchungsdatum 31.12. in das alte Jahr,
+auch wenn der Dezember durch die Dezember-/Q4-Voranmeldung schon festgeschrieben ist; die Vorsteuer daraus wird im
+ersten offenen Monat des neuen Jahres abgezogen. Ist das so in Ordnung?
 Antwort:
 
 ---

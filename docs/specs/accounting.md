@@ -148,7 +148,12 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
 5. **Gapless numbers.** `entry_no` is gapless per fiscal year, allocated through `number_sequences` (doc type
    `journal`) in the same transaction as the entry.
 6. **Hash chain.** `hash = sha256(prev_hash || canonical_json(entry without hash, lines ordered by line_no))`, with
-   `prev_hash` of the first entry of a year = the last hash of the previous year (or 64 zeros). Canonical JSON: sorted
+   one chain **per fiscal year**: `prev_hash` of a year's first entry = 64 zeros (`fiscal_year` is part of the hashed
+   JSON). A cross-year link cannot work, because the previous year stays open and keeps receiving entries after the
+   new year has started. Instead the year closing (section 13) stores the year's last `hash` and `entry_no` in
+   `fiscal_years.closing_hash` / `closing_entry_no` (set once; added by the E18 migration); verification checks each
+   year's chain and, for a closed year, that the recomputed last hash and the entry count equal those columns (this
+   also detects a truncated closed year after a restore). Canonical JSON: sorted
    keys, no spaces, integers as integers, dates as `YYYY-MM-DD`, decimals as strings. `permita38 check-db` and the
    integrity service verify the chain; a break is an `error` finding ("journal changed outside the app or forked by a
    synced folder").
@@ -156,7 +161,11 @@ Line fields for VAT: `tax_key`, `tax_kind` (`tax` / `input` / `base_only`), `tax
    `core/money.py` (`dec`, `q2`); responses carry money as **decimal strings** (section 7a).
 8. **Dates and the lock.** Every entry has a `document_date` (the date of the payment, bill, invoice, credit note)
    and a `booking_date = max(document_date, first day of the first unlocked month)`: late documents are booked into
-   the first open month, never refused for being late (section 11). `vat_date` and `income_date` follow the rules of
+   the first open month, never refused for being late (section 11). **Closing date exception:** when that date
+   would fall into a later fiscal year while the document's own fiscal year is not closed, the booking date is
+   31 December of the document's year instead (a "closing date" entry, like DATEV's period 13), so late bills and
+   year-end entries stay in their year after the December/Q4 return has locked December. The entry's
+   `fiscal_year` is the year of its booking date. `vat_date` and `income_date` follow the rules of
    section 9 and may lie in a locked month only in the **allowed drift cases** of section 11; such lines create drift
    on the return of that period ([`ustva.md`](ustva.md)) and a warning on the entry.
 9. **Synced folders.** When accounting is on and the data folder looks synced (the existing sync detection, or a
@@ -432,7 +441,8 @@ postings start only after initialisation (section 16).
   the accounting start) to be locked. No unlock (GoBD *Festschreibung*).
 * Triggers: finalising a VAT return locks its months ([`ustva.md`](ustva.md)); manual "lock up to" (boss,
   accountant); the year closing locks December.
-* Effect: no entry has a booking date in a locked month. A late document is **not refused**: its entry is booked on
+* Effect: no entry has a booking date in a locked month, except the closing date 31 December of a fiscal year that
+  is not closed (section 7.8; manual year-end entries such as depreciation, accruals and provisions use it too). A late document is **not refused**: its entry is booked on
   the first day of the first unlocked month (section 7.8), so bills, payments and `paid_on` dates of a filed month can
   still be entered. Reversing an entry whose booking date is in a locked month is refused (409); corrections are new
   entries. Invoices and credit notes are issued with a date in an open month (a back-dated issue into a locked month
@@ -443,7 +453,10 @@ postings start only after initialisation (section 16).
      (Ist always; Soll when cash above the current gross is refunded or a write-off is reversed);
   3. a § 13b tax date (EU service period, third-country date) in a locked month;
   4. an `eu_b2b_service` performance date in a locked month (Kz 21, ZM).
-  Input VAT (`VST`) never drifts: its `vat_date` moves to the booking date (a later deduction is allowed). Credit
+  Input VAT (`VST`) never drifts: its `vat_date` = max(its date, first day of the first unlocked month) — the booking
+  date within the year, the first open month of the next year for a closing-date entry (a later deduction is
+  allowed). The same applies to every other non-drift VAT line of a closing-date entry; a manual closing-date entry
+  with a `vat_date` in a locked month is refused (422). Credit
   notes and write-offs are dated in an open month and never drift — except the write-off reversal record, which is
   dated the payment date (drift case 2). Drift lines are listed on the return of their
   period and call for an amended return ([`ustva.md`](ustva.md)); ZM drift likewise ([`zm.md`](zm.md)).
@@ -457,7 +470,8 @@ template); open receivables come from the backfill (section 16).
 
 ## 13. Year closing (accrual) and year end (EÜR)
 
-* Accrual: "close year" needs all 12 months locked except December (closing locks it). It posts the provisions the
+* Accrual: "close year" needs all 12 months locked except December (closing locks it) — December may already be
+  locked by the December/Q4 return; closing-date entries (section 7.8) are allowed until the year is closed. It posts the provisions the
   user confirms (9.7), transfers the balances of the VAT accounts (`vat_out_*`, `input_vat_*`, `rc_*`,
   `vat_prepayments`, `vat_special_prepayment`) to `vat_previous_year` (settled by the annual return and its payment,
   a manual template), then the closing entry (balance accounts to `closing_balance`, P&L to `profit_carryforward` /
@@ -778,7 +792,7 @@ maintainer's sign-off of these specs (PR #124).
 | E15 | Trip posting | F | E7, F9 |
 | E16 | Manual entries, reverse, accounts API, templates | F | E7 |
 | E17 | VAT/tax bookings, opening balances | F | E16, F9 |
-| E18 | Year closing / EÜR year end | F | E17 |
+| E18 | Year closing / EÜR year end; migration adding `fiscal_years.closing_hash` / `closing_entry_no` (set once) | F | E17 |
 | E19 | xlsx importer: snapshot, `paid`→payment, `cancelled`→review, undo | F | E10 |
 | E20 | Stateful randomized model ×2 (freeze/payments; credit notes/locks) | F (test) | E12 |
 | E21 | Web `e2e_random` models | S | E12, W1 |
