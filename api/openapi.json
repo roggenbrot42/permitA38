@@ -9562,7 +9562,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/JournalEntry"
+                  },
+                  "title": "Response List Journal Api Accounting Journal Get"
+                }
               }
             }
           },
@@ -9755,7 +9761,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccountOut"
+                  },
+                  "title": "Response List Accounts Api Accounting Accounts Get"
+                }
               }
             }
           },
@@ -9839,23 +9851,6 @@
               ],
               "title": "To"
             }
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Account"
-            }
           }
         ],
         "responses": {
@@ -9863,7 +9858,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TrialBalanceOut"
+                }
               }
             }
           },
@@ -9913,57 +9910,6 @@
               ],
               "title": "Year"
             }
-          },
-          {
-            "name": "from",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "From"
-            }
-          },
-          {
-            "name": "to",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "To"
-            }
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Account"
-            }
           }
         ],
         "responses": {
@@ -9971,7 +9917,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/EurOut"
+                }
               }
             }
           },
@@ -10021,57 +9969,6 @@
               ],
               "title": "Year"
             }
-          },
-          {
-            "name": "from",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "From"
-            }
-          },
-          {
-            "name": "to",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "To"
-            }
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Account"
-            }
           }
         ],
         "responses": {
@@ -10079,7 +9976,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/PnlOut"
+                }
               }
             }
           },
@@ -10102,6 +10001,7 @@
           "accounting"
         ],
         "summary": "Report Balance Sheet",
+        "description": "Cumulated up to ``to`` (default: 31 December of the year).",
         "operationId": "report_balance_sheet_api_accounting_reports_balance_sheet_get",
         "security": [
           {
@@ -10131,23 +10031,6 @@
             }
           },
           {
-            "name": "from",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "From"
-            }
-          },
-          {
             "name": "to",
             "in": "query",
             "required": false,
@@ -10163,23 +10046,6 @@
               ],
               "title": "To"
             }
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Account"
-            }
           }
         ],
         "responses": {
@@ -10187,7 +10053,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BalanceSheetOut"
+                }
               }
             }
           },
@@ -10210,6 +10078,7 @@
           "accounting"
         ],
         "summary": "Report Open Items",
+        "description": "Open receivables and payables up to ``to`` (default: 31 December of the year).",
         "operationId": "report_open_items_api_accounting_reports_open_items_get",
         "security": [
           {
@@ -10239,23 +10108,6 @@
             }
           },
           {
-            "name": "from",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "From"
-            }
-          },
-          {
             "name": "to",
             "in": "query",
             "required": false,
@@ -10271,23 +10123,6 @@
               ],
               "title": "To"
             }
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "maxLength": 10
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Account"
-            }
           }
         ],
         "responses": {
@@ -10295,7 +10130,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OpenItemsOut"
+                }
               }
             }
           },
@@ -10318,6 +10155,7 @@
           "accounting"
         ],
         "summary": "Report Ledger",
+        "description": "The postings of one account (``account`` or ``role`` is required) with a running balance.",
         "operationId": "report_ledger_api_accounting_reports_ledger_get",
         "security": [
           {
@@ -10396,6 +10234,23 @@
               ],
               "title": "Account"
             }
+          },
+          {
+            "name": "role",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 60
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Role"
+            }
           }
         ],
         "responses": {
@@ -10403,7 +10258,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/LedgerOut"
+                }
               }
             }
           },
@@ -12550,6 +12407,73 @@
         "type": "object",
         "title": "AcceptIn"
       },
+      "AccountOut": {
+        "properties": {
+          "account": {
+            "type": "string",
+            "title": "Account"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "account_class": {
+            "type": "string",
+            "title": "Account Class"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "eur_line": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eur Line"
+          },
+          "deductible": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deductible"
+          },
+          "automatic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Automatic"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account",
+          "name",
+          "account_class"
+        ],
+        "title": "AccountOut"
+      },
       "AccountingInitIn": {
         "properties": {
           "chart": {
@@ -13531,6 +13455,100 @@
           "version"
         ],
         "title": "AuthStatus"
+      },
+      "BalanceRowOut": {
+        "properties": {
+          "account": {
+            "type": "string",
+            "title": "Account"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "balance": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Balance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account",
+          "name",
+          "balance"
+        ],
+        "title": "BalanceRowOut"
+      },
+      "BalanceSheetOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "as_of": {
+            "type": "string",
+            "title": "As Of"
+          },
+          "debit_side": {
+            "items": {
+              "$ref": "#/components/schemas/BalanceRowOut"
+            },
+            "type": "array",
+            "title": "Debit Side"
+          },
+          "credit_side": {
+            "items": {
+              "$ref": "#/components/schemas/BalanceRowOut"
+            },
+            "type": "array",
+            "title": "Credit Side"
+          },
+          "debit_total": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Debit Total"
+          },
+          "credit_total": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Credit Total"
+          },
+          "result": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Result"
+          },
+          "earlier_years_result": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Earlier Years Result"
+          },
+          "difference": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Difference"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "as_of",
+          "debit_side",
+          "credit_side",
+          "debit_total",
+          "credit_total",
+          "result",
+          "earlier_years_result",
+          "difference"
+        ],
+        "title": "BalanceSheetOut"
       },
       "Body_add_part_api_receipts__scan_id__parts_post": {
         "properties": {
@@ -17600,6 +17618,104 @@
         ],
         "title": "EntryTemplate"
       },
+      "EurLineOut": {
+        "properties": {
+          "line": {
+            "type": "string",
+            "title": "Line"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "line",
+          "amount"
+        ],
+        "title": "EurLineOut"
+      },
+      "EurOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/EurLineOut"
+            },
+            "type": "array",
+            "title": "Lines"
+          },
+          "vat_received": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Vat Received"
+          },
+          "vat_refunded": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Vat Refunded"
+          },
+          "input_vat_paid": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Input Vat Paid"
+          },
+          "vat_paid": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Vat Paid"
+          },
+          "total_income": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Total Income"
+          },
+          "total_expense": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Total Expense"
+          },
+          "profit": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Profit"
+          },
+          "non_deductible": {
+            "items": {
+              "$ref": "#/components/schemas/EurLineOut"
+            },
+            "type": "array",
+            "title": "Non Deductible"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "lines",
+          "vat_received",
+          "vat_refunded",
+          "input_vat_paid",
+          "vat_paid",
+          "total_income",
+          "total_expense",
+          "profit",
+          "non_deductible"
+        ],
+        "title": "EurOut"
+      },
       "Expense": {
         "properties": {
           "id": {
@@ -20334,6 +20450,105 @@
         "title": "JournalLine",
         "description": "One debit (positive) or credit (negative) of an entry. ``amount_cents`` / ``tax_base_cents`` are accepted from\nstorage and answered as decimal strings ``amount`` / ``tax_base``."
       },
+      "LedgerOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "account": {
+            "type": "string",
+            "title": "Account"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "date_from": {
+            "type": "string",
+            "title": "Date From"
+          },
+          "date_to": {
+            "type": "string",
+            "title": "Date To"
+          },
+          "opening": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Opening"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/LedgerRowOut"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "closing": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Closing"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "account",
+          "name",
+          "date_from",
+          "date_to",
+          "opening",
+          "rows",
+          "closing"
+        ],
+        "title": "LedgerOut"
+      },
+      "LedgerRowOut": {
+        "properties": {
+          "booking_date": {
+            "type": "string",
+            "title": "Booking Date"
+          },
+          "entry_no": {
+            "type": "integer",
+            "title": "Entry No"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "debit": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Debit"
+          },
+          "credit": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Credit"
+          },
+          "balance": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Balance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "booking_date",
+          "entry_no",
+          "role",
+          "debit",
+          "credit",
+          "balance"
+        ],
+        "title": "LedgerRowOut"
+      },
       "Line": {
         "properties": {
           "description": {
@@ -20879,6 +21094,130 @@
           "version"
         ],
         "title": "OcrInstalled"
+      },
+      "OpenItemOut": {
+        "properties": {
+          "open_item_id": {
+            "type": "string",
+            "title": "Open Item Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "account": {
+            "type": "string",
+            "title": "Account"
+          },
+          "source_coll": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Coll"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "source_number": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Number"
+          },
+          "counterparty_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Counterparty Id"
+          },
+          "open_amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Open Amount"
+          },
+          "since": {
+            "type": "string",
+            "title": "Since"
+          },
+          "age_days": {
+            "type": "integer",
+            "title": "Age Days"
+          }
+        },
+        "type": "object",
+        "required": [
+          "open_item_id",
+          "kind",
+          "account",
+          "open_amount",
+          "since",
+          "age_days"
+        ],
+        "title": "OpenItemOut"
+      },
+      "OpenItemsOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "as_of": {
+            "type": "string",
+            "title": "As Of"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OpenItemOut"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "receivables_total": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Receivables Total"
+          },
+          "payables_total": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Payables Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "as_of",
+          "items",
+          "receivables_total",
+          "payables_total"
+        ],
+        "title": "OpenItemsOut"
       },
       "OpeningBalanceIn": {
         "properties": {
@@ -21796,6 +22135,81 @@
         "additionalProperties": true,
         "type": "object",
         "title": "PlanIn"
+      },
+      "PnlOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "income": {
+            "items": {
+              "$ref": "#/components/schemas/PnlRowOut"
+            },
+            "type": "array",
+            "title": "Income"
+          },
+          "expenses": {
+            "items": {
+              "$ref": "#/components/schemas/PnlRowOut"
+            },
+            "type": "array",
+            "title": "Expenses"
+          },
+          "total_income": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Total Income"
+          },
+          "total_expense": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Total Expense"
+          },
+          "profit": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Profit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "income",
+          "expenses",
+          "total_income",
+          "total_expense",
+          "profit"
+        ],
+        "title": "PnlOut"
+      },
+      "PnlRowOut": {
+        "properties": {
+          "account": {
+            "type": "string",
+            "title": "Account"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account",
+          "name",
+          "amount"
+        ],
+        "title": "PnlRowOut"
       },
       "Project": {
         "properties": {
@@ -25979,6 +26393,102 @@
           "recovery_codes_left"
         ],
         "title": "TotpStatus"
+      },
+      "TrialBalanceOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "date_from": {
+            "type": "string",
+            "title": "Date From"
+          },
+          "date_to": {
+            "type": "string",
+            "title": "Date To"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/TrialRowOut"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "debit_total": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Debit Total"
+          },
+          "credit_total": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Credit Total"
+          },
+          "balance_total": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Balance Total"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "date_from",
+          "date_to",
+          "rows",
+          "debit_total",
+          "credit_total",
+          "balance_total",
+          "note"
+        ],
+        "title": "TrialBalanceOut"
+      },
+      "TrialRowOut": {
+        "properties": {
+          "account": {
+            "type": "string",
+            "title": "Account"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "debit": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Debit"
+          },
+          "credit": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Credit"
+          },
+          "balance": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Balance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account",
+          "name",
+          "debit",
+          "credit",
+          "balance"
+        ],
+        "title": "TrialRowOut"
       },
       "Trip": {
         "properties": {

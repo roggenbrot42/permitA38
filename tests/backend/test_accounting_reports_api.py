@@ -288,21 +288,21 @@ def _year(client, year, basis):
 
 def test_pnl_filters_by_income_year(app, scenario):
     _year(scenario, 2027, "accrual")
-    # a cost booked on 30 Dec 2026 whose income_date lies in 2027: not in the P&L of 2026, in the one of 2027
+    # an accrual line keeps its entry's fiscal year (accounting 14.5): a cost booked on 2 Jan 2027 is in the P&L of 2027 only
     lines = [
         PostLine(role="expense_other", amount_cents=1000, income_date=date(2027, 1, 2)),
         PostLine(role="payables", amount_cents=-1000, open_item_id="exp2"),
     ]
-    _post(app, "e9", date(2026, 12, 30), "Late", "expense", "expenses", "exp2", None, lines)
+    _post(app, "e9", date(2027, 1, 2), "Late", "expense", "expenses", "exp2", None, lines)
     p26 = get(scenario, "reports/pnl", year=2026).json()
     assert [(x["account"], x["amount"]) for x in p26["expenses"]] == [("9035", "-30.00"), ("9039", "-20.00")]
     assert p26["profit"] == "50.00"
     p27 = get(scenario, "reports/pnl", year=2027).json()
     assert [(x["account"], x["amount"]) for x in p27["expenses"]] == [("9039", "-10.00")]
     assert (p27["income"], p27["profit"]) == ([], "-10.00")
-    # the balance sheet of 2026 cumulates by booking date: result 50.00 - 10.00, and it still balances
+    # the balance sheet of 2026 cumulates by booking date: the 2027 entry is not in it, and it still balances
     b = get(scenario, "reports/balance-sheet", year=2026).json()
-    assert (b["result"], b["earlier_years_result"], b["difference"]) == ("40.00", "0.00", "0.00")
+    assert (b["result"], b["earlier_years_result"], b["difference"]) == ("50.00", "0.00", "0.00")
 
 
 def test_balance_sheet_shows_the_results_of_earlier_years(app, scenario):

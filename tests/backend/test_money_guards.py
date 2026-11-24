@@ -47,17 +47,12 @@ SCHEMA_NUMERIC_ALLOWLIST = {
     "next": "audit pagination cursor",
     "status": "audit entry HTTP status code",
     "year": "calendar year of a record reference",
-    "fiscal_year": "calendar year of a journal entry",
-    "created_at": "journal entry epoch seconds",
-    "entry_no": "gapless journal entry number",
-    "line_no": "ordinal of a journal line within its entry",
     "age_days": "age of an open item in days",
     "loc": "validation error path element (index)",
     "quarter": "calendar quarter 1..4 (ZM)",
     "rows": "number of ZM list rows",
     "drift": "number of ZM entries with late lines",
     "entries": "number of ZM drift entries",
-    "entry_no": "journal entry number",
     "finalised_at": "finalising time, epoch seconds",
     # counts
     "count": "number of items",
@@ -67,6 +62,9 @@ SCHEMA_NUMERIC_ALLOWLIST = {
     "pv_children_under_25": "count of children",
     "steuerklasse": "tax class 1..6",
     "ocr_download_size": "bytes",
+    "datev_consultant_no": "DATEV consultant number (identifier)",
+    "datev_client_no": "DATEV client number (identifier)",
+    "datev_account_length": "DATEV account number length 4..8",
     # durations and quantities
     "minutes": "minutes of a time entry",
     "absence_hours": "trip absence hours",
@@ -110,6 +108,10 @@ SCHEMA_NUMERIC_ALLOWLIST = {
 # ambiguous names: a number only on the named schema (elsewhere the same name is money)
 SCHEMA_NUMERIC_PAIRS = {
     ("Line", "vat"): "VAT rate in percent of a line (elsewhere `vat` is an amount)",
+    ("VatBox", "flag"): "UStVA box flag 0/1",
+    ("VatReturn", "period_no"): "month or quarter number of a VAT return",
+    ("VatReturnListItem", "no"): "ordinal of a VAT return in its period",
+    ("VatReturnListItem", "lines"): "number of lines of a VAT return",
 }
 
 # response properties typed as an untyped dict / Any: (schema, property) -> why no money can hide in it
