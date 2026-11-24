@@ -493,6 +493,16 @@ IMPLEMENTED = {
     ("GET", "/api/vat-returns/{rid}/export.pdf"),
     ("GET", "/api/vat-returns/{rid}/export.csv"),
     ("GET", "/api/vat-returns/{rid}/export.json"),
+    ("GET", "/api/zm"),
+    ("GET", "/api/zm/preview"),
+    ("POST", "/api/zm"),
+    ("GET", "/api/zm/{rid}"),
+    ("POST", "/api/zm/{rid}/finalize"),
+    ("POST", "/api/zm/{rid}/reopen"),
+    ("POST", "/api/zm/{rid}/filed"),
+    ("DELETE", "/api/zm/{rid}"),
+    ("GET", "/api/zm/{rid}/export.csv"),
+    ("GET", "/api/zm/{rid}/export.pdf"),
 }
 
 
