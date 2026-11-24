@@ -102,7 +102,7 @@ date rules.
   description. `write_off`: the open amount, per rate group the complement `C_r − T_r` of the cumulative allocation
   (accounting 9.2), only when `open_amount` > 0. `discount` only through `settle-discount`.
 * The credited net per rate group may not exceed the invoice's remaining net of that group (422). `reason` is
-  required (1–500 chars).
+  required (1–500 chars). The credit-note `date` is not before the invoice date and not in the future (422).
 * Credit notes are **issued on creation**: number from the new sequence `credit_note` (settings
   `credit_note_pattern`, default `"RK-{year}-{n:04d}"`, `credit_note_reset`, numbering page shows it), snapshot,
   date not in a locked month (409), in one transaction.
