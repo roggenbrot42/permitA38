@@ -116,9 +116,12 @@ date rules.
 
 ## 5. Tax treatment on documents
 
-* `tax_treatment` on invoices (`standard` default, `small_business`, `eu_b2b_service`; the reserved values are refused
-  with 422 in this release) and expenses (`standard`, `no_input_vat`, `reverse_charge_eu_service`,
-  `reverse_charge_third_country`). `small_business` is set by the year's regime, not chosen.
+* `tax_treatment` on invoices (`standard` default, `small_business`, `eu_b2b_service`; the reserved values
+  `reverse_charge_domestic`, `eu_b2b_goods_exempt`, `export_exempt`, `non_taxable_other`, `exempt_with_deduction`,
+  `exempt_no_deduction` are refused with 422 "not supported in this release") and expenses (`standard`, `no_input_vat`, `reverse_charge_eu_service`,
+  `reverse_charge_third_country`; reserved and refused with 422: `reverse_charge_domestic`, `import_vat`). `small_business`
+  is set by the year's regime, not chosen. Credit-note `amounts` keys are rate strings (`"19"`, `"7"`, `"10.7"`,
+  pattern `^[0-9]{1,2}(\.[0-9]{1,2})?$`); the service refuses a rate the invoice does not have.
 * `eu_b2b_service` requires the customer's `vat_id` with a non-DE EU prefix (422) and forces every line rate to 0;
   the PDF prints the reverse-charge note *(verify wording)*.
 * Expense `reverse_charge` (old field): output derived (`true` for the two reverse-charge treatments); input mapped
