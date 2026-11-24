@@ -137,14 +137,17 @@ for _name in ("trial-balance", "eur", "pnl", "balance-sheet", "open-items", "led
 
 
 # ------------------------------------------------------------------ locks, DATEV, integrity
-@router.get("/locks", name="list_period_locks")
+@router.get("/locks", name="list_period_locks", response_model=list[models.PeriodLock])
 def locks(user: Read, services: ServicesDep):
-    not_implemented()
+    return [models.PeriodLock(**r) for r in services.locks.all()]
 
 
-@router.post("/locks", status_code=201, dependencies=[SessionOnly], name="lock_period")
+@router.post(
+    "/locks", status_code=201, dependencies=[SessionOnly], name="lock_period", response_model=list[models.PeriodLock]
+)
 def lock_period(body: models.PeriodLockIn, user: Write, services: ServicesDep):
-    not_implemented()
+    """Lock every month up to the given one (in order); answers the newly locked months."""
+    return [models.PeriodLock(**r) for r in services.locks.lock_up_to(body.year, body.month, "manual", str(user["id"]))]
 
 
 @router.get("/datev", name="datev_export")

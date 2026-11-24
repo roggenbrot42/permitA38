@@ -10391,7 +10391,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PeriodLock"
+                  },
+                  "type": "array",
+                  "title": "Response List Period Locks Api Accounting Locks Get"
+                }
               }
             }
           }
@@ -10410,6 +10416,7 @@
           "accounting"
         ],
         "summary": "Lock Period",
+        "description": "Lock every month up to the given one (in order); answers the newly locked months.",
         "operationId": "lock_period_api_accounting_locks_post",
         "requestBody": {
           "content": {
@@ -10426,7 +10433,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PeriodLock"
+                  },
+                  "type": "array",
+                  "title": "Response Lock Period Api Accounting Locks Post"
+                }
               }
             }
           },
@@ -20362,6 +20375,91 @@
         "additionalProperties": true,
         "type": "object",
         "title": "PensionIn"
+      },
+      "PeriodLock": {
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "month": {
+            "type": "integer",
+            "title": "Month"
+          },
+          "locked_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked At"
+          },
+          "locked_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked By"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "year",
+          "month"
+        ],
+        "title": "PeriodLock"
       },
       "PeriodLockIn": {
         "properties": {

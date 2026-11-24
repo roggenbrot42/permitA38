@@ -1,17 +1,39 @@
 import logging
 import types
 import typing
+from datetime import date
 from typing import Annotated, Any
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from .models import LEGACY_TAX_KEYS, HealthIn, PersonalTaxIn, Settings
 
-__all__ = ["DEFAULT_SETTINGS", "LEGACY_TAX_KEYS", "effective_personal_tax", "effective_settings"]
+__all__ = [
+    "ACCOUNTING_START_KEY",
+    "DEFAULT_SETTINGS",
+    "LEGACY_TAX_KEYS",
+    "accounting_start",
+    "effective_personal_tax",
+    "effective_settings",
+]
 
 log = logging.getLogger(__name__)
 
 DEFAULT_SETTINGS: dict = Settings().model_dump()
+
+
+ACCOUNTING_START_KEY = "accounting.start"
+
+
+def accounting_start(settings: dict) -> date | None:
+    """The accounting start (accounting.md 16 step 1): the flat settings key ``accounting.start``, an ISO date on the
+    first of a month, set once by the initialisation. ``None`` when unset or not such a date."""
+    raw = settings.get(ACCOUNTING_START_KEY) if isinstance(settings, dict) else None
+    try:
+        day = date.fromisoformat(raw) if isinstance(raw, str) else None
+    except ValueError:
+        return None
+    return day if day is not None and day.day == 1 else None
 
 
 def effective_settings(raw: dict) -> dict:

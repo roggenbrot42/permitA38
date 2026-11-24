@@ -2075,6 +2075,7 @@ class JournalEntry(Record):
     created_by: str | None = None
     prev_hash: str | None = None
     hash: str | None = None
+    warnings: list[str] = []  # VAT drift warnings (not hashed)
     lines: list[JournalLine] = []
 
 
