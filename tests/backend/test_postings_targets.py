@@ -511,7 +511,7 @@ def test_partial_credit_with_a_zero_vat_share_over_paid_invoice_picks_the_right_
         assert (vat_out.amount_cents, vat_out.tax_base_cents, vat_out.tax_kind, vat_out.tax_key) == (
             0,
             vat_out_base_delta,
-            "tax",
+            "base_only",
             "S19",
         )
         assert vat_out.vat_date == date(2026, 2, 3)  # the period of the change, never the original period
@@ -593,7 +593,8 @@ def _journal_slots(entries: list[Entry]) -> dict[_Slot, tuple[int, int]]:
     sums: dict[_Slot, tuple[int, int]] = {}
     for entry in entries:
         for ln in entry.lines:
-            key = (ln.role, ln.tax_kind or "", ln.income_date is not None)
+            kind = "tax" if ln.tax_kind == "base_only" and ln.role.startswith("vat_out") else ln.tax_kind or ""
+            key = (ln.role, kind, ln.income_date is not None)  # a 0-amount VAT line is a statistical line (9.1)
             amount, base = sums.get(key, (0, 0))
             sums[key] = (amount + ln.amount_cents, base + (ln.tax_base_cents or 0))
     return {k: v for k, v in sums.items() if v != (0, 0)}
@@ -635,7 +636,7 @@ def _random_run(seed: int, bases: Bases) -> tuple[InvoiceState, list[Entry]]:
     entries: list[Entry] = []
     first = event_entry(None, state, bases, IssueEvent(snap.perf))
     nothing_yet = bases == Bases("eur", "ist") or (
-        bases == Bases("eur", "soll") and all(g.rate == 0 for g in snap.rates)
+        bases == Bases("eur", "soll") and all(g.rate == 0 or g.net == 0 for g in snap.rates)
     )
     assert (first is None) == nothing_yet  # EUR posts the VAT only (Soll) or nothing at all (Ist); rate 0 has no VAT
     if first is not None:
@@ -704,3 +705,106 @@ def test_random_sequences_keep_the_invariants(seed: int, bases: Bases) -> None:
         base = sum(ln.tax_base_cents or 0 for e in entries for ln in e.lines if ln.role == role_for("vat_out", rate))
         assert (booked, base) == (cur_vat, cur_net), (seed, bases, rate)
     assert tgt.overpayment == 0
+
+
+# ---- zero amounts (accounting.md 9.1): no 0-amount line except a base_only statistical line ----------------------
+
+
+def _assert_no_zero_lines(entries: list[Entry], where: object) -> None:
+    for entry in entries:
+        for ln in entry.lines:
+            assert ln.amount_cents != 0 or ln.tax_kind == "base_only", (where, ln)
+
+
+def _flat_lines(entry: Entry | None) -> list[tuple[Any, ...]]:
+    assert entry is not None
+    return [(ln.role, ln.amount_cents, ln.tax_kind, ln.tax_base_cents, ln.vat_date) for ln in entry.lines]
+
+
+@pytest.mark.parametrize(
+    ("bases", "expected"),
+    [
+        (Bases("accrual", "soll"), [("bank", 5, None, None, None), ("receivables", -5, None, None, None)]),
+        (Bases("eur", "soll"), [("bank", 5, None, None, None), ("revenue_s7", -5, None, None, None)]),
+    ],
+)
+def test_payment_on_a_five_cent_seven_percent_invoice_posts_no_zero_line(
+    bases: Bases, expected: list[tuple[Any, ...]]
+) -> None:
+    snap = IssuedSnapshot("z1", "regular", "standard", (RateGroup(Decimal(7), Cents(5), Cents(0)),), date(2026, 1, 1))
+    state = InvoiceState.issued(snap)
+    pay = PaymentEvent("p1", date(2026, 2, 3), Cents(5))
+    entry = event_entry(state, apply_event(state, pay), bases, pay)
+    assert sorted(_flat_lines(entry)) == sorted(expected)
+
+
+@pytest.mark.parametrize("income", ["accrual", "eur"])
+def test_ist_payment_on_a_five_cent_invoice_posts_the_base_once_as_a_statistical_line(income: str) -> None:
+    bases = Bases(income, "ist")  # type: ignore[arg-type]
+    snap = IssuedSnapshot("z1", "regular", "standard", (RateGroup(Decimal(7), Cents(5), Cents(0)),), date(2026, 1, 1))
+    state = InvoiceState.issued(snap)
+    issued = event_entry(None, state, bases, IssueEvent(date(2026, 1, 2)))
+    pay = PaymentEvent("p1", date(2026, 2, 3), Cents(5))
+    entry = event_entry(state, apply_event(state, pay), bases, pay)
+    stat = ("vat_out_s7", 0, "base_only", 5, date(2026, 2, 3))
+    assert stat in _flat_lines(entry)
+    entries = [e for e in (issued, entry) if e is not None]
+    assert sum(ln.tax_base_cents or 0 for e in entries for ln in e.lines if ln.role == "vat_out_s7") == 5
+    _assert_no_zero_lines(entries, bases)
+
+
+@pytest.mark.parametrize("bases", ALL_BASES, ids=lambda b: f"{b.income}-{b.vat}")
+def test_cancelled_seven_percent_group_posts_only_the_nineteen_percent_group(bases: Bases) -> None:
+    snap = IssuedSnapshot(
+        "z2",
+        "regular",
+        "standard",
+        (RateGroup(Decimal(19), Cents(10000), Cents(1900)), RateGroup(Decimal(7), Cents(0), Cents(0))),
+        date(2026, 1, 1),
+    )
+    state = InvoiceState.issued(snap)
+    pay = PaymentEvent("p1", date(2026, 2, 3), Cents(11900))
+    entries = [
+        e
+        for e in (
+            event_entry(None, state, bases, IssueEvent(date(2026, 1, 2))),
+            event_entry(state, apply_event(state, pay), bases, pay),
+        )
+        if e is not None
+    ]
+    assert entries
+    assert not any(ln.role.endswith("_s7") for e in entries for ln in e.lines)
+    _assert_no_zero_lines(entries, bases)
+
+
+@pytest.mark.parametrize("seed", range(60))
+@pytest.mark.parametrize("bases", ALL_BASES, ids=lambda b: f"{b.income}-{b.vat}")
+def test_random_groups_with_zero_vat_never_post_a_zero_line(seed: int, bases: Bases) -> None:
+    rng = random.Random(seed)
+    groups = tuple(
+        RateGroup(
+            rate,
+            Cents(net := rng.choice([0, 1, 5, 7, 9, 14, 100, 3333])),
+            Cents(int((Decimal(net) * rate / 100).quantize(Decimal(1), rounding="ROUND_HALF_UP"))),
+        )
+        for rate in rng.sample([Decimal(19), Decimal(7)], rng.randint(1, 2))
+    )
+    if sum(g.gross for g in groups) <= 0:
+        return
+    snap = IssuedSnapshot("rz", "regular", "standard", groups, date(2026, 1, 1))
+    state = InvoiceState.issued(snap)
+    entries: list[Entry] = []
+    first = event_entry(None, state, bases, IssueEvent(date(2026, 1, 2)))
+    if first is not None:
+        entries.append(first)
+    left = snap.gross
+    for n in range(rng.randint(1, 4)):
+        amount = Cents(left if n == 3 else rng.randint(1, max(1, left)))
+        event = PaymentEvent(f"p{n}", date(2026, 2, 1 + n), amount)
+        after = apply_event(state, event)
+        entry = event_entry(state, after, bases, event)
+        if entry is not None:
+            entries.append(entry)
+        state = after
+        left = max(1, snap.gross - state.kept)
+    _assert_no_zero_lines(entries, (seed, bases, groups))

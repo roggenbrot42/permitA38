@@ -126,6 +126,19 @@ def _vat_out_line(grp: RateGroup, vat_date: date) -> Line:
     )
 
 
+def _statistical_line(grp: RateGroup, vat_date: date) -> Line:
+    """The base of a group whose VAT rounds to 0: an amount-0 ``base_only`` line (spec 9.1, zero amounts)."""
+    return Line(
+        role_for("vat_out", grp.rate),
+        Cents(0),
+        tax_key=tax_key_for(grp.rate),
+        tax_kind="base_only",
+        tax_rate=rate_str(grp.rate),
+        tax_base_cents=grp.net,
+        vat_date=vat_date,
+    )
+
+
 def issue_entry(snapshot: IssuedSnapshot, bases: Bases, invoice_date: date) -> Entry | None:
     """The entry of ``finalize`` for the basis combinations of spec 9.1; ``None`` when nothing is posted.
 
@@ -173,16 +186,26 @@ def issue_entry(snapshot: IssuedSnapshot, bases: Bases, invoice_date: date) -> E
     elif accrual:
         lines.append(Line(Role("receivables"), snapshot.gross, open_item_id=item))
         for grp in snapshot.rates:
+            if grp.net == 0:
+                continue
             lines.append(_revenue_line(grp, invoice_date))
             if grp.rate == 0:
                 continue
-            if bases.vat == "soll":
+            if grp.vat == 0:
+                # Soll: the base still reaches Kz 81/86 through a statistical line. Ist: the base arrives with the
+                # payment (targets), so nothing is posted for the VAT at issue.
+                if bases.vat == "soll":
+                    lines.append(_statistical_line(grp, perf_date))
+            elif bases.vat == "soll":
                 lines.append(_vat_out_line(grp, perf_date))
             else:
                 lines.append(Line(role_for("vat_not_due", grp.rate), Cents(-grp.vat)))
     elif bases.vat == "soll":
         for grp in snapshot.rates:
-            if grp.rate == 0:
+            if grp.rate == 0 or grp.net == 0:
+                continue
+            if grp.vat == 0:
+                lines.append(_statistical_line(grp, perf_date))
                 continue
             lines.append(Line(role_for("vat_soll_clearing", grp.rate), grp.vat))
             lines.append(_vat_out_line(grp, perf_date))
