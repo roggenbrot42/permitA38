@@ -68,7 +68,12 @@ payment before issue is refused with a hint), the reserved tax treatments.
 | `opened_at`, `opened_by`, `closed_at`, `closed_by` | | `closed` after the year closing (section 13) |
 
 The settings keys `accounting`, `kleinunternehmer` stay for the year without a row (journal off) and as defaults for a
-new year. A year's bases (chart, income basis, VAT basis, small business) change only before its first entry; later a change needs a new year. `vat_frequency`, `dauerfrist` and `vat_regular_from` change only while the year has no VAT return record (draft or final); a closed year changes nothing. Switching the income
+new year. **Automatic year opening:** when accounting is initialised and a posting needs year N+1 while year N has a
+row and N+1 has none, `JournalService` creates the N+1 row in the same transaction, copying the bases, chart,
+frequency, Dauerfrist and small-business status of year N (`opened_by` = the posting user) — the previous year is
+usually still open in January, so its closing cannot be the only way to open the next year. A gap (no row for N) or a
+year before the earliest row is refused (409). The user can change the copied fields under the rules below until the
+first entry / return of the new year. A year's bases (chart, income basis, VAT basis, small business) change only before its first entry; later a change needs a new year. `vat_frequency`, `dauerfrist` and `vat_regular_from` change only while the year has no VAT return record (draft or final); a closed year changes nothing. Switching the income
 basis between years creates a transition entry for open items on 1 January (EÜR → accrual: open receivables and
 payables become balances; accrual → EÜR: they are carried as open items without balances) *(verify the transition
 rules with the adviser; v1 refuses a switch while open items exist and says so)*.
