@@ -6,7 +6,7 @@ from pydantic import Field
 
 from permita38.api import money_out
 from permita38.api.deps import Needs, ServicesDep
-from permita38.api.responses import present
+from permita38.api.responses import present, stored
 from permita38.core import validation as v
 from permita38.core.models import Contract, Document, Project
 from permita38.core.service import invoice_state
@@ -60,7 +60,10 @@ def invoice_from_time(body: FromTime, _: Annotated[dict, Needs("invoices", "writ
 
 @router.post("/invoices/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
 def finalize_invoice(rid: str, user: Annotated[dict, Needs("invoices", "write")], services: ServicesDep):
-    return _doc(services, "invoices", services.sales.finalize("invoices", rid, user), finalize=True)
+    """Issue the invoice. The answer carries the derived payment fields; ``paid_date`` is always present (null while
+    unpaid), so the response is sent without the ``exclude_none`` filter."""
+    doc = services.sales.invoice_view(services.sales.finalize("invoices", rid, user))
+    return stored(DocumentResult, _doc(services, "invoices", doc, finalize=True))
 
 
 @router.get("/invoices/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})
