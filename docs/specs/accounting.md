@@ -790,7 +790,7 @@ maintainer's sign-off of these specs (PR #124).
 | E23 | Pre-start baseline, opening items, lazy baseline | F | E22 |
 | E24 | Review list + API, expense rules, legacy `cancelled`, legacy `paid` without date or before the invoice date | F | E23 |
 | E25 | Integrity: `check-db` chain/balance, sanity warnings, synced-folder warning | S | E6 |
-| E26 | Transfer export/import/restore with the new tables and the trigger exception | F | E2 |
+| E26 | Transfer export/import/restore with the new tables and the trigger exception (append_only, frozen_when and set_once are suspended only inside the importer's replace-restore transaction) | F | E2 |
 | **M3 outputs** | | | |
 | O1 | UStVA computation (pure) | F | F2, E6 |
 | O2 | Return records: draft/finalise + lock, reopen, filed, delete, drill-down | F | O1, E7 |
