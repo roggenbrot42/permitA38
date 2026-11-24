@@ -328,6 +328,57 @@ TABLES: dict[str, Table] = {
                 Index("idx_document_scans_record_id", ("record_id",)),
             ),
         ),
+        # accounting journal (docs/specs/accounting.md section 8.1): internal, written only by the accounting services.
+        # Every column is nullable at storage level; NOT NULL is enforced by `required` guards (docs/specs/db-constraints.md)
+        Table(
+            "fiscal_years",
+            _cols(
+                _BASE + "year:int chart:str income_basis:str vat_basis:str vat_frequency:str dauerfrist:bool "
+                "small_business:bool vat_regular_from:str rules_version:str opened_at:int opened_by:id "
+                "closed_at:int closed_by:id" + _EXTRA
+            ),
+            (Index("idx_fiscal_years_year", ("year",), unique=True),),
+        ),
+        Table(
+            "journal_entries",
+            _cols(
+                _BASE + "fiscal_year:int entry_no:int document_date:str booking_date:str event:str event_key:str "
+                "source_coll:str source_id:id source_number:str reverses_id:id counterparty_id:id cp_vat_id:str "
+                "cp_country:str text:text origin:str created_at:int created_by:id prev_hash:str hash:str" + _EXTRA
+            ),
+            (
+                Index("idx_journal_entries_event_key", ("event_key",), unique=True),
+                Index("idx_journal_entries_year_no", ("fiscal_year", "entry_no"), unique=True),
+                Index("idx_journal_entries_source", ("source_id",)),
+                Index("idx_journal_entries_booking", ("booking_date",)),
+            ),
+        ),
+        Table(
+            "journal_lines",
+            _cols(
+                _BASE + "entry_id:id line_no:int role:str account:str amount_cents:int tax_key:str tax_kind:str "
+                "tax_rate:str tax_base_cents:int vat_date:str income_date:str open_item_id:id treatment:str" + _EXTRA
+            ),
+            (
+                Index("idx_journal_lines_entry_line", ("entry_id", "line_no"), unique=True),
+                Index("idx_journal_lines_vat", ("vat_date", "tax_key")),
+                Index("idx_journal_lines_income", ("income_date",)),
+                Index("idx_journal_lines_open_item", ("open_item_id",)),
+            ),
+        ),
+        Table(
+            "payments",
+            _cols(
+                _BASE + "document_id:id date:str amount_cents:int method:str kind:str note:text reverses_id:id "
+                "created_at:int created_by:id" + _EXTRA
+            ),
+            (Index("idx_payments_document", ("document_id",)),),
+        ),
+        Table(
+            "period_locks",
+            _cols(_BASE + "year:int month:int locked_at:int locked_by:id reason:str" + _EXTRA),
+            (Index("idx_period_locks_year_month", ("year", "month"), unique=True),),
+        ),
         Table("settings", _cols("key:str value:json"), pk="key", extra_column=None),
     )
 }
@@ -654,7 +705,83 @@ def _build_guards() -> tuple[Guard, ...]:
     ]
     out += [Guard(f"guard_{t}_{c}_ref", t, "reference", (c,), "ref.dangling", target=g) for t, c, g in _REFERENCES]
     out += _planning_guards()  # migration 0018-project_planning, after 0017-reference_guards
+    out += _accounting_guards()  # migration 0019-accounting_journal
     return tuple(out)
+
+
+# every tax key of docs/specs/accounting.md section 6 except NONE (the keys that need a VAT date)
+_VAT_TAX_KEYS = ("S19", "S7", "SX", "KU", "EU_SVC", "VST", "RC_EU_SVC", "RC_3C_SVC")
+
+
+def _accounting_guards() -> list[Guard]:
+    """Guards of migration accounting_journal (docs/specs/accounting.md sections 7 and 8.1)."""
+    from permita38.core.accounting.types import IncomeBasis, VatBasis
+    from permita38.core.vat_rules import TaxKind
+
+    def required(table: str, *cols: str) -> list[Guard]:
+        return [Guard(f"guard_{table}_{c}_required", table, "required", (c,), "state.required") for c in cols]
+
+    def dates(table: str, *cols: str) -> list[Guard]:
+        return [Guard(f"guard_{table}_{c}_date", table, "date", (c,), "format.date") for c in cols]
+
+    def one_of(table: str, col: str, values: tuple[str, ...]) -> Guard:
+        return Guard(f"guard_{table}_{col}_one_of", table, "one_of", (col,), "vocab.unknown", values=values)
+
+    def implies(table: str, stem: str, if_: Condition, then: Condition) -> Guard:
+        name = f"guard_{table}_{stem}_implies"
+        return Guard(name, table, "implies", (), f"state.implies:{name}", if_=if_, then=then)
+
+    def ref(table: str, col: str, target: str) -> Guard:
+        return Guard(f"guard_{table}_{col}_ref", table, "reference", (col,), "ref.dangling", target=target)
+
+    out: list[Guard] = []
+    out += required(
+        "fiscal_years", "year", "chart", "income_basis", "vat_basis", "vat_frequency", "dauerfrist",
+        "small_business", "rules_version", "opened_at", "opened_by",
+    )  # fmt: skip
+    out += dates("fiscal_years", "vat_regular_from")
+    out += [
+        one_of("fiscal_years", "chart", ("skr03", "skr04")),
+        one_of("fiscal_years", "income_basis", get_args(IncomeBasis)),
+        one_of("fiscal_years", "vat_basis", get_args(VatBasis)),
+        one_of("fiscal_years", "vat_frequency", ("month", "quarter", "none")),
+        implies("fiscal_years", "closed_by", IsSet("closed_at"), IsSet("closed_by")),
+    ]
+    out += required(
+        "journal_entries", "fiscal_year", "entry_no", "document_date", "booking_date", "event", "event_key",
+        "text", "origin", "created_at", "created_by", "prev_hash", "hash",
+    )  # fmt: skip
+    out += dates("journal_entries", "document_date", "booking_date")
+    out += [
+        one_of("journal_entries", "origin", ("auto", "manual", "opening")),
+        ref("journal_entries", "reverses_id", "journal_entries"),
+        Guard("guard_journal_entries_append_only", "journal_entries", "append_only", (), "state.append_only"),
+    ]
+    out += required("journal_lines", "entry_id", "line_no", "account", "amount_cents")
+    out += dates("journal_lines", "vat_date", "income_date")
+    out += [
+        one_of("journal_lines", "tax_kind", get_args(TaxKind)),
+        ref("journal_lines", "entry_id", "journal_entries"),
+        implies("journal_lines", "tax_kind_key", IsSet("tax_kind"), IsSet("tax_key")),
+        implies("journal_lines", "tax_key_vat_date", In("tax_key", _VAT_TAX_KEYS), IsSet("vat_date")),
+        Guard("guard_journal_lines_append_only", "journal_lines", "append_only", (), "state.append_only"),
+    ]
+    out += required("payments", "document_id", "date", "amount_cents", "method", "kind", "created_at", "created_by")
+    out += dates("payments", "date")
+    out += [
+        one_of("payments", "method", ("bank", "cash")),
+        one_of("payments", "kind", ("payment", "refund", "reversal")),
+        ref("payments", "document_id", "invoices"),
+        ref("payments", "reverses_id", "payments"),
+        implies("payments", "reversal_reverses", Eq("kind", "reversal"), IsSet("reverses_id")),
+        Guard("guard_payments_append_only", "payments", "append_only", (), "state.append_only"),
+    ]
+    out += required("period_locks", "year", "month", "locked_at", "locked_by", "reason")
+    out += [
+        Guard("guard_period_locks_month_range", "period_locks", "range", ("month",), "range.bounds", lo=1, hi=12),
+        Guard("guard_period_locks_append_only", "period_locks", "append_only", (), "state.append_only"),
+    ]
+    return out
 
 
 def _model_literal(model: Any, field_name: str) -> Any:
@@ -735,7 +862,8 @@ CHECKS = {
     "allocations": (
         "allocations_one_owner",
         '("user_id" IS NOT NULL AND "supplier_id" IS NULL) OR ("user_id" IS NULL AND "supplier_id" IS NOT NULL)',
-    )
+    ),
+    "payments": ("payments_amount_nonzero", '"amount_cents" <> 0'),
 }
 
 # internal per-user collections that are not exposed through the CRUD API
@@ -752,6 +880,11 @@ INTERNAL_COLLECTIONS = [
     "calendar_events",
     "receipt_scans",
     "document_scans",
+    "fiscal_years",
+    "journal_entries",
+    "journal_lines",
+    "payments",
+    "period_locks",
 ]
 # the user-facing record collections
 COLLECTIONS = [name for name in TABLES if name not in ("settings", *INTERNAL_COLLECTIONS)]

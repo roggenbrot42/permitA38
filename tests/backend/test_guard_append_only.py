@@ -23,9 +23,14 @@ def new_db() -> sqlite3.Connection:
     return db
 
 
-def test_kind_is_registered_and_attached_to_no_table_yet():
+def test_kind_is_registered_and_attached_to_the_four_journal_tables():
     assert "append_only" in GUARD_KINDS
-    assert not [g for g in GUARDS if g.kind == "append_only"]
+    assert {g.table for g in GUARDS if g.kind == "append_only"} == {
+        "journal_entries",
+        "journal_lines",
+        "payments",
+        "period_locks",
+    }
 
 
 def test_validation():

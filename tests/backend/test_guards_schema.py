@@ -29,6 +29,7 @@ def repo(tmp_path):
     r.close()
 
 
+ACCOUNTING_TABLES = ("fiscal_years", "journal_entries", "journal_lines", "payments", "period_locks")
 GUARD_MIGRATIONS = ("guards", "project_planning")  # the migrations that create guards
 
 
@@ -47,8 +48,7 @@ def test_guard_declarations_are_well_formed():
     used = {g.kind for g in GUARDS}
     assert used <= set(GUARD_KINDS)  # no unknown kind
     # no dead kind: used by a real guard, or a row-local kind (exercised by test_guards_v2_kinds.py)
-    # append_only is attached to no table yet (accounting tables come later; test_guard_append_only.py)
-    assert set(GUARD_KINDS) <= used | ROW_LOCAL_KINDS | {"append_only"}
+    assert set(GUARD_KINDS) <= used | ROW_LOCAL_KINDS
     # every row-local kind is covered by the check-db rule (it raises for a kind it does not know)
     samples = {case[0].kind: case[0] for case in V2_CASES.values()}
     for kind in ROW_LOCAL_KINDS:
@@ -58,7 +58,7 @@ def test_guard_declarations_are_well_formed():
         assert g.table in TABLES
         for c in g.columns:
             assert TABLES[g.table].column(c), (g.name, c)
-        if g.kind != "implies":
+        if g.kind not in ("implies", "append_only"):
             assert len(g.columns) == (2 if g.kind in ("order", "exactly_one", "max_days") else 1)
     assert {g.code for g in GUARDS if g.kind != "implies"} == {
         "numbering.duplicate",
@@ -71,6 +71,7 @@ def test_guard_declarations_are_well_formed():
         "range.too_long",
         "range.bounds",
         "ref.dangling",
+        "state.append_only",
     }
     for g in GUARDS:
         if g.kind == "reference":
@@ -112,8 +113,15 @@ def test_sqlite_migration_file_is_exactly_the_generated_statements(tmp_path):
     d = SQLiteDialect()
     v1 = "".join(m.sql() for m in CHAIN if m.name in GUARD_MIGRATIONS)
     refs = next(m for m in CHAIN if m.name == "reference_guards").sql()
-    v1_statements = [s for g in GUARDS if g.kind != "reference" for s in d.guard_sql(g)]
-    ref_statements = [s for g in GUARDS if g.kind == "reference" for s in d.guard_sql(g)]
+    acc = next(m for m in CHAIN if m.name == "accounting_journal").sql()
+    old = [g for g in GUARDS if g.table not in ACCOUNTING_TABLES]
+    for g in GUARDS:  # the accounting guards (all kinds) live in migration accounting_journal only
+        if g.table in ACCOUNTING_TABLES:
+            for s in d.guard_sql(g):
+                assert s in acc and s not in v1 and s not in refs
+    assert acc.count("CREATE TRIGGER") == sum(len(d.guard_sql(g)) for g in GUARDS if g.table in ACCOUNTING_TABLES)
+    v1_statements = [s for g in old if g.kind != "reference" for s in d.guard_sql(g)]
+    ref_statements = [s for g in old if g.kind == "reference" for s in d.guard_sql(g)]
     assert ref_statements
     # every guard's SQL is in exactly one migration file: v1 and planner guards in 0016 and 0018, reference guards in 0017
     for s in v1_statements:
@@ -130,7 +138,12 @@ def test_native_dialects_cover_every_guard(dialect):
     migrations = database.list_migrations(dialect)
     sql = "".join(m.sql() for m in migrations if m.name in GUARD_MIGRATIONS)
     ref_sql = next(m for m in migrations if m.name == "reference_guards").sql()
+    acc_sql = next(m for m in migrations if m.name == "accounting_journal").sql()
     for g in GUARDS:
+        if g.table in ACCOUNTING_TABLES:
+            for s in d.guard_sql(g):
+                assert s in acc_sql and s not in sql and s not in ref_sql
+            continue
         want = ref_sql if g.kind == "reference" else sql
         other = sql if g.kind == "reference" else ref_sql
         for s in d.guard_sql(g):

@@ -61,6 +61,18 @@ def sample(table: Table, i: int = 0) -> dict:
     elif table.name == "projects":
         rec.pop("customer_id")  # an internal project has no customer
         rec.update(kind="internal", status="active")
+    elif table.name == "fiscal_years":  # the guards of migration accounting_journal
+        rec.update(chart="skr03", income_basis="eur", vat_basis="soll", vat_frequency="month")
+    elif table.name == "journal_entries":
+        rec.pop("reverses_id")
+        rec.update(origin="auto")
+    elif table.name == "journal_lines":
+        rec.update(tax_kind="tax")
+    elif table.name == "payments":
+        rec.pop("reverses_id")
+        rec.update(method="bank", kind="payment")
+    elif table.name == "period_locks":
+        rec.update(month=5)
     return rec
 
 
@@ -91,6 +103,8 @@ def seed_references(repo, table: Table, rec: dict) -> None:
         if g.table == table.name and g.kind == "reference" and rec.get(g.columns[0]) is not None:
             if repo.get(g.target, rec[g.columns[0]]) is None:
                 target = {"id": rec[g.columns[0]], "name": "Demo"}
+                if g.target in ("journal_entries", "payments"):  # accounting rows have required fields
+                    target = {**sample(TABLES[g.target]), "id": rec[g.columns[0]]}
                 if g.target == "projects":
                     target.update(kind="internal", status="active")  # an internal project needs no customer
                 repo.save(g.target, target)
