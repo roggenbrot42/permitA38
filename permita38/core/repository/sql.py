@@ -571,7 +571,7 @@ class SQLRepository(Repository):
         with self.lock:
             self._ensure()
             rows = self._rows(
-                f"SELECT {q('hash')} FROM {q('journal_entries')} WHERE {q('fiscal_year')} <= {ph} "
+                f"SELECT {q('hash')} FROM {q('journal_entries')} WHERE {q('fiscal_year')} = {ph} "
                 f"ORDER BY {q('fiscal_year')} DESC, {q('entry_no')} DESC LIMIT 1",
                 [year],
             )

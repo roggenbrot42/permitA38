@@ -689,12 +689,12 @@ def test_journal_entries_and_lines_refuse_update_and_delete(repo):
         repo.delete("journal_lines", stored["lines"][0]["id"])
 
 
-def test_last_journal_hash_falls_back_to_the_previous_year(repo):
+def test_last_journal_hash_is_per_year(repo):
     assert repo.last_journal_hash(2026) is None
     repo.insert_journal_entry(_entry(2025, 1, "a", "2025-12-01", "a" * 64), _lines(1, -1))
     repo.insert_journal_entry(_entry(2025, 2, "b", "2025-12-02", "b" * 64), _lines(1, -1))
     assert repo.last_journal_hash(2025) == "b" * 64
-    assert repo.last_journal_hash(2026) == "b" * 64  # no entry in 2026 yet: the end of 2025
+    assert repo.last_journal_hash(2026) is None  # no entry in 2026 yet: no fallback to 2025
     assert repo.last_journal_hash(2024) is None
     repo.insert_journal_entry(_entry(2026, 1, "c", "2026-01-02", "c" * 64), _lines(1, -1))
     assert repo.last_journal_hash(2026) == "c" * 64 and repo.last_journal_hash(2025) == "b" * 64

@@ -6,8 +6,8 @@
 * idempotent: an existing ``event_key`` with identical content returns the existing entry, different content is a 409;
 * the fiscal year (the year of the ``booking_date``) exists and is not closed;
 * ``entry_no`` is gapless per year (counter ``journal`` in ``number_sequences``, same transaction as the insert);
-* hash chain: ``hash = sha256(prev_hash || canonical_json)`` (see :func:`canonical_json`); the first entry of a year
-  chains to the last hash of the previous year, the very first entry to 64 zeros.
+* hash chain per fiscal year: ``hash = sha256(prev_hash || canonical_json)`` (see :func:`canonical_json`); the first
+  entry of every year chains to 64 zeros, so a late entry in an earlier open year never forks a later year.
 
 Entries are inserted only through ``Repository.insert_journal_entry`` (plain INSERT, never an upsert); the database
 refuses UPDATE and DELETE (append-only guard). No SQL here.
@@ -19,6 +19,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import Any, Literal, cast, get_args
 
 from permita38.core import models
@@ -95,12 +96,19 @@ class ChainFinding:
     severity: str = "error"
 
 
+def _decimal_as_str(value: object) -> str:
+    if isinstance(value, Decimal):
+        return str(value)
+    raise TypeError(f"{type(value).__name__} is not part of the canonical journal form")
+
+
 def canonical_json(entry: Mapping[str, Any], lines: Sequence[Mapping[str, Any]]) -> str:
     """Sorted keys, no spaces, integers as integers, dates as ``YYYY-MM-DD`` strings, absent values as ``null``;
-    the lines ordered by ``line_no``. ASCII-escaped (``json.dumps`` defaults)."""
+    the lines ordered by ``line_no``; ``Decimal`` values (e.g. ``tax_rate``) as strings. ASCII-escaped
+    (``json.dumps`` defaults)."""
     body: dict[str, Any] = {k: entry.get(k) for k in ENTRY_FIELDS}
     body["lines"] = [{k: ln.get(k) for k in LINE_FIELDS} for ln in sorted(lines, key=lambda ln: int(ln["line_no"]))]
-    return json.dumps(body, sort_keys=True, separators=(",", ":"))
+    return json.dumps(body, sort_keys=True, separators=(",", ":"), default=_decimal_as_str)
 
 
 def entry_hash(prev_hash: str, entry: Mapping[str, Any], lines: Sequence[Mapping[str, Any]]) -> str:
@@ -122,14 +130,21 @@ class JournalService:
 
     # ---------- helpers
     def _booking_date(self, document_date: date) -> date:
-        """``max(document_date, first day of the first unlocked month)``. Locks (``period_locks``, E7) lock whole
-        months in order, so the first unlocked month follows the latest locked one; without locks: the document date."""
+        """``max(document_date, first day of the first unlocked month)`` (spec 7.8). Locks (``period_locks``, E7)
+        lock whole months in order, so the first unlocked month follows the latest locked one; without locks: the
+        document date. Closing-date exception: when that date falls into a later fiscal year while the document's
+        own year is not closed, the entry is booked on 31 December of the document's year."""
         locks = self.store.list("period_locks")
         if not locks:
             return document_date
         year, month = max((int(r["year"]), int(r["month"])) for r in locks)
         first_open = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
-        return max(document_date, first_open)
+        booking = max(document_date, first_open)
+        if booking.year > document_date.year:
+            rows = self.store.find("fiscal_years", year=document_date.year)
+            if not rows or rows[0].get("closed_at") is None:
+                return date(document_date.year, 12, 31)
+        return booking
 
     @staticmethod
     def _chart(row: Record, year: int) -> Chart:
@@ -187,7 +202,7 @@ class JournalService:
                     "amount_cents": ln.amount_cents,
                     "tax_key": ln.tax_key,
                     "tax_kind": ln.tax_kind,
-                    "tax_rate": ln.tax_rate,
+                    "tax_rate": str(ln.tax_rate) if ln.tax_rate is not None else None,
                     "tax_base_cents": ln.tax_base_cents,
                     "vat_date": _iso(ln.vat_date),
                     "income_date": _iso(ln.income_date),
@@ -292,10 +307,10 @@ class JournalService:
         return [models.JournalEntry.model_validate(r) for r in rows]
 
     def verify_chain(self, year: int) -> list[ChainFinding]:
-        """Check the entries of ``year``: balanced, numbered 1..n without gaps, ``prev_hash`` links and every hash
+        """Check only the entries of ``year`` (no cross-year comparison): balanced, numbered 1..n without gaps, ``prev_hash`` links and every hash
         recomputed from the stored content. A break means the journal changed outside the app or forked."""
         findings: list[ChainFinding] = []
-        expected_prev = self.store.last_journal_hash(year - 1) or ZERO_HASH
+        expected_prev = ZERO_HASH  # the chain is per fiscal year
         expected_no = 1
         offset = 0
         while True:

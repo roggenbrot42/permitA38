@@ -115,8 +115,8 @@ class Repository(ABC):
 
     @abstractmethod
     def last_journal_hash(self, year: int) -> str | None:
-        """The ``hash`` of the last entry of ``year``; when the year has none, of the last entry of the nearest
-        earlier year; None when there is no such entry (the chain then starts with 64 zeros)."""
+        """The ``hash`` of the last entry of ``year`` only; None when the year has none (its chain then starts
+        with 64 zeros: the hash chain is per fiscal year)."""
 
     @abstractmethod
     def list_journal_entries(

@@ -16,7 +16,7 @@ from permita38.core.charts import Role, load_chart
 from permita38.core.config import Config
 from permita38.core.errors import ServiceError
 from permita38.core.repository import create_repository
-from permita38.core.service.journal import JournalService, JournalSource, PostLine
+from permita38.core.service.journal import JournalService, JournalSource, PostLine, canonical_json
 
 FIXTURE = Path(__file__).parent / "fixtures" / "chart_synthetic.json"
 CHART = load_chart(FIXTURE)
@@ -209,7 +209,7 @@ def expected_hash(prev: str, entry: dict, lines: list[dict]) -> str:
     return hashlib.sha256((prev + text).encode("utf-8")).hexdigest()
 
 
-def test_hash_chain_across_a_year_boundary(svc, repo):
+def test_hash_chain_is_per_fiscal_year(svc, repo):
     post(svc, key="a", day=date(2025, 12, 30))
     post(svc, key="b", day=date(2025, 12, 31), lines=sale(net=5000, vat=950))
     post(svc, key="c", day=date(2026, 1, 2), lines=sale(net=777, vat=148))
@@ -217,12 +217,13 @@ def test_hash_chain_across_a_year_boundary(svc, repo):
     assert [(r["fiscal_year"], r["entry_no"]) for r in rows] == [(2025, 1), (2025, 2), (2026, 1)]
     prev = ZERO
     for r in rows:
+        if r["entry_no"] == 1:
+            prev = ZERO  # every year starts from 64 zeros
         assert r["prev_hash"] == prev
         want = expected_hash(prev, r, r["lines"])
         assert r["hash"] == want
         prev = want
-    # the first entry of 2026 chains to the last of 2025, the first of 2025 to 64 zeros
-    assert rows[2]["prev_hash"] == rows[1]["hash"] and rows[0]["prev_hash"] == ZERO
+    assert rows[0]["prev_hash"] == ZERO and rows[2]["prev_hash"] == ZERO and rows[1]["prev_hash"] == rows[0]["hash"]
     assert svc.verify_chain(2025) == [] and svc.verify_chain(2026) == []
 
 
@@ -296,12 +297,45 @@ def test_verify_chain_detects_a_changed_amount_unbalance_gap_and_broken_link(svc
     assert ("journal.prev_hash", 2) in [(f.code, f.entry_no) for f in svc.verify_chain(2026)]
 
 
-def test_verify_chain_detects_a_fork_at_the_year_start(svc, repo):
+def test_verify_chain_detects_a_changed_year_start_link(svc, repo):
+    post(svc, key="a", day=date(2026, 1, 2))
+    tamper(repo, "UPDATE journal_entries SET prev_hash = ? WHERE fiscal_year = 2026", ("f" * 64,))
+    assert ("journal.prev_hash", 1) in {(f.code, f.entry_no) for f in svc.verify_chain(2026)}
+
+
+def test_late_entry_in_an_earlier_open_year_does_not_disturb_the_later_year(svc, repo):
     post(svc, key="a", day=date(2025, 12, 30))
     post(svc, key="b", day=date(2026, 1, 2))
-    tamper(repo, "UPDATE journal_entries SET hash = ? WHERE fiscal_year = 2025", ("f" * 64,))
-    codes = {(f.code, f.entry_no) for f in svc.verify_chain(2026)}
-    assert ("journal.prev_hash", 1) in codes
+    late = post(svc, key="late", day=date(2025, 12, 31), lines=sale(net=5000, vat=950))
+    assert (late.fiscal_year, late.entry_no) == (2025, 2)
+    firsts = [r for r in repo.list_journal_entries() if r["entry_no"] == 1]
+    assert [(r["fiscal_year"], r["prev_hash"]) for r in firsts] == [(2025, ZERO), (2026, ZERO)]
+    assert svc.verify_chain(2025) == [] and svc.verify_chain(2026) == []
+
+
+def test_failed_insert_does_not_consume_a_number(svc, repo, monkeypatch):
+    assert post(svc, key="a").entry_no == 1
+    real = repo.insert_journal_entry
+
+    def failing(entry, lines):
+        assert entry["entry_no"] == 2  # the number was taken before the insert fails
+        raise RuntimeError("insert failed")
+
+    monkeypatch.setattr(repo, "insert_journal_entry", failing)
+    with pytest.raises(RuntimeError):
+        post(svc, key="b")
+    monkeypatch.setattr(repo, "insert_journal_entry", real)
+    assert post(svc, key="b").entry_no == 2
+    assert [r["entry_no"] for r in repo.list_journal_entries(2026)] == [1, 2]
+    assert svc.verify_chain(2026) == []
+
+
+def test_canonical_json_writes_decimals_as_strings():
+    entry = {"fiscal_year": 2026, "entry_no": 1}
+    line = {"line_no": 1, "account": "1", "amount_cents": 1, "tax_rate": Decimal("7.00")}
+    out = canonical_json(entry, [line])
+    assert '"tax_rate":"7.00"' in out
+    assert out == canonical_json(entry, [{**line, "tax_rate": "7.00"}])
 
 
 # ---------------------------------------------------------------- booking date
@@ -317,10 +351,39 @@ def test_booking_date_moves_into_the_first_unlocked_month(svc, repo):
     assert post(svc, key="later", day=date(2026, 5, 4)).booking_date == "2026-05-04"  # never moved backwards
 
 
-def test_a_december_lock_moves_the_booking_into_the_next_year(svc, repo):
-    repo.save("fiscal_years", fiscal_year(2027))
+def lock(repo, year: int, month: int):
     repo.save(
-        "period_locks", {"year": 2026, "month": 12, "locked_at": 1, "locked_by": "u1x000", "reason": "year_close"}
+        "period_locks", {"year": year, "month": month, "locked_at": 1, "locked_by": "u1x000", "reason": "manual"}
     )
+
+
+def test_a_december_lock_books_a_late_document_on_31_december_while_the_year_is_open(svc, repo):
+    repo.save("fiscal_years", fiscal_year(2027))
+    lock(repo, 2026, 12)
     e = post(svc, day=date(2026, 12, 20))
-    assert (e.fiscal_year, e.booking_date, e.entry_no) == (2027, "2027-01-01", 1)
+    assert (e.fiscal_year, e.booking_date, e.entry_no) == (2026, "2026-12-31", 1)
+
+
+def test_late_bill_posted_in_february_with_december_locked(svc, repo):
+    repo.save("fiscal_years", fiscal_year(2027))
+    lock(repo, 2026, 12)  # Feb 2027 posting: document of 2026, the year still open
+    e = post(svc, key="bill", day=date(2026, 11, 3))
+    assert (e.fiscal_year, e.booking_date, e.document_date) == (2026, "2026-12-31", "2026-11-03")
+    assert svc.verify_chain(2026) == []
+
+
+def test_late_bill_after_the_year_is_closed_goes_to_the_first_unlocked_month_of_the_next_year(svc, repo):
+    repo.save("fiscal_years", fiscal_year(2027))
+    lock(repo, 2026, 12)
+    year = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**year, "closed_at": 5, "closed_by": "u1x000"})
+    e = post(svc, key="bill", day=date(2026, 11, 3))
+    assert (e.fiscal_year, e.booking_date) == (2027, "2027-01-01")
+    lock(repo, 2027, 1)
+    assert post(svc, key="bill2", day=date(2026, 11, 4)).booking_date == "2027-02-01"
+
+
+def test_all_months_locked_up_to_december_books_on_31_december_even_for_a_january_document(svc, repo):
+    for m in range(1, 13):
+        lock(repo, 2026, m)
+    assert post(svc, day=date(2026, 1, 5)).booking_date == "2026-12-31"
