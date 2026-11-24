@@ -47,6 +47,16 @@ class DatabaseRevisionError(RuntimeError):
     """The database schema revision does not match what this version of the app expects."""
 
 
+class JournalConflict(Exception):
+    """A plain INSERT of a journal entry hit a unique index. ``field`` is ``event_key`` (the event was stored by a
+    concurrent writer) or ``entry_no`` (the ``(fiscal_year, entry_no)`` slot was taken). The transaction is rolled
+    back; PostgreSQL aborts a transaction on a failed statement, so callers retry in a **new** transaction."""
+
+    def __init__(self, field: str):
+        super().__init__(f"journal entry conflicts on {field}")
+        self.field = field
+
+
 class ConstraintViolation(Exception):
     """A database guard refused a write (see docs/specs/db-constraints.md). ``code`` is a check-db code such as
     ``numbering.duplicate``; ``collection`` is the collection that was being saved."""
@@ -106,7 +116,7 @@ class Repository(ABC):
     @abstractmethod
     def insert_journal_entry(self, entry: Record, lines: RecordList) -> Record:
         """Insert one entry and its lines with plain INSERTs in one transaction (never an upsert: an existing id,
-        ``event_key`` or ``(fiscal_year, entry_no)`` is an error and nothing is written). ``lines`` get ``entry_id``;
+        ``event_key`` or ``(fiscal_year, entry_no)`` is an error and nothing is written; a unique violation raises :class:`JournalConflict`). ``lines`` get ``entry_id``;
         ids and timestamps are assigned. Returns the stored entry with its ``lines`` ordered by ``line_no``."""
 
     @abstractmethod
@@ -133,7 +143,10 @@ class Repository(ABC):
     def next_number(self, doc_type: str, period: str) -> int:
         """Take the next value of the counter ``(doc_type, period)`` in ``number_sequences`` (first value 1).
         Call inside ``transaction()``: the counter then rolls back with the record it numbers (gapless). The row id
-        is derived from the key like ``NumberingService`` does, so concurrent first allocations meet in one row."""
+        is derived from the key like ``NumberingService`` does, so concurrent first allocations meet in one row.
+        Gapless numbering **needs a serialising transaction**: SQLite takes the write lock at ``BEGIN IMMEDIATE``;
+        server backends lock the counter row (``SELECT ... FOR UPDATE``). Only the very first allocation of a counter
+        has no row to lock; a race there ends in a unique violation of the numbered record, never in a duplicate."""
         row_id = "n" + hashlib.sha256(f"{doc_type}|{period}".encode()).hexdigest()[:20]
         with self.transaction():
             row = self.get("number_sequences", row_id)

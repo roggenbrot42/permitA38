@@ -263,6 +263,13 @@ class Dialect:
     def select_one(self, table: Table) -> str:
         return self.select_all(table) + f" WHERE {self.quote(table.pk)} = {self.placeholder}"
 
+    # appended to a SELECT that must lock the rows it reads until the transaction ends; SQLite has no row locks
+    # (``BEGIN IMMEDIATE`` already serialises every writer)
+    for_update = " FOR UPDATE"
+
+    def select_one_for_update(self, table: Table) -> str:
+        return self.select_one(table) + self.for_update
+
     def delete_one(self, table: Table) -> str:
         return f"DELETE FROM {self.quote(table.name)} WHERE {self.quote(table.pk)} = {self.placeholder}"
 
@@ -300,6 +307,7 @@ class Dialect:
 
 class SQLiteDialect(Dialect):
     name = "sqlite"
+    for_update = ""
     types = {ID: "TEXT", STR: "TEXT", TEXT: "TEXT", INT: "INTEGER", FLOAT: "REAL", BOOL: "INTEGER", JSON: "TEXT"}
 
     def _is_set(self, ref: str) -> str:

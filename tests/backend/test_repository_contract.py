@@ -13,6 +13,7 @@ from permita38.core.repository import (
     DatabaseRevisionError,
     Repository,
 )
+from permita38.core.repository.base import JournalConflict
 from permita38.core.repository.schema import GUARDS, Table
 
 from .repository_registry import REGISTRY, integrity_error, registry_params
@@ -669,14 +670,26 @@ def test_insert_journal_entry_returns_entry_with_ordered_lines_and_finds_it_by_e
 
 def test_insert_journal_entry_is_a_plain_insert_and_all_or_nothing(repo):
     repo.insert_journal_entry(_entry(2026, 1, "k:1", "2026-01-05"), _lines(5, -5))
-    with pytest.raises(integrity_error(repo)):  # same event_key
+    with pytest.raises(JournalConflict) as err:  # same event_key
         repo.insert_journal_entry(_entry(2026, 2, "k:1", "2026-01-06"), _lines(1, -1))
-    with pytest.raises(integrity_error(repo)):  # same (fiscal_year, entry_no)
+    assert err.value.field == "event_key"
+    with pytest.raises(JournalConflict) as err:  # same (fiscal_year, entry_no)
         repo.insert_journal_entry(_entry(2026, 1, "k:2", "2026-01-06"), _lines(1, -1))
+    assert err.value.field == "entry_no"
     with pytest.raises(integrity_error(repo)):  # a duplicate line_no: the whole entry rolls back
         repo.insert_journal_entry(_entry(2026, 2, "k:3", "2026-01-06"), [*_lines(1, -1), *_lines(1)])
     assert [e["event_key"] for e in repo.list("journal_entries")] == ["k:1"]
     assert len(repo.list("journal_lines")) == 2
+
+
+def test_next_number_counts_per_doc_type_and_period_and_rolls_back_with_the_transaction(repo):
+    assert [repo.next_number("journal", "2026") for _ in range(3)] == [1, 2, 3]
+    assert repo.next_number("journal", "2025") == 1 and repo.next_number("invoice", "2026") == 1
+    with pytest.raises(RuntimeError):
+        with repo.transaction():
+            assert repo.next_number("journal", "2026") == 4
+            raise RuntimeError("abort")
+    assert repo.next_number("journal", "2026") == 4  # the counter rolled back with the record it numbers
 
 
 def test_journal_entries_and_lines_refuse_update_and_delete(repo):

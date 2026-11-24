@@ -5,7 +5,12 @@
 * balanced (the amounts sum to 0), accounts and roles exist in the chart of the entry's fiscal year;
 * idempotent: an existing ``event_key`` with identical content returns the existing entry, different content is a 409;
 * the fiscal year (the year of the ``booking_date``) exists and is not closed;
-* ``entry_no`` is gapless per year (counter ``journal`` in ``number_sequences``, same transaction as the insert);
+* ``entry_no`` is gapless per year (counter ``journal`` in ``number_sequences``, same transaction as the insert).
+  Gapless numbering needs a **serialising transaction**: SQLite takes the write lock at ``BEGIN IMMEDIATE``, server
+  backends lock the counter row (``SELECT ... FOR UPDATE`` in ``next_number``). A concurrent writer that still wins the
+  race (first allocation of a counter, or a retry after a lost race) hits a unique index: a duplicate ``event_key``
+  re-reads the stored entry and runs the idempotency check, a duplicate ``(fiscal_year, entry_no)`` is a 409
+  "concurrent write, retry" - never a raw 500;
 * hash chain per fiscal year: ``hash = sha256(prev_hash || canonical_json)`` (see :func:`canonical_json`); the first
   entry of every year chains to 64 zeros, so a late entry in an earlier open year never forks a later year.
 
@@ -15,6 +20,7 @@ refuses UPDATE and DELETE (append-only guard). No SQL here.
 
 import hashlib
 import json
+import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -26,13 +32,15 @@ from permita38.core import models
 from permita38.core.charts import Chart, ChartMissing, ChartName, Role, chart_for
 from permita38.core.errors import ServiceError
 from permita38.core.repository import Repository
-from permita38.core.repository.base import Record
+from permita38.core.repository.base import JournalConflict, Record
 from permita38.core.vat_rules import TAX_KEYS, TaxKind
 
 ZERO_HASH = "0" * 64
 NUMBER_DOC_TYPE = "journal"
 MAX_TEXT = 200
 PAGE = 500
+MAX_CENTS = 10**13  # |amount| and |tax base| bound (100 billion units): far above any real entry, below int64
+TAX_RATE_RE = re.compile(r"^[0-9]{1,2}(\.[0-9]{1,2})?$")
 
 # The fields that go into the hash, besides ``hash`` itself; ids and storage timestamps are not part of it.
 ENTRY_FIELDS = (
@@ -135,16 +143,20 @@ class JournalService:
         document date. Closing-date exception: when that date falls into a later fiscal year while the document's
         own year is not closed, the entry is booked on 31 December of the document's year."""
         locks = self.store.list("period_locks")
-        if not locks:
-            return document_date
-        year, month = max((int(r["year"]), int(r["month"])) for r in locks)
-        first_open = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
-        booking = max(document_date, first_open)
-        if booking.year > document_date.year:
-            rows = self.store.find("fiscal_years", year=document_date.year)
+        booking = document_date
+        if locks:
+            year, month = max((int(r["year"]), int(r["month"])) for r in locks)
+            booking = max(document_date, date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1))
+        own = self.store.find("fiscal_years", year=document_date.year)
+        own_closed = bool(own) and own[0].get("closed_at") is not None
+        if booking.year > document_date.year and not own_closed:
+            return date(document_date.year, 12, 31)
+        # a closed fiscal year is fully locked even without period_locks rows: book into the next open year
+        while True:
+            rows = self.store.find("fiscal_years", year=booking.year)
             if not rows or rows[0].get("closed_at") is None:
-                return date(document_date.year, 12, 31)
-        return booking
+                return booking
+            booking = date(booking.year + 1, 1, 1)
 
     @staticmethod
     def _chart(row: Record, year: int) -> Chart:
@@ -163,6 +175,14 @@ class JournalService:
                 raise ServiceError(422, f"{where}: amount_cents must be an integer")
             if ln.tax_base_cents is not None and not _is_int(ln.tax_base_cents):
                 raise ServiceError(422, f"{where}: tax_base_cents must be an integer")
+            if abs(ln.amount_cents) > MAX_CENTS or (
+                ln.tax_base_cents is not None and abs(ln.tax_base_cents) > MAX_CENTS
+            ):
+                raise ServiceError(422, f"{where}: amounts are limited to +-{MAX_CENTS} cents")
+            if ln.amount_cents == 0 and ln.tax_kind != "base_only":
+                raise ServiceError(422, f"{where}: amount 0 is only allowed on a base_only statistical line")
+            if ln.tax_rate is not None and (not isinstance(ln.tax_rate, str) or not TAX_RATE_RE.match(ln.tax_rate)):
+                raise ServiceError(422, f"{where}: tax_rate must be a decimal string like '19' or '7.5'")
             if ln.role is None and ln.account is None:
                 raise ServiceError(422, f"{where}: needs an account or a role")
             if ln.tax_key is not None and ln.tax_key not in TAX_KEYS:
@@ -202,7 +222,7 @@ class JournalService:
                     "amount_cents": ln.amount_cents,
                     "tax_key": ln.tax_key,
                     "tax_kind": ln.tax_kind,
-                    "tax_rate": str(ln.tax_rate) if ln.tax_rate is not None else None,
+                    "tax_rate": ln.tax_rate,
                     "tax_base_cents": ln.tax_base_cents,
                     "vat_date": _iso(ln.vat_date),
                     "income_date": _iso(ln.income_date),
@@ -251,7 +271,20 @@ class JournalService:
         if source.origin not in get_args(Origin):
             raise ServiceError(422, f"Unknown origin '{source.origin}'")
         self._validate_lines(lines)
-        entry: Record = {
+        try:
+            return self._post(event_key, document_date, text, source, lines)
+        except JournalConflict as conflict:
+            # the transaction is gone (PostgreSQL aborts it on the failed INSERT); look again in a new one
+            if conflict.field == "event_key":
+                with self.store.transaction():
+                    existing = self.store.get_journal_entry_by_event_key(event_key)
+                    if existing is not None:
+                        return self._existing(existing, event_key, document_date, text, source, lines)
+            raise ServiceError(409, "concurrent write, retry") from None
+
+    @staticmethod
+    def _entry_record(event_key: str, document_date: date, text: str, source: JournalSource) -> Record:
+        return {
             "document_date": document_date.isoformat(),
             "event": source.event,
             "event_key": event_key,
@@ -266,12 +299,25 @@ class JournalService:
             "origin": source.origin,
             "created_by": source.created_by,
         }
+
+    def _existing(
+        self, existing: Record, event_key: str, document_date: date, text: str, source: JournalSource,
+        lines: Sequence[PostLine],
+    ) -> models.JournalEntry:  # fmt: skip
+        """Idempotency: the stored entry when the event has the same content, else 409."""
+        entry = self._entry_record(event_key, document_date, text, source)
+        if not self._same_event(existing, entry, lines):
+            raise ServiceError(409, f"event_key '{event_key}' already exists with different content")
+        return models.JournalEntry.model_validate(existing)
+
+    def _post(
+        self, event_key: str, document_date: date, text: str, source: JournalSource, lines: Sequence[PostLine]
+    ) -> models.JournalEntry:
+        entry = self._entry_record(event_key, document_date, text, source)
         with self.store.transaction():
             existing = self.store.get_journal_entry_by_event_key(event_key)
             if existing is not None:
-                if not self._same_event(existing, entry, lines):
-                    raise ServiceError(409, f"event_key '{event_key}' already exists with different content")
-                return models.JournalEntry.model_validate(existing)
+                return self._existing(existing, event_key, document_date, text, source, lines)
             booking = self._booking_date(document_date)
             year = booking.year
             rows = self.store.find("fiscal_years", year=year)
@@ -307,7 +353,7 @@ class JournalService:
         return [models.JournalEntry.model_validate(r) for r in rows]
 
     def verify_chain(self, year: int) -> list[ChainFinding]:
-        """Check only the entries of ``year`` (no cross-year comparison): balanced, numbered 1..n without gaps, ``prev_hash`` links and every hash
+        """Check only the entries of ``year`` (no cross-year comparison; an open year also its counter): balanced, numbered 1..n without gaps, ``prev_hash`` links and every hash
         recomputed from the stored content. A break means the journal changed outside the app or forked."""
         findings: list[ChainFinding] = []
         expected_prev = ZERO_HASH  # the chain is per fiscal year
@@ -332,5 +378,24 @@ class JournalService:
                     )
                 expected_prev = str(e.get("hash"))
             if len(page) < PAGE:
-                return findings
+                break
             offset += PAGE
+        findings.extend(self._counter_findings(year, expected_no - 1))
+        return findings
+
+    def _counter_findings(self, year: int, last_no: int) -> list[ChainFinding]:
+        """An open year's last ``entry_no`` must equal its ``journal`` counter (a deleted last entry leaves the
+        counter ahead). Closed years are checked against ``closing_entry_no`` instead (E18)."""
+        rows = self.store.find("fiscal_years", year=year)
+        if not rows or rows[0].get("closed_at") is not None:
+            return []
+        seq = self.store.find("number_sequences", doc_type=NUMBER_DOC_TYPE, period=str(year))
+        counter = int(seq[0].get("last_value") or 0) if seq else 0
+        if counter == last_no:
+            return []
+        return [
+            ChainFinding(
+                "journal.counter", last_no or None,
+                f"the journal counter of {year} is {counter} but the last entry is number {last_no}",
+            )
+        ]  # fmt: skip

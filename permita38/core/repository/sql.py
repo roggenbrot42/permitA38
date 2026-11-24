@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import builtins
 import contextlib
+import hashlib
 import os
 import re
 import secrets
@@ -27,6 +28,7 @@ from .base import (
     ID_RE,
     ConstraintViolation,
     DatabaseRevisionError,
+    JournalConflict,
     Record,
     RecordList,
     Repository,
@@ -535,13 +537,34 @@ class SQLRepository(Repository):
 
     def insert_journal_entry(self, entry: Record, lines: RecordList) -> Record:
         now = int(time.time())
-        with self.transaction():
-            stored = self._insert("journal_entries", {k: v for k, v in entry.items() if k != "lines"}, now)
-            stored["lines"] = [
-                self._insert("journal_lines", {**ln, "id": None, "entry_id": stored["id"]}, now) for ln in lines
-            ]
-            stored["lines"].sort(key=lambda r: r["line_no"])
+        try:
+            with self.transaction():
+                stored = self._insert("journal_entries", {k: v for k, v in entry.items() if k != "lines"}, now)
+                stored["lines"] = [
+                    self._insert("journal_lines", {**ln, "id": None, "entry_id": stored["id"]}, now) for ln in lines
+                ]
+                stored["lines"].sort(key=lambda r: r["line_no"])
+        except Exception as e:
+            # driver-neutral: sqlite3, psycopg and pymysql all name their class IntegrityError (psycopg also has
+            # UniqueViolation); the message names the column (SQLite) or the index (PostgreSQL / MariaDB)
+            msg = str(e)
+            if type(e).__name__ in ("IntegrityError", "UniqueViolation"):
+                if "event_key" in msg:
+                    raise JournalConflict("event_key") from e
+                if "entry_no" in msg or "year_no" in msg:
+                    raise JournalConflict("entry_no") from e
+            raise
         return stored
+
+    def next_number(self, doc_type: str, period: str) -> int:
+        row_id = "n" + hashlib.sha256(f"{doc_type}|{period}".encode()).hexdigest()[:20]
+        with self.transaction():
+            table = self._table("number_sequences")
+            rows = self._rows(self.dialect.select_one_for_update(table), [row_id])  # locks the counter row
+            old = self._decode(table, rows[0]) if rows else {}
+            value = int(old.get("last_value") or 0) + 1
+            self.save("number_sequences", {"id": row_id, "doc_type": doc_type, "period": period, "last_value": value})
+        return value
 
     def _with_lines(self, entries: RecordList) -> RecordList:
         if not entries:

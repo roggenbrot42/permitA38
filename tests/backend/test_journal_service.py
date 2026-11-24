@@ -5,6 +5,7 @@ import hashlib
 import json
 import shutil
 import threading
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -16,6 +17,7 @@ from permita38.core.charts import Role, load_chart
 from permita38.core.config import Config
 from permita38.core.errors import ServiceError
 from permita38.core.repository import create_repository
+from permita38.core.repository.base import JournalConflict
 from permita38.core.service.journal import JournalService, JournalSource, PostLine, canonical_json
 
 FIXTURE = Path(__file__).parent / "fixtures" / "chart_synthetic.json"
@@ -126,7 +128,7 @@ def test_missing_closed_year_is_409(svc, repo):
     repo.save("fiscal_years", {**year, "closed_at": 5, "closed_by": "u1x000"})
     with pytest.raises(ServiceError) as err:
         post(svc)
-    assert err.value.status == 409 and "closed" in err.value.message
+    assert err.value.status == 409 and "Fiscal year 2027 is not open" in err.value.message  # closed = locked
     assert repo.list("journal_entries") == []
 
 
@@ -385,3 +387,263 @@ def test_all_months_locked_up_to_december_books_on_31_december_even_for_a_januar
     for m in range(1, 13):
         lock(repo, 2026, m)
     assert post(svc, day=date(2026, 1, 5)).booking_date == "2026-12-31"
+
+
+def test_closed_year_without_lock_rows_books_into_the_first_unlocked_month_of_the_next_year(svc, repo):
+    repo.save("fiscal_years", fiscal_year(2027))
+    year = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**year, "closed_at": 5, "closed_by": "u1x000"})
+    assert repo.list("period_locks") == []
+    e = post(svc, key="late", day=date(2026, 11, 3))
+    assert (e.fiscal_year, e.booking_date, e.document_date) == (2027, "2027-01-01", "2026-11-03")
+    lock(repo, 2027, 1)
+    assert post(svc, key="late2", day=date(2026, 11, 4)).booking_date == "2027-02-01"
+
+
+# ---------------------------------------------------------------- review gaps: validation messages
+def err_of(svc, **kwargs) -> ServiceError:
+    with pytest.raises(ServiceError) as err:
+        post(svc, **kwargs)
+    return err.value
+
+
+def test_zero_lines_single_zero_line_bool_oversize_and_bad_tax_rate_are_422(svc, repo):
+    e = err_of(svc, lines=[])
+    assert (e.status, e.message) == (422, "An entry needs at least one line")
+    e = err_of(svc, lines=[PostLine(role="bank", amount_cents=0)])
+    assert (e.status, e.message) == (422, "Line 1: amount 0 is only allowed on a base_only statistical line")
+    e = err_of(svc, lines=[PostLine(role="bank", amount_cents=True), PostLine(role="revenue_s19", amount_cents=-1)])
+    assert (e.status, e.message) == (422, "Line 1: amount_cents must be an integer")
+    credit = PostLine(role="revenue_s19", amount_cents=-100)
+    e = err_of(svc, lines=[PostLine(role="bank", amount_cents=100, tax_base_cents=True), credit])
+    assert (e.status, e.message) == (422, "Line 1: tax_base_cents must be an integer")
+    big = 10**13 + 1
+    e = err_of(svc, lines=[PostLine(role="bank", amount_cents=big), PostLine(role="revenue_s19", amount_cents=-big)])
+    assert (e.status, e.message) == (422, "Line 1: amounts are limited to +-10000000000000 cents")
+    e = err_of(svc, lines=[PostLine(role="bank", amount_cents=100, tax_base_cents=big), credit])
+    assert (e.status, e.message) == (422, "Line 1: amounts are limited to +-10000000000000 cents")
+    for bad in ("19%", "abc", "100", "1.234", "", ".5", "-1", "1e1"):
+        e = err_of(svc, lines=[PostLine(role="bank", amount_cents=100, tax_rate=bad), credit])
+        assert e.status == 422 and e.message.startswith("Line 1: tax_rate must be a decimal string"), bad
+    assert repo.list("journal_entries") == []
+
+
+def test_amounts_at_the_bound_good_tax_rates_and_a_zero_statistical_line_are_accepted(svc):
+    top = 10**13
+    lines = [PostLine(role="bank", amount_cents=top), PostLine(role="revenue_s19", amount_cents=-top)]
+    assert post(svc, key="top", lines=lines).entry_no == 1
+    for i, rate in enumerate(("0", "7", "19", "7.5", "19.00")):
+        lines = [
+            PostLine(role="bank", amount_cents=100, tax_rate=rate),
+            PostLine(role="revenue_s19", amount_cents=-100),
+        ]
+        assert post(svc, key=f"r{i}", lines=lines).entry_no == i + 2
+    stat = PostLine(
+        role="revenue_s19", amount_cents=0, tax_key="KU", tax_kind="base_only", tax_base_cents=500,
+        vat_date=date(2026, 1, 15),
+    )  # fmt: skip
+    assert post(svc, key="stat", lines=[stat]).entry_no == 7
+
+
+def test_unknown_role_and_unknown_account_have_their_own_messages(svc):
+    bank_credit = PostLine(role="bank", amount_cents=-100)
+    e = err_of(svc, lines=[PostLine(role="no_such_role", amount_cents=100), bank_credit])
+    assert (e.status, e.message) == (422, "Line 1: unknown role 'no_such_role'")
+    e = err_of(svc, lines=[PostLine(account="1234567", amount_cents=100), bank_credit])
+    assert (e.status, e.message) == (422, "Line 1: unknown account '1234567' in chart skr03")
+    e = err_of(svc, lines=[PostLine(role="bank", account=REVENUE, amount_cents=100), bank_credit])
+    assert (e.status, e.message) == (422, f"Line 1: role 'bank' is account {BANK}, not {REVENUE}")
+
+
+def test_text_event_key_and_origin_are_checked(svc, repo):
+    assert err_of(svc, text="x" * 201).status == 422
+    assert post(svc, key="max", text="x" * 200).entry_no == 1
+    e = err_of(svc, text="  ")
+    assert (e.status, e.message) == (422, "text is required and at most 200 characters")
+    e = err_of(svc, key="  ")
+    assert (e.status, e.message) == (422, "event_key is required")
+    e = err_of(svc, key="")
+    assert (e.status, e.message) == (422, "event_key is required")
+    with pytest.raises(ServiceError) as err:
+        svc.post("k", date(2026, 1, 15), "t", replace(SRC, origin="bogus"), sale())  # type: ignore[arg-type]
+    assert (err.value.status, err.value.message) == (422, "Unknown origin 'bogus'")
+    assert len(repo.list("journal_entries")) == 1
+
+
+def test_chart_missing_is_409(svc, repo):
+    year = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**year, "chart": "skr04"})  # the temp chart directory only holds skr03
+    e = err_of(svc)
+    assert e.status == 409 and e.message.startswith("No chart of accounts for fiscal year 2026")
+    assert repo.list("journal_entries") == []
+
+
+# ---------------------------------------------------------------- review gaps: one changed field = 409
+def changed_field_cases() -> dict:
+    def src(**kw):
+        return {"source": replace(SRC, **kw)}
+
+    def line(i, **kw):
+        lines = sale()
+        lines[i] = replace(lines[i], **kw)
+        return {"lines": lines}
+
+    swapped = sale()
+    swapped[1], swapped[2] = swapped[2], swapped[1]
+    return {
+        "amount": {"lines": sale(net=10100, vat=1900)},
+        "account": line(0, role=None, account=REVENUE),
+        "tax_rate": line(2, tax_rate="7"),
+        "tax_key": line(2, tax_key="S7"),
+        "vat_date": line(2, vat_date=date(2026, 1, 16)),
+        "line_order": {"lines": swapped},
+        "event": src(event="payment"),
+        "source_id": src(source_id="inv2abc"),
+        "counterparty_id": src(counterparty_id="cust1x"),
+    }
+
+
+@pytest.mark.parametrize("name", list(changed_field_cases()))
+def test_idempotent_repost_with_one_changed_field_is_409(svc, repo, name):
+    first = post(svc)
+    kwargs = changed_field_cases()[name]
+    source = kwargs.get("source", SRC)
+    lines = kwargs.get("lines", sale())
+    with pytest.raises(ServiceError) as err:
+        svc.post("issue:1", date(2026, 1, 15), "Invoice 1", source, lines)
+    assert err.value.status == 409 and "different content" in err.value.message
+    assert [r["id"] for r in repo.list("journal_entries")] == [first.id]
+
+
+# ---------------------------------------------------------------- review gaps: verify_chain
+def test_verify_chain_of_an_empty_year_is_clean(svc):
+    assert svc.verify_chain(2026) == [] and svc.verify_chain(1999) == []
+
+
+def test_verify_chain_pages_and_finds_a_tamper_on_a_later_page(svc, repo, monkeypatch):
+    from permita38.core.service import journal
+
+    monkeypatch.setattr(journal, "PAGE", 2)
+    for i in range(5):
+        post(svc, key=f"k{i}")
+    assert svc.verify_chain(2026) == []
+    tamper(repo, "UPDATE journal_entries SET text = 'changed' WHERE entry_no = 5")
+    assert [(f.code, f.entry_no) for f in svc.verify_chain(2026)] == [("journal.hash", 5)]
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "UPDATE journal_entries SET text = 'changed' WHERE entry_no = 1",
+        "UPDATE journal_entries SET booking_date = '2026-01-16' WHERE entry_no = 1",
+        "UPDATE journal_entries SET created_by = 'u2x000' WHERE entry_no = 1",
+        "UPDATE journal_lines SET tax_key = 'S7' WHERE tax_key = 'S19'",
+    ],
+)
+def test_every_hashed_field_breaks_the_hash_when_changed(svc, repo, sql):
+    post(svc)
+    assert svc.verify_chain(2026) == []
+    tamper(repo, sql)
+    assert [(f.code, f.entry_no) for f in svc.verify_chain(2026)] == [("journal.hash", 1)]
+
+
+def drop_journal_triggers(repo):
+    with repo.transaction():
+        names = repo._rows("SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name LIKE 'journal_%'")
+        for (name,) in names:
+            repo._exec(f'DROP TRIGGER "{name}"')
+
+
+def test_deleting_the_last_entry_of_an_open_year_reports_the_counter(svc, repo):
+    for k in "abc":
+        post(svc, key=k)
+    assert svc.verify_chain(2026) == []
+    drop_journal_triggers(repo)
+    with repo.transaction():
+        repo._exec("DELETE FROM journal_lines WHERE entry_id IN (SELECT id FROM journal_entries WHERE entry_no = 3)")
+        repo._exec("DELETE FROM journal_entries WHERE entry_no = 3")
+    findings = svc.verify_chain(2026)
+    assert [(f.code, f.entry_no, f.severity) for f in findings] == [("journal.counter", 2, "error")]
+    assert findings[0].message == "the journal counter of 2026 is 3 but the last entry is number 2"
+
+
+def test_counter_of_a_closed_year_is_not_compared(svc, repo):
+    post(svc)
+    year = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**year, "closed_at": 5, "closed_by": "u1x000"})
+    seq = repo.find("number_sequences")[0]
+    repo.save("number_sequences", {**seq, "last_value": 9})
+    assert svc.verify_chain(2026) == []  # a closed year is checked against closing_entry_no (E18)
+
+
+# ---------------------------------------------------------------- review gaps: concurrency and unique violations
+def test_two_repository_instances_on_one_sqlite_file_number_consecutively(repo, tmp_path):
+    other = create_repository(Config(data_dir=tmp_path / "data", secret_key="x" * 16))
+    other.startup()
+    try:
+        errors: list[BaseException] = []
+        services = [JournalService(repo, clock=lambda: 1), JournalService(other, clock=lambda: 1)]
+
+        def work(i: int) -> None:
+            try:
+                for j in range(6):
+                    post(services[i], key=f"c{i}-{j}", day=date(2026, 3, 1))
+            except BaseException as e:  # pragma: no cover - reported below
+                errors.append(e)
+
+        threads = [threading.Thread(target=work, args=(i,)) for i in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []
+        assert sorted(r["entry_no"] for r in repo.list("journal_entries")) == list(range(1, 13))
+        assert services[0].verify_chain(2026) == []
+    finally:
+        other.close()
+
+
+def test_raw_unique_violations_are_translated(repo):
+    def entry(no: int, key: str) -> dict:
+        return {
+            "fiscal_year": 2026, "entry_no": no, "document_date": "2026-01-05", "booking_date": "2026-01-05",
+            "event": "issue", "event_key": key, "text": "t", "origin": "auto", "created_at": 1,
+            "created_by": "u1x000", "prev_hash": ZERO, "hash": "1" * 64,
+        }  # fmt: skip
+
+    lines = [{"line_no": 1, "account": BANK, "amount_cents": 1}, {"line_no": 2, "account": REVENUE, "amount_cents": -1}]
+    repo.insert_journal_entry(entry(1, "dup"), lines)
+    with pytest.raises(JournalConflict) as err:
+        repo.insert_journal_entry(entry(2, "dup"), lines)
+    assert err.value.field == "event_key"
+    with pytest.raises(JournalConflict) as err:
+        repo.insert_journal_entry(entry(1, "other"), lines)
+    assert err.value.field == "entry_no"
+
+
+def test_lost_race_on_event_key_returns_the_stored_entry_or_409(svc, repo, monkeypatch):
+    first = post(svc)
+    real = repo.get_journal_entry_by_event_key
+    calls: list[str] = []
+
+    def blind_once(key):  # the first look (before booking) misses the entry the other writer just committed
+        calls.append(key)
+        return None if len(calls) == 1 else real(key)
+
+    monkeypatch.setattr(repo, "get_journal_entry_by_event_key", blind_once)
+    assert post(svc).id == first.id  # same content: the existing entry
+    calls.clear()
+    with pytest.raises(ServiceError) as err:
+        post(svc, text="Another text")  # different content
+    assert err.value.status == 409 and "different content" in err.value.message
+    assert len(repo.list("journal_entries")) == 1
+
+
+def test_lost_race_on_entry_no_is_a_409_retry_not_a_500(svc, repo, monkeypatch):
+    post(svc, key="a")
+    with monkeypatch.context() as m:
+        m.setattr(repo, "next_number", lambda doc_type, period: 1)  # another writer took number 1
+        with pytest.raises(ServiceError) as err:
+            post(svc, key="b")
+    assert (err.value.status, err.value.message) == (409, "concurrent write, retry")
+    assert post(svc, key="b").entry_no == 2  # the retry works
