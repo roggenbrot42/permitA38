@@ -15,7 +15,6 @@ import re
 from datetime import date, timedelta
 from pathlib import Path
 
-from .test_accounting_reports_api import chart_dir, scenario  # noqa: F401  (fixtures)
 from .test_rbac import _routes
 
 DECIMAL_SCHEMA = {"type": "string", "format": "decimal", "pattern": r"^-?[0-9]+\.[0-9]{2,6}$"}
@@ -689,10 +688,10 @@ def test_no_to_float_or_bare_float_in_the_api_layer():
 # ======================================================================================================================
 # accounting journal and report routes: every amount is a decimal string, no allowlist entry for a money field
 # ======================================================================================================================
-def test_accounting_report_routes_send_money_only_as_decimal_strings(app, scenario):  # noqa: F811
+def test_accounting_report_routes_send_money_only_as_decimal_strings(app, scenario):
     seen_strings = 0
     paths = [
-        "journal", "accounts", "reports/trial-balance", "reports/eur", "reports/pnl", "reports/balance-sheet",
+        "journal", "accounts", "reports/trial-balance", "reports/pnl", "reports/balance-sheet",
         "reports/open-items", "reports/ledger?role=bank",
     ]  # fmt: skip
     for path in paths:
@@ -702,3 +701,11 @@ def test_accounting_report_routes_send_money_only_as_decimal_strings(app, scenar
             assert key in SWEEP_NUMERIC_KEYS and key not in AMBIGUOUS_KEYS, (path, ".".join(kp), value)
         seen_strings += len(re.findall(r'"-?[0-9]+\.[0-9]{2}"', r.text))
     assert seen_strings > 60, seen_strings
+
+
+def test_accounting_eur_route_sends_money_only_as_decimal_strings(eur_scenario):
+    r = eur_scenario.get("/api/accounting/reports/eur", params={"year": 2025})
+    assert r.status_code == 200, r.text
+    for kp, key, value in _walk_numbers(r.json()):
+        assert key in SWEEP_NUMERIC_KEYS and key not in AMBIGUOUS_KEYS, (".".join(kp), value)
+    assert len(re.findall(r'"-?[0-9]+\.[0-9]{2}"', r.text)) >= 8

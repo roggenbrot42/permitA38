@@ -5,9 +5,9 @@ A thin layer: the journal is loaded once per request, turned into ``PostedLine``
 as a decimal string (spec 7a). No SQL here: reads go through the ``Repository`` interface.
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import cast
 
@@ -17,6 +17,7 @@ from permita38.core import models
 from permita38.core import validation as v
 from permita38.core.accounting import reports
 from permita38.core.accounting.types import AccountNo, Cents, Line, Role
+from permita38.core.charts import AccountNo as ChartAccountNo
 from permita38.core.charts import Chart, ChartAccount, ChartMissing, ChartName, chart_for
 from permita38.core.charts import Role as ChartRole
 from permita38.core.errors import ServiceError
@@ -129,7 +130,8 @@ class BalanceSheetOut(BaseModel):
     credit_side: list[BalanceRowOut]
     debit_total: v.Money
     credit_total: v.Money
-    result: v.Money
+    result: v.Money  # result of the fiscal year up to as_of
+    earlier_years_result: v.Money  # booked before 1 January of the year, not closed yet
     difference: v.Money
 
 
@@ -177,12 +179,18 @@ class Loaded:
     lines: list[reports.PostedLine]
 
 
-def _extended_chart(chart: Chart) -> Chart:
+def _extended_chart(chart: Chart, unknown: Iterable[str] = ()) -> Chart:
     """The chart plus a synthetic role ``acct:<no>`` for every account that has no role, so that journal lines posted
-    by account number can be reported like role lines."""
+    by account number can be reported like role lines, and for every ``unknown`` account number of the journal that the
+    chart of the year does not have at all (balance class, no name): a stale role or account never raises."""
     have = {acc.account for _, acc in chart.roles}
     extra = tuple((ChartRole(f"acct:{acc.account}"), acc) for acc in chart.accounts if acc.account not in have)
-    return replace(chart, roles=(*chart.roles, *extra)) if extra else chart
+    known = {str(a) for a in have} | {str(acc.account) for acc in chart.accounts}
+    stray = tuple(
+        (ChartRole(f"acct:{no}"), ChartAccount(cast(ChartAccountNo, no), "", "balance", None, None))
+        for no in sorted(set(unknown) - known)
+    )
+    return replace(chart, roles=(*chart.roles, *extra, *stray)) if extra or stray else chart
 
 
 class AccountingReportService:
@@ -209,6 +217,14 @@ class AccountingReportService:
         except ChartMissing as e:
             raise ServiceError(409, f"No chart of accounts for fiscal year {year}: {e}") from None
 
+    @staticmethod
+    def _require_basis(fy: Record, basis: str) -> None:
+        if str(fy.get("income_basis")) != basis:
+            raise ServiceError(
+                422,
+                f"This report is for fiscal years on the {basis} basis; {fy['year']} is on {fy.get('income_basis')}",
+            )
+
     def _all_entries(self, date_from: date | None = None, date_to: date | None = None) -> Iterator[Record]:
         offset = 0
         start = date_from.isoformat() if date_from else None
@@ -220,28 +236,56 @@ class AccountingReportService:
                 return
             offset += PAGE
 
-    def load(self, year: int | None) -> Loaded:
-        """The fiscal year's chart and every posted line of the journal (all years: the balance sheet cumulates, the
-        EÜR / P&L filter by ``income_date`` themselves)."""
-        fy = self.fiscal_year(year)
-        chart = _extended_chart(self._chart(fy))
-        by_account: dict[str, str] = {}
-        for role, acc in chart.roles:
-            by_account.setdefault(str(acc.account), str(role))
-        lines: list[reports.PostedLine] = []
-        for e in self._all_entries():
+    @staticmethod
+    def _entry_rows(entries: Iterable[Record]) -> Iterator[tuple[Record, date, int]]:
+        for e in entries:
             booking = date.fromisoformat(str(e["booking_date"]))
             for row in e.get("lines", []):
-                name = row.get("role") or by_account.get(str(row["account"]), f"acct:{row['account']}")
-                line = Line(
-                    role=Role(str(name)),
+                yield row, booking, int(e["entry_no"])
+
+    def _build(self, fy: Record, rows: Iterable[tuple[Record, date, int]]) -> Loaded:
+        """Turn journal lines (with the booking date and number of their entry) into ``PostedLine`` against the chart
+        of ``fy``. A line whose role is not in that chart is shown under its account's role, else ``acct:<account>``."""
+        base = _extended_chart(self._chart(fy))
+        roles = {str(r) for r, _ in base.roles}
+        by_account: dict[str, str] = {}
+        for role, acc in base.roles:
+            by_account.setdefault(str(acc.account), str(role))
+        staged: list[tuple[str, Record, date, int]] = []
+        unknown: set[str] = set()
+        for row, booking, no in rows:
+            name = row.get("role")
+            if name not in roles:
+                account = str(row["account"])
+                name = by_account.get(account, f"acct:{account}")
+                if account not in by_account:
+                    unknown.add(account)
+            staged.append((str(name), row, booking, no))
+        lines = [
+            reports.PostedLine(
+                Line(
+                    role=Role(name),
                     amount_cents=Cents(int(row["amount_cents"])),
                     income_date=_opt_date(row.get("income_date")),
                     vat_date=_opt_date(row.get("vat_date")),
                     open_item_id=row.get("open_item_id"),
-                )
-                lines.append(reports.PostedLine(line, booking, int(e["entry_no"])))
-        return Loaded(int(fy["year"]), chart, lines)
+                ),
+                booking,
+                no,
+            )
+            for name, row, booking, no in staged
+        ]
+        return Loaded(int(fy["year"]), _extended_chart(base, unknown), lines)
+
+    def load_booked(self, fy: Record, date_from: date | None, date_to: date | None) -> Loaded:
+        """The lines of the entries booked in ``[date_from, date_to]`` (either end open)."""
+        return self._build(fy, self._entry_rows(self._all_entries(date_from, date_to)))
+
+    def load_income_year(self, fy: Record) -> Loaded:
+        """The lines whose ``income_date`` lies in the calendar year of ``fy`` (EÜR, P&L)."""
+        y = int(fy["year"])
+        found = self.store.journal_lines_by_income_date(date(y, 1, 1).isoformat(), date(y, 12, 31).isoformat())
+        return self._build(fy, ((ln, date.fromisoformat(str(ln["booking_date"])), int(ln["entry_no"])) for ln in found))
 
     # ---------- journal and accounts
     def journal(
@@ -304,8 +348,9 @@ class AccountingReportService:
         return start, end
 
     def trial_balance(self, year: int | None, date_from: date | None, date_to: date | None) -> TrialBalanceOut:
-        data = self.load(year)
-        start, end = self._period(data.year, date_from, date_to)
+        fy = self.fiscal_year(year)
+        start, end = self._period(int(fy["year"]), date_from, date_to)
+        data = self.load_booked(fy, start, end)
         tb = reports.trial_balance(data.lines, data.chart, start, end)
         return TrialBalanceOut(
             year=data.year,
@@ -328,8 +373,8 @@ class AccountingReportService:
     ) -> LedgerOut:
         if not account and not role:
             raise ServiceError(422, "The ledger needs an account or a role")
-        data = self.load(year)
-        by_role = {str(r): acc for r, acc in data.chart.roles}
+        fy = self.fiscal_year(year)
+        by_role = {str(r): acc for r, acc in self._chart(fy).roles}
         if role:
             if role not in by_role:
                 raise ServiceError(422, f"Unknown role '{role}'")
@@ -338,18 +383,21 @@ class AccountingReportService:
                 raise ServiceError(422, f"role '{role}' is account {no}, not {account}")
         else:
             no = str(account)
-        names = {str(acc.account): acc.name for acc in by_role.values()}
+        chart = self._chart(fy)
+        names = {str(acc.account): acc.name for acc in (*by_role.values(), *chart.accounts)}
         if no not in names:
             raise ServiceError(422, f"Unknown account '{no}'")
-        start, end = self._period(data.year, date_from, date_to)
-        led = reports.ledger(data.lines, data.chart, AccountNo(no), start, end)
+        start, end = self._period(int(fy["year"]), date_from, date_to)
+        data = self.load_booked(fy, start, end)
+        opening = self.store.journal_account_balance(no, start.isoformat())
+        led = reports.ledger(data.lines, data.chart, AccountNo(no), None, None)
         return LedgerOut(
             year=data.year,
             account=no,
             name=names[no],
             date_from=start.isoformat(),
             date_to=end.isoformat(),
-            opening=_m(led.opening),
+            opening=_m(opening),
             rows=[
                 LedgerRowOut(
                     booking_date=r.booking_date.isoformat(),
@@ -357,15 +405,17 @@ class AccountingReportService:
                     role=r.role,
                     debit=_m(r.debit),
                     credit=_m(r.credit),
-                    balance=_m(r.balance),
+                    balance=_m(opening + r.balance),
                 )
                 for r in led.rows
             ],
-            closing=_m(led.closing),
+            closing=_m(opening + led.closing),
         )
 
     def eur(self, year: int | None) -> EurOut:
-        data = self.load(year)
+        fy = self.fiscal_year(year)
+        self._require_basis(fy, "eur")
+        data = self.load_income_year(fy)
         r = reports.eur_report(data.lines, data.chart, data.year)
         return EurOut(
             year=r.year,
@@ -381,7 +431,9 @@ class AccountingReportService:
         )
 
     def pnl(self, year: int | None) -> PnlOut:
-        data = self.load(year)
+        fy = self.fiscal_year(year)
+        self._require_basis(fy, "accrual")
+        data = self.load_income_year(fy)
         r = reports.pnl(data.lines, data.chart, data.year)
 
         def rows(items: Sequence[reports.PnlRow]) -> list[PnlRowOut]:
@@ -397,9 +449,14 @@ class AccountingReportService:
         )
 
     def balance_sheet(self, year: int | None, as_of: date | None) -> BalanceSheetOut:
-        data = self.load(year)
-        day = as_of or date(data.year, 12, 31)
+        fy = self.fiscal_year(year)
+        self._require_basis(fy, "accrual")
+        day = as_of or date(int(fy["year"]), 12, 31)
+        data = self.load_booked(fy, None, day)
         b = reports.balance_sheet(data.lines, data.chart, day)
+        # 14.5: the results of earlier years that are not closed yet are a line of their own
+        year_start = date(data.year, 1, 1)
+        earlier = reports.balance_sheet(data.lines, data.chart, min(year_start - timedelta(days=1), day)).result
 
         def rows(items: Sequence[reports.BalanceRow]) -> list[BalanceRowOut]:
             return [BalanceRowOut(account=i.account, name=i.name, balance=_m(i.balance)) for i in items]
@@ -411,23 +468,22 @@ class AccountingReportService:
             credit_side=rows(b.credit_side),
             debit_total=_m(b.debit_total),
             credit_total=_m(b.credit_total),
-            result=_m(b.result),
+            result=_m(b.result - earlier),
+            earlier_years_result=_m(earlier),
             difference=_m(b.difference),
         )
 
     def open_items(self, year: int | None, as_of: date | None) -> OpenItemsOut:
         """Receivables and payables per document: the lines on the ``receivables`` / ``payables`` accounts with an
         ``open_item_id``, summed per item up to ``as_of`` (booking date); items at 0 are settled and left out."""
-        data = self.load(year)
-        day = as_of or date(data.year, 12, 31)
-        accounts = {str(r): str(a.account) for r, a in data.chart.roles if str(r) in OPEN_ITEM_ROLES}
+        fy = self.fiscal_year(year)
+        day = as_of or date(int(fy["year"]), 12, 31)
+        accounts = {str(r): str(a.account) for r, a in self._chart(fy).roles if str(r) in OPEN_ITEM_ROLES}
         role_of = {no: role for role, no in accounts.items()}
         totals: dict[tuple[str, str], int] = {}
         first: dict[tuple[str, str], tuple[date, int, Record]] = {}
-        for e in self._all_entries():
+        for e in self._all_entries(None, day):
             booking = date.fromisoformat(str(e["booking_date"]))
-            if booking > day:
-                continue
             for row in e.get("lines", []):
                 item = row.get("open_item_id")
                 role = role_of.get(str(row.get("account")))
@@ -467,7 +523,7 @@ class AccountingReportService:
                 )
             )
         return OpenItemsOut(
-            year=data.year,
+            year=int(fy["year"]),
             as_of=day.isoformat(),
             items=items,
             receivables_total=_m(receivables),
