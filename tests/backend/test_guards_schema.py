@@ -8,7 +8,7 @@ import pytest
 
 from permita38.core import database
 from permita38.core.repository import TABLES, ConstraintViolation
-from permita38.core.repository.dialect import DIALECTS, ROW_LOCAL_KINDS, SQLiteDialect
+from permita38.core.repository.dialect import DIALECTS, ROW_LOCAL_KINDS, TRANSITION_KINDS, SQLiteDialect
 from permita38.core.repository.schema import CHECKS, GUARD_KINDS, GUARDS
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service import integrity
@@ -60,7 +60,7 @@ def test_guard_declarations_are_well_formed():
     used = {g.kind for g in GUARDS}
     assert used <= set(GUARD_KINDS)  # no unknown kind
     # no dead kind: used by a real guard, or a row-local kind (exercised by test_guards_v2_kinds.py)
-    assert set(GUARD_KINDS) <= used | ROW_LOCAL_KINDS
+    assert set(GUARD_KINDS) <= used | ROW_LOCAL_KINDS | TRANSITION_KINDS  # transition kinds: test_guard_row_state.py
     # every row-local kind is covered by the check-db rule (it raises for a kind it does not know)
     samples = {case[0].kind: case[0] for case in V2_CASES.values()}
     for kind in ROW_LOCAL_KINDS:
@@ -103,6 +103,14 @@ def guard_suffixes(g, dialect: str = "sqlite") -> tuple[str, ...]:
             "postgresql": ("_fn", "_upd", "_del", "_trunc"),
             "mariadb": ("_upd", "_del"),
         }[dialect]
+    if g.kind == "frozen_when":
+        return {
+            "sqlite": ("_upd", "_del"),
+            "postgresql": ("_upd_fn", "_upd", "_del_fn", "_del"),
+            "mariadb": ("_upd", "_del"),
+        }[dialect]
+    if g.kind == "set_once":
+        return {"sqlite": ("_upd",), "postgresql": ("_upd_fn", "_upd"), "mariadb": ("_upd",)}[dialect]
     return ("_ins", "_upd", "_del") if g.kind == "reference" else ("_ins", "_upd")
 
 
