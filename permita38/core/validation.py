@@ -505,3 +505,23 @@ def check_period(start: str | None, end: str | None, what: str = "end") -> None:
     """Both are already valid ISO dates (or None)."""
     if start and end and end < start:
         raise ValueError(f"{what} must not be before the start date")
+
+
+# ---- accounting journal primitives (docs/specs/accounting.md 4, 8.1, 9.8, 11) ----
+AccountNo = Annotated[str, StringConstraints(pattern=r"^[0-9A-Za-z_.-]{1,20}$")]  # a chart account number
+RoleName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,59}$")]  # a stable role name of the chart
+TaxKeyName = Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]{0,29}$")]  # S19, VST, EU_SVC, RC_EU_SVC, NONE
+TaxKind = Literal["tax", "input", "base_only"]
+TaxRateText = Annotated[str, StringConstraints(pattern=r"^[0-9]{1,2}(\.[0-9]{1,2})?$")]
+EntryText = Annotated[str, StringConstraints(min_length=1, max_length=200), AfterValidator(_not_blank)]
+FiscalYearNo = Annotated[int, Field(ge=2000, le=2100, strict=True)]
+MonthNo = Annotated[int, Field(ge=1, le=12, strict=True)]
+QuarterNo = Annotated[int, Field(ge=1, le=4, strict=True)]
+Chart = Literal["skr03", "skr04"]
+IncomeBasis = Literal["eur", "accrual"]
+VatBasis = Literal["soll", "ist"]
+VatFrequency = Literal["month", "quarter", "none"]
+VatPeriodKind = Literal["month", "quarter"]
+Reference = Annotated[str, StringConstraints(max_length=100)]
+LongNote = Annotated[str, StringConstraints(max_length=500)]
+NonNegMoneyIn = money_in("0", "1000000000")
