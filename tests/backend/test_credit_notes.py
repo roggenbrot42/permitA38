@@ -131,7 +131,14 @@ def test_storno_copies_the_lines_and_credits_everything(repo, sales, cn):
     view = sales.invoice_view(repo.get("invoices", inv["id"]))
     assert (view["status"], view["credited_amount"], view["open_amount"]) == ("cancelled", "1725.00", "0.00")
     assert view["credit_notes"] == [
-        {"id": note["id"], "number": "RK-2026-0001", "date": "2026-03-10", "credit_kind": "storno", "gross": "1725.00"}
+        {
+            "id": note["id"],
+            "number": "RK-2026-0001",
+            "date": "2026-03-10",
+            "credit_kind": "storno",
+            "gross": "1725.00",
+            "reason": "Wrong customer",
+        }
     ]
 
 
@@ -345,6 +352,55 @@ def test_the_last_cent_of_a_group_takes_the_remaining_vat(repo, sales, cn):
 # ---------------------------------------------------------------- API
 def url(inv) -> str:
     return f"/api/invoices/{inv['id']}/credit-notes"
+
+
+CREDIT_SEQUENCES = {
+    "none": [],
+    "partials": [("credit", {"19": "100.00"}), ("credit", {"7": "50.50"}), ("credit", {"19": "0.01"})],
+    "write-off": [("write_off",)],
+    "partial then write-off": [("credit", {"19": "333.33"}), ("pay", "100.00"), ("write_off",)],
+    "write-off then reversal": [("pay", "200.00"), ("write_off",), ("pay", "300.00")],
+    "storno": [("credit", {"7": "500.00"}), ("storno",)],
+}
+
+
+@pytest.mark.parametrize("name", list(CREDIT_SEQUENCES))
+def test_api_creditable_is_exactly_what_the_service_accepts(boss_client, cust, name):
+    body = {
+        "customer_id": cust["id"],
+        "date": "2026-02-01",
+        "lines": [
+            {"description": "A", "qty": 1, "price": 1000, "vat": 19},
+            {"description": "B", "qty": 1, "price": 500, "vat": 7},
+        ],
+    }
+    inv = boss_client.post("/api/invoices", json=body).json()
+    assert boss_client.post(f"/api/invoices/{inv['id']}/finalize").status_code == 200
+    for step in CREDIT_SEQUENCES[name]:
+        if step[0] == "pay":
+            r = boss_client.post(f"/api/invoices/{inv['id']}/payments", json={"date": "2026-02-03", "amount": step[1]})
+        else:
+            kind = {"credit": "partial"}.get(step[0], step[0])
+            payload = {"credit_kind": kind, "date": "2026-02-05", "reason": "x"}
+            if kind == "partial":
+                payload["amounts"] = step[1]
+            r = boss_client.post(url(inv), json=payload)
+        assert r.status_code == 201, (step, r.text)
+    creditable = boss_client.get(f"/api/invoices/{inv['id']}").json()["creditable"]
+    assert set(creditable) == {"19", "7"}
+    for rate, left in creditable.items():
+        cents = int(Decimal(left) * 100)
+        more = f"{Decimal(cents + 1) / 100:.2f}"
+        r = boss_client.post(
+            url(inv), json={"credit_kind": "partial", "date": "2026-02-06", "reason": "x", "amounts": {rate: more}}
+        )
+        assert r.status_code == 422, (rate, more, r.text)
+        if cents:
+            r = boss_client.post(
+                url(inv), json={"credit_kind": "partial", "date": "2026-02-06", "reason": "x", "amounts": {rate: left}}
+            )
+            assert r.status_code == 201, (rate, left, r.text)
+            assert boss_client.get(f"/api/invoices/{inv['id']}").json()["creditable"][rate] == "0.00"
 
 
 def test_api_create_list_and_derived_invoice(boss_client, cust):
