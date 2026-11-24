@@ -441,6 +441,11 @@ class Settings(BaseModel):
     subcontractor_hint_hours_per_week: float = 30
     subcontractor_hint_weeks: int = 12
     customer_dominance_percent: float = 83
+    # DATEV export (docs/specs/datev-export.md); lenient: a stored legacy string must not break the response
+    datev_consultant_no: int | str | None = None
+    datev_client_no: int | str | None = None
+    datev_account_length: int | str = 4
+    datev_label: str = ""
 
 
 class TimelineAbsence(BaseModel):
@@ -1108,6 +1113,10 @@ class SettingsIn(v.StrictRecord):
     subcontractor_hint_hours_per_week: Annotated[float, Field(ge=1, le=168, allow_inf_nan=False)] = 30
     subcontractor_hint_weeks: Annotated[int, Field(ge=1, le=104)] = 12
     customer_dominance_percent: Annotated[float, Field(ge=1, le=100, allow_inf_nan=False)] = 83
+    datev_consultant_no: Annotated[int, Field(ge=1001, le=9999999)] | None = None
+    datev_client_no: Annotated[int, Field(ge=1, le=99999)] | None = None
+    datev_account_length: Annotated[int, Field(ge=4, le=8)] = 4
+    datev_label: Annotated[str, StringConstraints(max_length=30)] = ""
     team_timeline_visibility: TeamTimelineVisibilityIn = TeamTimelineVisibilityIn()
 
     @model_validator(mode="before")

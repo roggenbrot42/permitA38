@@ -500,6 +500,7 @@ IMPLEMENTED = {
     ("GET", "/api/accounting/reports/balance-sheet"),
     ("GET", "/api/accounting/reports/open-items"),
     ("GET", "/api/accounting/reports/ledger"),
+    ("GET", "/api/accounting/datev"),
     ("GET", "/api/vat-returns"),
     ("GET", "/api/vat-returns/preview"),
     ("POST", "/api/vat-returns"),

@@ -20,6 +20,7 @@ from permita38.core.service.busy import BusyTimeProvider
 from permita38.core.service.calendar.busy_provider import CalendarBusyProvider
 from permita38.core.service.calendar.service import CalendarService, ResourceFetcher
 from permita38.core.service.credit_notes import CreditNoteService
+from permita38.core.service.datev_export import DatevExportService
 from permita38.core.service.document_scans import DocumentScanService
 from permita38.core.service.fiscal_years import FiscalYearService
 from permita38.core.service.importer import ImportService
@@ -90,12 +91,14 @@ class Services:
     tax_bookings: TaxBookingService
     vat_returns: VatReturnService
     zm_reports: ZmReportService
+    datev_export: DatevExportService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
         """``calendar_fetcher`` exists for tests (a local fake server); production always uses the SSRF-safe fetcher."""
         store = create_repository(config)
         locks = LockService(store)
+        fiscal_years = FiscalYearService(store)
         records = RecordService(store)
         auth = AuthService(store, config.secret_key, config.token_ttl_hours)
         user_agent = f"permitA38/{__version__} (+https://github.com/roggenbrot42/permitA38)"
@@ -130,7 +133,7 @@ class Services:
             transfer=TransferService(store, config.data_dir / "tmp"),
             tokens=TokenService(store),
             audit=AuditService(store),
-            fiscal_years=FiscalYearService(store),
+            fiscal_years=fiscal_years,
             accounting_reports=AccountingReportService(store),
             journal=journal,
             locks=locks,
@@ -138,6 +141,7 @@ class Services:
             tax_bookings=TaxBookingService(store, journal),
             vat_returns=VatReturnService(store, locks),
             zm_reports=ZmReportService(store),
+            datev_export=DatevExportService(store, locks, fiscal_years),
             impressum=ImpressumService(
                 SafeFetcher(user_agent),
                 enabled=config.features.impressum_lookup,
