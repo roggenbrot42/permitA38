@@ -833,8 +833,8 @@ maintainer's sign-off of these specs (PR #124).
 | E22 | Init core: year, snapshots, replay, CLI | F | E12, E14, E15 |
 | E23 | Pre-start baseline, opening items, lazy baseline | F | E22 |
 | E24 | Review list + API, expense rules, legacy `cancelled`, legacy `paid` without date or before the invoice date | F | E23 |
-| E25 | Integrity: `check-db` chain/balance, sanity warnings, synced-folder warning | S | E6 |
-| E26 | Transfer export/import/restore with the new tables and the trigger exception (append_only, frozen_when and set_once are suspended only inside the importer's replace-restore transaction); integrity scans of the invoices collection distinguish `kind = credit_note` | F | E2 |
+| E25 | Integrity: `check-db` chain/balance, sanity warnings, synced-folder warning; integrity scans of the invoices collection distinguish `kind = credit_note` | S | E6 |
+| E26 | Transfer export/import/restore with the new tables and the trigger exception (append_only, frozen_when and set_once are suspended only inside the importer's replace-restore transaction) | F | E2 |
 | **M3 outputs** | | | |
 | O1 | UStVA computation (pure) | F | F2, E6 |
 | O2 | Return records: draft/finalise + lock, reopen, filed, delete, drill-down | F | O1, E7 |
