@@ -175,6 +175,13 @@ def test_legacy_ids_and_names_are_frozen():
     ]
 
 
+# docs/specs/accounting.md 8: these Document fields have a column on `invoices` only (credit notes, the frozen snapshot
+# and the treatment exist for invoices, never offers).
+INVOICE_ONLY_DOCUMENT_FIELDS = {"kind", "credit_kind", "corrects_id", "tax_treatment", "issued"}
+# computed on output from the journal tables (credit-notes-payments.md 2.3), never stored on either table
+DERIVED_DOCUMENT_FIELDS = {"paid_amount", "credited_amount", "open_amount", "payments", "credit_notes"}
+
+
 def test_models_are_covered_by_the_schema():
     """Adding a field to a model without a migration + schema column fails here."""
     pairs = {
@@ -185,6 +192,10 @@ def test_models_are_covered_by_the_schema():
     for coll, model in pairs.items():
         cols = set(TABLES[coll].column_names)
         missing = set(model.model_fields) - cols
+        if coll in ("offers", "invoices"):
+            missing -= DERIVED_DOCUMENT_FIELDS
+        if coll == "offers":
+            missing -= INVOICE_ONLY_DOCUMENT_FIELDS  # the shared response model; the offer request body drops them
         assert not missing, f"{coll}: model fields without a column: {sorted(missing)}"
     user_cols = set(TABLES["users"].column_names)
     assert set(models.UserOut.model_fields) - {"has_password", "permissions", "auth", "planning_warnings"} <= user_cols
