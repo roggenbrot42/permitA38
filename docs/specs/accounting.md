@@ -409,8 +409,8 @@ VAT line and may be reversed and reposted into the first open month (above).
 
 ### 9.5 Trips
 
-On trip finalise: D `travel_costs` (allowance + mileage, `income_date` = trip end date) / C `private_deposit` (owner)
-or `payables_employee` (a team member). No VAT. Reopen of a trip posts the reversal (same lock rule). Trip receipts
+On trip finalise: D `travel_costs` (allowance + mileage, `income_date` = trip end date) / C `private_deposit` (the traveller is the
+owner, i.e. a user with the role boss) or `payables_employee` (any other traveller, accountant included). No VAT. Reopen of a trip posts the reversal (same lock rule). Trip receipts
 are expenses and post as 9.4.
 
 ### 9.6 VAT payments, refunds, special prepayment
@@ -439,7 +439,9 @@ The Money page's reserve keeps working from `core/tax.py`; it additionally shows
 ### 9.8 Manual entries
 
 Reversals of trips, manual entries and template entries follow 7.8: booked on `max(original booking date, first open
-day)`, with the original `income_date` while that year is open and the booking date once it is closed.
+day)`, with the original `income_date` while that year is open and the booking date once it is closed. A reversal
+line whose original `vat_date` now lies in a locked month gets `vat_date` = the reversal's booking date (a reversal
+is a correction, not manual drift).
 
 Free, balanced entries on any account of the year's chart (`accounts` list), boss and accountant. Rules: at least two
 lines; text required; each line's account must be in the chart; a line with a `tax_key` needs `tax_kind`, `vat_date`
@@ -607,7 +609,7 @@ extended. API tokens: read scopes follow the existing token rules; no write to `
 | `GET/POST /api/accounting/years`, `GET /api/accounting/years/{year}` | fiscal years |
 | `POST /api/accounting/init` (boss) | initialisation (body: section 16 step 1, review resolutions); `GET /api/accounting/init/review` |
 | `GET /api/accounting/journal?from&to&account&tax_key&source` | entries with lines (paged) |
-| `POST /api/accounting/entries` | manual entry; `POST /api/accounting/entries/{id}/reverse` |
+| `POST /api/accounting/entries` | manual entry; `POST /api/accounting/entries/{id}/reverse` (manual entries only; automatic entries are corrected through their source document); `GET /api/accounting/entry-templates` (the 9.8 templates with their preset lines) |
 | `GET /api/accounting/accounts?year` | the chart's account list |
 | `GET /api/accounting/reports/{trial-balance,eur,pnl,balance-sheet,open-items,ledger}` | reports |
 | `GET /api/accounting/locks`, `POST /api/accounting/locks` `{year, month}` | period lock |
