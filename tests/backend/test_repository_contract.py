@@ -621,3 +621,25 @@ def test_guards_are_back_after_an_exception_and_a_rollback(repo):
         with pytest.raises(ConstraintViolation):
             repo.save("entries", {"date": "5.3.2026"})
     assert _trigger_names(repo) == before
+
+
+def _fiscal_year(year: int) -> dict:
+    return {
+        "year": year, "chart": "skr03", "income_basis": "eur", "vat_basis": "soll", "vat_frequency": "month",
+        "dauerfrist": False, "small_business": True, "vat_regular_from": f"{year}-07-01", "rules_version": "r1",
+        "opened_at": 1, "opened_by": "u1x000",
+    }  # fmt: skip
+
+
+def test_fiscal_years_get_list_find_and_unique_year(repo):
+    a = repo.save("fiscal_years", _fiscal_year(2027))
+    b = repo.save("fiscal_years", _fiscal_year(2026))
+    assert repo.get("fiscal_years", a["id"]) == a
+    assert a["dauerfrist"] is False and a["small_business"] is True and a["year"] == 2027
+    assert {r["year"] for r in repo.list("fiscal_years")} == {2026, 2027}
+    assert repo.find("fiscal_years", year=2026) == [b]
+    assert repo.find("fiscal_years", year=2030) == []
+    with pytest.raises(integrity_error(repo)):  # unique index idx_fiscal_years_year
+        repo.save("fiscal_years", _fiscal_year(2026))
+    assert repo.save("fiscal_years", {**b, "vat_regular_from": None})["id"] == b["id"]  # update by id keeps the row
+    assert len(repo.list("fiscal_years")) == 2
