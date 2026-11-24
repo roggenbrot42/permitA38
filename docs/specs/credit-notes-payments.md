@@ -132,7 +132,8 @@ date rules.
 * Expense `reverse_charge` (old field): output derived (`true` for the two reverse-charge treatments); input mapped
   as [`accounting.md`](accounting.md) section 16 step 10. For reverse-charge treatments the stored `vat` is the
   self-assessed tax, computed by the server from `net` and `vat_rate` (a client-sent `vat` is ignored with a
-  warning).
+  warning); for a reverse-charge treatment a missing or 0 `vat_rate` means the regular rate of the year (19 %), because
+  old clients and old records stored 0 there. For `no_input_vat` the stored `vat` is 0 and `net` = gross.
 * Expense `service_date` (optional date, not after `date` + 366 days).
 
 ## 6. Clients to update in the same milestone
