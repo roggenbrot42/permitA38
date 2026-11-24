@@ -814,9 +814,9 @@ maintainer's sign-off of these specs (PR #124).
 | E8 | Issue snapshot, `doc_totals` from snapshot, issue posting | F | E6 |
 | E9 | Freeze, legacy `paid` translation, derived fields, legacy read rule + materialisation | F | E8 |
 | E10 | Payments, refund, reversal, overpayment | F | E9, F6 |
-| E11 | Credit notes storno/partial, numbering settings + page; `procurement.hints` and `finance()` skip or net credit-note rows in every basis; remove the vat-returns/zm `SWEEP_ID_SKIP` entries once those routes are live | F | E10 |
+| E11 | Credit notes storno/partial, numbering settings + page; `procurement.hints` and `finance()` skip or net credit-note rows in every basis; remove the vat-returns/zm `SWEEP_ID_SKIP` entries once those routes are live; E11b: `credit_note` doc type in numbering.py (drop the E11a subclass), settings fields + numbering page, every total/list/export distinguishes `kind = credit_note` | F | E10 |
 | E12 | Write-off, reversal record, settle-discount | F | E11, F7 |
-| E13 | Credit-note PDF | F | E11 |
+| E13 | Credit-note PDF (prints the snapshot VAT per rate, never recomputed from the lines) | F | E11 |
 | E14 | Expense treatment mapping, `service_date`, bill/pay posting, repost/409; expense `net`/`vat` must be whole cents (today they accept sub-cent values, unlike line gross and trip amounts) | F | E7, F8 |
 | E15 | Trip posting | F | E7, F9 |
 | E16 | Manual entries, reverse, accounts API, templates; JournalService refuses an accrual line whose `income_date` lies outside the entry's fiscal year (section 14.5) | F | E7 |
