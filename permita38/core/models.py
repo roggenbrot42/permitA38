@@ -2245,6 +2245,43 @@ class VatBox(BaseModel):
     flag: int | None = None  # Kz 10 (amended return): the marker 1
 
 
+class VatPayment(BaseModel):
+    """One payment or refund of Kz 83 read from the journal (accounting.md 9.6); reversed ones are listed, flagged."""
+
+    model_config = ConfigDict(extra="allow")
+    entry_id: str | None = None
+    event_key: str | None = None
+    date: str | None = None
+    kind: Literal["payment", "refund"] = "payment"
+    amount: v.Money = 0
+    reversed: bool = False
+
+
+class SpecialPrepaymentPayment(BaseModel):
+    """The booked payment of a Sondervorauszahlung."""
+
+    model_config = ConfigDict(extra="allow")
+    entry_key: str | None = None
+    paid_on: str | None = None
+    amount: v.Money | None = None
+    reversed: bool = False
+
+
+class SpecialPrepaymentOut(BaseModel):
+    """Sondervorauszahlung of a year: proposal, entered amount and the booked payment (docs/specs/ustva.md)."""
+
+    model_config = ConfigDict(extra="allow")
+    year: int
+    dauerfrist: bool = False
+    proposal: v.Money = 0
+    months: int | None = None
+    previous_kz83: v.Money = 0
+    previous_kz39: v.Money = 0
+    amount: v.Money | None = None
+    due_date: str | None = None
+    payment: SpecialPrepaymentPayment | None = None
+
+
 class VatReturn(Record):
     year: int
     period_kind: str | None = None
@@ -2272,6 +2309,10 @@ class VatReturn(Record):
     external: bool | None = None
     finalised_at: int | None = None
     finalised_by: str | None = None
+    payments: list[VatPayment] | None = None
+    paid: v.Money | None = None  # net paid so far (payments minus refunds, reversed ones excluded)
+    open: v.Money | None = None  # Kz 83 minus paid
+    payment_state: Literal["none", "open", "paid", "overpaid"] | None = None
 
     @model_validator(mode="before")
     @classmethod

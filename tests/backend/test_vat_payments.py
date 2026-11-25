@@ -10,6 +10,7 @@ import pytest
 from permita38.core.errors import ServiceError
 from permita38.core.service.special_prepayment import SpecialPrepaymentService
 from permita38.core.service.tax_bookings import TaxBookingService
+from permita38.core.service.vat_returns import VatReturnService
 from permita38.core.settings import ACCOUNTING_START_KEY
 
 from .test_vat_returns import (  # noqa: F401  (fixtures)
@@ -38,6 +39,8 @@ def books(repo):
 
 @pytest.fixture
 def sp(repo, books):
+    row = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**row, "dauerfrist": True})
     return SpecialPrepaymentService(repo, books)
 
 
@@ -63,8 +66,8 @@ def credits(repo) -> list[tuple[str, int]]:
 def previous_year(repo, kz83_sum: int, kz39: int, months: int) -> None:
     """Final monthly returns of 2025 whose Kz 83 add up to ``kz83_sum``; Kz 39 on the last one."""
     repo.save("fiscal_years", fiscal_year(2025))
-    for no in range(1, months + 1):
-        last = no == months
+    for no in range(13 - months, 13):  # the business starts in month 13 - months
+        last = no == 12
         repo.save(
             "vat_returns",
             {
@@ -96,7 +99,6 @@ def test_proposal_without_returns_is_zero_and_amended_returns_replace_originals(
 
 
 def test_put_stores_the_value_and_the_payment_once(sp, repo, books):
-    repo.save("fiscal_years", fiscal_year(2027))
     sp2 = sp
     got = sp2.put(2026, 600.0, None, USER)
     assert got["amount"] == "600.00" and got["payment"] is None
@@ -131,11 +133,11 @@ def test_u10_december_credit_and_reopen(repo, books, sp, journal):
     fin = svc.finalize(d["id"], USER, confirm_gap=True)
     assert fin["result_cents"] == U10["boxes"]["83"] == 0 and fin["special_prepayment_credit_cents"] == 60000
     assert fin["boxes"]["81"]["tax"] == "997.69" and fin["boxes"]["86"]["tax"] == "2.31"
-    assert credits(repo) == [(f"vat:{d['id']}:credit", 60000)]
+    assert credits(repo) == [(f"vat:{d['id']}:credit:r1", 60000)]
     # reopen: the credit is reversed, Kz 39 shows again in the draft; finalising again books it once more
     again = svc.reopen(d["id"], USER)
     assert again["special_prepayment_credit_cents"] == 60000
-    assert credits(repo) == [(f"vat:{d['id']}:credit", 60000), (f"vat:{d['id']}:credit:rev", -60000)]
+    assert credits(repo) == [(f"vat:{d['id']}:credit:r1", 60000), (f"vat:{d['id']}:credit:r1:rev", -60000)]
     svc.finalize(d["id"], USER, confirm_gap=True)
     assert sum(a for _k, a in credits(repo)) == 60000 and len(credits(repo)) == 3
     svc.reopen(d["id"], USER)
@@ -155,6 +157,8 @@ def test_u10_december_variant_is_a_refund_of_150(repo, books, sp, journal):
 
 def test_no_credit_without_dauerfrist_in_other_periods_or_amended(repo, books, sp, journal):
     sp.put(2026, 600.0, None, USER)
+    row = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**row, "dauerfrist": False})
     svc = make_service(repo, today=LATE)  # no Dauerfrist
     assert svc.preview(2026, "month", 12)["special_prepayment_credit_cents"] == 0
     svc = december_service(repo, books)
@@ -164,7 +168,7 @@ def test_no_credit_without_dauerfrist_in_other_periods_or_amended(repo, books, s
     am = svc.create_draft(2026, "month", 12, amends_id=d["id"])
     assert am["special_prepayment_credit_cents"] == 60000
     svc.finalize(am["id"], USER)
-    assert credits(repo) == [(f"vat:{d['id']}:credit", 60000)]  # the amended return does not book it again
+    assert credits(repo) == [(f"vat:{d['id']}:credit:r1", 60000)]  # the amended return does not book it again
 
 
 # ------------------------------------------------------------------ payments
@@ -240,6 +244,9 @@ def test_api_payment_special_prepayment_and_rights(clients, app: Any, synthetic_
 
     assert emp.get("/api/vat/special-prepayment?year=2024").status_code == 403
     assert emp.put("/api/vat/special-prepayment", json={"year": 2024, "amount": "1.00"}).status_code == 403
+    store = app.state.services.store
+    assert boss.put("/api/vat/special-prepayment", json={"year": 2024, "amount": "1.00"}).status_code == 422
+    store.save("fiscal_years", {**store.find("fiscal_years", year=2024)[0], "dauerfrist": True})
     got = acc.get("/api/vat/special-prepayment?year=2024").json()
     assert got["proposal"] == "0.00" and got["amount"] is None
     put = boss.put("/api/vat/special-prepayment", json={"year": 2024, "amount": "600.00", "paid_on": "2024-02-09"})
@@ -247,3 +254,108 @@ def test_api_payment_special_prepayment_and_rights(clients, app: Any, synthetic_
     assert put.json()["amount"] == "600.00" and put.json()["payment"]["paid_on"] == "2024-02-09"
     assert boss.get("/api/vat/special-prepayment?year=2024").json()["amount"] == "600.00"
     assert boss.get("/api/vat/special-prepayment?year=2035").status_code == 422
+
+
+# ------------------------------------------------------------------ review fixes: months, applicability, keys
+def draft_row(repo, year: int, kind: str, no: int, status: str = "draft") -> None:
+    repo.save(
+        "vat_returns",
+        {
+            "year": year, "period_kind": kind, "period_no": no, "from_date": f"{year}-{no:02d}-01",
+            "to_date": f"{year}-{no:02d}-28", "due_date": f"{year}-{no:02d}-28", "status": status,
+            "amends_key": "", "boxes": {}, "source_lines": [],
+        },
+    )  # fmt: skip
+
+
+def test_second_credit_after_reopen_has_key_r2(repo, books, sp, journal):
+    svc = december_service(repo, books)
+    sp.put(2026, 600.0, None, USER)
+    post_case(journal, U10, date(2026, 12, 15))
+    d = svc.create_draft(2026, "month", 12)
+    svc.finalize(d["id"], USER, confirm_gap=True)
+    svc.reopen(d["id"], USER)
+    svc.finalize(d["id"], USER, confirm_gap=True)
+    keys = [k for k, _a in credits(repo)]
+    assert keys == [f"vat:{d['id']}:credit:r1", f"vat:{d['id']}:credit:r1:rev", f"vat:{d['id']}:credit:r2"]
+
+
+def test_months_are_capped_at_12_and_a_draft_december_counts(sp, repo):
+    repo.save("fiscal_years", fiscal_year(2025))
+    draft_row(repo, 2025, "month", 1)
+    assert sp.get(2026)["months"] == 12
+    repo.delete("vat_returns", repo.find("vat_returns", year=2025)[0]["id"])
+    draft_row(repo, 2025, "month", 12)  # only a draft December: one month with a business
+    got = sp.get(2026)
+    assert got["months"] == 1 and got["proposal"] == "0.00"
+    draft_row(repo, 2025, "quarter", 3)  # Q3 starts in July: 6 months
+    repo.delete("vat_returns", repo.find("vat_returns", year=2025, period_no=12)[0]["id"])
+    assert sp.get(2026)["months"] == 6
+
+
+def test_months_start_at_the_first_journal_entry(sp, repo, journal):
+    repo.save("fiscal_years", fiscal_year(2025))
+    post_case(journal, CASES["U1"], date(2025, 10, 15))
+    assert sp.get(2026)["months"] == 3
+
+
+def test_small_business_year_gets_no_credit(repo, books, sp, journal):
+    december_service(repo, books)
+    sp.put(2026, 600.0, None, USER)
+    row = repo.find("fiscal_years", year=2026)[0]
+    assert VatReturnService._special_credit(row, "month", 12) == 60000
+    assert VatReturnService._special_credit({**row, "small_business": True}, "month", 12) == 0
+
+
+def test_quarterly_dauerfrist_has_no_credit_and_put_is_422(repo, books, sp):
+    row = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**row, "dauerfrist": True, "vat_frequency": "quarter", "special_prepayment": "600.00"})
+    svc = make_service(repo, today=LATE)
+    assert svc.preview(2026, "quarter", 4)["special_prepayment_credit_cents"] == 0
+    with pytest.raises(ServiceError) as err:
+        sp.put(2026, 600.0, None, USER)
+    assert err.value.status == 422
+    assert sp.get(2026)["proposal"] == "0.00"
+
+
+def test_amount_change_after_payment_is_409_until_reversed(sp, repo, books):
+    sp.put(2026, 600.0, "2026-02-10", USER)
+    with pytest.raises(ServiceError) as err:
+        sp.put(2026, 500.0, None, USER)
+    assert err.value.status == 409
+    assert sp.put(2026, 600.0, None, USER)["amount"] == "600.00"  # same amount is fine
+    entry = [e for e in repo.list_journal_entries(year=2026, limit=100) if e["event"] == "special_prepayment"][0]
+    from permita38.core.service.manual_entries import ManualEntryService
+
+    ManualEntryService(repo, books.journal).reverse(entry["id"], None, None, USER)
+    got = sp.put(2026, 500.0, "2026-02-12", USER)
+    assert got["amount"] == "500.00" and got["payment"]["reversed"] is False
+
+
+def test_closed_year_put_is_409(sp, repo):
+    row = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**row, "closed_at": 5, "closed_by": "u1x000"})
+    with pytest.raises(ServiceError) as err:
+        sp.put(2026, 600.0, None, USER)
+    assert err.value.status == 409
+
+
+def test_a_non_decimal_stored_value_is_unset_not_a_500(sp, repo, books):
+    row = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**row, "special_prepayment": "abc"})
+    assert sp.get(2026)["amount"] is None
+    svc = december_service(repo, books)
+    assert svc.preview(2026, "month", 12)["special_prepayment_credit_cents"] == 0
+
+
+def test_response_schemas_carry_the_money_fields(app: Any):
+    schemas = app.openapi()["components"]["schemas"]
+    sp_out = schemas["SpecialPrepaymentOut"]["properties"]
+    for name in ("proposal", "previous_kz83", "previous_kz39", "amount"):
+        assert "decimal" in str(sp_out[name]), name
+    assert "decimal" in str(schemas["SpecialPrepaymentPayment"]["properties"]["amount"])
+    ret = schemas["VatReturn"]["properties"]
+    for name in ("paid", "open"):
+        assert "decimal" in str(ret[name]), name
+    assert "decimal" in str(schemas["VatPayment"]["properties"]["amount"])
+    assert "VatPayment" in str(ret["payments"])

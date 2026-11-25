@@ -147,14 +147,19 @@ def export_return_json(rid: str, user: Read, services: ServicesDep):
 
 
 # ------------------------------------------------------------------ special prepayment (Dauerfristverlaengerung)
-@special.get("/special-prepayment", name="get_special_prepayment")
+@special.get("/special-prepayment", name="get_special_prepayment", response_model=models.SpecialPrepaymentOut)
 def get_special_prepayment(year: Year, user: Read, services: ServicesDep):
-    return services.special_prepayment.get(year)
+    return models.SpecialPrepaymentOut(**services.special_prepayment.get(year))
 
 
-@special.put("/special-prepayment", dependencies=[SessionOnly], name="set_special_prepayment")
+@special.put(
+    "/special-prepayment",
+    dependencies=[SessionOnly],
+    name="set_special_prepayment",
+    response_model=models.SpecialPrepaymentOut,
+)
 def put_special_prepayment(body: models.SpecialPrepaymentIn, user: Write, services: ServicesDep):
-    return services.special_prepayment.put(body.year, body.amount, body.paid_on, user)
+    return models.SpecialPrepaymentOut(**services.special_prepayment.put(body.year, body.amount, body.paid_on, user))
 
 
 # ------------------------------------------------------------------ ZM

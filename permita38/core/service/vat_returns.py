@@ -275,10 +275,10 @@ class VatReturnService:
 
     @staticmethod
     def _special_credit(fy: Record, kind: str, no: int) -> int:
-        """Kz 39: the year's stored special prepayment, only in the December (monthly) or Q4 (quarterly) return of a
-        year with Dauerfrist (never for a small business)."""
-        last = (kind == "month" and no == 12) or (kind == "quarter" and no == 4)
-        if not last or not fy.get("dauerfrist") or fy.get("small_business"):
+        """Kz 39: the year's stored special prepayment, only in the December return of a monthly filer with
+        Dauerfrist (quarterly filers pay none; never for a small business)."""
+        last = kind == "month" and no == 12
+        if not last or not fy.get("dauerfrist") or fy.get("small_business") or fy.get("vat_frequency") != "month":
             return 0
         return stored_cents(fy)
 
@@ -290,19 +290,17 @@ class VatReturnService:
             return int(orig.get("special_prepayment_credit_cents") or 0) if orig else 0
         return self._special_credit(fy, str(row["period_kind"]), int(row["period_no"]))
 
-    def _credit_slot(self, rid: str) -> tuple[str, bool]:
-        """The id the Kz 39 credit entry (``vat:<id>:credit``) of this return is booked under and whether that entry
-        is live. A reopen reverses the entry; finalising again needs a fresh key, so the id gets a generation suffix
-        (``<rid>``, ``<rid>-g2``, ...)."""
-        cand, n = rid, 1
+    def _credit_slot(self, rid: str) -> tuple[int, bool]:
+        """The revision ``n`` of the Kz 39 credit entry (``vat:<id>:credit:r<n>``) of this return and whether that entry
+        is live. A reopen reverses the entry; finalising again needs a fresh key, so the next revision is used."""
+        n = 1
         while True:
-            key = f"vat:{cand}:credit"
+            key = f"vat:{rid}:credit:r{n}"
             if self.store.get_journal_entry_by_event_key(key) is None:
-                return cand, False
+                return n, False
             if self.store.get_journal_entry_by_event_key(key + ":rev") is None:
-                return cand, True
+                return n, True
             n += 1
-            cand = f"{rid}-g{n}"
 
     @staticmethod
     def _boxes(result: ustva.UstvaResult, amended: bool) -> dict[str, dict[str, Any]]:
@@ -624,7 +622,9 @@ class VatReturnService:
                 },
             )
             if credit and orig is None:  # an amended return keeps the credit of the original, booked already
-                self.bookings.special_prepayment_credit(int(row["year"]), self._credit_slot(rid)[0], credit, user)
+                self.bookings.special_prepayment_credit(
+                    int(row["year"]), rid, credit, user, revision=self._credit_slot(rid)[0]
+                )
             self.locks.lock_up_to(hi.year, hi.month, f"vat_return:{rid}", str(user.get("id")))
             if orig is not None:
                 self.store.save(COLLECTION, {**orig, "replaced_by": rid})
@@ -639,7 +639,7 @@ class VatReturnService:
                 raise ServiceError(409, "A filed return cannot be reopened; file an amended return")
             slot, live = self._credit_slot(rid)
             if live and not row.get("amends_id"):
-                self.bookings.special_prepayment_credit_reverse(int(row["year"]), slot, user or {})
+                self.bookings.special_prepayment_credit_reverse(int(row["year"]), rid, user or {}, revision=slot)
             saved = self.store.save(
                 COLLECTION,
                 {
