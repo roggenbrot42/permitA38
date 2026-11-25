@@ -38,12 +38,17 @@ DOCUMENT_COLUMNS = {  # the columns and tables of migration accounting_documents
 DOCUMENT_TABLES = ("vat_returns", "zm_reports")
 
 
+def is_closing_guard(g) -> bool:
+    return g.table == "fiscal_years" and any(c in ("closing_hash", "closing_entry_no") for c in g.columns)
+
+
 def is_row_state_guard(g) -> bool:
-    return g.kind in TRANSITION_KINDS  # attached by migration accounting_row_state only
+    # attached by migration accounting_row_state only (the closing_* set-once guards: migration year_closing_hash)
+    return g.kind in TRANSITION_KINDS and not is_closing_guard(g)
 
 
 def is_document_guard(g) -> bool:
-    return not is_row_state_guard(g) and (
+    return not is_row_state_guard(g) and not is_closing_guard(g) and (
         g.table in DOCUMENT_TABLES or any(c in DOCUMENT_COLUMNS.get(g.table, ()) for c in g.columns)
     )
 
@@ -144,6 +149,12 @@ def test_sqlite_migration_file_is_exactly_the_generated_statements(tmp_path):
     acc = next(m for m in CHAIN if m.name == "accounting_journal").sql()
     docs = next(m for m in CHAIN if m.name == "accounting_documents").sql()
     rows = next(m for m in CHAIN if m.name == "accounting_row_state").sql()
+    closing = next(m for m in CHAIN if m.name == "year_closing_hash").sql()
+    for g in GUARDS:  # the closing_hash / closing_entry_no guards live in migration year_closing_hash only
+        if is_closing_guard(g):
+            for s in d.guard_sql(g):
+                assert s in closing and s not in rows and s not in docs and s not in acc and s not in v1
+    assert closing.count("CREATE TRIGGER") == sum(len(d.guard_sql(g)) for g in GUARDS if is_closing_guard(g))
     for g in GUARDS:  # the row-state guards live in migration accounting_row_state only
         if is_row_state_guard(g):
             for s in d.guard_sql(g):
@@ -158,11 +169,13 @@ def test_sqlite_migration_file_is_exactly_the_generated_statements(tmp_path):
                 assert s in docs and s not in acc and s not in v1 and s not in refs
     assert docs.count("CREATE TRIGGER") == sum(len(d.guard_sql(g)) for g in GUARDS if is_document_guard(g))
     for g in GUARDS:  # the accounting guards (all kinds) live in migration accounting_journal only
-        if g.table in ACCOUNTING_TABLES and not is_row_state_guard(g):
+        if g.table in ACCOUNTING_TABLES and not is_row_state_guard(g) and not is_closing_guard(g):
             for s in d.guard_sql(g):
                 assert s in acc and s not in v1 and s not in refs
     assert acc.count("CREATE TRIGGER") == sum(
-        len(d.guard_sql(g)) for g in GUARDS if g.table in ACCOUNTING_TABLES and not is_row_state_guard(g)
+        len(d.guard_sql(g))
+        for g in GUARDS
+        if g.table in ACCOUNTING_TABLES and not is_row_state_guard(g) and not is_closing_guard(g)
     )
     v1_statements = [s for g in old if g.kind != "reference" for s in d.guard_sql(g)]
     ref_statements = [s for g in old if g.kind == "reference" for s in d.guard_sql(g)]
@@ -185,7 +198,12 @@ def test_native_dialects_cover_every_guard(dialect):
     acc_sql = next(m for m in migrations if m.name == "accounting_journal").sql()
     doc_sql = next(m for m in migrations if m.name == "accounting_documents").sql()
     row_sql = next(m for m in migrations if m.name == "accounting_row_state").sql()
+    closing_sql = next(m for m in migrations if m.name == "year_closing_hash").sql()
     for g in GUARDS:
+        if is_closing_guard(g):
+            for s in d.guard_sql(g):
+                assert s in closing_sql and s not in row_sql and s not in doc_sql and s not in acc_sql
+            continue
         if is_row_state_guard(g):
             for s in d.guard_sql(g):
                 assert s in row_sql and s not in doc_sql and s not in acc_sql and s not in sql and s not in ref_sql
