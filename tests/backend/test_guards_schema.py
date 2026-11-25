@@ -48,10 +48,8 @@ def is_row_state_guard(g) -> bool:
 
 
 def is_document_guard(g) -> bool:
-    return (
-        not is_row_state_guard(g)
-        and not is_closing_guard(g)
-        and (g.table in DOCUMENT_TABLES or any(c in DOCUMENT_COLUMNS.get(g.table, ()) for c in g.columns))
+    return not is_row_state_guard(g) and not is_closing_guard(g) and (
+        g.table in DOCUMENT_TABLES or any(c in DOCUMENT_COLUMNS.get(g.table, ()) for c in g.columns)
     )
 
 
