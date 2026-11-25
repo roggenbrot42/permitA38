@@ -20,7 +20,7 @@ def test_add_line_on_new_document(make_page, live_server, api):
     assert page.locator('[data-l="0"][data-k="description"]').input_value() == "first line"
 
 
-def test_mark_paid_sets_paid_date(make_page, live_server, api):
+def test_record_payment_marks_paid_with_date(make_page, live_server, api):
     from datetime import date
 
     api.setup_boss()
@@ -30,10 +30,14 @@ def test_mark_paid_sets_paid_date(make_page, live_server, api):
     page, _ = make_page(token=api.http.headers["Authorization"].split()[1])
     page.goto(live_server.url + f"/#/doc/invoices/{inv['id']}")
     page.wait_for_selector("#d_totals")
-    page.select_option("select[data-change=docStatus]", "paid")
+    # an issued invoice is frozen: the status menu has no "paid" any more, the payments panel records it
+    assert page.locator("select[data-change=docStatus] option[value=paid]").count() == 0
+    page.click("[data-a=payRecord]")
+    page.click("#m-save")
+    page.wait_for_selector("#modal-root:empty", state="attached")
     page.wait_for_timeout(800)
     rec = api.get(f"/invoices/{inv['id']}")
-    assert rec["status"] == "paid"
+    assert rec["status"] == "paid" and rec["open_amount"] == "0.00"
     assert rec.get("paid_date") == date.today().isoformat()
 
 

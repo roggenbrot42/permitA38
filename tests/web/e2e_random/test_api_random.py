@@ -13,7 +13,7 @@ import string
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 import httpx
 import pytest
@@ -75,6 +75,7 @@ class ApiSim:
         self.model: dict[str, dict[str, dict]] = {c: {} for c in COLLS}
         self.docs: dict[str, dict[str, dict]] = {"offers": {}, "invoices": {}}
         self.numbers = {"offers": 0, "invoices": 0}
+        self.credit_notes = 0  # numbered credit notes (storno, partial); they are documents in /invoices too
         self.timer_running = False
         self.log: list[str] = []
         self.n = 0
@@ -256,7 +257,10 @@ class ApiSim:
             }
             for i in range(r.randint(1, 4))
         ]
-        return {"customer_id": cid, "title": f"{kind} {self.n}", "lines": lines, "status": "paid", "number": "HACK-1"}
+        body = {"customer_id": cid, "title": f"{kind} {self.n}", "lines": lines, "status": "paid", "number": "HACK-1"}
+        if kind == "invoices" and r.random() < 0.5:
+            body["tax_treatment"] = "standard"  # the select on a draft; the reserved treatments are refused (below)
+        return body
 
     def op_doc_create(self):
         kind = self.rng.choice(["offers", "invoices"])
@@ -299,23 +303,107 @@ class ApiSim:
         self.docs[kind][rid].update(status="sent", number=d["number"])
         pdf = self.boss.http.get(f"/{kind}/{rid}/pdf")
         assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF") and "pdf" in pdf.headers["content-type"]
-        # editing never changes the number; the client cannot rewrite it
         number = d["number"]
-        d["number"], d["title"] = "HACK-2", "geändert"
-        r = self.boss.http.put(f"/{kind}/{rid}", json=d)
-        assert r.status_code == 200 and r.json()["number"] == number
+        if kind == "offers":
+            # editing never changes the number; the client cannot rewrite it
+            d["number"], d["title"] = "HACK-2", "geändert"
+            r = self.boss.http.put(f"/{kind}/{rid}", json=d)
+            assert r.status_code == 200 and r.json()["number"] == number
+        else:
+            self.check_frozen_invoice(rid, d)
         self.say(f"{kind} finalize {rid} -> {number}")
 
+    def check_frozen_invoice(self, rid, d):
+        """An issued invoice is frozen (credit-notes-payments.md 2.1): frozen fields and delete are 409, the allowed
+        fields (due date, notes, reference, status label) still change, a whole-record PUT of unchanged values is fine."""
+        number = d["number"]
+        r = self.boss.http.put(f"/invoices/{rid}", json={**d, "number": "HACK-2", "title": "geändert"})
+        assert r.status_code == 409, ("frozen title", r.status_code, r.text)
+        r = self.boss.http.put(f"/invoices/{rid}", json={**d, "status": "cancelled"})
+        assert r.status_code == 409, ("cancelled is derived", r.status_code, r.text)
+        assert self.boss.http.delete(f"/invoices/{rid}").status_code == 409, "an issued invoice cannot be deleted"
+        r = self.boss.http.put(f"/invoices/{rid}", json=d)
+        assert r.status_code == 200 and r.json()["number"] == number, (r.status_code, r.text)
+        r = self.boss.http.put(f"/invoices/{rid}", json={**d, "notes": f"Notiz {self.n}", "reference": f"PO-{self.n}"})
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["number"] == number and got["notes"] == f"Notiz {self.n}" and got["title"] == d["title"], got
+        self.n += 1
+        for k in ("paid_amount", "open_amount"):
+            assert isinstance(got[k], str), (k, got[k])  # money as decimal strings
+
     def op_doc_pay(self):
+        """Paid comes from recording payments (credit-notes-payments.md 3), never from a status select."""
         sent = [i for i, d in self.docs["invoices"].items() if d["status"] == "sent"]
         if not sent:
             return
         rid = self.rng.choice(sent)
         inv = self.boss.get(f"/invoices/{rid}")
-        inv["status"], inv["paid_date"] = "paid", self.today.isoformat()
-        assert self.boss.http.put(f"/invoices/{rid}", json=inv).status_code == 200
+        open_amt = Decimal(inv["open_amount"])
+        assert inv["status"] == "sent" and open_amt > 0 and inv["paid_amount"] == "0.00", inv
+        today = self.today.isoformat()
+        if open_amt >= Decimal("0.02") and self.rng.random() < 0.3:  # a part first: the invoice stays open
+            part = (open_amt / 2).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            r = self.boss.http.post(f"/invoices/{rid}/payments", json={"date": today, "amount": str(part)})
+            assert r.status_code == 201, r.text
+            mid = self.boss.get(f"/invoices/{rid}")
+            assert mid["status"] == "sent" and mid["paid_amount"] == money(part), mid
+            assert Decimal(mid["open_amount"]) == open_amt - part, mid
+            open_amt -= part
+        r = self.boss.http.post(
+            f"/invoices/{rid}/payments", json={"date": today, "amount": money_in(self.rng, str(open_amt))}
+        )
+        assert r.status_code == 201, r.text
+        done = self.boss.get(f"/invoices/{rid}")
+        assert done["status"] == "paid" and done["open_amount"] == "0.00" and done["paid_date"] == today, done
+        assert self.boss.http.delete(f"/invoices/{rid}").status_code == 409
         self.docs["invoices"][rid]["status"] = "paid"
-        self.say(f"invoice {rid} paid")
+        self.say(f"invoice {rid} paid by payment")
+        self.check_finance()
+
+    def op_doc_credit(self):
+        """Credit notes on an unpaid issued invoice: storno, partial or write-off (credit-notes-payments.md 4)."""
+        sent = [i for i, d in self.docs["invoices"].items() if d["status"] == "sent"]
+        if not sent:
+            return
+        rid = self.rng.choice(sent)
+        inv = self.boss.get(f"/invoices/{rid}")
+        today = self.today.isoformat()
+        url = f"/invoices/{rid}/credit-notes"
+        # Finance note: /api/finance (calc.py) nets every credit note against revenue on its date, so a partial credit
+        # (or write-off) of a still unpaid invoice shows negative revenue under the default cash (EÜR) basis. Reported
+        # as an open question; here a partial credit is followed by the payment of the rest in the same step, and
+        # write-offs are not exercised.
+        kind = self.rng.choice(["storno", "partial"])
+        if kind == "partial":
+            rate, grp = next(iter(inv["issued"]["rates"].items()))
+            half = (Decimal(grp["net"]) / 2).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            if half <= 0:
+                return
+            body = {"credit_kind": "partial", "date": today, "reason": "Teilgutschrift", "amounts": {rate: str(half)}}
+            too_much = {**body, "amounts": {rate: money(Decimal(grp["net"]) * 2)}}
+            assert self.boss.http.post(url, json=too_much).status_code == 422, "credit above the remaining net"
+        else:
+            body = {"credit_kind": kind, "date": today, "reason": "Kulanz"}
+        assert self.boss.http.post(url, json={**body, "reason": ""}).status_code == 422, "reason is required"
+        r = self.boss.http.post(url, json=body)
+        assert r.status_code == 201, (kind, r.status_code, r.text)
+        after = self.boss.get(f"/invoices/{rid}")
+        assert isinstance(after["credited_amount"], str) and Decimal(after["credited_amount"]) > 0, after
+        if kind == "storno":
+            assert after["status"] == "cancelled" and after["open_amount"] == "0.00", after
+            assert self.boss.http.post(url, json=body).status_code in (409, 422), "nothing left to credit"
+            self.docs["invoices"][rid]["status"] = "cancelled"
+        else:  # the invoice stays open with less to pay; the rest is paid right away (see the note on finance above)
+            assert after["status"] == "sent", after
+            r = self.boss.http.post(f"/invoices/{rid}/payments", json={"date": today, "amount": after["open_amount"]})
+            assert r.status_code == 201, r.text
+            done = self.boss.get(f"/invoices/{rid}")
+            assert done["status"] == "paid" and done["open_amount"] == "0.00", done
+            self.docs["invoices"][rid]["status"] = "paid"
+            self.docs["invoices"][rid]["credited_net"] = half
+        self.credit_notes += 1
+        self.say(f"invoice {rid} credit {kind}")
         self.check_finance()
 
     def op_doc_negative(self):
@@ -326,6 +414,9 @@ class ApiSim:
         assert self.boss.http.post(f"/{kind}/{nocust['id']}/finalize").status_code == 400, "no customer"
         for rid in (empty["id"], nocust["id"]):
             assert self.boss.http.delete(f"/{kind}/{rid}").status_code == 204
+        for tt in ("export_exempt", "reverse_charge_domestic"):  # reserved treatments are refused
+            body = {"customer_id": self.rng.choice(self.ids("customers")), "tax_treatment": tt, "lines": []}
+            assert self.boss.http.post("/invoices", json=body).status_code == 422, tt
         self.say("finalize without lines / customer rejected")
 
     def check_finance(self):
@@ -335,8 +426,11 @@ class ApiSim:
         for rid, d in self.docs["invoices"].items():
             if d["status"] == "paid":
                 rev += sum((dec(Decimal(str(ln["qty"])) * Decimal(str(ln["price"]))) for ln in d["lines"]), Decimal(0))
+                rev -= d.get("credited_net", Decimal(0))
                 groups += len(d["lines"])
         assert fin["revenue"] == money(rev), (fin["revenue"], rev, groups)
+        cns = [x for x in self.boss.get("/invoices") if x.get("kind") == "credit_note"]
+        assert len(cns) == self.credit_notes, (len(cns), self.credit_notes)
         net = sum(
             (
                 Decimal(str(x["net"])) * Decimal(str(x.get("deductible", 100))) / 100
@@ -697,6 +791,7 @@ class ApiSim:
         ("doc_create", 5),
         ("doc_finalize", 5),
         ("doc_pay", 4),
+        ("doc_credit", 2),
         ("doc_negative", 1),
         ("from_time", 2),
         ("timer", 2),
