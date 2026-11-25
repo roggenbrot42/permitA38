@@ -6,7 +6,11 @@ from typing import Any
 from permita38.core.repository.schema import INTERNAL_COLLECTIONS, TABLES
 
 FORMAT = "permita38-export"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2  # 2: the manifest carries the "accounting" block (last entry_no and hash per fiscal year)
+#: guard kinds only a restore of a whole data folder suspends, besides repository.importer.RESTORE_SUSPENDED
+ACCOUNTING_SUSPENDED = {"append_only", "frozen_when", "set_once"}
+#: tables a plain (non-replace) import must never touch: journals are never merged
+JOURNAL_TABLES = ("fiscal_years", "journal_entries", "journal_lines", "payments", "period_locks")
 SETTINGS_FILE = "data/settings.json"
 LOG_KEY = "data_transfer_log"
 
@@ -78,3 +82,13 @@ def columns_for(coll: str, include_accounts: bool) -> list[str]:
             if not c.startswith("totp") and (include_accounts or c not in ("password_hash", "pw_changed"))
         ]
     return cols
+
+
+def journal_tails(entries: list[dict]) -> dict[str, dict]:
+    """Per fiscal year the last ``entry_no`` and its ``hash`` (the manifest's "accounting" block)."""
+    best: dict[int, dict] = {}
+    for e in entries:
+        year, no = e.get("fiscal_year"), e.get("entry_no")
+        if isinstance(year, int) and isinstance(no, int) and (year not in best or no > best[year]["last_entry_no"]):
+            best[year] = {"last_entry_no": no, "last_hash": e.get("hash")}
+    return {str(y): best[y] for y in sorted(best)}

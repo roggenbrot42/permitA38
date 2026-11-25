@@ -278,15 +278,13 @@ class SQLRepository(Repository):
                 self._commit()
 
     @contextmanager
-    def guards_suspended(self, kinds: set[str]) -> Iterator[None]:
+    def guards_suspended(self, kinds: set[str], *, restore: bool = False) -> Iterator[None]:
         kinds = set(kinds)
         unknown = kinds - set(GUARD_KINDS)
         if unknown or "unique" in kinds:
             raise ValueError(f"guards of kind {sorted(unknown | (kinds & {'unique'}))} cannot be suspended")
-        if "append_only" in kinds:
-            raise ValueError(
-                "guards of kind 'append_only' cannot be suspended here (only the transfer importer may, later)"
-            )
+        if "append_only" in kinds and not restore:
+            raise ValueError("guards of kind 'append_only' cannot be suspended (only the transfer importer may)")
         with self.lock:
             self._ensure()
             if not self._depth:

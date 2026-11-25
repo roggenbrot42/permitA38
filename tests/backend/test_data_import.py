@@ -144,7 +144,7 @@ REFUSALS = {
 }
 PATCHES = {
     "master_data": {"scope": "master_data"},
-    "newer_format": {"format_version": 2},
+    "newer_format": {"format_version": 3},
     "wrong_format": {"format": "something-else"},
     "unknown_schema": {"schema_head": "ffffffff"},
 }
