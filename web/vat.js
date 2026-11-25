@@ -26,7 +26,9 @@ function vatTabs(tab) {
 }
 
 PAGES.vat = async (tab = 'returns', a, b, c) => {
-  const head = `<div class="head"><div><h1>VAT</h1><div class="muted">${tab === 'zm' ? 'Recapitulative statement (ZM) for services to businesses in other EU states. Figures to enter or upload in the BZSt online portal; nothing is filed from here.' : 'VAT advance returns (UStVA). Figures to enter in Mein ELSTER; nothing is filed from here.'}</div></div></div>${vatTabs(tab)}`;
+  const st = await accStatus();
+  if (st && !st.initialised) return accSetupPanel('VAT');
+  const head = `<div class="head"><div><h1>VAT</h1><div class="muted">${tab === 'zm' ? 'Recapitulative statement (ZM) for services to businesses in other EU states. Figures to enter or upload in the BZSt online portal; nothing is filed from here.' : 'VAT advance returns (UStVA). Figures to enter in Mein ELSTER; nothing is filed from here.'}</div></div></div>${vatTabs(tab)}${accAdviserBanner(st, 'vat-adviser')}`;
   const y = /^\d{4}$/.test(a || '') ? +a : new Date().getFullYear();
   if (tab === 'zm') return head + (b && /^[1-4]$/.test(b) ? await zmDetail(y, +b) : await zmList(y));
   if (['month', 'quarter'].includes(b) && /^\d{1,2}$/.test(c || '')) return head + await vatDetail(y, b, +c);
@@ -165,8 +167,6 @@ const VAT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep
 const vatPeriodName = (kind, no) => kind === 'month' ? VAT_MONTHS[no - 1] : 'Q' + no;
 const vatLink = (y, kind, no) => `#/vat/returns/${y}/${kind}/${no}`;
 const vatYearNav = y => `<div class="row tight" style="align-items:center;margin-bottom:10px"><a href="#/vat/returns/${y - 1}" aria-label="Previous year">‹</a><b>${y}</b><a href="#/vat/returns/${y + 1}" aria-label="Next year">›</a></div>`;
-/** The adviser banner. The API does not expose the rules status, so this is static: the rules of a release stay unconfirmed until a tax adviser has checked them. */
-const VAT_ADVISER = '<div class="banner" id="vat-adviser" role="status">The VAT rules and boxes are not confirmed by a tax adviser yet. Check every figure before you enter it in Mein ELSTER.</div>';
 
 async function vatList(y) {
   let list;
@@ -177,7 +177,7 @@ async function vatList(y) {
       <td>${esc(fmtDate(p.due_date))}</td><td>${vatStatePill(p)}</td><td class="num">${p.result === null || p.result === undefined ? '' : esc(eur(p.result))}</td><td class="num">${p.lines ?? ''}</td><td class="right"><a href="${link}">Open</a></td></tr>`;
   }).join('');
   const table = list.length ? `<div class="card"><table id="vat-list"><thead><tr><th>Period</th><th>Period dates</th><th>Due</th><th>State</th><th class="num">Kz 83</th><th class="num">Lines</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="card"><div class="empty">No VAT periods for this year.</div></div>';
-  return `${vatYearNav(y)}${VAT_ADVISER}${table}${await vatSpecialPanel(y)}`;
+  return `${vatYearNav(y)}${table}${await vatSpecialPanel(y)}`;
 }
 
 /** The "Special prepayment" panel (Sondervorauszahlung, monthly filers with Dauerfrist only). */
@@ -248,7 +248,7 @@ async function vatDetail(y, kind, no) {
   }
   const dl = (id, path, label) => `<a href="${esc(api.url(`vat-returns/${rid}/${path}`))}" id="${id}" data-a="vatExport">${label}</a>`;
   const exp = rid ? [dl('vat-pdf', 'export.pdf', 'PDF'), dl('vat-csv', 'export.csv', 'CSV'), dl('vat-csv-lines', 'export.csv?lines=true', 'Lines CSV'), dl('vat-json', 'export.json', 'JSON')].join(' · ') : '';
-  return `${back}${VAT_ADVISER}<div class="card">${title}<div class="muted small">${meta}</div>${err}${warn}${drift}<div id="vat-export-err"></div>${table}
+  return `${back}<div class="card">${title}<div class="muted small">${meta}</div>${err}${warn}${drift}<div id="vat-export-err"></div>${table}
     ${ret.note ? `<p class="small">Note: ${esc(ret.note)}</p>` : ''}<div class="row tight" style="margin-top:12px;align-items:center">${actions.join('')}<span class="right small">${exp}</span></div>
     <p class="small muted">Not a filing. Enter these figures in Mein ELSTER.${rid ? '' : ' A preview: create a draft to see the source lines of each box.'}</p></div>
     <div id="vat-box-lines"></div>${final ? vatPayments(ret, writable) : ''}`;

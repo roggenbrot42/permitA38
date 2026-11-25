@@ -322,6 +322,7 @@ _DISCOUNT = {"date": "2026-01-05", "amount_paid": "10.00"}
 _CREDIT = {"credit_kind": "storno", "date": "2026-01-05", "reason": "Demo"}
 _VAT_PAY = {"date": "2026-02-10", "amount": "5.00", "kind": "payment"}
 NEW_ROUTES: list[tuple[str, str, str, str, bool, dict | None, str]] = [
+    ("GET", "/api/accounting/status", "accounting", "read", False, None, ""),
     ("GET", "/api/accounting/years", "accounting", "read", False, None, ""),
     ("POST", "/api/accounting/years", "accounting", "write", False, _FY, ""),
     ("GET", "/api/accounting/years/{year}", "accounting", "read", False, None, ""),
@@ -464,7 +465,7 @@ def test_new_routes_are_exactly_the_documented_ones(app):
         if path.startswith(NEW_PREFIXES) or (path.startswith("/api/invoices/{") and path.endswith(NEW_INVOICE_SUFFIXES))
     }
     assert found == {(m, p) for m, p, *_ in NEW_ROUTES}
-    assert len(NEW_ROUTES) == 55
+    assert len(NEW_ROUTES) == 56
 
 
 def test_boss_only_routes_are_exactly_init_and_close_year(app):
@@ -479,6 +480,7 @@ def _call(client, method, path, body, query):
 
 
 IMPLEMENTED = {
+    ("GET", "/api/accounting/status"),
     ("GET", "/api/accounting/years"),
     ("POST", "/api/accounting/years"),
     ("GET", "/api/accounting/years/{year}"),
