@@ -9,6 +9,7 @@ from datetime import date
 from typing import Annotated, Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.api.responses import present
@@ -24,6 +25,7 @@ from permita38.core.service.accounting_reports import (
     TrialBalanceOut,
     parse_date,
 )
+from permita38.core.service.integrity import ACCOUNTING_RULES, IntegrityService, summary
 from permita38.core.service.manual_entries import EntryTemplate
 from permita38.core.service.year_closing import ProvisionInput
 
@@ -239,9 +241,31 @@ def datev(
     )
 
 
-@router.get("/integrity", name="accounting_integrity")
+class IntegrityFinding(BaseModel):
+    code: str
+    severity: str
+    collection: str | None = None
+    id: str | None = None
+    field: str | None = None
+    message: str
+
+
+class IntegritySummary(BaseModel):
+    errors: int
+    warnings: int
+    info: int
+
+
+class AccountingIntegrity(BaseModel):
+    findings: list[IntegrityFinding]
+    summary: IntegritySummary
+
+
+@router.get("/integrity", name="accounting_integrity", response_model=AccountingIntegrity)
 def integrity(user: Read, services: ServicesDep):
-    not_implemented()
+    """Balance and hash chain per fiscal year plus the accounting sanity warnings (spec 7.1, 7.6, 7.9)."""
+    found = IntegrityService(services.store).run(rules=ACCOUNTING_RULES)
+    return {"findings": [f.as_dict() for f in found], "summary": summary(found)}
 
 
 # ------------------------------------------------------------------ payments and credit notes on invoices
