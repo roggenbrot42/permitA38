@@ -163,7 +163,7 @@ class AccountingInitService:
         clock = (lambda: today) if today is not None else date.today
         payments = PaymentService(self.store, self.journal, today=clock)
         return ReviewApplier(
-            self.store, self.expense_posting, CreditNoteService(self.store, self.journal, payments), payments
+            self.store, self.expense_posting, CreditNoteService(self.store, self.journal, payments), payments, clock
         )
 
     # ------------------------------------------------------------------ parameters
@@ -316,14 +316,20 @@ class AccountingInitService:
             applier = self._applier(today)
             applier.validate(review, answers)
             open_rows = [r for r in review if r.key not in answers]
-            if open_rows:
+            periods = self.external_periods(params, today)
+            filed = applier.returns_to_store(params.external_returns, periods)  # 422 for a period that is no answer
+            answered = {(r.year, r.kind, r.no) for r in params.external_returns}
+            open_periods = [p for p in periods if (p.year, p.kind, p.no) not in answered]
+            if open_rows or open_periods:
                 raise ServiceError(
                     409,
-                    f"{len(open_rows)} record(s) need a decision before the accounting can start",
-                    body={"review": [r.as_dict() for r in open_rows], "unresolved": [r.key for r in open_rows]},
+                    f"{len(open_rows) + len(open_periods)} item(s) need a decision before the accounting can start",
+                    body={
+                        "review": [r.as_dict() for r in open_rows],
+                        "external_returns": [p.as_dict() for p in open_periods],
+                        "unresolved": [r.key for r in open_rows] + [p.key for p in open_periods],
+                    },
                 )
-            periods = self.external_periods(params, today)
-            filed = applier.returns_to_store(params.external_returns, periods)
             balances = self._balances(params)
             if balances and params.income_basis != "accrual":
                 raise ServiceError(422, "Opening balances exist only under the accrual basis")
@@ -373,7 +379,7 @@ class AccountingInitService:
 
     def external_periods(self, params: models.AccountingInitIn, today: date | None = None) -> list[ExternalPeriod]:
         """Step 5b: the ended VAT periods on/after the start, for which a return filed outside the app may be entered
-        (``external_returns``; a period without an answer counts as none filed). A small business files quarterly."""
+        (``external_returns``; every period needs an answer, ``none_filed`` included). A small business files quarterly."""
         kind = "quarter" if params.small_business else params.frequency
         return external_periods(self.start_of(params, today), today or date.today(), kind)
 

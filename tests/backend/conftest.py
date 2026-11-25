@@ -314,3 +314,26 @@ def eur_scenario(app, boss_client, chart_dir):
 def _post_entry(app, key, day, text, event, coll, sid, number, lines):
     source = JournalSource(event=event, created_by="u1x000", source_coll=coll, source_id=sid, source_number=number)
     app.state.services.journal.post(key, day, text, source, lines)
+
+
+@pytest.fixture
+def none_filed(monkeypatch):
+    """Opt-in: answer every ended VAT period with "none filed" (accounting.md 16 step 5b) when a test sends no
+    ``external_returns`` itself; a test that passes any is left alone. Request it explicitly (``usefixtures``)."""
+    from permita38.core import models
+    from permita38.core.errors import ServiceError
+    from permita38.core.service.accounting_init import AccountingInitService
+
+    real = AccountingInitService.run
+
+    def run(self, params, user=None, today=None):
+        if not params.external_returns:
+            try:
+                periods = self.external_periods(params, today)
+            except ServiceError:  # an invalid start: the run itself refuses
+                periods = []
+            none = [models.ExternalReturnIn(year=p.year, kind=p.kind, no=p.no, none_filed=True) for p in periods]
+            params = params.model_copy(update={"external_returns": none})
+        return real(self, params, user, today)
+
+    monkeypatch.setattr(AccountingInitService, "run", run)

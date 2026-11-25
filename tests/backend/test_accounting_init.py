@@ -38,6 +38,8 @@ PARAMS = models.AccountingInitIn(chart="skr03", income_basis="accrual", vat_basi
 EUR = PARAMS.model_copy(update={"income_basis": "eur"})
 RC_RAW = {"date": "2026-03-01", "net": 100.0, "vat": 0.0, "category": "software", "reverse_charge": True}
 
+pytestmark = pytest.mark.usefixtures("none_filed")  # every ended period needs an answer (step 5b)
+
 
 def all_entries(repo) -> list:
     out: list = []

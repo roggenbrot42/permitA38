@@ -30,6 +30,8 @@ BASES = {
     "eur_ist": ("eur", "ist"),
 }
 
+pytestmark = pytest.mark.usefixtures("none_filed")  # every ended period needs an answer (step 5b)
+
 
 def params(income: str, vat: str) -> models.AccountingInitIn:
     return models.AccountingInitIn(chart="skr03", income_basis=income, vat_basis=vat, accounting_start="2026-01-01")
