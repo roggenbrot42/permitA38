@@ -45,9 +45,9 @@ __all__ = ["AccountingInitService", "InitResult", "ReviewItem"]
 REVIEW_MESSAGE = "needs the review list — coming in a later step"
 SYSTEM_USER: dict[str, Any] = {"id": "system", "role": "boss"}
 
-# the order of events of the same day: an issue first, then the bill-like events, a write-off reversal before the
-# payment that triggers it, then payments and credit notes in the order they were created
-RANK_ISSUE, RANK_BILL, RANK_REVERSAL, RANK_CASH = 0, 1, 2, 3
+# the order of events of the same day: an issue first, everything else after it in creation order (``seq``, see
+# :func:`_row_order`); the only rank is issue-before-cash
+RANK_ISSUE, RANK_OTHER = 0, 1
 
 
 @dataclass(frozen=True)
@@ -86,14 +86,16 @@ class InitResult:
 class _Event:
     day: str
     rank: int
-    created: int
-    index: int
+    group: int  # 0 = no seq (legacy row, expense, trip), 1 = has a seq: legacy rows come first
+    n: int  # the seq, or the creation time of a legacy row
+    tie: int
+    ident: str  # the final sort key: the record id
     kind: str
     apply: Callable[[], Any]
 
     @property
-    def order(self) -> tuple[str, int, int, int]:
-        return (self.day, self.rank, self.created, self.index)
+    def order(self) -> tuple[str, int, int, int, int, str]:
+        return (self.day, self.rank, self.group, self.n, self.tie, self.ident)
 
 
 class _ReplayStore:
@@ -125,6 +127,16 @@ def _num(value: Any) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _row_order(row: Mapping[str, Any], created: Any, tie: int) -> tuple[int, int, int]:
+    """(group, n, tie) of a payments row or credit note: its ``seq`` when it has one, else (created before this
+    release) its creation time and, within one second, ``tie``: credit notes 0, a write-off reversal 1 (after its
+    write-off, directly before the payment that triggered it), payments 2."""
+    seq = _num(row.get("seq"))
+    if seq > 0:
+        return (1, seq, 0)
+    return (0, _num(created), tie)
 
 
 def _is_credit(row: Mapping[str, Any]) -> bool:
@@ -193,7 +205,12 @@ class AccountingInitService:
                     )
                     continue
                 perf = self._perf(inv, st, day)
-                if perf is not None and perf < start and (params.vat_basis == "soll" or self._b2b_service(inv)):
+                if (
+                    perf is not None
+                    and perf < start
+                    and not params.small_business
+                    and ((params.vat_basis == "soll" and self._carries_vat(inv, st, day)) or self._b2b_service(inv))
+                ):
                     item("vat_before_start", "invoices", inv, "VAT date before the accounting start; " + REVIEW_MESSAGE)
             elif self._open_at_start(inv, st, start, payments.get(str(inv["id"]), []), notes.get(str(inv["id"]), [])):
                 item(
@@ -210,6 +227,16 @@ class AccountingInitService:
     def _b2b_service(inv: Mapping[str, Any]) -> bool:
         return inv.get("tax_treatment") == "eu_b2b_service"
 
+    def _carries_vat(self, inv: Mapping[str, Any], st: Mapping[str, Any], day: date) -> bool:
+        """Does the invoice declare any VAT (a 0 % or small-business invoice has no return to declare)?"""
+        snap = inv.get("issued")
+        if not isinstance(snap, Mapping) or not isinstance(snap.get("rates"), Mapping):
+            try:
+                snap = build_snapshot(self.store, dict(inv), dict(st), day)
+            except ServiceError:
+                return True
+        return any(_num(g.get("vat")) for g in snap["rates"].values())
+
     @staticmethod
     def _perf(inv: Mapping[str, Any], st: Mapping[str, Any], day: date) -> date | None:
         raw = inv.get("issued")
@@ -225,6 +252,8 @@ class AccountingInitService:
         pays: Iterable[Mapping[str, Any]],
         notes: Iterable[Mapping[str, Any]],
     ) -> bool:
+        if inv.get("status") == "cancelled":  # a cancelled invoice is no open item (it is a legacy_cancelled case)
+            return False
         rows = list(pays)
         gross = gross_cents_of(inv, st)
         if not rows and inv.get("status") == "paid" and gross != 0:
@@ -268,10 +297,10 @@ class AccountingInitService:
         self, params: models.AccountingInitIn, user: Mapping[str, Any] | None = None, today: date | None = None
     ) -> InitResult:
         user = user or SYSTEM_USER
-        start = self.start_of(params, today)
         with self.store.transaction():
             if accounting_start(self.store.settings()) is not None or self.store.settings().get(ACCOUNTING_START_KEY):
                 raise ServiceError(409, "Accounting is already initialised")
+            start = self.start_of(params, today)
             review = self.check(params, today)
             if review:
                 raise ServiceError(
@@ -350,12 +379,11 @@ class AccountingInitService:
         credit_post = CreditPostingService(view, self.journal)  # type: ignore[arg-type]
         pay_service = PaymentService(view, self.journal)  # type: ignore[arg-type]
         events: list[_Event] = []
-        idx = 0
 
-        def add(day: str, rank: int, created: int, kind: str, apply: Callable[[], Any]) -> None:
-            nonlocal idx
-            events.append(_Event(day, rank, created, idx, kind, apply))
-            idx += 1
+        def add(
+            day: str, rank: int, order: tuple[int, int, int], ident: str, kind: str, apply: Callable[[], Any]
+        ) -> None:
+            events.append(_Event(day, rank, order[0], order[1], order[2], ident, kind, apply))
 
         invoices = {str(r["id"]): r for r in self.store.list("invoices") if _issued(r)}
         late = {k: v for k, v in invoices.items() if (_day(v["date"]) or start) >= start}
@@ -379,30 +407,40 @@ class AccountingInitService:
 
         settings = effective_settings(self.store.settings())
         for inv_id, inv in late.items():
-            add(str(inv["date"])[:10], RANK_ISSUE, 0, "issue", partial(issue, inv_id))
+            add(str(inv["date"])[:10], RANK_ISSUE, (0, 0, 0), inv_id, "issue", partial(issue, inv_id))
             has_rows = bool(self.store.find("payments", document_id=inv_id))
             if not has_rows and inv.get("status") == "paid" and gross_cents_of(inv, settings) != 0:
                 paid_day = invoice_state.legacy_payment_date(inv)
-                add(paid_day, RANK_CASH, 0, "legacy_payment", partial(legacy, inv_id))
+                add(paid_day, RANK_OTHER, (0, 0, 1), inv_id, "legacy_payment", partial(legacy, inv_id))
         for pay in self.store.list("payments"):
             if str(pay.get("document_id")) in late:
                 view.hidden["payments"].add(str(pay["id"]))
-                add(str(pay["date"])[:10], RANK_CASH, _num(pay.get("created_at")), "payment", partial(payment, pay))
+                order = _row_order(pay, pay.get("created_at"), 2)
+                add(str(pay["date"])[:10], RANK_OTHER, order, str(pay["id"]), "payment", partial(payment, pay))
         for note in self.store.list("invoices"):
             if note.get("kind") != "credit_note" or str(note.get("corrects_id")) not in late:
                 continue
             view.hidden["invoices"].add(str(note["id"]))
-            rank = RANK_REVERSAL if note.get("credit_kind") == "write_off_reversal" else RANK_CASH
-            created = _num((note.get("issued") or {}).get("issued_at"))
-            add(str(note["date"])[:10], rank, created, "credit", partial(credit, note))
+            reversal = note.get("credit_kind") == "write_off_reversal"
+            order = _row_order(note, (note.get("issued") or {}).get("issued_at"), 1 if reversal else 0)
+            add(str(note["date"])[:10], RANK_OTHER, order, str(note["id"]), "credit", partial(credit, note))
         for exp in self.store.list("expenses"):
             day = _day(exp.get("date"))
             if day is not None and day >= start:
-                add(day.isoformat(), RANK_BILL, 0, "expense", partial(self._expense, exp, user))
+                add(
+                    day.isoformat(), RANK_OTHER, (0, 0, 0), str(exp["id"]), "expense", partial(self._expense, exp, user)
+                )
         for trip in self.store.list("trips"):
             end = _day(trip.get("end"))
             if trip.get("status") == "final" and end is not None and end >= start:
-                add(end.isoformat(), RANK_BILL, 0, "trip", partial(self.trip_posting.sync, dict(trip), user))
+                add(
+                    end.isoformat(),
+                    RANK_OTHER,
+                    (0, 0, 0),
+                    str(trip["id"]),
+                    "trip",
+                    partial(self.trip_posting.sync, dict(trip), user),
+                )
         counts: dict[str, int] = {}
         for ev in sorted(events, key=lambda e: e.order):
             ev.apply()

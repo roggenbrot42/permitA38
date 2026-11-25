@@ -9443,6 +9443,28 @@
         ],
         "parameters": [
           {
+            "name": "chart",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(skr03|skr04)$",
+              "default": "skr03",
+              "title": "Chart"
+            }
+          },
+          {
+            "name": "income_basis",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(eur|accrual)$",
+              "default": "eur",
+              "title": "Income Basis"
+            }
+          },
+          {
             "name": "accounting_start",
             "in": "query",
             "required": false,
@@ -9468,6 +9490,16 @@
               "pattern": "^(soll|ist)$",
               "default": "soll",
               "title": "Vat Basis"
+            }
+          },
+          {
+            "name": "small_business",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Small Business"
             }
           }
         ],

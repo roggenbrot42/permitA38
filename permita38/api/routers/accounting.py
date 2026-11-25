@@ -109,14 +109,18 @@ def init_accounting(body: models.AccountingInitIn, user: Boss, services: Service
 def init_review(
     user: Read,
     services: ServicesDep,
+    chart: Annotated[str, Query(pattern="^(skr03|skr04)$")] = "skr03",
+    income_basis: Annotated[str, Query(pattern="^(eur|accrual)$")] = "eur",
     accounting_start: Annotated[str | None, Query(max_length=10)] = None,
     vat_basis: Annotated[str, Query(pattern="^(soll|ist)$")] = "soll",
+    small_business: bool = False,
 ):
     """The records that need a decision before the accounting can start (read only)."""
     params = models.AccountingInitIn(
-        chart="skr03",
-        income_basis="eur",
-        vat_basis=vat_basis,
+        chart=chart,  # type: ignore[arg-type]
+        income_basis=income_basis,  # type: ignore[arg-type]
+        vat_basis=vat_basis,  # type: ignore[arg-type]
+        small_business=small_business,
         accounting_start=accounting_start,  # type: ignore[arg-type]
     )
     return [r.as_dict() for r in services.accounting_init.check(params)]

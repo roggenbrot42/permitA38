@@ -5,9 +5,11 @@ The core property: initialising a data folder that already holds the events post
 would have produced (compared with a second folder where the accounting was initialised first).
 """
 
+import contextlib
 import json
 import shutil
 from decimal import Decimal
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,7 @@ from permita38.core.errors import ServiceError
 from permita38.core.repository import create_repository
 from permita38.core.service.accounting_init import AccountingInitService
 from permita38.core.service.credit_notes import CreditNoteService
+from permita38.core.service.expense_postings import ExpensePostingService
 from permita38.core.service.journal import JournalService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
@@ -302,6 +305,138 @@ def test_a_fully_settled_pre_start_invoice_is_no_review_case(repo):
     assert repo.get("invoices", "oldinv01")["issued"]["gross"] == 11900  # step 3: the snapshot only
 
 
+# ---------------------------------------------------------------- order of events, live versus backfill
+@contextlib.contextmanager
+def live_world(tmp_path):
+    """A second data folder whose accounting is initialised BEFORE the events are entered (the live path)."""
+    repo_b = create_repository(Config(data_dir=tmp_path / "live", secret_key="x" * 16))
+    repo_b.startup()
+    try:
+        sales_b = SalesService(repo_b, RecordService(repo_b))
+        sales_b.payments.today = lambda: TODAY
+        init(repo_b, income="accrual", vat="soll")
+        yield World(repo_b, sales_b, sales_b.payments), repo_b
+    finally:
+        repo_b.close()
+
+
+def same_live_and_backfill(tmp_path, repo, sales, pay, script, params=PARAMS):
+    """Enter ``script`` before the initialisation (then backfill) and after it (live): the entries must be equal."""
+    script(World(repo, sales, pay))
+    assert all_entries(repo) == []
+    AccountingInitService(repo).run(params, BOSS)
+    with live_world(tmp_path) as (b, repo_b):
+        script(b)
+        got, want = canon(repo), canon(repo_b)
+    assert got == want
+    return got
+
+
+def write_off_and_payment_same_day(w: World):
+    w.a()
+    w.cn.create("inva00a", credit_kind="write_off", date="2026-03-05", reason="Lost", user=BOSS)
+    w.pay.record("inva00a", date="2026-03-05", amount=Decimal("500"), user=BOSS)
+
+
+def test_write_off_and_payment_on_the_same_day(tmp_path, repo, sales, pay):
+    got = same_live_and_backfill(tmp_path, repo, sales, pay, write_off_and_payment_same_day)
+    assert {k for k, *_ in got} >= {"credit", "payment"}
+    reversal = [r for r in repo.find("invoices") if r.get("credit_kind") == "write_off_reversal"]
+    (payment,) = repo.find("payments", document_id="inva00a")
+    assert len(reversal) == 1 and 0 < reversal[0]["seq"] < payment["seq"]  # the reversal is created first
+
+
+def test_write_off_later_payment_then_storno_and_payment_on_one_day(tmp_path, repo, sales, pay):
+    def script(w: World):
+        w.a()
+        w.cn.create("inva00a", credit_kind="write_off", date="2026-03-01", reason="Lost", user=BOSS)
+        w.pay.record("inva00a", date="2026-03-10", amount=Decimal("400"), user=BOSS)
+        w.cn.create("inva00a", credit_kind="storno", date="2026-03-20", reason="x", user=BOSS)
+        w.pay.record("inva00a", date="2026-03-20", amount=Decimal("100"), user=BOSS)
+
+    same_live_and_backfill(tmp_path, repo, sales, pay, script)
+
+
+@pytest.mark.parametrize("credit_first", [True, False])
+def test_payment_and_credit_entered_within_one_second(tmp_path, repo, sales, pay, credit_first):
+    def script(w: World):
+        w.a()
+        credit = partial(w.cn.create, "inva00a", credit_kind="partial", date="2026-03-05", reason="x",
+                         amounts={"19": "100.00"}, user=BOSS)  # fmt: skip
+        payment = partial(w.pay.record, "inva00a", date="2026-03-05", amount=Decimal("500"), user=BOSS)
+        for step in (credit, payment) if credit_first else (payment, credit):
+            step()
+
+    same_live_and_backfill(tmp_path, repo, sales, pay, script)
+    (row,) = repo.find("payments", document_id="inva00a")
+    (note,) = [r for r in repo.find("invoices") if r.get("credit_kind") == "partial"]
+    assert (row["seq"] < note["seq"]) == (not credit_first)
+
+
+def test_refund_entered_within_the_same_second_as_its_payment(tmp_path, repo, sales, pay):
+    def script(w: World):
+        w.a()
+        w.pay.record("inva00a", date="2026-03-05", amount=Decimal("500"), user=BOSS)
+        w.pay.record("inva00a", date="2026-03-05", amount=Decimal("200"), kind="refund", user=BOSS)
+
+    same_live_and_backfill(tmp_path, repo, sales, pay, script)
+
+
+def test_rows_without_seq_order_by_creation_time_then_the_reversal_first(tmp_path, repo, sales, pay, monkeypatch):
+    """Rows created before this release carry no seq (seq 0 = none): the write-off reversal, created in the same
+    second as the payment that triggered it, is replayed first."""
+    for module in ("payments", "credit_notes"):
+        monkeypatch.setattr(f"permita38.core.service.{module}.next_event_seq", lambda _store: 0)
+    same_live_and_backfill(tmp_path, repo, sales, pay, write_off_and_payment_same_day)
+    assert all(not r.get("seq") for r in repo.find("payments", document_id="inva00a"))
+
+
+def test_issue_comes_before_cash_on_the_same_day(tmp_path, repo, sales, pay):
+    def script(w: World):
+        w.invoice("inva00e", "2026-03-01", "100", "19", "R-E")
+        w.pay.record("inva00e", date="2026-03-01", amount=Decimal("119"), user=BOSS)
+
+    same_live_and_backfill(tmp_path, repo, sales, pay, script)
+    entries = JournalService(repo).entries(2026, limit=500)
+    no = {e.event_key.split(":")[0]: e.entry_no for e in entries}
+    assert no["issue"] < no["payment"]
+
+
+def test_a_failure_mid_replay_writes_nothing(repo, sales, pay, monkeypatch):
+    w = World(repo, sales, pay)
+    w.a()
+    w.expenses()
+    repo.save("invoices", {k: v for k, v in repo.get("invoices", "inva00a").items() if k != "issued"})
+
+    def boom(*_a, **_k):
+        raise RuntimeError("forced")
+
+    monkeypatch.setattr(ExpensePostingService, "sync", boom)
+    with pytest.raises(RuntimeError):
+        AccountingInitService(repo).run(PARAMS, BOSS)
+    assert repo.find("fiscal_years") == [] and ACCOUNTING_START_KEY not in repo.settings()
+    assert all_entries(repo) == [] and repo.find("journal_entries") == []
+    assert "issued" not in repo.get("invoices", "inva00a")
+
+
+def test_review_refinements_and_an_initialised_folder_answers_409_first(repo):
+    cu = customer(repo)
+    keep = dict(customer_id=cu["id"], status="sent", service_to="2025-12-20")
+    repo.save("invoices", dict(id="zerovat1", date="2026-01-05", number="R-Z", lines=[line("100", "0")], **keep))
+    repo.save("invoices", dict(id="stdvat01", date="2026-01-05", number="R-S", lines=[line("100", "19")], **keep))
+    repo.save("invoices", dict(id="oldcxl01", date="2025-12-05", number="R-X", lines=[line("100", "19")],
+                               customer_id=cu["id"], status="cancelled"))  # fmt: skip
+    got = {(r.id, r.code) for r in AccountingInitService(repo).check(PARAMS)}
+    assert got == {("stdvat01", "vat_before_start")}  # no VAT, no return; a cancelled invoice is not open
+    small = PARAMS.model_copy(update={"small_business": True})
+    assert AccountingInitService(repo).check(small) == []
+    AccountingInitService(repo).run(small, BOSS)
+    bad = PARAMS.model_copy(update={"accounting_start": "2026-01-15"})
+    with pytest.raises(ServiceError) as err:
+        AccountingInitService(repo).run(bad, BOSS)
+    assert err.value.status == 409
+
+
 # ---------------------------------------------------------------- CLI
 def _cli(tmp_path, *words: str) -> None:
     from permita38.cli import main as cli
@@ -364,3 +499,5 @@ def test_api_refusal_carries_the_review_list(app, clients):
     assert [x["code"] for x in r.json()["review"]] == ["rc_without_supplier"]
     got = clients["accountant"].get("/api/accounting/init/review", params={"accounting_start": "2026-01-01"}).json()
     assert [x["id"] for x in got] == ["rcnosup1"]
+    bad = clients["accountant"].get("/api/accounting/init/review", params={"chart": "skr99"})
+    assert bad.status_code == 422
