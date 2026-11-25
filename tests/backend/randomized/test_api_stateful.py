@@ -1159,8 +1159,8 @@ class ApiMachine(RuleBasedStateMachine):
             assert r.status_code == g
             return
         old = self.m[coll].get(rid)
-        if coll == "invoices" and old is not None and old.get("number"):
-            assert r.status_code == 409  # numbered invoices are cancelled, never deleted (gapless numbering)
+        if coll == "invoices" and old is not None and (old.get("number") or old["status"] != "draft"):
+            assert r.status_code == 409  # issued invoices are credited, never deleted (gapless numbering)
             return
         me = self.m["users"][s.user_id]
         if me["role"] != "boss" and coll not in MEMBER_OWN:
@@ -1266,9 +1266,26 @@ class ApiMachine(RuleBasedStateMachine):
             return
         s = data.draw(self.actor())
         rid = data.draw(st.sampled_from(list(self.m[coll])))
-        body = (
-            copy.deepcopy(data.draw(self.doc_st(coll))) if data.draw(st.booleans()) else copy.deepcopy(self.bodies[rid])
-        )
+        issued = coll == "invoices" and self.m[coll][rid]["status"] != "draft"
+        if issued:
+            # an issued invoice is frozen (spec 2.1): the body repeats the stored one, with at most the changeable
+            # fields (due_date, notes, reference) moved, or one frozen field changed on purpose
+            body = copy.deepcopy(self.bodies[rid])
+            mode = data.draw(st.sampled_from(["same", "allowed", "allowed", "frozen"]))
+            if mode == "allowed":
+                for k, gen in (("due_date", maybe_none(iso_days(5, 40))), ("notes", maybe_none(TEXT)),
+                               ("reference", maybe_none(TEXT))):  # fmt: skip
+                    if data.draw(st.booleans()):
+                        body[k] = data.draw(gen)
+            elif mode == "frozen":
+                body["title"] = (body.get("title") or "") + "!"
+        else:
+            body = (
+                copy.deepcopy(data.draw(self.doc_st(coll)))
+                if data.draw(st.booleans())
+                else copy.deepcopy(self.bodies[rid])
+            )
+        body.pop("paid_date", None)
         body["status"] = status
         if status == "paid":
             body["paid_date"] = paid
@@ -1280,6 +1297,12 @@ class ApiMachine(RuleBasedStateMachine):
             return
         if self.invalid(coll, body):
             assert r.status_code == 422, (coll, body, r.text)
+            return
+        if coll == "invoices" and not issued and status != "draft":  # spec 2.1: a draft only changes through finalize
+            assert r.status_code == 409 and "finalize the draft instead" in r.text, r.text
+            return
+        if issued:
+            self.check_issued_update(rid, body, r)
             return
         if self.unknown_project(body, self.m[coll][rid]):
             self.assert_unknown_project(r)
@@ -1296,6 +1319,61 @@ class ApiMachine(RuleBasedStateMachine):
         self.check_record(coll, exp, r.json())
         self.m[coll][rid], self.bodies[rid] = exp, body
         self.dirty.add(coll)
+
+    def check_issued_update(self, rid, body, r):
+        """PUT of an issued invoice (spec 2.1, 2.2): only due_date / notes / reference move; a legacy ``paid`` request
+        books a payment of the open amount; a label (sent/accepted/rejected) only while nothing is paid."""
+        old = self.m["invoices"][rid]
+        known = ("customer_id", "project_id", "lines", "title", "date", "vat_rate", "service_from")
+        if any(k in body and not self.same_frozen(k, body[k], old.get(k)) for k in known):
+            assert r.status_code == 409, r.text
+            return
+        req, cur = body["status"], old["status"]
+        new_status, new_paid = cur, old.get("paid_date")
+        err = None
+        if req == cur:
+            if req == "paid" and body["paid_date"] != old.get("paid_date"):
+                err = 409  # the payment date cannot be changed
+        elif req == "paid":
+            if oracle.doc_totals(old, False)["gross"] == 0:
+                pass  # nothing is open: no payment, the status stays
+            elif body["paid_date"] < old["date"] or body["paid_date"] > date.today().isoformat():
+                err = 422
+            else:
+                new_status, new_paid = "paid", body["paid_date"]
+        elif req in ("sent", "accepted", "rejected"):
+            if cur == "paid":
+                err = 409  # reverse the payment instead
+            else:
+                new_status = req
+        else:
+            err = 409  # draft / cancelled
+        if err:
+            assert r.status_code == err, (err, r.status_code, r.text)
+            return
+        assert r.status_code == 200, r.text
+        exp = {**old, "status": new_status, "paid_date": new_paid}
+        for k in ("due_date", "notes", "reference"):
+            if k in body:
+                if body[k] is None:
+                    exp.pop(k, None)
+                else:
+                    exp[k] = body[k]
+        self.check_record("invoices", exp, r.json())
+        self.m["invoices"][rid] = exp
+        self.bodies[rid] = {**body, "status": new_status}
+        self.bodies[rid].pop("paid_date", None)
+        self.dirty.add("invoices")
+
+    @staticmethod
+    def same_frozen(key, new, old):
+        if key == "lines":
+
+            def norm(ls):
+                return [{k: v for k, v in ln.items() if k != "amount" and v is not None} for ln in ls]
+
+            return norm(new) == norm(old)
+        return (new or None) == (old or None)
 
     def next_number(self, coll, year):
         """Sequences are per document type and per year of the document date; a counter never moves back."""
@@ -1329,6 +1407,7 @@ class ApiMachine(RuleBasedStateMachine):
         if new["status"] == "draft":
             new["status"] = "sent"
         if coll == "invoices":
+            new.setdefault("paid_date", None)  # the key is always present on an issued invoice
             new.setdefault("due_date", (base + timedelta(days=14)).isoformat())
         else:
             new.setdefault("valid_until", (base + timedelta(days=30)).isoformat())
