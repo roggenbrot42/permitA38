@@ -969,7 +969,7 @@ function taxBurdenCards(f, year, cur, s) {
     ${tp.balance != null ? row('Expected back payment / refund', tp.balance) : ''}
     <tr><td colspan="2"><b>Social insurance</b> (self-paid, full year)</td></tr>
     ${row('Health insurance', ins.kv)}${row('Care insurance', ins.pv)}${row('Pension insurance', ins.rv)}${row('Unemployment insurance', ins.alv)}${mPos(ins.subsidy) ? row('Employer subsidy', mNegate(ins.subsidy)) : ''}
-    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(f.totals.vat_due)}</td></tr>
+    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer && mZero(f.totals.vat_due) ? '–' : eur(f.totals.vat_due)}</td></tr>
     <tr><td><b>What stays with you</b> (months begun)</td><td class="num"><b class="${f.take_home != null && !mNeg(f.take_home) ? 'free-good' : 'free-bad'}" data-k="take_home">${eur(f.take_home)}</b></td></tr></table>
     <details><summary class="small">How this was computed</summary><ul class="small">
       <li>Taxable income (zvE): ${eur(tp.zve)}</li><li>Pension provision deduction: ${eur(vp.dA)}</li><li>Other provision deduction: ${eur(vp.dBO)}</li><li>Projected full-year profit: ${eur(f.projected_profit)}</li></ul></details>
@@ -1003,7 +1003,7 @@ PAGES.money = async (year) => {
   <div class="grid g2">${red ? `<div class="card"><h2>Business taxes ${year}</h2><table>
     ${f.company_type === 'gmbh' ? `<tr><td>Körperschaftsteuer (15 %)</td><td class="num">${eur(ta.kst)}</td></tr><tr><td>Solidaritätszuschlag on Körperschaftsteuer</td><td class="num">${eur(ta.kst_soli)}</td></tr>` : ''}
     ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)</td><td class="num">${eur(ta.gewst)}</td></tr>` : '<tr><td>No business taxes (Freiberufler)</td><td class="num">–</td></tr>'}
-    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(T.vat_due)}</td></tr></table>
+    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer && mZero(T.vat_due) ? '–' : eur(T.vat_due)}</td></tr></table>
     <p class="small muted">Income tax, social insurance and take-home are shown to the owner only.</p>
     <p class="small muted">Based on profit to date. Projected full-year profit: ${eur(f.projected_profit)}. Estimate only – not tax advice.</p></div>` : taxBurdenCards(f, year, cur, s)}
   <div class="card"><h2>Expenses by category</h2>${Object.keys(f.categories).length ? `<table>${Object.entries(f.categories).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${eur(v)}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses this year.</div>'}</div></div>
