@@ -20,9 +20,12 @@ from permita38.core.money import dec, line_amount, q2, to_float, vat_amount
 from permita38.core.repository import Repository, new_id
 from permita38.core.repository.schema import COLLECTIONS
 from permita38.core.service.numbering import NumberingService
+from permita38.core.service.records import RecordService
+from permita38.core.service.sales import SalesService, gross_cents_of
 from permita38.core.settings import effective_settings
 
 from . import values as V
+from .accounting import locked_problem, reverse_entry
 from .mapping import auto_map, parse_mapping_file
 from .shared import (
     FUZZY_MATCH,
@@ -49,6 +52,10 @@ DOC_KINDS = ("invoices", "offers")
 ALLOWED_STATUS = {"invoices": ("draft", "sent", "paid", "cancelled"),
                   "offers": ("draft", "sent", "accepted", "rejected")}  # fmt: skip
 MAX_PDF_BYTES = 20 * 1024 * 1024
+REVIEW_CANCELLED = "cancelled_import"
+IMPORT_NOTE = "imported"
+OVERWRITE_NOTE = "import overwritten"
+SYSTEM_USER = {"id": "system", "role": "boss"}
 
 
 @dataclass
@@ -90,6 +97,10 @@ class ImportService:
     def __init__(self, store: Repository, numbering: NumberingService | None = None):
         self.store = store
         self.numbering = numbering or NumberingService(store)
+        # imported invoices are issued through the finalize path and imported expenses through the expense hook
+        # (docs/specs/accounting.md 10, 22 E19)
+        self.records = RecordService(store)
+        self.sales = SalesService(store, self.records, self.numbering)
 
     # ------------------------------------------------------------------ public
     def plan(
@@ -144,17 +155,21 @@ class ImportService:
                     name = self.store.save_attachment(f"{rec['number']}.pdf", blob)
                     rec["original_pdf"] = name
                     rec["original_pdf_sha256"] = hashlib.sha256(blob).hexdigest()
+                prev = o.previous or {}
                 if o.action == "overwrite":
                     overwrites += 1
                     rec["id"] = o.overwrite_id
-                    prev = o.previous or {}
                     for k in ("original_pdf", "original_pdf_sha256"):  # keep the legal original unless replaced
                         if k not in rec and k in prev:
                             rec[k] = prev[k]
-                    saved = self.store.save(o.coll, {**rec, "import_batch": batch_id})
+                    if o.coll == "expenses":  # the revisions go on counting: the repost is r2, r3, ...
+                        rec.update({k: prev[k] for k in ("bill_rev", "pay_rev") if k in prev})
+                    elif o.coll == "invoices":  # payment rows are append-only: the old ones are reversed
+                        self._reverse_import_payments(prev)
+                saved = self._save_imported(o.coll, {**rec, "import_batch": batch_id}, prev or None)
+                if o.action == "overwrite":
                     overwritten.append([o.coll, saved["id"], _digest(saved)])
                 else:
-                    saved = self.store.save(o.coll, {**rec, "import_batch": batch_id})
                     records.append([o.coll, saved["id"], _digest(saved)])
                 for hook in IMPORT_HOOKS:
                     hook(o.coll, saved)
@@ -185,6 +200,49 @@ class ImportService:
             "next_number": next_after,
             "next_number_before": next_before,
         }
+
+    def _save_imported(self, coll: str, rec: dict, old: dict | None) -> dict:
+        """Write one imported record under the accounting rules; returns it as finally stored.
+
+        Invoices (not drafts) are issued through ``SalesService.finalize``: the file's number is kept, the ``issued``
+        snapshot is written, and the issue entry posts once accounting runs. A ``paid`` row with a date becomes a
+        payment row (and entry) through ``PaymentService.materialize``; ``cancelled`` stays issued and is flagged for
+        review. Expenses go through the expense hook, which posts or reposts the bill entry."""
+        saved = self.store.save(coll, rec)
+        if coll == "expenses":
+            hook = self.records.expense_hook
+            hook.prepare(saved, old)
+            return hook.sync(saved, old, SYSTEM_USER)
+        if coll != "invoices" or saved.get("status", "draft") == "draft":
+            return saved
+        if saved.get("status") == "cancelled":
+            saved = self.store.save(coll, {**saved, "review": REVIEW_CANCELLED})
+        saved = self.sales.finalize(coll, saved["id"], SYSTEM_USER)
+        gross = gross_cents_of(saved, self.sales.settings())
+        if saved.get("status") == "paid" and saved.get("paid_date") and gross > 0:
+            # one payment of the open amount on the paid date; the advance-payment and future-date checks of a user
+            # payment do not apply to a historical file (like the legacy materialisation, spec 2.2)
+            self.sales.payments._insert(
+                saved,
+                day=str(saved["paid_date"])[:10],
+                signed=gross,
+                kind="payment",
+                method="bank",
+                note=IMPORT_NOTE,
+                reverses_id=None,
+                user=SYSTEM_USER,
+            )
+        return saved
+
+    def _reverse_import_payments(self, invoice: dict) -> None:
+        """Overwrite: reverse the payment rows of the earlier import (rows are never deleted)."""
+        rows = self.store.find("payments", document_id=invoice["id"])
+        reversed_ids = {r.get("reverses_id") for r in rows}
+        for row in rows:
+            if row.get("kind") == "payment" and row["id"] not in reversed_ids:
+                self.sales.payments._reverse_row(
+                    invoice, row, str(row["date"]), OVERWRITE_NOTE, SYSTEM_USER, check_date=False
+                )
 
     def batches(self) -> list[dict]:
         out = []
@@ -226,9 +284,23 @@ class ImportService:
                             f"An imported customer is still used by {coll} {rec.get('id')}; undo refused",
                         )
             for coll, rid, _ in records:
+                if coll == "invoices":
+                    self._undo_invoice(rid)
+                elif coll == "expenses":  # reversals of the live entries (409 when a bill lies in a locked month)
+                    self.records.expense_hook.unpost(self.store.get(coll, rid) or {"id": rid}, SYSTEM_USER)
                 self.store.delete(coll, rid)
             self.store.save("import_batches", {**batch, "status": "undone"})
         return {"batch_id": batch_id, "removed": len(records), "applied": True}
+
+    def _undo_invoice(self, rid: str) -> None:
+        """Reverse the issue entry of an imported invoice (event key + ``:rev``; 409 while its booking date lies in a
+        locked month) before the row is removed. A ``payments`` row is append-only and keeps its invoice (the
+        database refuses to delete it), so an invoice with payment rows, or credit notes, stops the undo (409)."""
+        if self.store.find("payments", document_id=rid) or self.store.find("invoices", corrects_id=rid):
+            raise ServiceError(
+                409, "An imported invoice has payments or credit notes (append-only records); undo refused"
+            )
+        reverse_entry(self.store, self.sales.postings.journal, f"issue:{rid}")
 
     # ------------------------------------------------------------------ building the plan
     def _build(self, data, filename, doc_type, mapping_raw, options_raw, pdfs, sheet, delimiter) -> _Plan:
@@ -326,7 +398,7 @@ class ImportService:
         settings = effective_settings(self.store.settings())
         customers = _CustomerIndex(self.store.list("customers"), bool(options.get("merge_similar")))
         existing_numbers: dict[str, dict] = {}
-        existing_external = set()
+        existing_external: dict[str, dict] = {}
         coll = doc_type
         number_colls = (
             ("invoices", "offers") if (doc_type in DOC_KINDS and settings.get("numbering_shared")) else (coll,)
@@ -336,8 +408,8 @@ class ImportService:
                 if d.get("number"):
                     existing_numbers[d["number"]] = {**d, "_coll": c}
         for d in self.store.list(coll):
-            if d.get("external_id"):
-                existing_external.add(d["external_id"])
+            if d.get("external_id") and d.get("kind") != "credit_note":
+                existing_external[d["external_id"]] = d
         planned_numbers: set[str] = set()
         planned_external: set[str] = set()
         batch_digests = self._batch_digests()
@@ -404,13 +476,24 @@ class ImportService:
                 outcomes.append(out)
                 continue
             if ext in existing_external:
-                out.action = "skip"
-                out.messages.append("already imported (same external id)")
-                outcomes.append(out)
-                continue
+                old = existing_external[ext]
+                digest_ok = batch_digests.get((old.get("import_batch"), str(old["id"]))) == _digest(old)
+                if doc_type == "expenses" and options["on_duplicate"] == "overwrite" and digest_ok:
+                    out.action = "overwrite"
+                    out.overwrite_id = old["id"]
+                    out.previous = old
+                    out.messages.append("replaces the earlier import with this external id")
+                else:
+                    out.action = "skip"
+                    out.messages.append("already imported (same external id)")
+                    outcomes.append(out)
+                    continue
             if key_value is not None and key_value in existing_numbers:
                 old = existing_numbers[key_value]
-                if old["_coll"] != coll:
+                if old.get("kind") == "credit_note":
+                    out.action = "error"
+                    out.messages.append(f"{key_value} is already used by a credit note")
+                elif old["_coll"] != coll:
                     out.action = "error"
                     out.messages.append(
                         f"{key_value} is already used by a document in {old['_coll']} (shared numbering)"
@@ -427,6 +510,9 @@ class ImportService:
                         out.overwrite_id = old["id"]
                         out.previous = clean
                         out.messages.append("replaces the earlier import with this number")
+                        if doc_type == "invoices" and (why := self._frozen_overwrite(clean)):
+                            out.action = "error"
+                            out.messages.append(why)
                 elif options["on_duplicate"] == "overwrite":
                     out.action = "error"
                     out.messages.append(f"{key_value} exists and was not imported; overwrite is only for imports")
@@ -435,6 +521,12 @@ class ImportService:
                     out.messages.append(f"{key_value} already exists; skipped")
                     outcomes.append(out)
                     continue
+            if out.action != "error" and doc_type == "invoices" and record["status"] != "draft" and doc_day:
+                if why := locked_problem(self.store, doc_day):  # spec 11: the importer follows the issue rules
+                    out.action = "error"
+                    out.messages.append(f"{key_value}: {why}")
+            if record.get("status") == "cancelled" and out.action != "error":
+                out.messages.append("cancelled: imported as an issued invoice and flagged for review")
             if out.action == "error":
                 outcomes.append(out)
                 continue
@@ -455,6 +547,18 @@ class ImportService:
             outcomes.append(out)
         pdf_unmatched = [n for n in pdf_entries if n not in pdf_used]
         return outcomes, new_customers, pdf_unmatched
+
+    def _frozen_overwrite(self, old: dict) -> str | None:
+        """Why an earlier imported invoice cannot be replaced: it is posted, or payments / credit notes were added."""
+        rid = old["id"]
+        if self.store.get_journal_entry_by_event_key(f"issue:{rid}") is not None:
+            return "the earlier import is already posted to the journal; overwrite refused"
+        pays = self.store.find("payments", document_id=rid)
+        if any(p.get("note") not in (IMPORT_NOTE, OVERWRITE_NOTE) for p in pays) or self.store.find(
+            "invoices", corrects_id=rid
+        ):
+            return "payments or credit notes were added since the import; overwrite refused"
+        return None
 
     def _batch_digests(self) -> dict[tuple[str | None, str], str]:
         """(batch id, record id) -> digest of the record as the importer last wrote it (creates and overwrites)."""
