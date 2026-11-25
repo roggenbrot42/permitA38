@@ -57,14 +57,18 @@ def test_invoices_are_issued_paid_and_cancelled_with_accounting_running(repo, sv
     assert svc.numbering.preview("invoice", 1)  # the counter follows the imported numbers
 
 
-def test_before_initialisation_nothing_posts_but_snapshots_and_payments_are_written(repo, svc):
-    run(svc, HEAD + ROWS)
+def test_before_initialisation_paid_stays_virtual_and_undo_removes_the_invoice(repo, svc):
+    report = run(svc, HEAD + ROWS)
     inv = by_number(repo)
     assert all(i["issued"] for i in inv.values())
-    assert len(repo.list("payments")) == 1
-    assert repo.list("payments")[0]["amount_cents"] == 23800
+    assert repo.list("payments") == []  # the stored paid + paid_date is the virtual payment (spec 2.3)
+    assert inv["A-2"]["status"] == "paid" and inv["A-2"]["paid_date"][:10] == "2026-02-20"
+    derived = svc.sales.payments._derive(inv["A-2"])
+    assert (derived.status, derived.paid_cents, derived.paid_date) == ("paid", 23800, "2026-02-20")
     assert inv["A-3"]["review"] == "cancelled_import"
     assert JournalService(repo).entries(2026) == []
+    assert svc.undo(report["batch_id"])["applied"] is True
+    assert repo.list("invoices") == []
 
 
 def test_invoice_dated_before_the_start_gets_a_snapshot_but_no_entry(repo, svc):
@@ -118,29 +122,26 @@ def test_expense_overwrite_reposts_r2(repo, svc):
     ]
 
 
-def test_undo_while_open_posts_reversals_and_removes_the_rows(repo, svc):
+def test_undo_of_an_expense_only_batch_posts_reversals_and_removes_the_rows(repo, svc):
     init(repo)
-    report = run(svc, HEAD + "A-1;05.02.2026;Acme;100;19;119;;sent\n")
     exp = run(svc, EXP_HEAD + EXP, "expenses")
-    inv = repo.list("invoices")[0]
     eid = repo.list("expenses")[0]["id"]
-    assert svc.undo(report["batch_id"])["applied"] is True
     assert svc.undo(exp["batch_id"])["applied"] is True
-    assert repo.list("invoices") == [] and repo.list("expenses") == []
-    posted = keys(repo)
-    assert f"issue:{inv['id']}:rev" in posted and f"expense:{eid}:bill:r1:rev" in posted
-    rows = JournalService(repo).entries(2026)
-    assert sum(ln.amount for e in rows for ln in e.lines) == 0
+    assert repo.list("expenses") == []
+    assert f"expense:{eid}:bill:r1:rev" in keys(repo)
+    assert sum(ln.amount for e in JournalService(repo).entries(2026) for ln in e.lines) == 0
 
 
-def test_undo_of_a_paid_invoice_is_refused_because_payments_are_append_only(repo, svc):
+def test_undo_of_a_booked_invoice_is_refused_and_nothing_changes(repo, svc):
     init(repo)
-    report = run(svc, HEAD + ROWS)
-    before = len(keys(repo))
+    report = run(svc, HEAD + ROWS)  # A-2 is paid: payment row and entry exist
+    assert len(repo.list("payments")) == 1
+    before = keys(repo)
     with pytest.raises(ServiceError) as e:
         svc.undo(report["batch_id"])
-    assert e.value.status == 409
-    assert len(repo.list("invoices")) == 3 and len(keys(repo)) == before
+    assert e.value.status == 409 and "issue credit notes instead" in e.value.message
+    assert len(repo.list("invoices")) == 3 and len(repo.list("payments")) == 1 and keys(repo) == before
+    assert all(b["status"] == "imported" for b in svc.batches())
 
 
 def test_undo_after_a_lock_is_409_and_nothing_changes(repo, svc):

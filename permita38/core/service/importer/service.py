@@ -21,11 +21,11 @@ from permita38.core.repository import Repository, new_id
 from permita38.core.repository.schema import COLLECTIONS
 from permita38.core.service.numbering import NumberingService
 from permita38.core.service.records import RecordService
-from permita38.core.service.sales import SalesService, gross_cents_of
+from permita38.core.service.sales import SalesService
 from permita38.core.settings import effective_settings
 
 from . import values as V
-from .accounting import locked_problem, reverse_entry
+from .accounting import locked_problem
 from .mapping import auto_map, parse_mapping_file
 from .shared import (
     FUZZY_MATCH,
@@ -218,20 +218,13 @@ class ImportService:
         if saved.get("status") == "cancelled":
             saved = self.store.save(coll, {**saved, "review": REVIEW_CANCELLED})
         saved = self.sales.finalize(coll, saved["id"], SYSTEM_USER)
-        gross = gross_cents_of(saved, self.sales.settings())
-        if saved.get("status") == "paid" and saved.get("paid_date") and gross > 0:
-            # one payment of the open amount on the paid date; the advance-payment and future-date checks of a user
-            # payment do not apply to a historical file (like the legacy materialisation, spec 2.2)
-            self.sales.payments._insert(
-                saved,
-                day=str(saved["paid_date"])[:10],
-                signed=gross,
-                kind="payment",
-                method="bank",
-                note=IMPORT_NOTE,
-                reverses_id=None,
-                user=SYSTEM_USER,
-            )
+        if (
+            saved.get("status") == "paid"
+            and saved.get("paid_date")
+            and (self.store.get_journal_entry_by_event_key(f"issue:{saved['id']}") is not None)
+        ):
+            # spec 2.3: the stored paid + paid_date is a virtual payment; it becomes a row only when the invoice posts
+            saved = self.sales.payments.materialize(saved, SYSTEM_USER)
         return saved
 
     def _reverse_import_payments(self, invoice: dict) -> None:
@@ -283,24 +276,25 @@ class ImportService:
                             409,
                             f"An imported customer is still used by {coll} {rec.get('id')}; undo refused",
                         )
-            for coll, rid, _ in records:
+            for coll, rid, _ in records:  # an issued and booked invoice stops the whole undo before anything changes
                 if coll == "invoices":
-                    self._undo_invoice(rid)
-                elif coll == "expenses":  # reversals of the live entries (409 when a bill lies in a locked month)
+                    self._check_undoable_invoice(rid)
+            for coll, rid, _ in records:
+                if coll == "expenses":  # reversals of the live entries (409 when a bill lies in a locked month)
                     self.records.expense_hook.unpost(self.store.get(coll, rid) or {"id": rid}, SYSTEM_USER)
                 self.store.delete(coll, rid)
             self.store.save("import_batches", {**batch, "status": "undone"})
         return {"batch_id": batch_id, "removed": len(records), "applied": True}
 
-    def _undo_invoice(self, rid: str) -> None:
-        """Reverse the issue entry of an imported invoice (event key + ``:rev``; 409 while its booking date lies in a
-        locked month) before the row is removed. A ``payments`` row is append-only and keeps its invoice (the
-        database refuses to delete it), so an invoice with payment rows, or credit notes, stops the undo (409)."""
-        if self.store.find("payments", document_id=rid) or self.store.find("invoices", corrects_id=rid):
-            raise ServiceError(
-                409, "An imported invoice has payments or credit notes (append-only records); undo refused"
-            )
-        reverse_entry(self.store, self.sales.postings.journal, f"issue:{rid}")
+    def _check_undoable_invoice(self, rid: str) -> None:
+        """An imported invoice may be removed only while it has no journal entry, no payments row and no credit note
+        (spec 10); a virtual payment (stored ``paid``) leaves no row and does not count."""
+        if (
+            self.store.get_journal_entry_by_event_key(f"issue:{rid}") is not None
+            or self.store.find("payments", document_id=rid)
+            or self.store.find("invoices", corrects_id=rid)
+        ):
+            raise ServiceError(409, "issued and booked; issue credit notes instead")
 
     # ------------------------------------------------------------------ building the plan
     def _build(self, data, filename, doc_type, mapping_raw, options_raw, pdfs, sheet, delimiter) -> _Plan:
