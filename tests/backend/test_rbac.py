@@ -477,6 +477,8 @@ def _call(client, method, path, body, query):
 
 
 IMPLEMENTED = {
+    ("POST", "/api/accounting/init"),  # boss only; the dummy body initialises an empty folder
+    ("GET", "/api/accounting/init/review"),
     ("GET", "/api/accounting/years"),
     ("POST", "/api/accounting/years"),
     ("GET", "/api/accounting/years/{year}"),

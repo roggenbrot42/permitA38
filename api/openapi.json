@@ -9386,6 +9386,7 @@
           "accounting"
         ],
         "summary": "Init Accounting",
+        "description": "Initialise the accounting (boss only): fiscal year, opening entry, snapshots, backfill of every event on or\nafter the start, in one transaction. 409 when already initialised or when records need the review list.",
         "operationId": "init_accounting_api_accounting_init_post",
         "requestBody": {
           "content": {
@@ -9430,7 +9431,46 @@
           "accounting"
         ],
         "summary": "Accounting Init Review",
+        "description": "The records that need a decision before the accounting can start (read only).",
         "operationId": "accounting_init_review_api_accounting_init_review_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "accounting_start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 10
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Accounting Start"
+            }
+          },
+          {
+            "name": "vat_basis",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(soll|ist)$",
+              "default": "soll",
+              "title": "Vat Basis"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -9439,16 +9479,18 @@
                 "schema": {}
               }
             }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
           },
-          {
-            "ApiToken": []
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        ]
+        }
       }
     },
     "/api/accounting/journal": {

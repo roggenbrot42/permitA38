@@ -100,12 +100,26 @@ def close_year(year: int, user: Boss, services: ServicesDep, body: models.YearCl
 
 @router.post("/init", dependencies=[SessionOnly], name="init_accounting")
 def init_accounting(body: models.AccountingInitIn, user: Boss, services: ServicesDep):
-    not_implemented()
+    """Initialise the accounting (boss only): fiscal year, opening entry, snapshots, backfill of every event on or
+    after the start, in one transaction. 409 when already initialised or when records need the review list."""
+    return services.accounting_init.run(body, user).as_dict()
 
 
 @router.get("/init/review", name="accounting_init_review")
-def init_review(user: Read, services: ServicesDep):
-    not_implemented()
+def init_review(
+    user: Read,
+    services: ServicesDep,
+    accounting_start: Annotated[str | None, Query(max_length=10)] = None,
+    vat_basis: Annotated[str, Query(pattern="^(soll|ist)$")] = "soll",
+):
+    """The records that need a decision before the accounting can start (read only)."""
+    params = models.AccountingInitIn(
+        chart="skr03",
+        income_basis="eur",
+        vat_basis=vat_basis,
+        accounting_start=accounting_start,  # type: ignore[arg-type]
+    )
+    return [r.as_dict() for r in services.accounting_init.check(params)]
 
 
 # ------------------------------------------------------------------ journal, accounts
