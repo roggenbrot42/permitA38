@@ -134,7 +134,8 @@ das als Festschreibung? Reicht der gespeicherte Stand der Voranmeldung mit den z
 Dokumentation? Ausnahme: Solange das Wirtschaftsjahr nicht abgeschlossen ist, buchen wir verspätete Belege dieses
 Jahres und Abschlussbuchungen (Abschreibung, Rückstellungen, Abgrenzungen) mit Buchungsdatum 31.12. in das alte Jahr,
 auch wenn der Dezember durch die Dezember-/Q4-Voranmeldung schon festgeschrieben ist; die Vorsteuer daraus wird im
-ersten offenen Monat des neuen Jahres abgezogen. Ist das so in Ordnung?
+ersten offenen Monat des neuen Jahres abgezogen. Ist das so in Ordnung? Bei der EÜR behält eine nach dem
+Jahresende erfasste Zahlung des alten Jahres ihr Zahlungsdatum (Zufluss) und ändert die EÜR des alten Jahres. Richtig?
 Antwort:
 
 ---
