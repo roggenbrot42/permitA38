@@ -3,7 +3,7 @@
 :class:`TaxBookingService` turns one user action into one journal entry with the pure engine
 ``core/accounting/postings_other.py`` and posts it through :class:`JournalService` (event keys: ``vat:<id>`` for VAT
 payments, refunds and the special prepayment (several per return, origin manual, corrected by reversal),
-``vat:<return id>:credit`` for the automatic December credit, ``manual:<id>`` for the taxes of 9.7 (provisions
+``vat:<return id>:credit:r<n>`` for the automatic December credit, ``manual:<id>`` for the taxes of 9.7 (provisions
 ``manual:<kind>_provision:<year>:r<n>``), ``open:<year>:balances`` for the opening entry). Amounts are integer cents (the routes convert at the edge).
 
 * Nothing posts before the accounting is initialised (settings ``accounting.start``): 409; a date before the start: 422.
@@ -162,14 +162,14 @@ class TaxBookingService:
         )
 
     def special_prepayment_credit(
-        self, year: int, return_id: str, amount: int, user: Mapping[str, Any]
+        self, year: int, return_id: str, amount: int, user: Mapping[str, Any], revision: int = 1
     ) -> models.JournalEntry | None:
         """December/Q4 return finalised: D vat_prepayments / C vat_special_prepayment with the Kz 39 amount, dated
-        31 December of ``year``; key ``vat:<return_id>:credit`` (idempotent), origin auto. ``None`` for Kz 39 = 0."""
+        31 December of ``year``; key ``vat:<return_id>:credit:r<revision>`` (idempotent; a reopen and a new finalise use the next revision), origin auto. ``None`` for Kz 39 = 0."""
         if isinstance(amount, bool) or not isinstance(amount, int) or amount < 0:
             raise ServiceError(422, "The Kz 39 amount must be a number of cents, 0 or more")
         self._day(date(year, 12, 31))
-        entry = special_prepayment_credit_entry(f"{return_id}:credit", date(year, 12, 31), Cents(amount))
+        entry = special_prepayment_credit_entry(f"{return_id}:credit:r{revision}", date(year, 12, 31), Cents(amount))
         if entry is None:
             return None
         return self._post(
@@ -183,11 +183,11 @@ class TaxBookingService:
         )
 
     def special_prepayment_credit_reverse(
-        self, year: int, return_id: str, user: Mapping[str, Any]
+        self, year: int, return_id: str, user: Mapping[str, Any], revision: int = 1
     ) -> models.JournalEntry | None:
-        """The return is reopened: reverse the credit ``vat:<return_id>:credit`` (key ``...:rev``, idempotent).
+        """The return is reopened: reverse the credit ``vat:<return_id>:credit:r<revision>`` (key ``...:rev``, idempotent).
         ``None`` when there was no credit."""
-        key = f"vat:{return_id}:credit"
+        key = f"vat:{return_id}:credit:r{revision}"
         orig = self.store.get_journal_entry_by_event_key(key)
         if orig is None:
             return None

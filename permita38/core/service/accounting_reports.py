@@ -277,9 +277,16 @@ class AccountingReportService:
         ]
         return Loaded(int(fy["year"]), _extended_chart(base, unknown), lines)
 
-    def load_booked(self, fy: Record, date_from: date | None, date_to: date | None) -> Loaded:
-        """The lines of the entries booked in ``[date_from, date_to]`` (either end open)."""
-        return self._build(fy, self._entry_rows(self._all_entries(date_from, date_to)))
+    def load_booked(
+        self, fy: Record, date_from: date | None, date_to: date | None, skip_closing_balance: bool = False
+    ) -> Loaded:
+        """The lines of the entries booked in ``[date_from, date_to]`` (either end open). ``skip_closing_balance``
+        leaves out the year's own ``close:<year>:balance`` entry (the balance sheet of a closed year, 14.5)."""
+        entries = self._all_entries(date_from, date_to)
+        if skip_closing_balance:
+            skip = f"close:{int(fy['year'])}:balance"
+            entries = (e for e in entries if e.get("event_key") != skip)
+        return self._build(fy, self._entry_rows(entries))
 
     def load_income_year(self, fy: Record) -> Loaded:
         """The lines whose ``income_date`` lies in the calendar year of ``fy`` (EÜR, P&L)."""
@@ -452,7 +459,7 @@ class AccountingReportService:
         fy = self.fiscal_year(year)
         self._require_basis(fy, "accrual")
         day = as_of or date(int(fy["year"]), 12, 31)
-        data = self.load_booked(fy, None, day)
+        data = self.load_booked(fy, None, day, skip_closing_balance=fy.get("closed_at") is not None)
         b = reports.balance_sheet(data.lines, data.chart, day)
         # 14.5: the results of earlier years that are not closed yet are a line of their own
         year_start = date(data.year, 1, 1)

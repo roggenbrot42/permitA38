@@ -37,6 +37,7 @@ from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.sanity import SanityService
 from permita38.core.service.settings import SettingsService
+from permita38.core.service.special_prepayment import SpecialPrepaymentService
 from permita38.core.service.suppliers import SupplierService
 from permita38.core.service.tax_bookings import TaxBookingService
 from permita38.core.service.team_timeline import TeamTimelineService
@@ -48,6 +49,7 @@ from permita38.core.service.totp import TotpService
 from permita38.core.service.transfer.service import TransferService, clean_stale_tmp
 from permita38.core.service.trips import TripService
 from permita38.core.service.vat_returns import VatReturnService
+from permita38.core.service.year_closing import YearClosingService
 from permita38.core.service.zm_reports import ZmReportService
 from permita38.core.settings import effective_settings
 
@@ -90,7 +92,9 @@ class Services:
     manual_entries: ManualEntryService
     tax_bookings: TaxBookingService
     vat_returns: VatReturnService
+    special_prepayment: SpecialPrepaymentService
     zm_reports: ZmReportService
+    year_closing: YearClosingService
     datev_export: DatevExportService
 
     @classmethod
@@ -107,6 +111,7 @@ class Services:
         sanity = SanityService(store)
         sales = SalesService(store, records)
         journal = sales.postings.journal
+        tax_bookings = TaxBookingService(store, journal)
         return cls(
             busy=busy,
             planner=PlannerService(store, busy),
@@ -138,8 +143,10 @@ class Services:
             journal=journal,
             locks=locks,
             manual_entries=ManualEntryService(store, journal),
-            tax_bookings=TaxBookingService(store, journal),
-            vat_returns=VatReturnService(store, locks),
+            tax_bookings=tax_bookings,
+            year_closing=YearClosingService(store, journal, locks, tax_bookings),
+            vat_returns=VatReturnService(store, locks, bookings=tax_bookings),
+            special_prepayment=SpecialPrepaymentService(store, tax_bookings),
             zm_reports=ZmReportService(store),
             datev_export=DatevExportService(store, locks, fiscal_years),
             impressum=ImpressumService(

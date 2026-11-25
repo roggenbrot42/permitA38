@@ -92,7 +92,7 @@ def test_special_prepayment_and_credit(eur):
     c = eur.special_prepayment_credit(2026, "dec26", 20000, USER)
     assert c is not None
     # Kz 39 = 200,00: D vat_prepayments 20000 / C vat_special_prepayment -20000, no income_date, 31 Dec
-    assert c.event_key == "vat:dec26:credit" and c.origin == "auto" and str(c.document_date) == "2026-12-31"
+    assert c.event_key == "vat:dec26:credit:r1" and c.origin == "auto" and str(c.document_date) == "2026-12-31"
     assert lines(c) == [("vat_prepayments", 20000, None), ("vat_special_prepayment", -20000, None)]
     again = eur.special_prepayment_credit(2026, "dec26", 20000, USER)
     assert again is not None and again.id == c.id
@@ -324,7 +324,7 @@ def test_credit_reversal_on_reopen(eur):
     c = eur.special_prepayment_credit(2026, "dec26", 20000, USER)
     assert c is not None
     r = eur.special_prepayment_credit_reverse(2026, "dec26", USER)
-    assert r is not None and r.event_key == "vat:dec26:credit:rev" and r.reverses_id == c.id
+    assert r is not None and r.event_key == "vat:dec26:credit:r1:rev" and r.reverses_id == c.id
     assert lines(r) == [("vat_prepayments", -20000, None), ("vat_special_prepayment", 20000, None)]
     again = eur.special_prepayment_credit_reverse(2026, "dec26", USER)
     assert again is not None and again.id == r.id
@@ -398,7 +398,8 @@ def test_closed_year_and_locked_month(eur):
     assert str(e.document_date) == "2026-03-10" and str(e.booking_date) == "2026-04-01"  # first open day
     row = eur.store.find("fiscal_years", year=2026)[0]
     eur.store.save("fiscal_years", {**row, "closed_at": 1, "closed_by": "u1x000"})
-    # a closed year is fully locked: the payment books into the next open year, its income date follows
+    # a closed year is fully locked: the payment books into the next open year; under EÜR the income date stays the
+    # payment date (accounting 14.5), only accrual years normalise it
     late = eur.vat_payment("ret1", date(2026, 5, 10), 1000, "payment", USER)
     assert str(late.document_date) == "2026-05-10" and str(late.booking_date) == "2027-01-01"
-    assert late.lines[0].income_date == "2027-01-01"
+    assert late.lines[0].income_date == "2026-05-10"

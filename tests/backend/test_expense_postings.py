@@ -439,6 +439,16 @@ def test_13b_private_share_income_date_follows_the_closing_date_exception(repo, 
     assert private.income_date == "2026-12-31"
 
 
+def test_eur_13b_nondeductible_tax_carries_no_income_date(repo, rs):
+    """Spec 9.4: it becomes an expense when paid with the return (9.6), so the bill must not count it as well."""
+    init(repo, income="eur", vat="ist")
+    make(repo, rs, date="2026-10-15", tax_treatment="reverse_charge_eu_service", net=100.0, vat=0.0, vat_rate=19.0,
+         deductible=50)  # fmt: skip
+    bill = next(e for e in entries(repo) if ":bill:" in e.event_key)
+    nd = [ln for ln in bill.lines if ln.role == "rc_vat_nondeductible"]
+    assert len(nd) == 1 and nd[0].income_date is None
+
+
 def test_itemised_reverse_charge_line_without_a_rate_defaults_to_19(repo, rs):
     init(repo)
     lines = [{"description": "a", "gross": 100.0, "category": "software"}]

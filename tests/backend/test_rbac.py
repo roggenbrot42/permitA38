@@ -482,6 +482,7 @@ IMPLEMENTED = {
     ("GET", "/api/accounting/years/{year}"),
     ("GET", "/api/accounting/locks"),
     ("POST", "/api/accounting/locks"),
+    ("POST", "/api/accounting/years/{year}/close"),  # boss only, 422 for the dummy id
     ("GET", "/api/accounting/entry-templates"),
     ("POST", "/api/accounting/entries"),
     ("POST", "/api/accounting/entries/{entry_id}/reverse"),
@@ -493,6 +494,9 @@ IMPLEMENTED = {
     ("GET", "/api/invoices/{rid}/credit-notes"),
     ("POST", "/api/invoices/{rid}/credit-notes"),
     ("GET", "/api/accounting/journal"),
+    ("POST", "/api/vat-returns/{rid}/payment"),
+    ("GET", "/api/vat/special-prepayment"),
+    ("PUT", "/api/vat/special-prepayment"),
     ("GET", "/api/accounting/accounts"),
     ("GET", "/api/accounting/reports/trial-balance"),
     ("GET", "/api/accounting/reports/eur"),
@@ -533,7 +537,8 @@ def test_new_routes_answer_501_where_allowed_and_403_where_denied(app, clients):
         for role, c in clients.items():
             r = _call(c, method, path, body, query)
             if (method, path) in IMPLEMENTED:  # answered by a service now (tests/backend/test_fiscal_years.py)
-                assert (r.status_code == 403) == (role == "employee"), (method, path, role, r.status_code)
+                refused = role == "employee" or (boss_only and role != "boss")
+                assert (r.status_code == 403) == refused, (method, path, role, r.status_code)
             elif role == "employee" or (boss_only and role != "boss"):
                 assert r.status_code == 403, (method, path, role, r.status_code)
             else:

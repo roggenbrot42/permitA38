@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.api.responses import present
 from permita38.core import models, rights
+from permita38.core.money import dec, q2
 from permita38.core.service.accounting_reports import (
     AccountOut,
     BalanceSheetOut,
@@ -24,6 +25,7 @@ from permita38.core.service.accounting_reports import (
     parse_date,
 )
 from permita38.core.service.manual_entries import EntryTemplate
+from permita38.core.service.year_closing import ProvisionInput
 
 router = APIRouter(prefix="/accounting", tags=["accounting"])
 payments_router = APIRouter(tags=["accounting"])
@@ -86,9 +88,14 @@ def get_year(year: int, user: Read, services: ServicesDep):
     return models.FiscalYear(**services.fiscal_years.get(year))
 
 
-@router.post("/years/{year}/close", dependencies=[SessionOnly], name="close_fiscal_year")
-def close_year(year: int, user: Boss, services: ServicesDep):
-    not_implemented()
+@router.post(
+    "/years/{year}/close", dependencies=[SessionOnly], name="close_fiscal_year", response_model=models.FiscalYear
+)
+def close_year(year: int, user: Boss, services: ServicesDep, body: models.YearCloseIn | None = None):
+    """Close the year (boss only): accrual posts the confirmed provisions, the VAT transfer and the closing entries,
+    EÜR just ends the year. 409 when blocked or closed already."""
+    provisions = [ProvisionInput(p.kind, int(q2(dec(p.amount)) * 100)) for p in (body.provisions if body else [])]
+    return models.FiscalYear(**services.year_closing.close(year, provisions, user))
 
 
 @router.post("/init", dependencies=[SessionOnly], name="init_accounting")
