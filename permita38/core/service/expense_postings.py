@@ -481,6 +481,7 @@ class ExpensePostingService:
             lines,
             source,
             f"Opening item expense {name}"[:200],
+            open_item_id=str(rec["id"]),
         )
 
     post_opening = sync_opening

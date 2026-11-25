@@ -163,7 +163,7 @@ class AccountingInitService:
         clock = (lambda: today) if today is not None else date.today
         payments = PaymentService(self.store, self.journal, today=clock)
         return ReviewApplier(
-            self.store, self.expense_posting, CreditNoteService(self.store, self.journal, payments), payments
+            self.store, self.expense_posting, CreditNoteService(self.store, self.journal, payments), payments, clock
         )
 
     # ------------------------------------------------------------------ parameters

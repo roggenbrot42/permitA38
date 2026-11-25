@@ -27,7 +27,6 @@ from permita38.core.service.sales import SalesService
 from permita38.core.service.trips import TripService
 from permita38.core.settings import ACCOUNTING_START_KEY
 
-from .test_init_review import answer_external_periods  # noqa: F401  (autouse fixture)
 from .test_invoice_freeze import cust, issue, store  # noqa: F401  (fixtures)
 from .test_issue_posting import customer, init, line, repo, sales  # noqa: F401  (fixtures and helpers)
 from .test_payments import BOSS, TODAY, pay  # noqa: F401  (fixtures)
@@ -38,6 +37,8 @@ from .test_trip_postings import boss as trip_boss
 PARAMS = models.AccountingInitIn(chart="skr03", income_basis="accrual", vat_basis="soll", accounting_start="2026-01-01")
 EUR = PARAMS.model_copy(update={"income_basis": "eur"})
 RC_RAW = {"date": "2026-03-01", "net": 100.0, "vat": 0.0, "category": "software", "reverse_charge": True}
+
+pytestmark = pytest.mark.usefixtures("none_filed")  # every ended period needs an answer (step 5b)
 
 
 def all_entries(repo) -> list:

@@ -132,11 +132,18 @@ class OpeningItemService:
         ]
 
     def sync(
-        self, kind: str, ident: str, desired: Sequence[PostLine], source: JournalSource, text: str
+        self,
+        kind: str,
+        ident: str,
+        desired: Sequence[PostLine],
+        source: JournalSource,
+        text: str,
+        open_item_id: str | None = None,
     ) -> models.JournalEntry | None:
         """Bring the opening items of ``kind`` / ``ident`` to the ``desired`` balance-sheet lines: the first call posts
         ``open:<year>:<kind>:<id>``, a later difference posts the adjustment ``...:r<n>`` (new minus previous baseline,
-        each against ``opening_balance``). Idempotent: no difference posts nothing (the base entry is returned)."""
+        each against ``opening_balance``). ``open_item_id`` is the record id the open-item lines carry (default ``ident``).
+        Idempotent: no difference posts nothing (the base entry is returned)."""
         start = self.start()
         if start is None:
             return None
@@ -160,7 +167,7 @@ class OpeningItemService:
         if not delta:
             return self.journal.get_by_event_key(base) if count else None
         lines = [
-            PostLine(role=r, amount_cents=v, open_item_id=ident.split(":")[0] if r in OPEN_ITEM_ROLES else None)
+            PostLine(role=r, amount_cents=v, open_item_id=(open_item_id or ident) if r in OPEN_ITEM_ROLES else None)
             for r, v in delta.items()
         ]
         key = base if count == 0 else f"{base}:r{count}"

@@ -9,7 +9,7 @@ the returns filed outside the app. Nothing is guessed: a row without an answer k
 No SQL here.
 """
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -140,7 +140,9 @@ class ReviewApplier:
         expense_posting: ExpensePostingService,
         credit_notes: CreditNoteService,
         payments: PaymentService,
+        today: Callable[[], date] = date.today,
     ):
+        self.today = today
         self.store = store
         self.expense_posting = expense_posting
         self.credit_notes = credit_notes
@@ -159,6 +161,8 @@ class ReviewApplier:
                 inv = self.store.get(item.collection, item.id) or {}
                 if ans.date and str(ans.date)[:10] < str(inv.get("date") or "")[:10]:
                     raise ServiceError(422, f"{key}: the date lies before the invoice date")
+                if ans.date and str(ans.date)[:10] > self.today().isoformat():
+                    raise ServiceError(422, f"{key}: the date lies in the future")
 
     def apply(
         self,
@@ -251,18 +255,24 @@ class ReviewApplier:
         return len(invoices)
 
     # ------------------------------------------------------------------ step 5b
-    @staticmethod
     def returns_to_store(
-        returns: list[models.ExternalReturnIn], periods: list[ExternalPeriod]
+        self, returns: list[models.ExternalReturnIn], periods: list[ExternalPeriod]
     ) -> list[models.ExternalReturnIn]:
         """The answers that carry a return (not ``none_filed``), each for a period of :func:`external_periods`, in
         period order."""
-        allowed = {(p.year, p.kind, p.no) for p in periods}
+        allowed = {(p.year, p.kind, p.no): p for p in periods}
         for r in returns:
-            if (r.year, r.kind, r.no) not in allowed:
+            period = allowed.get((r.year, r.kind, r.no))
+            if period is None:
                 raise ServiceError(
                     422, f"external_returns: {r.year} {r.kind} {r.no} is not an ended period on/after the start"
                 )
+            if r.filed_on is not None:
+                filed = str(r.filed_on)[:10]
+                if filed <= period.to_date.isoformat():
+                    raise ServiceError(422, f"external_returns: {r.year} {r.kind} {r.no} was filed before it ended")
+                if filed > self.today().isoformat():
+                    raise ServiceError(422, f"external_returns: {r.year} {r.kind} {r.no} was filed in the future")
         return sorted((r for r in returns if not r.none_filed), key=lambda r: (r.year, r.no))
 
     @staticmethod
