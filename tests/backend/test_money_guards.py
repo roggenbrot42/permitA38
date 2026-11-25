@@ -50,6 +50,7 @@ SCHEMA_NUMERIC_ALLOWLIST = {
     "age_days": "age of an open item in days",
     "loc": "validation error path element (index)",
     "quarter": "calendar quarter 1..4 (ZM)",
+    "months": "months with a business in the previous year (Sondervorauszahlung), 1..12",
     "rows": "number of ZM list rows",
     "drift": "number of ZM entries with late lines",
     "entries": "number of ZM drift entries",
