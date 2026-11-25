@@ -25,7 +25,7 @@ from permita38.core.service.accounting_reports import (
     TrialBalanceOut,
     parse_date,
 )
-from permita38.core.service.integrity import JOURNAL_PREFIXES, IntegrityService, summary
+from permita38.core.service.integrity import ACCOUNTING_RULES, IntegrityService, summary
 from permita38.core.service.manual_entries import EntryTemplate
 from permita38.core.service.year_closing import ProvisionInput
 
@@ -264,7 +264,7 @@ class AccountingIntegrity(BaseModel):
 @router.get("/integrity", name="accounting_integrity", response_model=AccountingIntegrity)
 def integrity(user: Read, services: ServicesDep):
     """Balance and hash chain per fiscal year plus the accounting sanity warnings (spec 7.1, 7.6, 7.9)."""
-    found = IntegrityService(services.store).run(JOURNAL_PREFIXES)
+    found = IntegrityService(services.store).run(rules=ACCOUNTING_RULES)
     return {"findings": [f.as_dict() for f in found], "summary": summary(found)}
 
 

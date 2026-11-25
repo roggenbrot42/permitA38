@@ -14,9 +14,14 @@ import pytest
 
 from permita38.cli.main import main
 from permita38.core.repository.sqlite import DB_FILENAME
-from permita38.core.service.integrity import IntegrityService
+from permita38.core.service import integrity
+from permita38.core.service.credit_notes import CreditNoteService
+from permita38.core.service.integrity import ACCOUNTING_RULES, IntegrityService
 from permita38.core.service.journal import JournalService
+from permita38.core.service.locks import LockService
 from permita38.core.service.records import RecordService
+from permita38.core.service.tax_bookings import TaxBookingService
+from permita38.core.service.year_closing import YearClosingService
 
 from .test_issue_posting import (  # noqa: F401  (fixtures and helpers)
     customer,
@@ -222,15 +227,130 @@ def test_a_final_vat_return_with_drift(repo):
     assert codes(repo) == [("accounting.vat_drift", rid)]
 
 
-def test_a_synced_folder_warning_needs_accounting_on(repo, books):
+def test_the_sync_conflict_warning_gets_the_accounting_wording_when_accounting_is_on(repo, books):
     (repo.data_dir / "data.sync-conflict-20260101-000000-ABC.db").write_text("x")
-    assert ("accounting.synced_folder", None) in codes(repo)
-    assert "one device at a time" in next(f.message for f in IntegrityService(repo).run(("accounting.synced",)))
+    (found,) = IntegrityService(repo).run(("file.sync_conflict",))
+    assert "one device at a time" in found.message
+    assert codes(repo) == []  # no separate accounting rule: the file rule reports it once
 
 
-def test_a_conflict_copy_without_accounting_is_no_accounting_finding(repo):
+def test_a_conflict_copy_without_accounting_has_the_plain_wording(repo):
     (repo.data_dir / "data.sync-conflict-20260101-000000-ABC.db").write_text("x")
     assert codes(repo) == []
+    (found,) = IntegrityService(repo).run(("file.sync_conflict",))
+    assert "one device" not in found.message
+
+
+def test_a_credit_note_before_the_accounting_start_is_not_reported(repo, books):
+    repo.save(
+        "invoices",
+        {"id": "cnold001", "number": "G-0", "kind": "credit_note", "status": "sent", "date": "2025-12-31", "lines": []},
+    )
+    assert codes(repo) == []
+
+
+def test_a_booked_then_deleted_expense_is_no_dangling_source(repo, books):
+    repo.save("users", {"id": BOSS["id"], "username": "boss", "name": "Demo Boss", "role": "boss"})
+    repo.delete("expenses", books["exp"]["id"])
+    assert IntegrityService(repo).run(("ref.",)) == []
+
+
+def test_a_dangling_created_by_is_still_reported_but_the_system_user_is_not(repo, books):
+    repo.save("users", {"id": BOSS["id"], "username": "boss", "name": "Demo Boss", "role": "boss"})
+    tamper(repo, "UPDATE payments SET created_by = 'ghost0'")
+    assert [(f.code, f.collection) for f in IntegrityService(repo).run(("ref.",))] == [("ref.dangling", "payments")]
+    tamper(repo, "UPDATE payments SET created_by = 'system'")
+    assert IntegrityService(repo).run(("ref.",)) == []
+
+
+def test_a_crashing_accounting_rule_is_reported_on_the_route_rules(repo, books, monkeypatch):
+    def boom(ctx):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(integrity, "ACCOUNTING_RULES", [boom])
+    found = IntegrityService(repo).run(rules=integrity.ACCOUNTING_RULES)
+    assert [(f.code, f.severity) for f in found] == [("check.crashed", "error")]
+
+
+def test_the_route_keeps_crashed_findings(app, clients, monkeypatch):
+    import permita38.api.routers.accounting as route
+
+    def boom(ctx):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(route, "ACCOUNTING_RULES", [boom])
+    body = clients["boss"].get("/api/accounting/integrity").json()
+    assert [f["code"] for f in body["findings"]] == ["check.crashed"]
+    assert body["summary"]["errors"] == 1
+
+
+def test_the_route_runs_only_the_accounting_rules(repo, books, monkeypatch):
+    seen = []
+    monkeypatch.setattr(integrity, "RULES", [lambda ctx: seen.append("all") or []])
+    IntegrityService(repo).run(rules=ACCOUNTING_RULES)
+    assert seen == []
+
+
+def test_a_replaced_original_return_reports_no_drift(repo):
+    repo.save("fiscal_years", vat_fiscal_year(2026))
+    journal = JournalService(repo, clock=lambda: 1_800_000_000)
+    svc = make_service(repo)
+    post_sale(journal, "a:1", date(2026, 2, 5), date(2026, 2, 5))
+    rid = svc.create_draft(2026, "month", 2)["id"]
+    svc.finalize(rid, USER, confirm_gap=True)
+    svc.filed(rid, "2026-03-09", None, None)
+    repo.save_settings({"accounting.start": "2026-01-01"})
+    post_sale(JournalService(repo, clock=lambda: 1_800_000_100), "a:2", date(2026, 3, 5), date(2026, 2, 20))
+    assert codes(repo) == [("accounting.vat_drift", rid)]
+    amend = svc.create_draft(2026, "month", 2, amends_id=rid)["id"]
+    svc.finalize(amend, USER, confirm_gap=True)
+    assert repo.get("vat_returns", rid)["replaced_by"] == amend
+    assert codes(repo) == []  # the original is superseded; the amendment contains the late sale
+
+
+# ---------------------------------------------------------------- clean folders: no findings of any kind
+def whole(repo):
+    """Every rule on the folder (with the boss the clean folder needs)."""
+    repo.save("users", {"id": BOSS["id"], "username": "boss", "name": "Demo Boss", "role": "boss"})
+    return IntegrityService(repo).run()
+
+
+def test_a_closed_eur_year_is_clean(repo, sales):
+    init(repo, income="eur", vat="ist")
+    locks = LockService(repo, today=lambda: date(2027, 1, 10))
+    locks.lock_up_to(2026, 11, "manual", "u1x000")
+    journal = JournalService(repo)
+    closing = YearClosingService(repo, journal, locks, TaxBookingService(repo, journal))
+    closing.close(2026, [], BOSS)
+    assert repo.find("fiscal_years", year=2026)[0]["closed_at"] is not None
+    assert whole(repo) == []
+
+
+def test_a_write_off_and_its_reversal_are_clean(repo, sales):
+    init(repo)
+    sales.payments.today = lambda: date(2026, 12, 31)
+    inv = sales.finalize("invoices", draft(repo, "2026-03-02", [line("100.00")])["id"])
+    cn = CreditNoteService(repo, sales.postings.journal, sales.payments)
+    cn.create(inv["id"], credit_kind="write_off", date="2026-03-06", reason="Lost", user=BOSS)
+    sales.payments.record(inv["id"], date="2026-03-10", amount=Decimal("119.00"), kind="payment", user=BOSS)
+    assert sorted(n["credit_kind"] for n in repo.find("invoices", corrects_id=inv["id"])) == [
+        "write_off",
+        "write_off_reversal",
+    ]
+    assert whole(repo) == []
+
+
+def test_a_trip_is_clean(repo, books):
+    project = repo.save("projects", {"name": "Demo project", "kind": "internal", "status": "active"})
+    repo.save("trips", {"project_id": project["id"]})
+    assert whole(repo) == []
+
+
+def test_an_external_vat_return_is_clean(repo):
+    repo.save("fiscal_years", vat_fiscal_year(2026))
+    repo.save_settings({"accounting.start": "2026-01-01"})
+    make_service(repo).create_external(2026, "month", 2, 0, 0, "2026-03-09", USER)
+    assert whole(repo) == []
 
 
 # ---------------------------------------------------------------- check-db and the route
