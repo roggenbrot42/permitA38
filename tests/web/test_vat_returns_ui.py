@@ -227,3 +227,93 @@ def test_no_special_prepayment_panel_without_dauerfrist(browser, srv):
     assert pg.locator("#vat-special").count() == 0
     assert not problems, problems
     ctx.close()
+
+
+def test_booked_versus_form_figures_and_rounding_line(browser, srv):
+    invoice(srv, "2026-01-15", "3500.50")  # 19 %: booked 665.10, form 665.00 on the base 3500
+    invoice(srv, "2026-01-16", "1234.99", vat=7)  # 7 %: booked 86.45, form 86.38 on the base 1234
+    ctx, pg, problems, _ = open_page(browser, srv)
+    pg.goto(srv.base + "/#/vat/returns/2026/month/1")
+    pg.wait_for_selector("#vat-boxes")
+    row81 = pg.locator("#vat-boxes tr[data-kz='81']").inner_text()
+    assert "3.500,00" in row81 and "665,00" in row81 and "3.500,50" in row81 and "665,10" in row81
+    row86 = pg.locator("#vat-boxes tr[data-kz='86']").inner_text()
+    assert "1.234,00" in row86 and "86,38" in row86 and "86,45" in row86
+    assert "booked" in pg.locator("#vat-boxes tr[data-kz='86'] td").nth(4).inner_text()
+    assert "0,17" in pg.inner_text("#vat-rounding")  # 0.10 + 0.07
+    assert not problems, problems
+    ctx.close()
+
+
+def test_december_return_shows_kz_39(browser, srv_df):
+    srv_df.api("PUT", "vat/special-prepayment", json={"year": 2026, "amount": "600.00"})
+    ctx, pg, problems, _ = open_page(browser, srv_df)
+    pg.goto(srv_df.base + "/#/vat/returns/2026/month/12")
+    pg.wait_for_selector("#vat-boxes")
+    row39 = pg.locator("#vat-boxes tr[data-kz='39']").inner_text()
+    assert "600,00" in row39 and "Credit of the special prepayment" in row39
+    assert not problems, problems
+    ctx.close()
+
+
+def test_refund_payment_and_drift_banner_text_of_a_final_unfiled_return(browser, srv):
+    invoice(srv, "2026-01-15", "1000.00")
+    ret = srv.api("POST", "vat-returns", json={"year": 2026, "kind": "month", "no": 1}).json()
+    srv.api("POST", f"vat-returns/{ret['id']}/finalize")
+    invoice(srv, "2026-04-15", "500.00", service_to="2026-01-20")  # late entry: drift of the final return
+    ctx, pg, problems, _ = open_page(browser, srv)
+    pg.goto(srv.base + "/#/vat/returns/2026/month/1")
+    pg.wait_for_selector("#vat-drift")
+    text = pg.inner_text("#vat-drift")
+    assert "reopen and finalise again" in text and "amended return" not in text
+    pg.click("button[data-a=vatPay]")
+    pg.fill("#f_amount", "200,00")
+    pg.click("#m-save")
+    pg.wait_for_selector("#vat-pay-table")
+    pg.click("button[data-a=vatPay]")
+    pg.select_option("#f_kind", "refund")
+    pg.fill("#f_amount", "50,00")
+    pg.click("#m-save")
+    pg.wait_for_selector("#vat-pay-table tbody tr:nth-child(2)")
+    assert "Refund" in pg.inner_text("#vat-pay-table") and "50,00" in pg.inner_text("#vat-pay-table")
+    assert "150,00" in pg.inner_text("#vat-payments")  # Kz 83 190.00 - paid 150.00 -> open 40.00
+    assert "40,00" in pg.inner_text("#vat-open")
+    # once filed the banner asks for an amended return
+    pg.click("button[data-a=vatFiled]")
+    pg.click("#m-save")
+    pg.wait_for_selector("button[data-a=vatAmend]")
+    assert "File an amended return" in pg.inner_text("#vat-drift")
+    assert not problems, problems
+    ctx.close()
+
+
+def test_no_special_prepayment_panel_for_a_quarterly_year(tmp_path, monkeypatch, browser):
+    s = make_server(tmp_path, monkeypatch, dauerfrist=True, vat_frequency="quarter")
+    try:
+        assert s.api("GET", "vat/special-prepayment?year=2026").json()["applies"] is False
+        ctx, pg, problems, _ = open_page(browser, s)
+        pg.goto(s.base + "/#/vat/returns/2026")
+        pg.wait_for_selector("#vat-list")
+        assert pg.locator("#vat-special").count() == 0
+        assert not problems, problems
+        ctx.close()
+    finally:
+        s.stop()
+
+
+def test_read_only_user_sees_no_action_buttons(browser, srv_df):
+    invoice(srv_df, "2026-01-15", "1000.00")
+    ret = srv_df.api("POST", "vat-returns", json={"year": 2026, "kind": "month", "no": 1}).json()
+    srv_df.api("POST", f"vat-returns/{ret['id']}/finalize")
+    ctx, pg, problems, _ = open_page(browser, srv_df)
+    pg.goto(srv_df.base + "/#/vat/returns/2026")
+    pg.wait_for_selector("#vat-special button[data-a=vatSpecial]")
+    pg.evaluate("S.me.permissions.vat.write = 'none'")  # a read-only user: the page is rendered again from the hash
+    pg.evaluate("location.hash = '#/vat/returns/2026/month/1'")
+    pg.wait_for_selector("#vat-payments")
+    assert pg.locator("button[data-a=vatPay], button[data-a=vatFiled], button[data-a=vatReopen]").count() == 0
+    pg.evaluate("location.hash = '#/vat/returns/2026'")
+    pg.wait_for_selector("#vat-special")
+    assert pg.locator("#vat-special button").count() == 0
+    assert not problems, problems
+    ctx.close()

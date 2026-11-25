@@ -359,3 +359,41 @@ def test_response_schemas_carry_the_money_fields(app: Any):
         assert "decimal" in str(ret[name]), name
     assert "decimal" in str(schemas["VatPayment"]["properties"]["amount"])
     assert "VatPayment" in str(ret["payments"])
+
+
+# ------------------------------------------------------------------ review fixes: applies, paid_on, final December
+def test_small_business_year_does_not_apply_and_put_is_422(sp, repo):
+    assert sp.get(2026)["applies"] is True
+    row = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**row, "small_business": True})
+    got = sp.get(2026)
+    assert got["applies"] is False and got["proposal"] == "0.00"
+    with pytest.raises(ServiceError) as err:
+        sp.put(2026, 600.0, None, USER)
+    assert err.value.status == 422
+
+
+def test_quarterly_year_reports_applies_false(sp, repo):
+    row = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**row, "vat_frequency": "quarter"})
+    assert sp.get(2026)["applies"] is False and sp.get(2026)["dauerfrist"] is True
+
+
+def test_other_paid_on_while_payment_is_live_is_409(sp, repo):
+    sp.put(2026, 600.0, "2026-02-10", USER)
+    with pytest.raises(ServiceError) as err:
+        sp.put(2026, 600.0, "2026-02-12", USER)
+    assert err.value.status == 409 and "reverse the payment first" in err.value.message
+    assert sp.get(2026)["payment"]["paid_on"] == "2026-02-10"
+    assert sp.put(2026, 600.0, "2026-02-10", USER)["payment"]["paid_on"] == "2026-02-10"  # the same date replays
+
+
+def test_put_after_a_final_december_return_is_409(sp, repo):
+    sp.put(2026, 600.0, None, USER)
+    draft_row(repo, 2026, "month", 12)
+    row = repo.find("vat_returns", year=2026, period_no=12)[0]
+    repo.save("vat_returns", {**row, "status": "final", "finalised_at": 1, "finalised_by": "u1x000"})
+    with pytest.raises(ServiceError) as err:
+        sp.put(2026, 500.0, None, USER)
+    assert err.value.status == 409 and "reopen the December return first" in err.value.message
+    assert sp.get(2026)["amount"] == "600.00"

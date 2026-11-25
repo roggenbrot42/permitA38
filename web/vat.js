@@ -184,7 +184,7 @@ async function vatList(y) {
 async function vatSpecialPanel(y) {
   let sp;
   try { sp = await api('GET', 'vat/special-prepayment?year=' + y); } catch (e) { return ''; }
-  if (!sp.dauerfrist) return '';
+  if (!sp.applies) return '';
   const pay = sp.payment;
   const basis = `(Kz 83 of ${y - 1}: ${esc(eur(sp.previous_kz83))} + Kz 39: ${esc(eur(sp.previous_kz39))}) × 12 / ${sp.months ?? '?'} months ÷ 11`;
   const payment = pay ? `<div id="sp-payment">Booked payment: <b>${esc(eur(pay.amount))}</b> on ${esc(fmtDate(pay.paid_on))}${pay.reversed ? ' <span class="pill bad">Reversed</span>' : ' <span class="pill good">Paid</span>'}</div>` : '<div id="sp-payment" class="muted">No payment booked.</div>';
@@ -228,13 +228,14 @@ async function vatDetail(y, kind, no) {
     const b = boxes[kz];
     const base = b.base !== null && b.base !== undefined ? esc(eur(b.base)) : '';
     const tax = b.tax ?? b.amount;
-    const booked = b.booked_tax !== null && b.booked_tax !== undefined && b.booked_tax !== b.tax ? `booked ${esc(eur(b.booked_tax))}` : '';
+    const differs = (booked, form) => booked !== null && booked !== undefined && form !== null && form !== undefined && Money.cmp(booked, form) !== 0;
+    const booked = [differs(b.booked_base, b.base) ? `base ${esc(eur(b.booked_base))}` : '', differs(b.booked_tax, b.tax) ? `tax ${esc(eur(b.booked_tax))}` : ''].filter(Boolean).map(x => `booked ${x}`).join(' · ');
     const flag = b.flag !== null && b.flag !== undefined ? esc(String(b.flag)) : '';
     return `<tr data-kz="${kz}"><td><b>${kz}</b></td><td>${esc(label)}</td><td class="num">${base}</td><td class="num">${flag || (tax !== null && tax !== undefined ? esc(eur(tax)) : '')}</td><td class="small muted">${booked}</td><td class="right">${drill(kz)}</td></tr>`;
   }).join('');
   const table = trs ? `<table id="vat-boxes"><thead><tr><th>Kz</th><th>Box</th><th class="num">Base (form)</th><th class="num">Tax / amount (form)</th><th>Booked</th><th></th></tr></thead><tbody>${trs}</tbody></table>
     <div class="small" id="vat-rounding">Rounding difference (booked − form), stays on the VAT accounts until the annual return: <b>${esc(eur(ret.rounding_difference ?? 0))}</b></div>` : '<div class="empty">No figures in this period.</div>';
-  const drift = ret.drift?.entries ? `<div class="banner" id="vat-drift" role="alert">⚠ ${ret.drift.entries} entr${ret.drift.entries === 1 ? 'y' : 'ies'} written after finalising change${ret.drift.entries === 1 ? 's' : ''} the tax by ${esc(eur(ret.drift.tax))}. File an amended return.
+  const drift = ret.drift?.entries ? `<div class="banner" id="vat-drift" role="alert">⚠ ${ret.drift.entries} entr${ret.drift.entries === 1 ? 'y' : 'ies'} written after finalising change${ret.drift.entries === 1 ? 's' : ''} the tax by ${esc(eur(ret.drift.tax))}. ${filed ? 'File an amended return.' : 'To fix this, reopen and finalise again.'}
     <ul>${(ret.drift.lines || []).map(l => `<li>${esc(l.document || '')} · ${esc(l.tax_key || '')} · ${esc(fmtDate(l.vat_date))} · base ${l.base === null || l.base === undefined ? '' : esc(eur(l.base))}${l.tax === null || l.tax === undefined ? '' : ' · tax ' + esc(eur(l.tax))}</li>`).join('')}</ul></div>` : '';
   const warn = (ret.warnings || []).length ? `<div class="banner">${ret.warnings.map(w => esc(w)).join('<br>')}</div>` : '';
   const btn = (a, label, cls = '') => `<button class="${cls}" data-a="${a}" data-year="${y}" data-kind="${kind}" data-no="${no}" data-id="${esc(rid || '')}">${label}</button>`;
