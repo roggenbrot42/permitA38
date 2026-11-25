@@ -540,7 +540,10 @@ template); open receivables come from the backfill (section 16).
    accrual every line's `income_date` lies in the entry's fiscal year: `JournalService` first applies the section 11
    rule centrally (under accrual a line whose `income_date` lies in a **closed** year gets the entry's booking date — this covers
    late payments, refunds and write-off reversals of a closed year), then refuses any remaining line outside the year
-   with 422,
+   with 422; a line on a P&L account (chart class) without `income_date` gets the entry's booking date (all origins),
+   so P&L, EÜR and the year closing always see the same lines; the closing entries themselves (`close:<Y>:pnl`,
+   `close:<Y>:balance`) carry none. The balance sheet of a closed year leaves out its own `close:<Y>:balance` entry
+   (it shows the balances that entry closes),
    so the P&L result equals the balance-sheet result of the year; before the year closing the balance sheet shows the
    results of earlier unclosed years as a separate "result of earlier years not yet closed" line. The EÜR route
    answers 422 for an accrual year and P&L / balance sheet answer 422 for an EÜR year (EÜR may carry an `income_date`
