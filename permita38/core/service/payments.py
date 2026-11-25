@@ -2,7 +2,7 @@
 
 Every write materialises a legacy virtual payment first, inserts one append-only ``payments`` row (``amount_cents``
 signed: payments positive, refunds and reversals negative) and, when the accounting is initialised, posts the 9.2
-target delta through :class:`~permita38.core.service.opening_items.PrestartPaymentPosting` in the same transaction
+target delta through :class:`~permita38.core.service.postings.PaymentPostingService` in the same transaction
 (event key ``payment:<payment id>``; an invoice dated before the start gets its pre-start baseline first, step 5a).
 Before the initialisation the rows are only stored.
 A payment on a written-off invoice first stores and posts the write-off reversal record (spec 3, accounting 9.2).
@@ -23,8 +23,9 @@ from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service import invoice_state
 from permita38.core.service.journal import JournalService
-from permita38.core.service.opening_items import PrestartCreditPosting, PrestartPaymentPosting
 from permita38.core.service.postings import (
+    CreditPostingService,
+    PaymentPostingService,
     credit_snapshot,
     invoice_state_of,
     stored_snapshot,
@@ -106,8 +107,8 @@ class PaymentService:
         self.store = store
         self.today = today
         self.now = now
-        self.posting = PrestartPaymentPosting(store, journal)
-        self.credit_posting = PrestartCreditPosting(store, journal)
+        self.posting = PaymentPostingService(store, journal)
+        self.credit_posting = CreditPostingService(store, journal)
 
     # ---------- helpers
     def _invoice(self, invoice_id: str) -> Record:

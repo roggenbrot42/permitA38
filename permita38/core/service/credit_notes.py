@@ -28,9 +28,9 @@ from permita38.core.service import invoice_state
 from permita38.core.service.journal import JournalService
 from permita38.core.service.locks import first_unlocked_from
 from permita38.core.service.numbering import NumberingService
-from permita38.core.service.opening_items import PrestartCreditPosting
 from permita38.core.service.payments import MAX_PAYMENT_CENTS, PaymentService, next_event_seq
 from permita38.core.service.postings import (
+    CreditPostingService,
     credit_snapshot,
     creditable_nets,
     invoice_state_of,
@@ -72,7 +72,7 @@ class CreditNoteService:
         self.store = store
         self.payments = payments or PaymentService(store, journal, now=now)
         self.numbering = numbering or NumberingService(store)
-        self.posting = PrestartCreditPosting(store, journal)
+        self.posting = CreditPostingService(store, journal)
         self.now = now
 
     # ---------- helpers

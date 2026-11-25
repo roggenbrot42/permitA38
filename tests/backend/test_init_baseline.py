@@ -16,7 +16,9 @@ from permita38.core import models
 from permita38.core.service.accounting_init import AccountingInitService
 from permita38.core.service.credit_notes import CreditNoteService
 from permita38.core.service.journal import JournalService
+from permita38.core.service.opening_items import OpeningItemService
 
+from .test_expense_postings import rs  # noqa: F401  (fixture)
 from .test_invoice_freeze import cust, issue, store  # noqa: F401  (fixtures)
 from .test_issue_posting import customer, line, lock_through, repo, sales  # noqa: F401  (fixtures and helpers)
 from .test_payments import BOSS, pay  # noqa: F401  (fixtures)
@@ -204,3 +206,86 @@ def test_refund_after_a_pre_start_credit_posts_the_baseline_lazily(repo, sales, 
     assert (str(e.document_date), str(e.booking_date)) == ("2026-01-01", "2026-02-01")
     assert trial(repo) == {"vat_out_s19": 1900, "bank": -11900, "opening_balance": 10000}
     assert JournalService(repo).verify_chain(2026) == []
+
+
+# ---------------------------------------------------------------- opening adjustments (step 5a) and unpaid expenses
+def test_prestart_payment_entered_after_init_posts_an_opening_adjustment(repo, sales, pay):
+    """Accrual/Ist, 1190.00 invoice (190.00 VAT): 500.00 dated before the start entered after the initialisation
+    moves the baseline by receivables -500.00 and vat_not_due +79.83 (190 x 500 / 1190), against opening_balance."""
+    prestart_invoice(repo)
+    AccountingInitService(repo).run(params("accrual", "ist"), BOSS)
+    assert rows(entry(repo, "open:2026:invoice:oldinv01")) == [
+        ("receivables", 119000), ("vat_not_due_s19", -19000), ("opening_balance", -100000)
+    ]  # fmt: skip
+    pay_on(pay)  # 500.00 on 2025-12-20, after the initialisation
+    adj = entry(repo, "open:2026:invoice:oldinv01:r1")
+    assert rows(adj) == [("receivables", -50000), ("vat_not_due_s19", 7983), ("opening_balance", 42017)]
+    assert str(adj.document_date) == "2026-01-01" and adj.origin == "opening"
+    assert all(ln.vat_date is None and ln.income_date is None for ln in adj.lines)
+    assert not any(e.event_key.startswith("payment:") for e in all_entries(repo))  # never a normal event
+    pay_on(pay, "690.00", "2026-02-10")
+    assert trial(repo) == EXPECTED["accrual_ist"][1]  # receivables and vat_not_due end at 0
+    assert JournalService(repo).verify_chain(2026) == []
+
+
+def test_ensure_invoice_baseline_twice_posts_one_entry(repo, sales, pay):
+    prestart_invoice(repo)
+    AccountingInitService(repo).run(params("accrual", "soll"), BOSS)
+    svc = OpeningItemService(repo)
+    inv = repo.get("invoices", "oldinv01")
+    first, second = svc.ensure_invoice_baseline(inv, BOSS), svc.ensure_invoice_baseline(inv, BOSS)
+    assert first is not None and second is not None and first.id == second.id
+    assert [e.event_key for e in all_entries(repo)] == ["open:2026:invoice:oldinv01"]
+
+
+def test_credit_note_after_init_on_an_open_pre_start_invoice(repo, sales, pay):
+    prestart_invoice(repo)
+    AccountingInitService(repo).run(params("accrual", "soll"), BOSS)
+    CreditNoteService(repo, sales.postings.journal, pay).create(
+        "oldinv01", credit_kind="storno", date="2026-02-10", reason="Demo", user=BOSS
+    )
+    assert trial(repo) == {"revenue_s19": 100000, "vat_out_s19": 19000, "opening_balance": -119000}  # receivables 0
+    assert [e.event_key for e in all_entries(repo)][0] == "open:2026:invoice:oldinv01"
+
+
+UNPAID = {k: v for k, v in EXPENSE.items() if k != "paid_on"}
+
+
+def update_expense(rs, **fields):
+    body = {k: v for k, v in {**UNPAID, **fields}.items() if k != "id"}
+    return rs.update(BOSS, "expenses", "oldexp01", body)
+
+
+@pytest.mark.parametrize(
+    ("income", "vat", "opening", "final"),
+    [
+        ("accrual", "soll", [("payables", -11900), ("opening_balance", 11900)], {"bank": -11900, "opening_balance": 11900}),
+        (
+            "eur", "soll", [("input_vat_clearing", -1900), ("opening_balance", 1900)],
+            {"expense_software": 10000, "bank": -11900, "opening_balance": 1900},
+        ),
+    ],
+)  # fmt: skip
+def test_unpaid_prestart_expense_gets_an_opening_item_cleared_by_the_later_payment(
+    repo, rs, income, vat, opening, final
+):
+    repo.save("expenses", dict(UNPAID))
+    result = AccountingInitService(repo).run(params(income, vat), BOSS)
+    assert rows(entry(repo, "open:2026:expense:oldexp01")) == opening and result.counts["opening_expense"] == 1
+    assert entry(repo, "expense:oldexp01:pay:r1") is None
+    update_expense(rs, paid_on="2026-02-10")  # the live hook posts the payment
+    assert trial(repo) == final  # payables / input_vat_clearing are cleared
+
+
+def test_prestart_expense_paid_on_changed_after_init_posts_an_opening_adjustment(repo, rs):
+    repo.save("expenses", dict(EXPENSE))  # paid on 2026-02-10
+    AccountingInitService(repo).run(params("accrual", "soll"), BOSS)
+    assert trial(repo) == {"bank": -11900, "opening_balance": 11900}
+    update_expense(rs, paid_on="2025-12-20")  # now paid before the start: the payable is no longer open
+    adj = entry(repo, "open:2026:expense:oldexp01:r1")
+    assert rows(adj) == [("payables", 11900), ("opening_balance", -11900)] and adj.origin == "opening"
+    assert entry(repo, "expense:oldexp01:pay:r1:rev") is not None  # the February payment is reversed
+    assert trial(repo) == {}  # payables, bank and opening_balance all 0
+    update_expense(rs, paid_on="2026-03-10")  # and back to open
+    assert rows(entry(repo, "open:2026:expense:oldexp01:r2")) == [("payables", -11900), ("opening_balance", 11900)]
+    assert trial(repo) == {"bank": -11900, "opening_balance": 11900}
