@@ -200,15 +200,17 @@ class RecordService:
         elif coll == "entries":
             data["minutes"] = int(round(float(data.get("minutes") or 0)))
             data.setdefault("billable", True)
-            pid = data["project_id"] if "project_id" in data else (old or {}).get("project_id")
+            # a PUT replaces the row: the project after the write is the one in ``data`` (absent or null = none), never
+            # the old one (the request model drops null fields, so "no project" arrives as a missing key)
+            pid = data.get("project_id")
             project = self.store.get("projects", pid) if pid else None
             if project and project_kind(project) == "internal":
                 data["billable"] = False  # internal projects are never billed
-            self._check_day_total(data, old)
             if old and old.get("invoice_id"):
                 if not full:
                     raise ServiceError(403, "Entry already invoiced")
                 data.setdefault("invoice_id", old["invoice_id"])
+            self._check_day_total(data, old)
         if data.get("created") is None:
             data.pop("created", None)
         saved = self.store.save(coll, data)
