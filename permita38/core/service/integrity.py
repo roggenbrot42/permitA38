@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from permita38.core import calc, documents, money
 from permita38.core import validation as v
+from permita38.core.accounting.types import Bases
 from permita38.core.models import RECORD_MODELS, scenario_project_refs
 from permita38.core.numbering import Pattern, PatternError, normalize_text, parse_pattern, period_key
 from permita38.core.repository import Repository
@@ -174,6 +175,8 @@ def rule_ref_dangling(ctx: Ctx) -> Iterable[Finding]:
         pairs: list[tuple[str, str | None]] = [(c, t) for c, t in REF_TARGETS.items() if table.column(c)]
         if coll == "document_scans":
             pairs.append(("record_id", None))  # the target collection is named by record_coll
+        if coll == "journal_entries":  # append-only: its sources may be deleted after a reversal, never checked
+            pairs = [(c, t) for c, t in pairs if c != "source_id"]
         for rec in rows:
             for col, target in pairs:
                 value = rec.get(col)
@@ -183,6 +186,8 @@ def rule_ref_dangling(ctx: Ctx) -> Iterable[Finding]:
                     target = rec.get("record_coll")
                     if target not in ctx.ids:
                         continue  # state.document_scan_record reports a bad record_coll
+                if col == "created_by" and value == "system" and coll in ("journal_entries", "payments"):
+                    continue  # automatic postings carry the pseudo user "system"
                 if col == "template_id" and value in builtin:
                     continue
                 if value not in ctx.ids.get(target or "", set()):
@@ -300,7 +305,8 @@ def rule_numbering_state(ctx: Ctx) -> Iterable[Finding]:
                 yield Finding(
                     "numbering.draft_with_number", ERROR, coll, d.get("id"), "number", "a draft must not have a number"
                 )
-            if coll == "invoices" and d.get("status") in _FINAL_INVOICE and not has_number:
+            numberless = d.get("credit_kind") in ("write_off", "write_off_reversal")  # internal vouchers, no number
+            if coll == "invoices" and d.get("status") in _FINAL_INVOICE and not has_number and not numberless:
                 yield Finding(
                     "numbering.final_without_number",
                     ERROR,
@@ -681,8 +687,127 @@ def rule_file_orphan(ctx: Ctx) -> Iterable[Finding]:
 
 
 def rule_file_sync_conflict(ctx: Ctx) -> Iterable[Finding]:
+    from permita38.core.settings import accounting_start
+
+    hint = ""
+    if accounting_start(ctx.settings) is not None:  # accounting 7.9
+        hint = " (use permitA38 on one device at a time while accounting is on)"
     for name in ctx.store.conflicts():
-        yield Finding("file.sync_conflict", WARNING, None, None, None, f"sync conflict copy: {name}")
+        yield Finding("file.sync_conflict", WARNING, None, None, None, f"sync conflict copy: {name}{hint}")
+
+
+# ---------------------------------------------------------------------------------------------- 10. accounting
+# docs/specs/accounting.md 7.1, 7.6, 7.9. Chain and balance findings are errors; the sanity checks are warnings.
+
+
+def _years(ctx: Ctx) -> list[int]:
+    years = {r.get("year") for r in ctx.rows("fiscal_years")} | {
+        r.get("fiscal_year") for r in ctx.rows("journal_entries")
+    }
+    return sorted(y for y in years if isinstance(y, int))
+
+
+def rule_journal_chain(ctx: Ctx) -> Iterable[Finding]:
+    """Per fiscal year: numbering gaps, balance, hash chain, the open year's counter and the closed year's anchor."""
+    from permita38.core.service.journal import JournalService
+
+    journal = JournalService(ctx.store)
+    for year in _years(ctx):
+        for f in journal.verify_chain(year):
+            where = f"{year}/{f.entry_no}" if f.entry_no is not None else str(year)
+            yield Finding(f.code, ERROR, "journal_entries", where, None, f.message)
+
+
+def _issued_invoices(ctx: Ctx, start: date) -> Iterable[dict]:
+    """Issued invoices on or after the accounting start. Credit notes (kind = credit_note) are another document."""
+    for inv in ctx.rows("invoices"):
+        day = _day(inv.get("date"))
+        if (
+            inv.get("status", "draft") != "draft"
+            and inv.get("kind") != _CN
+            and not inv.get("credit_kind")
+            and day is not None
+            and day >= start
+        ):
+            yield inv
+
+
+def _has_rates(doc: dict) -> bool:
+    snap = doc.get("issued")
+    return isinstance(snap, dict) and isinstance(snap.get("rates"), dict)
+
+
+def rule_accounting_sanity(ctx: Ctx) -> Iterable[Finding]:
+    from permita38.core.settings import accounting_start
+
+    start = accounting_start(ctx.settings)
+    if start is None:
+        return
+    keys = {r.get("event_key") for r in ctx.rows("journal_entries")}
+    by_id = {r["id"]: r for r in ctx.rows("invoices") if isinstance(r.get("id"), str)}
+    for inv in _issued_invoices(ctx, start):
+        if not _has_rates(inv):
+            yield Finding("accounting.invoice_no_snapshot", WARNING, "invoices", inv.get("id"), "issued",
+                          "issued after the accounting start without its snapshot")  # fmt: skip
+        elif f"issue:{inv.get('id')}" not in keys and _posts_issue_entry(ctx, inv):
+            yield Finding("accounting.invoice_no_entry", WARNING, "invoices", inv.get("id"), None,
+                          "issued after the accounting start but has no issue entry")  # fmt: skip
+    for note in ctx.rows("invoices"):
+        day = _day(note.get("date"))
+        if (
+            note.get("kind") == _CN
+            and note.get("status", "draft") != "draft"
+            and day is not None
+            and day >= start
+            and not _has_rates(note)
+        ):
+            yield Finding("accounting.credit_note_no_snapshot", WARNING, "invoices", note.get("id"), "issued",
+                          "credit note issued without its snapshot")  # fmt: skip
+    for pay in ctx.rows("payments"):
+        target = by_id.get(pay.get("document_id"))
+        day = _day(target.get("date")) if target else None
+        if target is None or day is None or day < start or target.get("credit_kind") or not _has_rates(target):
+            continue
+        if f"payment:{pay.get('id')}" not in keys:
+            yield Finding("accounting.payment_no_entry", WARNING, "payments", pay.get("id"), None,
+                          "payment has no payment entry")  # fmt: skip
+    for exp in ctx.rows("expenses"):
+        rev = exp.get("bill_rev")
+        if isinstance(rev, int) and rev > 0 and f"expense:{exp.get('id')}:bill:r{rev}" not in keys:
+            yield Finding("accounting.expense_no_entry", WARNING, "expenses", exp.get("id"), "bill_rev",
+                          f"bill revision {rev} has no matching entry")  # fmt: skip
+
+
+def _posts_issue_entry(ctx: Ctx, inv: dict) -> bool:
+    """Whether the engine posts an issue entry for this invoice (some basis/treatment combinations and all-zero
+    invoices post nothing, accounting 9.1). Unreadable snapshots count as posting, so the gap is reported."""
+    from permita38.core.accounting.postings_issue import issue_entry
+    from permita38.core.service.postings import stored_snapshot
+
+    try:
+        snap = stored_snapshot(inv)
+        day = _day(inv.get("date"))
+        fy = next((r for r in ctx.rows("fiscal_years") if day and r.get("year") == day.year), None)
+        if snap is None or day is None or fy is None:
+            return True
+        return issue_entry(snap, Bases(fy["income_basis"], fy["vat_basis"]), day) is not None
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        return True
+
+
+def rule_accounting_vat_drift(ctx: Ctx) -> Iterable[Finding]:
+    from permita38.core.service.locks import LockService
+    from permita38.core.service.vat_returns import VatReturnService
+
+    current = [r for r in ctx.rows("vat_returns") if r.get("status") == "final" and not r.get("replaced_by")]
+    if not current:
+        return
+    svc = VatReturnService(ctx.store, LockService(ctx.store))
+    for row in current:  # a replaced original is superseded: its drift is of no interest
+        drift = svc._drift(row) or {}
+        if drift.get("entries") or drift.get("tax_cents"):
+            yield Finding("accounting.vat_drift", WARNING, "vat_returns", row.get("id"), None,
+                          "the final return differs from the journal (drift)")  # fmt: skip
 
 
 RULES: list[Callable[[Ctx], Iterable[Finding]]] = [
@@ -710,19 +835,27 @@ RULES: list[Callable[[Ctx], Iterable[Finding]]] = [
     rule_file_missing,
     rule_file_orphan,
     rule_file_sync_conflict,
+    rule_journal_chain,
+    rule_accounting_sanity,
+    rule_accounting_vat_drift,
 ]
+
+
+ACCOUNTING_RULES = [rule_journal_chain, rule_accounting_sanity, rule_accounting_vat_drift]
 
 
 class IntegrityService:
     def __init__(self, store: Repository):
         self.store = store
 
-    def run(self, only: Sequence[str] = ()) -> list[Finding]:
+    def run(
+        self, only: Sequence[str] = (), rules: Sequence[Callable[[Ctx], Iterable[Finding]]] | None = None
+    ) -> list[Finding]:
         """All findings (or those whose code starts with one of ``only``), most severe first. Reads one snapshot."""
         found: list[Finding] = []
         with self.store.transaction():  # one consistent snapshot; nothing is written
             ctx = _load(self.store)
-            for rule in RULES:
+            for rule in RULES if rules is None else rules:
                 try:
                     found.extend(rule(ctx))
                 except Exception as e:  # a bug in one rule must not hide the other findings

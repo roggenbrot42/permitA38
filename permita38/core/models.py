@@ -207,6 +207,7 @@ class CreditNoteSummary(BaseModel):
     date: str | None = None
     credit_kind: str | None = None
     gross: v.Money = 0
+    reason: str | None = None
 
 
 class IssuedRate(BaseModel):
@@ -283,6 +284,7 @@ class Document(Record):
     open_amount: v.Money | None = None  # gross - credited - paid; negative = customer credit
     payments: list[Payment] | None = None
     credit_notes: list[CreditNoteSummary] | None = None
+    creditable: dict[str, v.Money] | None = None  # per rate: the net still creditable
 
 
 class Template(Record):
@@ -668,6 +670,7 @@ INTERNAL_DOCUMENT_FIELDS = (
     "open_amount",
     "payments",
     "credit_notes",
+    "creditable",
 )
 
 
@@ -2122,6 +2125,7 @@ class JournalEntry(Record):
     source_id: str | None = None
     source_number: str | None = None
     reverses_id: str | None = None
+    reversed_by: str | None = None  # id of the reversal of this entry (computed in the journal listing, not stored)
     counterparty_id: str | None = None
     cp_vat_id: str | None = None
     cp_country: str | None = None
@@ -2297,6 +2301,7 @@ class SpecialPrepaymentOut(BaseModel):
     model_config = ConfigDict(extra="allow")
     year: int
     dauerfrist: bool = False
+    applies: bool = False
     proposal: v.Money = 0
     months: int | None = None
     previous_kz83: v.Money = 0

@@ -9315,6 +9315,91 @@
         }
       }
     },
+    "/api/accounting/years/{year}/close-preview": {
+      "get": {
+        "tags": [
+          "accounting"
+        ],
+        "summary": "Preview Year Close",
+        "description": "What closing the year would do: the blockers, the provision proposals (prepayments already expensed) and the\nplanned entries. Optional ``trade_tax`` / ``corporate_tax`` (decimal strings) are provisions the user is about to\nconfirm; the plan includes them. Writes nothing.",
+        "operationId": "preview_year_close_api_accounting_years__year__close_preview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "year",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Year"
+            }
+          },
+          {
+            "name": "trade_tax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trade Tax"
+            }
+          },
+          {
+            "name": "corporate_tax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Corporate Tax"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YearClosePreviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/accounting/years/{year}/close": {
       "post": {
         "tags": [
@@ -10453,6 +10538,74 @@
         ]
       }
     },
+    "/api/accounting/locks/preview": {
+      "get": {
+        "tags": [
+          "accounting"
+        ],
+        "summary": "Preview Period Lock",
+        "description": "The months a lock up to the given one would lock now, in order (empty when all are locked).",
+        "operationId": "preview_period_lock_api_accounting_locks_preview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 2999,
+              "minimum": 1900,
+              "title": "Year"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 12,
+              "minimum": 1,
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LockMonthOut"
+                  },
+                  "title": "Response Preview Period Lock Api Accounting Locks Preview Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/accounting/datev": {
       "get": {
         "tags": [
@@ -10517,13 +10670,16 @@
           "accounting"
         ],
         "summary": "Accounting Integrity",
+        "description": "Balance and hash chain per fiscal year plus the accounting sanity warnings (spec 7.1, 7.6, 7.9).",
         "operationId": "accounting_integrity_api_accounting_integrity_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AccountingIntegrity"
+                }
               }
             }
           }
@@ -12532,6 +12688,14 @@
             ],
             "title": "Role"
           },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles",
+            "default": []
+          },
           "eur_line": {
             "anyOf": [
               {
@@ -12658,6 +12822,26 @@
         ],
         "title": "AccountingInitIn",
         "description": "Initialisation request (accounting.md 16 step 1 and 9)."
+      },
+      "AccountingIntegrity": {
+        "properties": {
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrityFinding"
+            },
+            "type": "array",
+            "title": "Findings"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/IntegritySummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "findings",
+          "summary"
+        ],
+        "title": "AccountingIntegrity"
       },
       "AdoptVendorItemIn": {
         "properties": {
@@ -15384,6 +15568,17 @@
             "format": "decimal",
             "title": "Gross",
             "default": "0.00"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
           }
         },
         "additionalProperties": true,
@@ -16239,6 +16434,22 @@
               }
             ],
             "title": "Credit Notes"
+          },
+          "creditable": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                  "format": "decimal"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creditable"
           }
         },
         "additionalProperties": true,
@@ -16943,6 +17154,22 @@
               }
             ],
             "title": "Credit Notes"
+          },
+          "creditable": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                  "format": "decimal"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creditable"
           },
           "planning_warnings": {
             "anyOf": [
@@ -19700,6 +19927,85 @@
         ],
         "title": "IncomingPlanIn"
       },
+      "IntegrityFinding": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "collection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "title": "IntegrityFinding"
+      },
+      "IntegritySummary": {
+        "properties": {
+          "errors": {
+            "type": "integer",
+            "title": "Errors"
+          },
+          "warnings": {
+            "type": "integer",
+            "title": "Warnings"
+          },
+          "info": {
+            "type": "integer",
+            "title": "Info"
+          }
+        },
+        "type": "object",
+        "required": [
+          "errors",
+          "warnings",
+          "info"
+        ],
+        "title": "IntegritySummary"
+      },
       "InvoiceIn": {
         "properties": {
           "number": {
@@ -20296,6 +20602,17 @@
             ],
             "title": "Reverses Id"
           },
+          "reversed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reversed By"
+          },
           "counterparty_id": {
             "anyOf": [
               {
@@ -20806,6 +21123,24 @@
         "additionalProperties": true,
         "type": "object",
         "title": "LineIn"
+      },
+      "LockMonthOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "month": {
+            "type": "integer",
+            "title": "Month"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "month"
+        ],
+        "title": "LockMonthOut"
       },
       "LoginPayload": {
         "properties": {
@@ -22258,6 +22593,57 @@
         "type": "object",
         "title": "PlanIn"
       },
+      "PlanLineOut": {
+        "properties": {
+          "account": {
+            "type": "string",
+            "title": "Account"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account",
+          "amount"
+        ],
+        "title": "PlanLineOut"
+      },
+      "PlannedEntryOut": {
+        "properties": {
+          "event_key": {
+            "type": "string",
+            "title": "Event Key"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/PlanLineOut"
+            },
+            "type": "array",
+            "title": "Lines"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_key",
+          "event",
+          "text",
+          "lines"
+        ],
+        "title": "PlannedEntryOut"
+      },
       "PnlOut": {
         "properties": {
           "year": {
@@ -22645,6 +23031,33 @@
           "name"
         ],
         "title": "ProjectIn"
+      },
+      "ProvisionProposalOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "prepayments_expensed": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Prepayments Expensed"
+          },
+          "booked": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Booked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "prepayments_expensed",
+          "booked"
+        ],
+        "title": "ProvisionProposalOut"
       },
       "ReceiptConfirmIn": {
         "properties": {
@@ -24409,6 +24822,11 @@
           "dauerfrist": {
             "type": "boolean",
             "title": "Dauerfrist",
+            "default": false
+          },
+          "applies": {
+            "type": "boolean",
+            "title": "Applies",
             "default": false
           },
           "proposal": {
@@ -29443,6 +29861,56 @@
         "title": "YearCloseIn",
         "description": "Close a fiscal year (accounting.md 13). Accrual: the provisions the user confirms are posted first; EÜR takes\nnone. At most one provision per kind."
       },
+      "YearClosePreviewOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "income_basis": {
+            "type": "string",
+            "title": "Income Basis"
+          },
+          "blockers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blockers"
+          },
+          "provisions": {
+            "items": {
+              "$ref": "#/components/schemas/ProvisionProposalOut"
+            },
+            "type": "array",
+            "title": "Provisions"
+          },
+          "plan": {
+            "items": {
+              "$ref": "#/components/schemas/PlannedEntryOut"
+            },
+            "type": "array",
+            "title": "Plan"
+          },
+          "next_year_opening": {
+            "items": {
+              "$ref": "#/components/schemas/PlanLineOut"
+            },
+            "type": "array",
+            "title": "Next Year Opening"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "income_basis",
+          "blockers",
+          "provisions",
+          "plan",
+          "next_year_opening"
+        ],
+        "title": "YearClosePreviewOut"
+      },
       "YearCloseProvisionIn": {
         "properties": {
           "kind": {
@@ -31309,6 +31777,22 @@
             ],
             "title": "Credit Notes"
           },
+          "creditable": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                  "format": "decimal"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creditable"
+          },
           "planning_warnings": {
             "anyOf": [
               {
@@ -31786,6 +32270,22 @@
               }
             ],
             "title": "Credit Notes"
+          },
+          "creditable": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                  "format": "decimal"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creditable"
           },
           "planning_warnings": {
             "anyOf": [

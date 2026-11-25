@@ -738,7 +738,7 @@ def test_expense_dialog_links_supplier_allocation_and_reverse_charge(browser):
     pg.wait_for_selector("#modal-root .modal", state="detached")
     body = api.calls("POST", "expenses")[1][3]
     assert body["reverse_charge"] is True and body["allocation_id"] is None
-    assert body["net"] == "3091.88" and body["vat"] == "587.46" and body["vat_rate"] == 0
+    assert body["net"] == "3091.88" and body["vat"] == "587.46" and body["vat_rate"] == 19
     assert problems == []
     ctx.close()
 

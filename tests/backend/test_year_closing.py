@@ -544,3 +544,39 @@ def test_manual_pl_line_without_income_date_is_in_the_pnl_and_balances_after_clo
     nxt = reports.balance_sheet(2026, date(2026, 1, 1))
     assert float(nxt.difference) == 0 and float(nxt.result) == 0.0
     assert float(nxt.debit_total) == float(nxt.credit_total) and nxt.debit_side
+
+
+def test_close_preview_route_reads_blockers_and_proposals_and_writes_nothing(api, app):
+    url = "/api/accounting/years/2025/close-preview"
+    app.state.services.store.save_settings({ACCOUNTING_START_KEY: "2025-01-01", "company_type": "gmbh"})
+    r = api["accountant"].get(url)
+    assert r.status_code == 200, r.text  # accounting read, not boss only
+    body = api["boss"].get(url).json()
+    assert body["year"] == 2025 and body["income_basis"] == "accrual"
+    assert any("2025-01" in b for b in body["blockers"])  # months before December are open
+    assert [(p["kind"], p["prepayments_expensed"], p["booked"]) for p in body["provisions"]] == [
+        ("trade_tax", "0.00", "0.00"),
+        ("corporate_tax", "0.00", "0.00"),
+    ]
+    assert set(body) == {"year", "income_basis", "blockers", "provisions", "plan", "next_year_opening"}
+    assert all(set(e) == {"event_key", "event", "text", "lines"} for e in body["plan"])
+    assert api["boss"].get("/api/accounting/years/2025").json()["closed_at"] is None
+    assert api["boss"].get("/api/accounting/years/1999/close-preview").status_code == 404
+
+
+def test_close_preview_route_takes_the_typed_provisions_into_the_plan(api, app):
+    app.state.services.store.save_settings({ACCOUNTING_START_KEY: "2025-01-01", "company_type": "gewerbe"})
+    url = "/api/accounting/years/2025/close-preview"
+
+    def plan(**params):
+        r = api["boss"].get(url, params=params)
+        assert r.status_code == 200, r.text
+        return {e["event_key"]: [(ln["account"], ln["amount"]) for ln in e["lines"]] for e in r.json()["plan"]}
+
+    assert plan() == {}  # an empty year plans nothing
+    # a provision of 5.00 is expensed (debit 5.00) and closed into the profit carry-forward as a loss of 5.00
+    assert plan(trade_tax="5.00")["close:2025:pnl"] == [("9042", "-5.00"), ("9052", "5.00")]
+    assert api["boss"].get(url, params={"trade_tax": "5,00"}).status_code == 422
+    assert api["boss"].get(url, params={"trade_tax": "0"}).status_code == 422
+    assert api["boss"].get(url, params={"corporate_tax": "x"}).status_code == 422
+    assert app.state.services.store.list("journal_entries") == []  # a preview posts nothing
