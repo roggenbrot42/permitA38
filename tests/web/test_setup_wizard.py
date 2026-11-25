@@ -126,8 +126,20 @@ def answer(pg, key, action, **extra):
         r.locator("input[type=date]").fill(extra["date"])
 
 
+def capture_posts(pg):
+    posts: list[dict] = []
+
+    def on_request(rq):
+        if rq.method == "POST" and rq.url.endswith("/api/accounting/init"):
+            posts.append(rq.post_data_json)
+
+    pg.on("request", on_request)
+    return posts
+
+
 def test_wizard_walks_all_steps_409_then_success(browser, srv):
     ctx, pg, problems = boss_page(browser, srv)
+    posts = capture_posts(pg)
     pg.goto(srv.base + "/#/accounting/setup")
     expect(pg.get_by_test_id("wz")).to_have_attribute("data-step", "1")
     # step 1: bases; the start must be the first of a month
@@ -196,6 +208,20 @@ def test_wizard_walks_all_steps_409_then_success(browser, srv):
     pg.get_by_test_id("wz-next").click()
     expect(pg.get_by_test_id("wz-open-warning")).to_have_count(0)
     pg.get_by_test_id("wz-submit").click()
+    # the accrual payload that reached the server
+    body = posts[-1]
+    assert len(posts) == 2
+    assert (body["chart"], body["income_basis"], body["accounting_start"]) == ("skr03", "accrual", "2026-01-01")
+    assert [(o["role"], o["amount"]) for o in body["opening_balances"]] == [("bank", "1000.50"), ("equity", "-1000.50")]
+    res = {o["key"]: o for o in body["review_resolutions"]}
+    assert len(res) == 7
+    assert res[KEY["nodate"]] == {"key": KEY["nodate"], "action": "date", "date": "2026-03-05"}
+    assert res[KEY["nosupplier"]]["treatment"] == "reverse_charge_third_country"
+    assert res[KEY["vat"]] == {"key": KEY["vat"], "action": "confirm"}
+    ext = body["external_returns"]
+    assert len(ext) == 5
+    assert ext[0] == {"year": 2026, "kind": "month", "no": 1, "kz83": "123.45", "kz39": "0", "filed_on": "2026-02-10"}
+    assert all(e["none_filed"] is True for e in ext[1:])
     # success: the result and the links; the VAT and Accounting pages leave the set-up state
     expect(pg.get_by_test_id("wz-done")).to_contain_text("Accounting is set up")
     assert status(srv)["initialised"] is True
@@ -214,5 +240,98 @@ def test_accountant_cannot_open_the_wizard(browser, srv):
     pg.goto(srv.base + "/#/accounting/setup")
     expect(pg.get_by_test_id("accounting-setup-ask")).to_have_text("Ask the boss to set up accounting.")
     expect(pg.get_by_test_id("wz")).to_have_count(0)
+    ctx.close()
+    assert not problems, problems
+
+
+def test_wizard_eur_run_has_no_balances_and_succeeds(browser, srv):
+    ctx, pg, problems = boss_page(browser, srv)
+    posts = capture_posts(pg)
+    pg.goto(srv.base + "/#/accounting/setup")
+    pg.get_by_label("Accounting start").fill("2026-06-01")
+    pg.get_by_test_id("wz-next").click()
+    expect(pg.get_by_test_id("wz-no-balances")).to_be_visible()
+    expect(pg.get_by_test_id("wz-balance")).to_have_count(0)
+    pg.get_by_test_id("wz-next").click()
+    expect(pg.get_by_test_id("wz-review-row")).to_have_count(2)  # only the two paid-date rows exist from June on
+    answer(pg, KEY["before"], "confirm")
+    answer(pg, KEY["nodate"], "confirm")
+    pg.get_by_test_id("wz-next").click()
+    expect(pg.get_by_test_id("wz-no-periods")).to_be_visible()
+    pg.get_by_test_id("wz-next").click()
+    pg.get_by_test_id("wz-submit").click()
+    expect(pg.get_by_test_id("wz-done")).to_contain_text("Accounting is set up")
+    assert posts[-1]["income_basis"] == "eur"
+    assert posts[-1]["opening_balances"] == []
+    assert status(srv)["initialised"] is True
+    ctx.close()
+    assert not problems, problems
+
+
+def test_wizard_gmbh_is_locked_to_accrual(browser, srv):
+    r = httpx.put(
+        srv.base + "/api/settings",
+        headers={"Authorization": "Bearer " + srv.token},
+        json={"company_type": "gmbh", "state": "BY", "hebesatz": 400},
+    )
+    assert r.status_code == 200, r.text
+    ctx, pg, problems = boss_page(browser, srv)
+    pg.goto(srv.base + "/#/accounting/setup")
+    basis = pg.get_by_label("Income basis")
+    expect(basis).to_be_disabled()
+    expect(basis).to_have_value("accrual")
+    expect(pg.get_by_text("must use the accrual basis")).to_be_visible()
+    pg.get_by_test_id("wz-next").click()
+    expect(pg.get_by_test_id("wz-balance")).to_be_visible()
+    ctx.close()
+    assert not problems, problems
+
+
+def walk_to_step3(pg, srv):
+    pg.goto(srv.base + "/#/accounting/setup")
+    pg.get_by_label("Accounting start").fill("2026-01-01")
+    pg.get_by_test_id("wz-next").click()  # EÜR: nothing to enter in step 2
+    pg.get_by_test_id("wz-next").click()
+    expect(pg.get_by_test_id("wz")).to_have_attribute("data-step", "3")
+
+
+def test_date_action_without_date_is_blocked_client_side(browser, srv):
+    ctx, pg, problems = boss_page(browser, srv)
+    posts = capture_posts(pg)
+    walk_to_step3(pg, srv)
+    answer(pg, KEY["nodate"], "date")
+    pg.get_by_test_id("wz-next").click()
+    expect(pg.get_by_test_id("wz")).to_have_attribute("data-step", "3")
+    expect(pg.get_by_test_id("wz-err")).to_contain_text("enter the payment date")
+    answer(pg, KEY["nodate"], "date", date="2026-03-05")
+    pg.get_by_test_id("wz-next").click()
+    expect(pg.get_by_test_id("wz")).to_have_attribute("data-step", "4")
+    assert posts == []
+    ctx.close()
+    assert not problems, problems
+
+
+def test_409_for_an_unanswered_external_period_goes_to_step_4(browser, srv):
+    ctx, pg, problems = boss_page(browser, srv)
+    walk_to_step3(pg, srv)
+    pg.get_by_test_id("wz-next").click()
+    for n in range(1, 6):
+        pg.locator(f"[data-period='2026-month-{n}'] select").select_option("none")
+    pg.get_by_test_id("wz-next").click()
+    # the server reports period 3 as unanswered; staged, because the form cannot be submitted incomplete
+    pg.route(
+        "**/api/accounting/init",
+        lambda route: route.fulfill(
+            status=409,
+            content_type="application/json",
+            body='{"detail": "1 item(s) need a decision", "unresolved": ["external_return:2026:month:3"]}',
+        ),
+    )
+    pg.get_by_test_id("wz-submit").click()
+    expect(pg.get_by_test_id("wz")).to_have_attribute("data-step", "4")
+    expect(pg.get_by_test_id("wz-unresolved")).to_contain_text("external_return:2026:month:3")
+    expect(pg.locator("[data-testid=wz-period][data-unresolved='1']")).to_have_count(0)  # it has an answer
+    pg.locator("[data-period='2026-month-3'] select").select_option("")
+    expect(pg.locator("[data-period='2026-month-3']")).to_have_attribute("data-unresolved", "1")
     ctx.close()
     assert not problems, problems

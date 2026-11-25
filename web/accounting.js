@@ -488,7 +488,8 @@ A.closeModal = () => closeModal();
    Steps: 1 bases, 2 opening balances (accrual), 3 review list, 4 returns filed outside the app, 5 summary + POST.
    The state lives in WZ; every step reads its form back into WZ before moving on. Server text goes through esc(). */
 const WZ_STEPS = ['Bases', 'Opening balances', 'Review list', 'Filed returns', 'Summary'];
-const WZ_ROLES = [['bank', 'Bank'], ['cash', 'Cash'], ['payables', 'Payables'], ['payables_employee', 'Payables to staff'], ['vat_prepayments', 'VAT prepayments'], ['equity', 'Equity'], ['profit_carryforward', 'Profit carry-forward']];
+const WZ_ROLES = [['bank', 'Bank'], ['cash', 'Cash'], ['payables', 'Payables'], ['payables_employee', 'Payables to staff'], ['vat_prepayments', 'VAT prepayments'], ['equity', 'Equity'], ['profit_carryforward', 'Profit carry-forward'],
+  ['customer_credit', 'Customer credits'], ['trade_tax_provision', 'Trade tax provision'], ['corporate_tax_provision', 'Corporate tax provision'], ['vat_previous_year', 'VAT of the previous year'], ['vat_special_prepayment', 'VAT special prepayment']];
 const WZ_TREAT = { standard: 'Standard (input VAT deductible)', no_input_vat: 'No input VAT', reverse_charge_eu_service: 'Reverse charge, EU service', reverse_charge_third_country: 'Reverse charge, third country' };
 const WZ_ACTION = { confirm: 'Confirm', treatment: 'Choose a tax treatment', date: 'Enter the payment date', credit_note: 'Create the credit note and refund' };
 const WZ_CONFIRM = { vat_before_start: 'Confirm: declared outside the app', expense_prepaid: 'Confirm: the prepayment becomes an opening item', rc_stored_vat: 'Confirm: recompute the self-assessed VAT',
@@ -498,6 +499,9 @@ const wzBlankBal = () => ({ role: '', account: '', d: '', c: '' });
 const wzNew = () => ({ step: 1, p: { chart: 'skr03', income_basis: 'eur', vat_basis: 'soll', frequency: 'month', dauerfrist: false, small_business: false, start: `${new Date().getFullYear()}-01-01` },
   bal: [wzBlankBal(), wzBlankBal()], review: [], periods: [], reviewKey: '', res: {}, extr: {}, unresolved: [], error: '', result: null, gmbh: false });
 let WZ = wzNew();
+const wzExtKey = p => `external_return:${p.year}:${p.kind}:${p.no}`;
+const wzReviewUnresolved = () => WZ.unresolved.filter(k => !k.startsWith('external_return:'));
+const wzExtUnresolved = () => WZ.unresolved.filter(k => k.startsWith('external_return:'));
 const wzKey = p => `${p.year}-${p.kind}-${p.no}`;
 const wzPeriodLabel = p => (p.kind === 'quarter' ? `Q${p.no} ${p.year}` : `${p.year}-${String(p.no).padStart(2, '0')}`) + ` (${fmtDate(p.from)} – ${fmtDate(p.to)})`;
 const wzVal = id => { const el = $('#' + id); return el ? el.value : ''; };
@@ -548,6 +552,11 @@ function wzValidate() {
     const r = wzBalances();
     if (r.error) return r.error;
     if (r.rows.length && !Money.isZero(r.diff)) return `The opening balances must balance: debit and credit differ by ${eur(Money.abs(r.diff))}.`;
+  } else if (WZ.step === 3) {
+    for (const it of WZ.review) {
+      const x = WZ.res[it.key];
+      if (x && x.action === 'date' && !x.date) return `${it.number || it.id}: enter the payment date.`;
+    }
   } else if (WZ.step === 4) {
     for (const p of WZ.periods) {
       const x = WZ.extr[wzKey(p)] || {};
@@ -626,7 +635,7 @@ function wzStep3() {
     <p class="small" id="wz-open" data-testid="wz-open">${open ? `${open} of ${WZ.review.length} rows still need an answer.` : 'Every row has an answer.'}</p>
     <div class="table-wrap"><table><caption class="sr-only">Records that need a decision</caption><thead><tr><th>Record</th><th>What is the problem</th><th>Your answer</th></tr></thead><tbody>
     ${WZ.review.map((it, i) => {
-      const r = WZ.res[it.key] || {}, bad = WZ.unresolved.includes(it.key) && !r.action;
+      const r = WZ.res[it.key] || {}, bad = wzReviewUnresolved().includes(it.key) && !r.action;
       const acts = it.resolutions.map(a => `<option value="${esc(a)}" ${r.action === a ? 'selected' : ''}>${esc(wzActionLabel(it.code, a))}</option>`).join('');
       const extra = r.action === 'treatment' ? `<select id="wz_r${i}_treat" data-change="wzChange" aria-label="Tax treatment">${(it.treatments || []).map(t => `<option value="${esc(t)}" ${r.treatment === t ? 'selected' : ''}>${esc(WZ_TREAT[t] || t)}</option>`).join('')}</select>`
         : r.action === 'date' ? `<input id="wz_r${i}_date" type="date" value="${esc(r.date || '')}" data-change="wzChange" aria-label="Payment date">` : '';
@@ -641,7 +650,8 @@ function wzStep4() {
     <div class="table-wrap"><table><caption class="sr-only">Returns filed outside the app</caption><thead><tr><th>Period</th><th>Answer</th><th class="num">Kz 83</th><th class="num">Kz 39</th><th>Filed on</th></tr></thead><tbody>
     ${WZ.periods.map((p, i) => {
       const x = WZ.extr[wzKey(p)] || { mode: '', kz83: '', kz39: '', filed: '' }, f = x.mode === 'filed';
-      return `<tr data-testid="wz-period" data-period="${esc(wzKey(p))}"><td class="nowrap">${esc(wzPeriodLabel(p))}</td>
+      const bad = wzExtUnresolved().includes(wzExtKey(p)) && !x.mode;
+      return `<tr data-testid="wz-period" data-period="${esc(wzKey(p))}" ${bad ? 'data-unresolved="1" style="outline:2px solid var(--danger,#b00020)"' : ''}><td class="nowrap">${esc(wzPeriodLabel(p))}</td>
         <td>${wzSel(`wz_x${i}_mode`, [['', '– answer –'], ['filed', 'Filed'], ['none', 'None filed']], x.mode, `data-rerender="1" aria-label="Answer for ${esc(wzPeriodLabel(p))}"`)}</td>
         <td>${f ? `<input id="wz_x${i}_kz83" inputmode="decimal" class="num" value="${esc(x.kz83)}" aria-label="Kz 83 of ${esc(wzPeriodLabel(p))}" style="width:110px">` : ''}</td>
         <td>${f ? `<input id="wz_x${i}_kz39" inputmode="decimal" class="num" value="${esc(x.kz39)}" aria-label="Kz 39 of ${esc(wzPeriodLabel(p))}" style="width:110px" placeholder="0">` : ''}</td>
@@ -661,8 +671,9 @@ function wzStep5() {
     <p class="small muted">Setting up writes the opening entry, books every record from the start date on and locks the filed months. It can run only once.</p>`;
 }
 function wzUnresolvedBanner() {
-  if (!WZ.unresolved.length) return '';
-  return `<div class="banner bad" role="alert" data-testid="wz-unresolved">These rows still need an answer: <ul>${WZ.unresolved.map(k => `<li><code>${esc(k)}</code></li>`).join('')}</ul></div>`;
+  const keys = WZ.step === 4 ? wzExtUnresolved() : WZ.step === 3 ? wzReviewUnresolved() : [];
+  if (!keys.length) return '';
+  return `<div class="banner bad" role="alert" data-testid="wz-unresolved">These rows still need an answer: <ul>${keys.map(k => `<li><code>${esc(k)}</code></li>`).join('')}</ul></div>`;
 }
 function wzDone() {
   const r = WZ.result, counts = Object.entries(r.counts || {}).map(([k, n]) => `<li>${esc(k.replace(/_/g, ' '))}: ${esc(n)}</li>`).join('');
@@ -701,7 +712,7 @@ A.wzSubmit = async el => {
   el.disabled = true;
   try { WZ.result = await api('POST', 'accounting/init', wzBody()); }
   catch (e) {
-    if (e.status === 409 && Array.isArray(e.data?.unresolved)) { WZ.unresolved = e.data.unresolved; WZ.error = e.message; WZ.step = 3; }
+    if (e.status === 409 && Array.isArray(e.data?.unresolved)) { WZ.unresolved = e.data.unresolved; WZ.error = e.message; WZ.step = wzReviewUnresolved().length || !wzExtUnresolved().length ? 3 : 4; }
     else WZ.error = e.message;
     el.disabled = false;
   }
