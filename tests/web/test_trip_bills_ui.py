@@ -151,11 +151,11 @@ def test_superseded_trip_render_does_not_hijack_the_open_trip(browser, srv):
         pg.press("[data-item-exp=ithotel1]", "Tab")
         h = {"Authorization": "Bearer " + srv.token}
         for _ in range(30):
-            if httpx.get(srv.base + f"/api/trips/{t2}", headers=h).json()["items"][0]["expected"] != 100:
+            if httpx.get(srv.base + f"/api/trips/{t2}", headers=h).json()["items"][0]["expected"] not in (250, "250.00"):
                 break
             pg.wait_for_timeout(100)
         exp = {t: httpx.get(srv.base + f"/api/trips/{t}", headers=h).json()["items"][0]["expected"] for t in (t1, t2)}
-        assert exp == {t1: 100, t2: 250}
+        assert {t: float(v) for t, v in exp.items()} == {t1: 100, t2: 250}
         btn = pg.locator("#t_step tr[data-item] [data-a=editExpense]").first
         expect(btn).to_have_attribute("data-trip", t2)
         btn.click()
