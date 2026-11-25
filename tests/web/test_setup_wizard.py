@@ -44,11 +44,25 @@ def fill_folder(store):
     base = {"customer_id": cu["id"], "lines": [{"description": "Work", "qty": 1, "price": "100", "vat": "19"}]}
     store.save(
         "invoices",
-        {"id": "solldec1", "date": "2026-01-05", "number": HOSTILE, "status": "sent", "service_to": "2025-12-20", **base},
+        {
+            "id": "solldec1",
+            "date": "2026-01-05",
+            "number": HOSTILE,
+            "status": "sent",
+            "service_to": "2025-12-20",
+            **base,
+        },
     )
     store.save(
         "invoices",
-        {"id": "cxlpaid1", "date": "2026-02-02", "number": "R-2", "status": "cancelled", "paid_date": "2026-02-10", **base},
+        {
+            "id": "cxlpaid1",
+            "date": "2026-02-02",
+            "number": "R-2",
+            "status": "cancelled",
+            "paid_date": "2026-02-10",
+            **base,
+        },
     )
     store.save("invoices", {"id": "paidnodt1", "date": "2026-03-01", "number": "R-5", "status": "paid", **base})
     store.save(
