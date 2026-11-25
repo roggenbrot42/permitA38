@@ -1,4 +1,5 @@
-/* permitA38 – accounting page: journal and reports, read only. Contract: docs/specs/accounting.md 14, 17, 18.
+/* permitA38 – accounting page: journal and reports, manual entries, period locks, fiscal years, DATEV export.
+   Contract: docs/specs/accounting.md 4, 9.8, 11, 13, 14, 17, 18; datev-export.md "API and UI".
    Tabs: Journal, Ledger, Trial balance, EÜR (EÜR years) or P&L + Balance sheet (accrual years), Open items.
    Money comes from the API as decimal strings and is only shown through Money (web/money.js), never through floats.
    Everything that comes from the server goes through esc(). Vanilla JS, no build step. */
@@ -21,6 +22,8 @@ const accDC = amt => (Money.isNeg(amt) ? ['', eur(Money.abs(amt))] : [eur(amt), 
 const accTabs = basis => [['journal', 'Journal'], ['ledger', 'Ledger'], ['trial-balance', 'Trial balance'],
   ...(basis === 'eur' ? [['eur', 'EÜR']] : [['pnl', 'Profit & loss'], ['balance-sheet', 'Balance sheet']]),
   ['open-items', 'Open items']];
+/** Second tab row: the bookkeeping actions. Inline styles keep the first row (the reports) a clean `.tabs`. */
+const ACC_TABS_B = [['entry', 'Manual entry'], ['periods', 'Periods'], ['years', 'Years'], ['datev', 'DATEV export']];
 const accAccountLabel = n => { const a = ACC.accounts.find(x => x.account === n); return a ? `${n} ${a.name}` : n; };
 /** Expense amount (income-signed in the reports) shown as a positive figure; a refund keeps its minus. */
 const accNeg = a => (Money.isZero(a) ? a : Money.isNeg(a) ? Money.abs(a) : '-' + Money.abs(a));
@@ -49,10 +52,11 @@ async function accLoadAccounts() {
   ACC.accounts = await api('GET', 'accounting/accounts' + accQuery({ year: ACC.year }));
   ACC.accountsYear = ACC.year;
 }
-const accYearBar = (tab, basis) => `<div class="head"><div><h1>Accounting</h1><div class="muted">Journal and reports, read only. All figures come from the journal.</div></div>
+const accYearBar = (tab, basis) => `<div class="head"><div><h1>Accounting</h1><div class="muted">Journal and reports. All figures come from the journal.</div></div>
   <div class="field" style="margin:0"><label for="acc_year">Fiscal year</label><select id="acc_year" data-change="accYear">${ACC.years.map(y => `<option value="${y.year}" ${y.year === ACC.year ? 'selected' : ''}>${y.year}</option>`).join('')}</select></div></div>
   <div class="small muted" id="acc-basis" style="margin-bottom:8px">${esc(ACC_BASIS[basis] || basis || '')}</div>
-  <div class="tabs" role="tablist">${accTabs(basis).map(([k, l]) => `<a href="#/accounting/${k}" role="tab" aria-selected="${k === tab}" data-testid="acc-tab-${k}" class="${k === tab ? 'on' : ''}">${esc(l)}</a>`).join('')}</div>`;
+  <div class="tabs" role="tablist">${accTabs(basis).map(([k, l]) => `<a href="#/accounting/${k}" role="tab" aria-selected="${k === tab}" data-testid="acc-tab-${k}" class="${k === tab ? 'on' : ''}">${esc(l)}</a>`).join('')}</div>
+  <div role="tablist" data-testid="acc-tabs-b" style="display:flex;gap:4px;margin:-8px 0 16px;flex-wrap:wrap">${ACC_TABS_B.map(([k, l]) => `<a href="#/accounting/${k}" role="tab" aria-selected="${k === tab}" data-testid="acc-tab-${k}" style="padding:4px 12px;border-radius:14px;border:1px solid var(--line);${k === tab ? 'color:var(--accent);border-color:var(--accent);font-weight:600' : 'color:var(--muted)'}">${esc(l)}</a>`).join('')}</div>`;
 
 /* ---------- journal ---------- */
 function accEntryHTML(e) {
@@ -70,7 +74,8 @@ function accEntryHTML(e) {
   return `<details class="acc-entry card" data-testid="acc-entry" data-entry="${esc(e.id)}"><summary><b>#${esc(e.entry_no)}</b> <span class="nowrap">${esc(fmtDate(e.booking_date))}</span>
     <span class="acc-text">${esc(e.text || '')}</span> ${e.source_number ? `<span class="small muted">${esc(e.source_number)}</span>` : ''} ${pills.join(' ')} <span class="small muted right">${hash}</span></summary>
     <div class="table-wrap"><table><caption class="sr-only">Lines of entry ${esc(e.entry_no)}</caption><thead><tr><th>Role</th><th>Account</th><th class="num">Debit</th><th class="num">Credit</th><th>Tax key</th><th>VAT date</th><th>Income date</th></tr></thead><tbody>${lines}</tbody></table></div>
-    <div class="small muted">Document date ${esc(fmtDate(e.document_date))}${e.source_coll ? ` · source ${esc(e.source_coll)}` : ''}</div></details>`;
+    <div class="small muted">Document date ${esc(fmtDate(e.document_date))}${e.source_coll ? ` · source ${esc(e.source_coll)}` : ''}</div>
+    ${e.origin === 'manual' && !e.reverses_id && can('accounting', 'write') ? `<div style="margin-top:8px"><button type="button" class="sm" data-testid="acc-reverse" data-a="accReverse" data-id="${esc(e.id)}" data-no="${esc(e.entry_no)}">Reverse</button></div>` : ''}</details>`;
 }
 async function accJournal() {
   await accLoadAccounts();
@@ -156,13 +161,279 @@ async function accOpenItems() {
   return `<div class="small muted" style="margin-bottom:8px">As of ${esc(fmtDate(o.as_of))}</div>${tbl('Receivables', 'receivable', o.receivables_total)}${tbl('Payables', 'payable', o.payables_total)}`;
 }
 
-const ACC_TABS = { journal: accJournal, ledger: accLedger, 'trial-balance': accTrial, eur: accEur, pnl: accPnl, 'balance-sheet': accBalance, 'open-items': accOpenItems };
+/* ---------- manual entry (9.8) ---------- */
+const ACC_TAX_KEYS = ['', 'S19', 'S7', 'SX', 'KU', 'EU_SVC', 'VST', 'RC_EU_SVC', 'RC_3C_SVC', 'NONE'];
+const ACC_KIND_OF = { S19: 'tax', S7: 'tax', SX: 'tax', KU: 'base_only', EU_SVC: 'base_only', VST: 'input', RC_EU_SVC: 'tax', RC_3C_SVC: 'tax' };
+const accBlankLine = () => ({ account: '', d: '', c: '', tk: '', kind: '', rate: '', base: '', vdate: '', tpl: '' });
+ACC.draft = null;   // {tpl, amount, date, text, lines: [...]}, kept while the form is on screen
+const accDraftNew = () => ({ tpl: '', amount: '', date: new Date().toISOString().slice(0, 10), text: '', lines: [accBlankLine(), accBlankLine()] });
+
+async function accEntryTab() {
+  await accLoadAccounts();
+  if (!ACC.tpls) ACC.tpls = await api('GET', 'accounting/entry-templates');
+  if (!ACC.draft) ACC.draft = accDraftNew();
+  const d = ACC.draft;
+  return `<div class="card" id="acc-entry-form"><h2>Manual entry</h2>
+    <div class="muted small" style="margin-bottom:8px">Free, balanced entries (debit = credit). To correct one, reverse it in the journal and post a new one.</div>
+    <div class="row" style="flex-wrap:wrap;gap:10px;align-items:flex-end">
+      <div class="field"><label for="acc_tpl">Template</label><select id="acc_tpl" data-change="accTemplate"><option value="">Free entry</option>${ACC.tpls.map(t => `<option value="${esc(t.key)}" ${t.key === d.tpl ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}</select></div>
+      <div class="field" id="acc_amount_wrap" ${d.tpl ? '' : 'hidden'}><label for="acc_amount">Amount</label><input id="acc_amount" inputmode="decimal" autocomplete="off" value="${esc(d.amount)}" placeholder="0,00"></div>
+      <div class="field"><label for="acc_edate">Date</label><input id="acc_edate" type="date" value="${esc(d.date)}"></div>
+      <div class="field" style="flex:1;min-width:220px"><label for="acc_etext">Text</label><input id="acc_etext" maxlength="200" value="${esc(d.text)}"></div></div>
+    <div class="table-wrap"><table data-testid="acc-entry-lines"><thead><tr><th>Account</th><th class="num">Debit</th><th class="num">Credit</th><th>Tax key</th><th></th></tr></thead><tbody id="acc-lines">${accLinesHTML()}</tbody></table></div>
+    <div class="row" style="gap:10px;align-items:center;margin-top:8px"><button type="button" data-a="accAddLine">Add line</button>
+      <span id="acc-balance" data-testid="acc-balance-state" class="small" role="status"></span></div>
+    <div id="acc-entry-err" class="small" role="alert" data-testid="acc-entry-err" style="color:var(--danger,#b00020);margin-top:8px"></div>
+    <div class="actions" style="margin-top:8px"><button type="button" class="primary" data-testid="acc-entry-submit" data-a="accEntrySubmit">Post entry</button></div></div>`;
+}
+function accLinesHTML() {
+  const d = ACC.draft, opts = sel => `<option value="">Pick an account…</option>${ACC.accounts.map(a => `<option value="${esc(a.account)}" ${a.account === sel ? 'selected' : ''}>${esc(a.account + ' ' + a.name + (a.role ? ' (' + a.role + ')' : ''))}</option>`).join('')}`;
+  return d.lines.map((l, i) => {
+    const taxed = l.tk && l.tk !== 'NONE';
+    const x = taxed ? `<div class="row" style="flex-wrap:wrap;gap:6px;margin-top:4px">
+      <select id="acc_l${i}_kind" aria-label="Tax kind line ${i + 1}">${['tax', 'input', 'base_only'].map(k => `<option value="${k}" ${k === l.kind ? 'selected' : ''}>${k}</option>`).join('')}</select>
+      <input id="acc_l${i}_rate" aria-label="Tax rate line ${i + 1}" placeholder="Rate %" size="6" value="${esc(l.rate)}">
+      <input id="acc_l${i}_base" aria-label="Tax base line ${i + 1}" inputmode="decimal" placeholder="Tax base" size="10" value="${esc(l.base)}">
+      <input id="acc_l${i}_vdate" type="date" aria-label="VAT date line ${i + 1}" value="${esc(l.vdate)}"></div>` : '';
+    return `<tr data-line="${i}"><td><select id="acc_l${i}_acct" aria-label="Account line ${i + 1}">${opts(l.account)}</select>${x}</td>
+      <td class="num"><input id="acc_l${i}_d" aria-label="Debit line ${i + 1}" inputmode="decimal" autocomplete="off" size="10" value="${esc(l.d)}"></td>
+      <td class="num"><input id="acc_l${i}_c" aria-label="Credit line ${i + 1}" inputmode="decimal" autocomplete="off" size="10" value="${esc(l.c)}"></td>
+      <td><select id="acc_l${i}_tk" data-change="accTaxKey" aria-label="Tax key line ${i + 1}">${ACC_TAX_KEYS.map(k => `<option value="${k}" ${k === l.tk ? 'selected' : ''}>${k || '–'}</option>`).join('')}</select></td>
+      <td>${d.lines.length > 2 ? `<button type="button" class="sm" data-a="accDelLine" data-i="${i}" aria-label="Remove line ${i + 1}">×</button>` : ''}</td></tr>`;
+  }).join('');
+}
+/** Read the form back into ACC.draft (the DOM is the source of truth while the user types). */
+function accCollect() {
+  const d = ACC.draft, v = id => ($('#' + id) ? $('#' + id).value : '');
+  d.tpl = v('acc_tpl'); d.amount = v('acc_amount'); d.date = v('acc_edate'); d.text = v('acc_etext');
+  d.lines = d.lines.map((l, i) => ({ ...l, account: v(`acc_l${i}_acct`), d: v(`acc_l${i}_d`), c: v(`acc_l${i}_c`), tk: v(`acc_l${i}_tk`),
+    kind: $(`#acc_l${i}_kind`) ? v(`acc_l${i}_kind`) : l.kind, rate: $(`#acc_l${i}_rate`) ? v(`acc_l${i}_rate`) : l.rate,
+    base: $(`#acc_l${i}_base`) ? v(`acc_l${i}_base`) : l.base, vdate: $(`#acc_l${i}_vdate`) ? v(`acc_l${i}_vdate`) : l.vdate }));
+}
+const accRedrawLines = () => { $('#acc-lines').innerHTML = accLinesHTML(); accBalanceState(); };
+/** One debit/credit pair: {ok, value: signed canonical text (debit positive) or null for a blank line} or {ok:false, error}. */
+function accSigned(l, i) {
+  const d = Money.parseInput(l.d), c = Money.parseInput(l.c);
+  if (!d.ok || !c.ok) return { ok: false, error: `Line ${i + 1}: ${(d.ok ? c : d).error}` };
+  if (d.value !== null && c.value !== null) return { ok: false, error: `Line ${i + 1}: enter either a debit or a credit, not both` };
+  const v = d.value ?? c.value;
+  if (v === null) return { ok: true, value: null };
+  if (Money.isNeg(v)) return { ok: false, error: `Line ${i + 1}: amounts are positive; use the other column for the opposite side` };
+  return { ok: true, value: d.value !== null ? v : (Money.isZero(v) ? '0' : '-' + v) };
+}
+function accBalanceState() {
+  const el = $('#acc-balance'); if (!el || !ACC.draft) return;
+  const ds = [], cs = []; let bad = false;
+  ACC.draft.lines.forEach(l => { const a = Money.parseInput(l.d), b = Money.parseInput(l.c); if (!a.ok || !b.ok) { bad = true; return; } if (a.value !== null) ds.push(a.value); if (b.value !== null) cs.push(b.value); });
+  if (bad) { el.textContent = 'Check the amounts: one decimal separator, no thousands separators.'; el.dataset.state = 'bad'; return; }
+  const dt = Money.sum(ds), ct = Money.sum(cs), diff = Money.sum([dt, Money.isZero(ct) ? '0' : '-' + Money.abs(ct)]);
+  const ok = Money.isZero(diff) && ds.length + cs.length > 0;
+  el.dataset.state = ok ? 'balanced' : 'unbalanced';
+  el.textContent = `Debit ${eur(dt)} · Credit ${eur(ct)} · ${ok ? 'balanced' : 'difference ' + eur(diff)}`;
+}
+/** The request body from the draft, or {error}. */
+function accBuildEntry() {
+  const d = ACC.draft; if (!d.text.trim()) return { error: 'Enter a text for the entry.' }; if (!d.date) return { error: 'Enter a date.' };
+  const lines = [];
+  for (let i = 0; i < d.lines.length; i++) {
+    const l = d.lines[i], s = accSigned(l, i);
+    if (!s.ok) return { error: s.error };
+    if (s.value === null) { if (l.account) return { error: `Line ${i + 1}: enter an amount.` }; continue; }
+    if (!l.account) return { error: `Line ${i + 1}: pick an account.` };
+    const o = { account: l.account, amount: s.value };
+    if (l.tk) {
+      o.tax_key = l.tk;
+      if (l.tk !== 'NONE') {
+        o.tax_kind = l.kind || ACC_KIND_OF[l.tk];
+        if (!l.vdate) return { error: `Line ${i + 1}: a tax key needs a VAT date.` }; o.vat_date = l.vdate;
+        if (l.rate.trim()) o.tax_rate = l.rate.trim();
+        if (o.tax_kind !== 'input') { const b = Money.parseInput(l.base); if (!b.ok || b.value === null) return { error: `Line ${i + 1}: ${b.ok ? 'a tax or base-only line needs the tax base' : b.error}` }; o.tax_base = b.value; }
+      }
+    }
+    if (Money.isZero(s.value) && o.tax_kind !== 'base_only') return { error: `Line ${i + 1}: a zero amount is only allowed on a base-only tax line.` };
+    lines.push(o);
+  }
+  if (lines.length < 2) return { error: 'An entry needs at least two lines.' };
+  const sum = Money.sum(lines.map(x => x.amount));
+  if (!Money.isZero(sum)) return { error: `The entry is not balanced: debit and credit differ by ${eur(Money.abs(sum))}.` };
+  return { body: { date: d.date, text: d.text.trim(), lines } };
+}
+A.accTemplate = el => {
+  accCollect(); const d = ACC.draft, t = ACC.tpls.find(x => x.key === el.value);
+  if (!t) d.lines = [accBlankLine(), accBlankLine()];
+  else d.lines = t.lines.map(tl => ({ ...accBlankLine(), tpl: tl.side, account: (ACC.accounts.find(a => a.role === tl.role) || {}).account || '' }));
+  $('#acc_amount_wrap').hidden = !t; accRedrawLines(); accApplyAmount();
+};
+/** A template is one debit and one credit line: the typed amount goes on both sides. */
+function accApplyAmount() {
+  const d = ACC.draft; if (!d.tpl) return;
+  const a = Money.parseInput($('#acc_amount').value), txt = a.ok && a.value !== null ? a.value : '';
+  d.lines.forEach((l, i) => {
+    const dn = $(`#acc_l${i}_d`), cr = $(`#acc_l${i}_c`);
+    if (l.tpl === 'debit') { dn.value = txt; cr.value = ''; } else if (l.tpl === 'credit') { cr.value = txt; dn.value = ''; }
+  });
+  accCollect(); accBalanceState();
+}
+A.accTaxKey = el => {
+  accCollect(); const i = Number(el.id.match(/acc_l(\d+)_tk/)[1]), l = ACC.draft.lines[i];
+  l.kind = ACC_KIND_OF[l.tk] || ''; accRedrawLines();
+};
+A.accAddLine = () => { accCollect(); ACC.draft.lines.push(accBlankLine()); accRedrawLines(); };
+A.accDelLine = el => { accCollect(); ACC.draft.lines.splice(Number(el.dataset.i), 1); accRedrawLines(); };
+A.accEntrySubmit = async el => {
+  accCollect(); const err = $('#acc-entry-err'); err.textContent = '';
+  const r = accBuildEntry(); if (r.error) { err.textContent = r.error; return; }
+  el.disabled = true;
+  try { await api('POST', 'accounting/entries', r.body); }
+  catch (e) { err.textContent = e.message; el.disabled = false; return; }
+  ACC.draft = null; toast('Entry posted'); render();
+};
+document.addEventListener('input', e => {
+  if (!ACC.draft || !e.target.closest || !e.target.closest('#acc-entry-form')) return;
+  if (e.target.id === 'acc_amount') { accApplyAmount(); return; }
+  if (/^acc_l\d+_[dc]$/.test(e.target.id)) { accCollect(); accBalanceState(); }
+});
+
+/* ---------- reverse (journal) ---------- */
+A.accReverse = el => {
+  modal(`<h2>Reverse entry #${esc(el.dataset.no)}</h2><p>A reversal entry is booked with the opposite lines. The original entry stays in the journal. Reversing is final; a mistake is corrected by a new entry.</p>
+    <div class="field"><label for="acc_rdate">Date of the reversal (optional)</label><input id="acc_rdate" type="date"></div>
+    <div class="field"><label for="acc_rtext">Text (optional)</label><input id="acc_rtext" maxlength="200"></div>
+    <div id="acc-rev-err" class="small" role="alert" style="color:var(--danger,#b00020)"></div>
+    <div class="actions"><button type="button" data-a="closeModal">Cancel</button><button type="button" class="primary" data-testid="acc-reverse-confirm" data-a="accReverseGo" data-id="${esc(el.dataset.id)}">Reverse entry</button></div>`);
+};
+A.accReverseGo = async el => {
+  const body = {}, d = $('#acc_rdate').value, t = $('#acc_rtext').value.trim();
+  if (d) body.date = d;
+  if (t) body.text = t;
+  try { await api('POST', `accounting/entries/${el.dataset.id}/reverse`, body); }
+  catch (e) { $('#acc-rev-err').textContent = e.message; return; }
+  closeModal(); toast('Entry reversed'); render();
+};
+
+/* ---------- periods (11) ---------- */
+const accMonthKey = (y, m) => `${y}-${String(m).padStart(2, '0')}`;
+/** First lockable month: the accounting start from the settings, else January of the earliest fiscal year (as the server). */
+const accStart = () => {
+  const st = S.settings?.['accounting.start'] || S.settings?.accounting?.start;
+  if (/^\d{4}-\d{2}/.test(st || '')) return [Number(st.slice(0, 4)), Number(st.slice(5, 7))];
+  return [Math.min(...ACC.years.map(y => y.year)), 1];
+};
+const accNextMonth = (y, m) => (m === 12 ? [y + 1, 1] : [y, m + 1]);
+async function accPeriods() {
+  const locks = (await api('GET', 'accounting/locks')).sort((a, b) => a.year - b.year || a.month - b.month);
+  ACC.locks = locks;
+  const reason = r => (r === 'manual' ? 'Locked manually' : r === 'year_close' ? 'Year closing' : String(r || '').startsWith('vat_return') ? 'VAT return ' + String(r).split(':').slice(1).join(':') : String(r || ''));
+  const last = locks[locks.length - 1], next = last ? accNextMonth(last.year, last.month) : accStart();
+  return `<div class="card"><h2>Locked months</h2><div class="muted small">A locked month takes no more bookings (GoBD). Months are locked in order and cannot be unlocked.</div>
+    ${locks.length ? `<div class="table-wrap"><table data-testid="acc-locks"><caption class="sr-only">Locked months</caption><thead><tr><th>Month</th><th>Reason</th><th>Locked on</th></tr></thead><tbody>${locks.map(l => `<tr><td>${esc(accMonthKey(l.year, l.month))}</td><td>${esc(reason(l.reason))}</td><td class="nowrap">${l.locked_at ? esc(new Date(l.locked_at * 1000).toLocaleDateString('de-DE')) : ''}</td></tr>`).join('')}</tbody></table></div>` : accEmpty('No month is locked yet.')}</div>
+    <div class="card"><h2>Lock up to a month</h2><div class="row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+      <div class="field"><label for="acc_lock_month">Lock all months up to and including</label><input id="acc_lock_month" type="month" value="${esc(accMonthKey(...next))}"></div>
+      <button type="button" class="primary" data-testid="acc-lock-go" data-a="accLockAsk">Lock up to this month…</button></div></div>`;
+}
+A.accLockAsk = () => {
+  const v = $('#acc_lock_month').value;
+  if (!/^\d{4}-\d{2}$/.test(v)) { toast('Pick a month', true); return; }
+  const y = Number(v.slice(0, 4)), m = Number(v.slice(5)), last = ACC.locks[ACC.locks.length - 1], todo = [];
+  // the months the server will lock: from the month after the last lock (or the accounting start) up to the chosen one
+  let [cy, cm] = last ? accNextMonth(last.year, last.month) : accStart();
+  while (cy < y || (cy === y && cm <= m)) { todo.push(accMonthKey(cy, cm)); [cy, cm] = accNextMonth(cy, cm); }
+  if (!todo.length) { toast('That month is already locked.', true); return; }
+  const gap = todo.length > 1 ? `<p data-testid="acc-lock-gap"><b>${todo.length} months</b> will be locked, because months are locked in order: ${esc(todo.join(', '))}.</p>` : '';
+  modal(`<h2>Lock up to ${esc(v)}</h2>${gap}<p>Locking is final: there is no unlock. No booking can be made in a locked month afterwards.</p>
+    <div id="acc-lock-err" class="small" role="alert" style="color:var(--danger,#b00020)"></div>
+    <div class="actions"><button type="button" data-a="closeModal">Cancel</button><button type="button" class="primary" data-testid="acc-lock-confirm" data-a="accLockGo" data-year="${y}" data-month="${m}">Lock</button></div>`);
+};
+A.accLockGo = async el => {
+  let r;
+  try { r = await api('POST', 'accounting/locks', { year: Number(el.dataset.year), month: Number(el.dataset.month) }); }
+  catch (e) { $('#acc-lock-err').textContent = e.message; return; }
+  closeModal(); toast(`${r.length} month${r.length === 1 ? '' : 's'} locked`); render();
+};
+
+/* ---------- fiscal years and closing (4, 13) ---------- */
+const accYesNo = b => (b === null || b === undefined ? '' : b ? 'yes' : 'no');
+async function accYears() {
+  const boss = S.me?.role === 'boss';
+  return `<div class="card"><h2>Fiscal years</h2><div class="table-wrap"><table data-testid="acc-years"><caption class="sr-only">Fiscal years and their bases</caption>
+    <thead><tr><th>Year</th><th>Chart</th><th>Income basis</th><th>VAT basis</th><th>VAT returns</th><th>Small business</th><th>Status</th><th></th></tr></thead><tbody>
+    ${ACC.years.map(y => `<tr data-year="${esc(y.year)}"><td>${esc(y.year)}</td><td>${esc(y.chart || '')}</td><td>${esc(ACC_BASIS[y.income_basis] || y.income_basis || '')}</td><td>${esc(y.vat_basis || '')}</td><td>${esc(y.vat_frequency || '')}</td><td>${accYesNo(y.small_business)}</td>
+      <td>${y.closed_at ? (y.income_basis === 'eur' ? 'Ended' : 'Closed') : 'Open'}</td>
+      <td>${boss && !y.closed_at ? `<button type="button" class="sm" data-testid="acc-close-${esc(y.year)}" data-a="accCloseAsk" data-year="${esc(y.year)}" data-basis="${esc(y.income_basis)}">${y.income_basis === 'eur' ? 'End year' : 'Close year'}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>
+    <p class="small muted">Closing a year is final. Only the boss can close or end a year.</p></div>`;
+}
+A.accCloseAsk = el => {
+  const y = el.dataset.year, eurYear = el.dataset.basis === 'eur';
+  const prov = eurYear ? '' : `<p class="small muted" data-testid="acc-close-note">The server offers no preview of the closing: it checks the blockers when you confirm and lists them here. There is no provision proposal yet; enter your own estimate of the tax still to be paid (net of the prepayments expensed in the year), or leave the fields empty.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap"><div class="field"><label for="acc_prov_trade">Provision for trade tax (optional)</label><input id="acc_prov_trade" inputmode="decimal" autocomplete="off"></div>
+    <div class="field"><label for="acc_prov_corp">Provision for corporate tax (optional)</label><input id="acc_prov_corp" inputmode="decimal" autocomplete="off"></div></div>`;
+  modal(`<h2>${eurYear ? 'End' : 'Close'} year ${esc(y)}</h2>
+    <p>${eurYear ? 'December is locked, the end of the year is sealed in the journal chain and the next year is opened. Open items stay open.' : 'The provisions are posted, the VAT accounts are transferred, the closing entry is made, December is locked and the next year is opened with its opening balances.'} This is final.</p>
+    <p class="small muted">The earlier year must be closed first, and all months before December must be locked.</p>${prov}
+    <div id="acc-close-err" class="small" role="alert" data-testid="acc-close-blockers" style="color:var(--danger,#b00020)"></div>
+    <div class="actions"><button type="button" data-a="closeModal">Cancel</button><button type="button" class="primary" data-testid="acc-close-confirm" data-a="accCloseGo" data-year="${esc(y)}" data-basis="${esc(el.dataset.basis)}">${eurYear ? 'End year' : 'Close year'}</button></div>`);
+};
+A.accCloseGo = async el => {
+  const err = $('#acc-close-err'); err.textContent = ''; const provisions = [];
+  if (el.dataset.basis !== 'eur') {
+    for (const [id, kind, label] of [['acc_prov_trade', 'trade_tax', 'trade tax'], ['acc_prov_corp', 'corporate_tax', 'corporate tax']]) {
+      const p = Money.parseInput($(`#${id}`).value);
+      if (!p.ok) { err.textContent = `Provision for ${label}: ${p.error}`; return; }
+      if (p.value !== null && !Money.isZero(p.value)) {
+        if (Money.isNeg(p.value)) { err.textContent = `Provision for ${label} must be positive.`; return; }
+        provisions.push({ kind, amount: p.value });
+      }
+    }
+  }
+  el.disabled = true;
+  try { await api('POST', `accounting/years/${el.dataset.year}/close`, { provisions }); }
+  catch (e) { err.textContent = e.message; el.disabled = false; return; }
+  closeModal(); toast(`Year ${el.dataset.year} ${el.dataset.basis === 'eur' ? 'ended' : 'closed'}`); render();
+};
+
+/* ---------- DATEV export ---------- */
+async function accDatev() {
+  const y = ACC.year;
+  return `<div class="card"><h2>Export for the tax adviser (DATEV)</h2>
+    <div class="muted small">One fiscal year per export, as a zip with the booking file and a report. Unlocked months are exported too; their rows are not marked as locked (Festschreibung 0) and the report says so.</div>
+    <div class="row" style="align-items:flex-end;gap:10px;flex-wrap:wrap;margin-top:8px">
+      <div class="field"><label for="acc_dx_from">From</label><input id="acc_dx_from" type="date" value="${y}-01-01"></div>
+      <div class="field"><label for="acc_dx_to">To</label><input id="acc_dx_to" type="date" value="${y}-12-31"></div>
+      <button type="button" class="primary" data-testid="acc-datev-go" data-a="accDatevGo">Download export</button></div>
+    <div id="acc-datev-msg" data-testid="acc-datev-msg" role="status" class="small" style="margin-top:8px"></div></div>`;
+}
+A.accDatevGo = async el => {
+  const msg = $('#acc-datev-msg'), from = $('#acc_dx_from').value, to = $('#acc_dx_to').value;
+  msg.style.color = ''; msg.textContent = '';
+  if (!from || !to) { msg.textContent = 'Enter both dates.'; return; }
+  if (from > to) { msg.textContent = 'From must not be after to.'; return; }
+  if (from.slice(0, 4) !== to.slice(0, 4)) { msg.textContent = 'An export covers one fiscal year: choose dates in the same year.'; return; }
+  el.disabled = true;
+  try {
+    const t = api.token.get(), r = await fetch(api.url('accounting/datev' + accQuery({ from, to })), { headers: t ? { Authorization: 'Bearer ' + t } : {}, credentials: 'include' });
+    if (!r.ok) {
+      const data = await r.json().catch(() => ({})), text = typeof data.detail === 'string' ? data.detail : (r.statusText || 'Export failed');
+      msg.style.color = 'var(--danger,#b00020)';
+      msg.innerHTML = `${esc(text)}${r.status === 422 && /settings/i.test(text) ? ' <a href="#/settings" data-testid="acc-datev-settings-link">Open the settings</a>' : ''}`;
+      return;
+    }
+    const blob = await r.blob(), a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = `datev-export_${from}_${to}.zip`; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    msg.textContent = `Downloaded ${a.download}. The zip contains the report with the figures of the export.`;
+  } catch (e) { msg.style.color = 'var(--danger,#b00020)'; msg.textContent = e.message; }
+  finally { el.disabled = false; }
+};
+A.closeModal = () => closeModal();
+
+
+const ACC_TABS = { entry: accEntryTab, periods: accPeriods, years: accYears, datev: accDatev, journal: accJournal, ledger: accLedger, 'trial-balance': accTrial, eur: accEur, pnl: accPnl, 'balance-sheet': accBalance, 'open-items': accOpenItems };
 
 PAGES.accounting = async (tab = 'journal') => {
   await accLoadYears();
   if (ACC.year === null) return `<div class="head"><div><h1>Accounting</h1></div></div><div class="card">${accEmpty('No fiscal year has been opened yet.')}</div>`;
   const basis = (ACC.years.find(y => y.year === ACC.year) || {}).income_basis;
-  if (!accTabs(basis).some(([k]) => k === tab)) tab = 'journal';   // the EÜR tab of an accrual year (and vice versa) does not exist
+  if (!accTabs(basis).some(([k]) => k === tab) && !ACC_TABS_B.some(([k]) => k === tab)) tab = 'journal';   // the EÜR tab of an accrual year (and vice versa) does not exist
   let body;
   try { body = await ACC_TABS[tab](); }
   catch (e) {
