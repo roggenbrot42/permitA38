@@ -451,7 +451,9 @@ class JournalService:
         recomputed from the stored content. A break means the journal changed outside the app or forked."""
         findings: list[ChainFinding] = []
         expected_prev = ZERO_HASH  # the chain is per fiscal year
+        recomputed_last = ZERO_HASH  # the recomputed hash of the last entry (a closed year is compared against it)
         expected_no = 1
+        seen = 0
         offset = 0
         while True:
             page = self.store.list_journal_entries(year=year, limit=PAGE, offset=offset)
@@ -466,16 +468,60 @@ class JournalService:
                     findings.append(
                         ChainFinding("journal.prev_hash", no, f"entry {no} does not follow the entry before")
                     )
-                if e.get("hash") != entry_hash(str(e.get("prev_hash")), e, e["lines"]):
+                recomputed_last = entry_hash(str(e.get("prev_hash")), e, e["lines"])
+                if e.get("hash") != recomputed_last:
                     findings.append(
                         ChainFinding("journal.hash", no, f"entry {no} changed outside the app (hash mismatch)")
                     )
                 expected_prev = str(e.get("hash"))
+                seen += 1
             if len(page) < PAGE:
                 break
             offset += PAGE
         findings.extend(self._counter_findings(year, expected_no - 1))
+        findings.extend(self._closing_findings(year, recomputed_last, seen))
         return findings
+
+    def _closing_findings(self, year: int, last_hash: str, count: int) -> list[ChainFinding]:
+        """A closed year's recomputed last hash and entry count must equal ``closing_hash`` / ``closing_entry_no``
+        (accounting 7.6; a truncated closed year after a restore, or a changed entry, shows up here)."""
+        rows = self.store.find("fiscal_years", year=year)
+        if not rows or rows[0].get("closed_at") is None:
+            return []
+        row = rows[0]
+        if not row.get("closing_hash") or row.get("closing_entry_no") is None:
+            return [
+                ChainFinding("journal.closing_missing", None, f"fiscal year {year} is closed without a closing hash")
+            ]
+        out: list[ChainFinding] = []
+        if last_hash != row["closing_hash"]:
+            out.append(
+                ChainFinding(
+                    "journal.closing_hash", count or None,
+                    f"the last entry of the closed year {year} does not match its closing hash",
+                )
+            )  # fmt: skip
+        if count != int(row["closing_entry_no"]):
+            out.append(
+                ChainFinding(
+                    "journal.closing_count", count or None,
+                    f"the closed year {year} has {count} entries but was closed with {int(row['closing_entry_no'])}",
+                )
+            )  # fmt: skip
+        return out
+
+    def chain_tail(self, year: int) -> tuple[str, int]:
+        """``(hash of the last entry, number of entries)`` of ``year``; ``(64 zeros, 0)`` for a year without entries.
+        The year closing stores both (accounting 7.6)."""
+        count = 0
+        offset = 0
+        while True:
+            page = self.store.list_journal_entries(year=year, limit=PAGE, offset=offset)
+            count += len(page)
+            if len(page) < PAGE:
+                break
+            offset += PAGE
+        return (self.store.last_journal_hash(year) or ZERO_HASH), count
 
     def _counter_findings(self, year: int, last_no: int) -> list[ChainFinding]:
         """An open year's last ``entry_no`` must equal its ``journal`` counter (a deleted last entry leaves the

@@ -2194,6 +2194,28 @@ class PeriodLockIn(v.CheckedBody):
     month: v.MonthNo
 
 
+class YearCloseProvisionIn(v.CheckedBody):
+    """A tax provision the user confirms for the year closing (accounting.md 9.7, 13): ``amount`` is the estimate
+    already net of the prepayments expensed in the year."""
+
+    kind: Literal["trade_tax", "corporate_tax"]
+    amount: v.PositiveMoneyIn
+
+
+class YearCloseIn(v.CheckedBody):
+    """Close a fiscal year (accounting.md 13). Accrual: the provisions the user confirms are posted first; EÜR takes
+    none. At most one provision per kind."""
+
+    provisions: Annotated[list[YearCloseProvisionIn], Field(max_length=2)] = []
+
+    @model_validator(mode="after")
+    def _one_per_kind(self):
+        kinds = [p.kind for p in self.provisions]
+        if len(set(kinds)) != len(kinds):
+            raise ValueError("at most one provision per kind")
+        return self
+
+
 class PeriodLock(Record):
     year: int
     month: int
