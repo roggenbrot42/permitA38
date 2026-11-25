@@ -398,7 +398,8 @@ def test_closed_year_and_locked_month(eur):
     assert str(e.document_date) == "2026-03-10" and str(e.booking_date) == "2026-04-01"  # first open day
     row = eur.store.find("fiscal_years", year=2026)[0]
     eur.store.save("fiscal_years", {**row, "closed_at": 1, "closed_by": "u1x000"})
-    # a closed year is fully locked: the payment books into the next open year, its income date follows
+    # a closed year is fully locked: the payment books into the next open year; under EÜR the income date stays the
+    # payment date (accounting 14.5), only accrual years normalise it
     late = eur.vat_payment("ret1", date(2026, 5, 10), 1000, "payment", USER)
     assert str(late.document_date) == "2026-05-10" and str(late.booking_date) == "2027-01-01"
-    assert late.lines[0].income_date == "2027-01-01"
+    assert late.lines[0].income_date == "2026-05-10"
