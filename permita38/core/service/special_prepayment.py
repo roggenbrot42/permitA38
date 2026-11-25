@@ -64,8 +64,8 @@ def _stored(fy: Mapping[str, Any]) -> int | None:
 
 
 def _applies(fy: Mapping[str, Any]) -> bool:
-    """A Sondervorauszahlung exists for a monthly filer with Dauerfrist only."""
-    return bool(fy.get("dauerfrist")) and fy.get("vat_frequency") == "month"
+    """A Sondervorauszahlung exists for a monthly filer with Dauerfrist only, never for a small business."""
+    return bool(fy.get("dauerfrist")) and fy.get("vat_frequency") == "month" and not fy.get("small_business")
 
 
 class SpecialPrepaymentService:
@@ -124,11 +124,13 @@ class SpecialPrepaymentService:
 
     def get(self, year: int) -> dict[str, Any]:
         fy = self._year(year)
-        proposal, months, kz83, kz39 = self._proposal(year) if _applies(fy) else (0, None, 0, 0)
+        applies = _applies(fy)
+        proposal, months, kz83, kz39 = self._proposal(year) if applies else (0, None, 0, 0)
         state = str(effective_settings(self.store.settings()).get("state") or "")
         return {
             "year": year,
             "dauerfrist": bool(fy.get("dauerfrist")),
+            "applies": applies,
             "proposal": _money(proposal),
             "months": months,
             "previous_kz83": _money(kz83),
@@ -149,10 +151,17 @@ class SpecialPrepaymentService:
                 raise ServiceError(409, f"Fiscal year {year} is closed")
             if not _applies(fy):
                 raise ServiceError(422, f"{year} has no monthly VAT filing with Dauerfrist: no Sondervorauszahlung")
+            if any(
+                r.get("status") == "final" and r.get("period_kind") == "month" and int(r.get("period_no") or 0) == 12
+                for r in self.store.find("vat_returns", year=year)
+            ):
+                raise ServiceError(409, "The December return is final: reopen the December return first")
             entry_id = fy.get(ENTRY)
             live = bool(entry_id) and self.store.get_journal_entry_by_event_key(f"vat:{entry_id}:rev") is None
             if live and cents != stored_cents(fy):
                 raise ServiceError(409, "The payment is booked: reverse it before changing the amount")
+            if live and paid_on and paid_on != fy.get(PAID_ON):
+                raise ServiceError(409, "The payment is booked: reverse the payment first")
             changes: Record = {KEY: _money(cents)}
             if paid_on:
                 new_id = str(entry_id) if live else str(uuid.uuid4())

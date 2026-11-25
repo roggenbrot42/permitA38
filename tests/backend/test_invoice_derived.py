@@ -85,7 +85,14 @@ def test_partial_credit_note_reduces_the_open_amount():
     d = st.derive(inv(), 200000 + 38000, [], [credit(59500)])
     assert (d.fields["credited_amount"], d.fields["open_amount"], d.status) == ("595.00", "1785.00", "sent")
     assert d.fields["credit_notes"] == [
-        {"id": "c1", "number": "RK-1", "date": "2026-03-01", "credit_kind": "partial", "gross": "595.00"}
+        {
+            "id": "c1",
+            "number": "RK-1",
+            "date": "2026-03-01",
+            "credit_kind": "partial",
+            "gross": "595.00",
+            "reason": None,
+        }
     ]
 
 
@@ -268,3 +275,34 @@ def test_present_snapshot_shows_decimal_strings_and_iso_datetime_without_touchin
     assert out["gross"] == "1190.00" and out["rates"]["19"] == {"net": "1000.00", "vat": "190.00", "gross": "1190.00"}
     assert out["issued_at"] == "2026-11-24T10:56:20Z" and out["perf"] == "2026-02-01"
     assert stored["gross"] == 119000 and stored["issued_at"] == 1795517780
+
+
+def test_creditable_net_per_rate_counts_partial_and_write_off_and_gives_a_reversal_back(boss_client, cust):  # noqa: F811
+    a = issue(boss_client, cust)  # net 1000.00 @ 19 %, gross 1190.00
+    assert boss_client.get(f"/api/invoices/{a['id']}").json()["creditable"] == {"19": "1000.00"}
+    base = f"/api/invoices/{a['id']}/credit-notes"
+    body = {"credit_kind": "partial", "date": "2026-02-05", "reason": "r", "amounts": {"19": "200.00"}}
+    r = boss_client.post(base, json=body)
+    assert r.status_code in (200, 201), r.text
+    got = boss_client.get(f"/api/invoices/{a['id']}").json()
+    assert got["creditable"] == {"19": "800.00"}
+    assert got["credit_notes"][0]["reason"] == "r"
+    # the write-off takes the open amount (1190 - 238 = 952.00 gross = 800.00 net): same rule as the over-credit check
+    r = boss_client.post(base, json={"credit_kind": "write_off", "date": "2026-02-06", "reason": "gone"})
+    assert r.status_code in (200, 201), r.text
+    got = boss_client.get(f"/api/invoices/{a['id']}").json()
+    assert got["creditable"] == {"19": "0.00"}
+    wo = [n for n in got["credit_notes"] if n["credit_kind"] == "write_off"]
+    assert [n["gross"] for n in wo] == ["952.00"]  # the write-off is positive
+    # a payment reverses the write-off first: the reversal is returned negative and the creditable net is back
+    r = boss_client.post(f"/api/invoices/{a['id']}/payments", json={"date": "2026-02-07", "amount": "100.00"})
+    assert r.status_code in (200, 201), r.text
+    got = boss_client.get(f"/api/invoices/{a['id']}").json()
+    rev = [n["gross"] for n in got["credit_notes"] if n["credit_kind"] == "write_off_reversal"]
+    assert rev == ["-100.00"]  # the payment of 100.00 reverses 100.00 of the write-off
+    assert got["creditable"] == {"19": "84.03"}  # 100.00 gross = 84.03 net (+ 15.97 VAT) given back
+    assert got["open_amount"] == "0.00"  # 952.00 written off, 100.00 of it reversed, 100.00 paid
+
+
+def test_creditable_is_absent_without_a_snapshot():
+    assert "creditable" not in st.derive(inv(), 119000, [], []).fields

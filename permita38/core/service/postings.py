@@ -47,6 +47,7 @@ __all__ = [
     "build_snapshot",
     "cash_event_lines",
     "credit_snapshot",
+    "creditable_nets",
     "invoice_state_of",
     "stored_snapshot",
 ]
@@ -256,6 +257,13 @@ def invoice_state_of(snap: IssuedSnapshot, credit_notes: Iterable[Mapping[str, A
     if any(v for row in (*disc, *wo) for v in row):
         return CreditState(snap, groups(credited), Cents(kept_cents), groups(disc), groups(wo))
     return InvoiceState(snap, groups(credited), Cents(kept_cents))
+
+
+def creditable_nets(snap: IssuedSnapshot, credit_notes: Iterable[Mapping[str, Any]]) -> list[tuple[Decimal, int, int]]:
+    """``(rate, net, vat)`` still creditable per rate group: the snapshot minus everything credited by the credit
+    documents, write-offs included and their reversals given back (the one rule of the over-credit check)."""
+    state = invoice_state_of(snap, credit_notes, 0)
+    return [(g.rate, int(g.net) - int(k.net), int(g.vat) - int(k.vat)) for g, k in zip(snap.rates, state.credited)]
 
 
 class PaymentPostingService:

@@ -56,7 +56,34 @@ REFERENCES: dict[str, str] = {
     "login_user_id": "users",
     "expense_id": "expenses",
     "created_by": "users",
+    # accounting tables: a name shared by tables with different targets has its default here and the others in
+    # TABLE_REFERENCES / POLYMORPHIC_REFERENCES
+    "corrects_id": "invoices",
+    "document_id": "invoices",
+    "entry_id": "journal_entries",
+    "reverses_id": "journal_entries",
+    "amends_id": "vat_returns",
+    "replaced_by": "vat_returns",
+    "counterparty_id": "customers",
+    "open_item_id": "invoices",
+    "opened_by": "users",
+    "closed_by": "users",
+    "locked_by": "users",
+    "finalised_by": "users",
 }
+#: "table.column" -> target, where the column name alone points elsewhere
+TABLE_REFERENCES: dict[str, str] = {
+    "payments.reverses_id": "payments",
+    "zm_reports.amends_id": "zm_reports",
+    "zm_reports.replaced_by": "zm_reports",
+}
+#: "table.column" -> collections the id may live in (the first match wins; none of them is checked against REFERENCES)
+POLYMORPHIC_REFERENCES: dict[str, tuple[str, ...]] = {
+    "journal_entries.counterparty_id": ("customers", "suppliers"),
+    "journal_lines.open_item_id": ("invoices", "expenses"),
+}
+#: id columns that are not checked: the journal is the record of what happened, its source may be deleted later
+UNCHECKED_REFERENCES = {"journal_entries.source_id"}
 LIST_REFERENCES: dict[str, tuple[str, str]] = {  # (collection, column) -> target collection
     "contracts.user_ids": ("contracts", "users"),
 }
@@ -99,6 +126,8 @@ class Plan:
     users: dict | None = None
     numbering: dict | None = None
     empty_reason: str | None = None
+    replace: bool = False
+    shortened: dict[str, dict] = field(default_factory=dict)  # year -> {"archive": n, "current": n}
 
     def error(self, code: str, message: str, file: str | None = None) -> None:
         self.errors.append(Item(code, message, file))
@@ -151,11 +180,12 @@ def _manifest_summary(m: dict) -> dict:
 
 
 # ------------------------------------------------------------------ empty-instance precondition
-def instance_state(store: Repository, *, allow_no_users: bool) -> str | None:
-    """None when the instance is empty in the sense of spec decision 8, else the reason (409 text)."""
+def instance_state(store: Repository, *, allow_no_users: bool, replace: bool = False) -> str | None:
+    """None when the instance is empty in the sense of spec decision 8, else the reason (409 text). With ``replace``
+    the records and attachments may exist (the restore replaces them); the user rules still apply."""
     found: list[str] = []
     for name in TABLES:
-        if name in ("users", "settings"):
+        if name in ("users", "settings") or replace:
             continue
         rows = store.list(name)
         n = len(rows)
@@ -169,9 +199,52 @@ def instance_state(store: Repository, *, allow_no_users: bool) -> str | None:
     if not users and not allow_no_users:
         found.append("users: 0 (run the first-run setup first)")
     files = len(store.list_attachments())
-    if files:
+    if files and not replace:
         found.append(f"attachments: {files}")
-    return f"This instance already contains data ({', '.join(found)})." if found else None
+    if not found:
+        return None
+    msg = f"This instance already contains data ({', '.join(found)})."
+    if any(f.split(":")[0] in manifest.JOURNAL_TABLES for f in found):
+        msg += " Journals are never merged; only a replace-restore may overwrite them."
+    return msg
+
+
+def _journal_shortened(plan: Plan, store: Repository) -> None:
+    """Compare the archive's journal tails with the current journal: a restore that ends with fewer entries in a
+    year (or without the year) shortens the journal."""
+    current = manifest.journal_tails(store.list("journal_entries"))
+    archive = ((plan.manifest or {}).get("accounting") or {}).get("journal") or {}
+    for year, cur in current.items():
+        arch = archive.get(year)
+        have = arch.get("last_entry_no") if isinstance(arch, dict) else None
+        have = have if isinstance(have, int) and not isinstance(have, bool) else 0
+        if have < cur["last_entry_no"]:
+            plan.shortened[year] = {"archive": have, "current": cur["last_entry_no"]}
+    for year, d in plan.shortened.items():
+        plan.warn(
+            "journal_shortened",
+            f"The journal will be shortened: year {year} has {d['current']} entries now but {d['archive']} in the archive.",
+            "manifest.json",
+        )
+
+
+def _attachment_collisions(plan: Plan, store: Repository) -> None:
+    """A replace keeps the existing attachment files; an archive file with the same name but other content would
+    fail after the commit, so it is refused here (nothing is deleted)."""
+    for name in sorted(plan.attachments):
+        existing = store.attachment_path(name)
+        if existing is None:
+            continue
+        sha = hashlib.sha256()
+        with open(existing, "rb") as f:
+            while chunk := f.read(limits.CHUNK):
+                sha.update(chunk)
+        if sha.hexdigest() != plan.attachment_sha.get(name):
+            plan.error(
+                "attachment_conflict",
+                f"The attachment {name} exists with other content; remove it first or restore into a fresh instance.",
+                f"attachments/{name}",
+            )
 
 
 # ------------------------------------------------------------------ validation
@@ -363,11 +436,19 @@ def _check_references(plan: Plan) -> None:
             for col in table.columns:
                 if col.type != ID or col.name == "id":
                     continue
-                target = REFERENCES.get(col.name)
+                key = f"{coll}.{col.name}"
+                target = TABLE_REFERENCES.get(key) or REFERENCES.get(col.name)
                 value = rec.get(col.name)
                 if target == "trips.items":
                     continue  # checked below, against the items of the trip
-                if target is None or not value or value in ids.get(target, set()):
+                if key in POLYMORPHIC_REFERENCES:
+                    targets = POLYMORPHIC_REFERENCES[key]
+                    if not value or any(value in ids.get(t, set()) for t in targets):
+                        continue
+                    target = targets[0]
+                elif key in UNCHECKED_REFERENCES:
+                    continue
+                elif target is None or not value or value in ids.get(target, set()):
                     continue
                 total += 1
                 if shown < 20:
@@ -582,15 +663,22 @@ def _day(value: Any) -> date | None:
         return None
 
 
-def validate(path: Path, store: Repository, *, allow_no_users: bool = False, today: date | None = None) -> Plan:
+def validate(
+    path: Path, store: Repository, *, allow_no_users: bool = False, today: date | None = None, replace: bool = False
+) -> Plan:
     """Read the whole archive; nothing is written. Errors and warnings are collected in the returned plan."""
-    plan = Plan(allow_no_users=allow_no_users)
+    if replace and not getattr(store, "can_suspend_guards", False):
+        raise ServiceError(409, "A replace-restore needs a database whose guards can be suspended (SQLite only).")
+    plan = Plan(allow_no_users=allow_no_users, replace=replace)
     try:
         with ArchiveReader(path) as reader:
             _validate(plan, reader, store, today or date.today())
     except ArchiveError as e:
         plan.error(e.code, e.message, e.file)
-    plan.empty_reason = instance_state(store, allow_no_users=allow_no_users)
+    plan.empty_reason = instance_state(store, allow_no_users=allow_no_users, replace=replace)
+    if replace and plan.ok:
+        _journal_shortened(plan, store)
+        _attachment_collisions(plan, store)
     if plan.empty_reason:
         plan.error("not_empty", plan.empty_reason)
     return plan
@@ -618,6 +706,9 @@ def _validate(plan: Plan, reader: ArchiveReader, store: Repository, today: date)
     if not isinstance(man, dict) or not isinstance(man.get("files"), dict):
         raise ArchiveError("manifest_invalid", "manifest.json is not a valid manifest.", "manifest.json")
     plan.manifest = man
+    acc = man.get("accounting")
+    if acc is not None and not (isinstance(acc, dict) and isinstance(acc.get("journal"), dict)):
+        raise ArchiveError("manifest_invalid", "manifest.json has an invalid accounting block.", "manifest.json")
     if man.get("format") != manifest.FORMAT:
         raise ArchiveError("format_unknown", "This is not a permitA38 export archive.", "manifest.json")
     version = man.get("format_version")
@@ -724,20 +815,53 @@ def _stage_one(reader: ArchiveReader, store: Repository, stage: str, name: str, 
         raise ServiceError(422, f"The attachment {name} changed while it was read; nothing was imported.")
 
 
-def apply(path: Path, store: Repository, plan: Plan) -> dict:
+def _check_restored_journal(store: Repository, plan: Plan) -> None:
+    """The restored journal must end where the manifest says (last entry_no and hash per fiscal year)."""
+    acc = (plan.manifest or {}).get("accounting")
+    if acc is None:  # an archive of format 1 has no journal
+        return
+    entries = store.list("journal_entries")
+    if manifest.journal_tails(entries) != acc["journal"]:
+        raise ServiceError(422, "The restored journal does not match the manifest; nothing was imported.")
+    from permita38.core.service.journal import JournalService
+
+    journal = JournalService(store)
+    found = [
+        f"{year}: {f.message}"
+        for year in sorted({int(e["fiscal_year"]) for e in entries})
+        for f in journal.verify_chain(year)
+    ]
+    if found:
+        raise ServiceError(
+            422, "The restored journal fails the chain check; nothing was imported: " + "; ".join(found[:10])
+        )
+
+
+def apply(path: Path, store: Repository, plan: Plan, *, confirm_shorten: bool = False) -> dict:
     """Write a validated plan. Attachments are staged first, the records go in one transaction, and the staged files
     are moved into place only after the commit. On any failure (also an interrupt) nothing is left behind."""
     if not plan.ok:
         raise ServiceError(422, "The archive was not imported.")
+    if plan.shortened and not confirm_shorten:
+        raise ServiceError(
+            409, "The journal will be shortened by this restore; confirm it explicitly (confirm_shorten)."
+        )
     stage = store.new_stage()
     try:
         with ArchiveReader(path) as reader:
             for name in sorted(plan.attachments):
                 _stage_one(reader, store, stage, name, plan)
-        with store.transaction(), store.guards_suspended(RESTORE_SUSPENDED):
-            reason = instance_state(store, allow_no_users=plan.allow_no_users)  # re-checked: it may have changed
+        suspended = RESTORE_SUSPENDED | manifest.ACCOUNTING_SUSPENDED if plan.replace else RESTORE_SUSPENDED
+        with store.transaction(), store.guards_suspended(suspended, restore=plan.replace):
+            # re-checked: it may have changed
+            reason = instance_state(store, allow_no_users=plan.allow_no_users, replace=plan.replace)
             if reason:
                 raise ServiceError(409, reason)
+            if plan.replace:
+                for coll in reversed(manifest.exported_collections()):
+                    if coll != "users":
+                        for rec in store.list(coll):
+                            store.delete(coll, rec["id"])
             local = store.list("users")
             local_user = local[0] if local else None
             relogin = _write_users(store, plan, local_user)  # first: allocations etc. reference the users
@@ -746,6 +870,7 @@ def apply(path: Path, store: Repository, plan: Plan) -> dict:
                     continue
                 for rec in plan.records.get(coll, []):
                     store.save(coll, rec, touch=False)
+            _check_restored_journal(store, plan)
             keep = {k: v for k, v in store.settings().items() if manifest.is_secret_setting(k)}
             store.save_settings({**plan.settings, **keep})
             from permita38.core.service.integrity import IntegrityService

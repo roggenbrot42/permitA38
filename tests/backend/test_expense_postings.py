@@ -300,6 +300,23 @@ def test_old_reverse_charge_flag_maps_through_the_supplier(repo, rs, mode, expec
     assert rec["vat"] == 19.0  # 100.00 at the stated 19 %
 
 
+def test_legacy_reverse_charge_shape_with_rate_zero_gets_the_regular_rate(repo, rs):
+    rec = make(repo, rs, reverse_charge=True, tax_treatment=None, vat=0.0, vat_rate=0, net=1000.0)
+    assert rec["tax_treatment"] == "reverse_charge_eu_service"
+    assert rec["vat"] == 190.0 and rec["vat_rate"] == 19.0 and rec["net"] == 1000.0
+
+
+def test_reverse_charge_without_a_rate_stores_the_regular_rate(repo, rs):
+    data = {"date": "2026-03-10", "net": 1000.0, "category": "software", "tax_treatment": "reverse_charge_eu_service"}
+    rec = rs.create(BOSS, "expenses", data)
+    assert rec["vat"] == 190.0 and rec["vat_rate"] == 19.0
+
+
+def test_no_input_vat_stores_vat_zero_and_net_equals_gross(repo, rs):
+    rec = make(repo, rs, tax_treatment="no_input_vat", net=100.0, vat=19.0, vat_rate=19.0)
+    assert rec["vat"] == 0.0 and rec["net"] == 119.0
+
+
 def test_old_reverse_charge_flag_without_a_supplier_is_eu(repo, rs):
     assert make(repo, rs, reverse_charge=True)["tax_treatment"] == "reverse_charge_eu_service"
 

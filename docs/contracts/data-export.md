@@ -84,7 +84,7 @@ afterwards.
 {
   "ok": true,
   "manifest": {
-    "format": "permita38-export", "format_version": 1, "scope": "full",
+    "format": "permita38-export", "format_version": 2, "scope": "full",
     "app_version": "0.4.0-alpha.2", "schema_head": "d8a69cde",
     "created": "2026-10-24T09:30:15Z", "created_epoch": 1792834215,
     "include_accounts": false, "include_attachments": true
@@ -192,7 +192,7 @@ attachments/<name>
 ```json
 {
   "format": "permita38-export",
-  "format_version": 1,
+  "format_version": 2,
   "scope": "full",
   "app_version": "0.4.0-alpha.2",
   "schema_head": "d8a69cde",
@@ -202,6 +202,7 @@ attachments/<name>
   "include_attachments": true,
   "counts": {"customers": 12, "projects": 9, "entries": 3041, "invoices": 87, "expenses": 140, "users": 2},
   "numbering": {"invoices": {"period": "2026", "last_value": 87}, "offers": {"period": "2026", "last_value": 31}},
+  "accounting": {"journal": {"2026": {"last_entry_no": 214, "last_hash": "9c1f...e07a"}}},
   "excluded": [
     "secret key", "two-factor secrets and recovery codes", "API tokens", "calendar link URLs", "calendar events (cache)",
     "password hashes (not requested)"
