@@ -340,7 +340,9 @@ NEW_ROUTES: list[tuple[str, str, str, str, bool, dict | None, str]] = [
     ("GET", "/api/accounting/reports/open-items", "accounting", "read", False, None, ""),
     ("GET", "/api/accounting/reports/ledger", "accounting", "read", False, None, ""),
     ("GET", "/api/accounting/locks", "accounting", "read", False, None, ""),
+    ("GET", "/api/accounting/locks/preview", "accounting", "read", False, None, "?year=2026&month=1"),
     ("POST", "/api/accounting/locks", "accounting", "write", False, {"year": 2026, "month": 1}, ""),
+    ("GET", "/api/accounting/years/{year}/close-preview", "accounting", "read", False, None, ""),
     ("GET", "/api/accounting/datev", "accounting", "read", False, None, ""),
     ("GET", "/api/accounting/integrity", "accounting", "read", False, None, ""),
     ("GET", "/api/invoices/{rid}/payments", "invoices", "read", False, None, ""),
@@ -462,7 +464,7 @@ def test_new_routes_are_exactly_the_documented_ones(app):
         if path.startswith(NEW_PREFIXES) or (path.startswith("/api/invoices/{") and path.endswith(NEW_INVOICE_SUFFIXES))
     }
     assert found == {(m, p) for m, p, *_ in NEW_ROUTES}
-    assert len(NEW_ROUTES) == 53
+    assert len(NEW_ROUTES) == 55
 
 
 def test_boss_only_routes_are_exactly_init_and_close_year(app):
@@ -482,6 +484,8 @@ IMPLEMENTED = {
     ("GET", "/api/accounting/years/{year}"),
     ("GET", "/api/accounting/locks"),
     ("POST", "/api/accounting/locks"),
+    ("GET", "/api/accounting/locks/preview"),
+    ("GET", "/api/accounting/years/{year}/close-preview"),
     ("POST", "/api/accounting/years/{year}/close"),  # boss only, 422 for the dummy id
     ("GET", "/api/accounting/entry-templates"),
     ("POST", "/api/accounting/entries"),
@@ -565,7 +569,7 @@ def test_api_tokens_read_accounting_and_vat_but_never_write_them(app, clients):
                     if role == "employee":
                         assert got.status_code == 403, (role, read_only, method, path)
                     elif (method, path) in IMPLEMENTED:  # 404: the dummy year does not exist
-                        assert got.status_code in (200, 404, 422), (role, read_only, method, path, got.status_code)
+                        assert got.status_code in (200, 404, 409, 422), (role, read_only, method, path, got.status_code)
                     else:
                         assert got.status_code == 501, (role, read_only, method, path)
 

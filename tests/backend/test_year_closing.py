@@ -544,3 +544,21 @@ def test_manual_pl_line_without_income_date_is_in_the_pnl_and_balances_after_clo
     nxt = reports.balance_sheet(2026, date(2026, 1, 1))
     assert float(nxt.difference) == 0 and float(nxt.result) == 0.0
     assert float(nxt.debit_total) == float(nxt.credit_total) and nxt.debit_side
+
+
+def test_close_preview_route_reads_blockers_and_proposals_and_writes_nothing(api, app):
+    url = "/api/accounting/years/2025/close-preview"
+    app.state.services.store.save_settings({ACCOUNTING_START_KEY: "2025-01-01", "company_type": "gmbh"})
+    r = api["accountant"].get(url)
+    assert r.status_code == 200, r.text  # accounting read, not boss only
+    body = api["boss"].get(url).json()
+    assert body["year"] == 2025 and body["income_basis"] == "accrual"
+    assert any("2025-01" in b for b in body["blockers"])  # months before December are open
+    assert [(p["kind"], p["prepayments_expensed"], p["booked"]) for p in body["provisions"]] == [
+        ("trade_tax", "0.00", "0.00"),
+        ("corporate_tax", "0.00", "0.00"),
+    ]
+    assert set(body) == {"year", "income_basis", "blockers", "provisions", "plan", "next_year_opening"}
+    assert all(set(e) == {"event_key", "event", "text", "lines"} for e in body["plan"])
+    assert api["boss"].get("/api/accounting/years/2025").json()["closed_at"] is None
+    assert api["boss"].get("/api/accounting/years/1999/close-preview").status_code == 404

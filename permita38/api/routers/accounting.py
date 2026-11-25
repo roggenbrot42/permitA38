@@ -6,13 +6,16 @@ API tokens: reads follow the owner's rights; every route that changes something 
 """
 
 from datetime import date
+from decimal import Decimal
 from typing import Annotated, Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.api.responses import present
 from permita38.core import models, rights
+from permita38.core import validation as v
 from permita38.core.money import dec, q2
 from permita38.core.service.accounting_reports import (
     AccountOut,
@@ -70,6 +73,47 @@ PaymentWrite = Annotated[dict, NeedsInvoicesOrAccountingWrite]
 InvoiceRead = Annotated[dict, Needs("invoices", "read")]
 
 
+# ------------------------------------------------------------------ previews (read only)
+def _euros(cents: int) -> Decimal:
+    return Decimal(int(cents)).scaleb(-2)
+
+
+class LockMonthOut(BaseModel):
+    year: int
+    month: int
+
+
+class PlanLineOut(BaseModel):
+    account: str
+    amount: v.Money  # debit positive, credit negative
+
+
+class PlannedEntryOut(BaseModel):
+    event_key: str
+    event: str
+    text: str
+    lines: list[PlanLineOut]
+
+
+class ProvisionProposalOut(BaseModel):
+    kind: str
+    prepayments_expensed: v.Money
+    booked: v.Money
+
+
+class YearClosePreviewOut(BaseModel):
+    year: int
+    income_basis: str
+    blockers: list[str]
+    provisions: list[ProvisionProposalOut]
+    plan: list[PlannedEntryOut]
+    next_year_opening: list[PlanLineOut]
+
+
+def _plan_lines(lines) -> list[PlanLineOut]:
+    return [PlanLineOut(account=ln.account, amount=_euros(ln.amount_cents)) for ln in lines]
+
+
 # ------------------------------------------------------------------ fiscal years, initialisation
 @router.get("/years", name="list_fiscal_years", response_model=list[models.FiscalYear])
 def list_years(user: Read, services: ServicesDep):
@@ -86,6 +130,29 @@ def create_year(body: models.FiscalYearIn, user: Write, services: ServicesDep):
 @router.get("/years/{year}", name="get_fiscal_year", response_model=models.FiscalYear)
 def get_year(year: int, user: Read, services: ServicesDep):
     return models.FiscalYear(**services.fiscal_years.get(year))
+
+
+@router.get("/years/{year}/close-preview", name="preview_year_close", response_model=YearClosePreviewOut)
+def close_preview(year: int, user: Read, services: ServicesDep):
+    """What closing the year would do: the blockers, the provision proposals (prepayments already expensed) and the
+    planned entries. Writes nothing."""
+    p = services.year_closing.preview(year)
+    return YearClosePreviewOut(
+        year=p.year,
+        income_basis=p.income_basis,
+        blockers=list(p.blockers),
+        provisions=[
+            ProvisionProposalOut(
+                kind=x.kind, prepayments_expensed=_euros(x.prepayments_expensed_cents), booked=_euros(x.booked_cents)
+            )
+            for x in p.provisions
+        ],
+        plan=[
+            PlannedEntryOut(event_key=e.event_key, event=e.event, text=e.text, lines=_plan_lines(e.lines))
+            for e in p.plan
+        ],
+        next_year_opening=_plan_lines(p.next_year_opening),
+    )
 
 
 @router.post(
@@ -212,6 +279,17 @@ def report_ledger(
 @router.get("/locks", name="list_period_locks", response_model=list[models.PeriodLock])
 def locks(user: Read, services: ServicesDep):
     return [models.PeriodLock(**r) for r in services.locks.all()]
+
+
+@router.get("/locks/preview", name="preview_period_lock", response_model=list[LockMonthOut])
+def lock_preview(
+    user: Read,
+    services: ServicesDep,
+    year: Annotated[int, Query(ge=1900, le=2999)],
+    month: Annotated[int, Query(ge=1, le=12)],
+):
+    """The months a lock up to the given one would lock now, in order (empty when all are locked)."""
+    return [LockMonthOut(year=y, month=m) for y, m in services.locks.preview_lock_up_to(year, month)]
 
 
 @router.post(

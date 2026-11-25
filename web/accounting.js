@@ -331,13 +331,14 @@ async function accPeriods() {
       <div class="field"><label for="acc_lock_month">Lock all months up to and including</label><input id="acc_lock_month" type="month" value="${esc(accMonthKey(...next))}"></div>
       <button type="button" class="primary" data-testid="acc-lock-go" data-a="accLockAsk">Lock up to this month…</button></div></div>`;
 }
-A.accLockAsk = () => {
+A.accLockAsk = async () => {
   const v = $('#acc_lock_month').value;
   if (!/^\d{4}-\d{2}$/.test(v)) { toast('Pick a month', true); return; }
-  const y = Number(v.slice(0, 4)), m = Number(v.slice(5)), last = ACC.locks[ACC.locks.length - 1], todo = [];
-  // the months the server will lock: from the month after the last lock (or the accounting start) up to the chosen one
-  let [cy, cm] = last ? accNextMonth(last.year, last.month) : accStart();
-  while (cy < y || (cy === y && cm <= m)) { todo.push(accMonthKey(cy, cm)); [cy, cm] = accNextMonth(cy, cm); }
+  const y = Number(v.slice(0, 4)), m = Number(v.slice(5));
+  let months;
+  try { months = await api('GET', `accounting/locks/preview?year=${y}&month=${m}`); }  // the months the server will lock
+  catch (e) { toast(e.message, true); return; }
+  const todo = months.map(x => accMonthKey(x.year, x.month));
   if (!todo.length) { toast('That month is already locked.', true); return; }
   const gap = todo.length > 1 ? `<p data-testid="acc-lock-gap"><b>${todo.length} months</b> will be locked, because months are locked in order: ${esc(todo.join(', '))}.</p>` : '';
   modal(`<h2>Lock up to ${esc(v)}</h2>${gap}<p>Locking is final: there is no unlock. No booking can be made in a locked month afterwards.</p>
@@ -362,14 +363,20 @@ async function accYears() {
       <td>${boss && !y.closed_at ? `<button type="button" class="sm" data-testid="acc-close-${esc(y.year)}" data-a="accCloseAsk" data-year="${esc(y.year)}" data-basis="${esc(y.income_basis)}">${y.income_basis === 'eur' ? 'End year' : 'Close year'}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>
     <p class="small muted">Closing a year is final. Only the boss can close or end a year.</p></div>`;
 }
-A.accCloseAsk = el => {
+A.accCloseAsk = async el => {
   const y = el.dataset.year, eurYear = el.dataset.basis === 'eur';
-  const prov = eurYear ? '' : `<p class="small muted" data-testid="acc-close-note">The server offers no preview of the closing: it checks the blockers when you confirm and lists them here. There is no provision proposal yet; enter your own estimate of the tax still to be paid (net of the prepayments expensed in the year), or leave the fields empty.</p>
-    <div class="row" style="gap:10px;flex-wrap:wrap"><div class="field"><label for="acc_prov_trade">Provision for trade tax (optional)</label><input id="acc_prov_trade" inputmode="decimal" autocomplete="off"></div>
-    <div class="field"><label for="acc_prov_corp">Provision for corporate tax (optional)</label><input id="acc_prov_corp" inputmode="decimal" autocomplete="off"></div></div>`;
+  let pv;
+  try { pv = await api('GET', `accounting/years/${encodeURIComponent(y)}/close-preview`); }
+  catch (e) { toast(e.message, true); return; }
+  const blockers = pv.blockers.length ? `<div class="small" role="alert" data-testid="acc-close-preview-blockers" style="color:var(--danger,#b00020)"><b>This year cannot be closed yet:</b><ul>${pv.blockers.map(b => `<li>${esc(b)}</li>`).join('')}</ul></div>` : '';
+  const KIND = { trade_tax: ['Provision for trade tax', 'acc_prov_trade'], corporate_tax: ['Provision for corporate tax', 'acc_prov_corp'] };
+  const prov = pv.provisions.length ? `<p class="small muted" data-testid="acc-close-note">Enter your estimate of the tax still to be paid for the year, net of the prepayments already expensed. Leave a field empty to post no provision.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap">${pv.provisions.map(p => `<div class="field" data-testid="acc-prov-${esc(p.kind)}"><label for="${KIND[p.kind][1]}">${esc(KIND[p.kind][0])} (optional)</label><input id="${KIND[p.kind][1]}" inputmode="decimal" autocomplete="off">
+      <div class="small muted">Prepayments expensed: <span data-testid="acc-prov-prepaid-${esc(p.kind)}">${esc(eur(p.prepayments_expensed))}</span>${Money.isZero(p.booked) ? '' : `; already booked: ${esc(eur(p.booked))}`}</div></div>`).join('')}</div>` : '';
+  const plan = pv.plan.length ? `<details data-testid="acc-close-plan"><summary>Entries the closing will post (${pv.plan.length})</summary>${pv.plan.map(e => `<p class="small"><b>${esc(e.text)}</b><br>${e.lines.map(l => `${esc(l.account)}: ${esc(eur(l.amount))}`).join(' · ')}</p>`).join('')}</details>` : '';
   modal(`<h2>${eurYear ? 'End' : 'Close'} year ${esc(y)}</h2>
     <p>${eurYear ? 'December is locked, the end of the year is sealed in the journal chain and the next year is opened. Open items stay open.' : 'The provisions are posted, the VAT accounts are transferred, the closing entry is made, December is locked and the next year is opened with its opening balances.'} This is final.</p>
-    <p class="small muted">The earlier year must be closed first, and all months before December must be locked.</p>${prov}
+    ${blockers}${prov}${plan}
     <div id="acc-close-err" class="small" role="alert" data-testid="acc-close-blockers" style="color:var(--danger,#b00020)"></div>
     <div class="actions"><button type="button" data-a="closeModal">Cancel</button><button type="button" class="primary" data-testid="acc-close-confirm" data-a="accCloseGo" data-year="${esc(y)}" data-basis="${esc(el.dataset.basis)}">${eurYear ? 'End year' : 'Close year'}</button></div>`);
 };
@@ -377,6 +384,7 @@ A.accCloseGo = async el => {
   const err = $('#acc-close-err'); err.textContent = ''; const provisions = [];
   if (el.dataset.basis !== 'eur') {
     for (const [id, kind, label] of [['acc_prov_trade', 'trade_tax', 'trade tax'], ['acc_prov_corp', 'corporate_tax', 'corporate tax']]) {
+      if (!$(`#${id}`)) continue;
       const p = Money.parseInput($(`#${id}`).value);
       if (!p.ok) { err.textContent = `Provision for ${label}: ${p.error}`; return; }
       if (p.value !== null && !Money.isZero(p.value)) {

@@ -239,10 +239,14 @@ def test_boss_ends_an_eur_year_with_locked_months(browser, eur):
     ctx.close()
 
 
-def test_accrual_close_dialog_says_there_is_no_preview(browser, accrual):
+def test_accrual_close_dialog_shows_the_server_preview(browser, accrual):
+    api_call(accrual, "PUT", "/settings", json={"company_type": "gewerbe", "state": "BY", "hebesatz": 400})
     ctx, pg, problems = open_page(browser, accrual, "years")
     pg.click("[data-testid=acc-close-2026]")
-    expect(pg.locator("[data-testid=acc-close-note]")).to_contain_text("no preview")
+    # blockers and the proposal come from close-preview before anything is confirmed
+    expect(pg.locator("[data-testid=acc-close-preview-blockers]")).to_contain_text("2026-01")
+    expect(pg.locator("[data-testid=acc-prov-prepaid-trade_tax]")).to_contain_text("0,00")
+    assert pg.locator("#acc_prov_corp").count() == 0  # a Gewerbe has no corporate tax
     pg.fill("#acc_prov_trade", "1.234,56")
     pg.click("[data-testid=acc-close-confirm]")
     expect(pg.locator("[data-testid=acc-close-blockers]")).to_contain_text("decimal separator")
