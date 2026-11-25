@@ -179,7 +179,7 @@ def test_legacy_ids_and_names_are_frozen():
 # and the treatment exist for invoices, never offers).
 INVOICE_ONLY_DOCUMENT_FIELDS = {"kind", "credit_kind", "corrects_id", "tax_treatment", "issued"}
 # computed on output from the journal tables (credit-notes-payments.md 2.3), never stored on either table
-DERIVED_DOCUMENT_FIELDS = {"paid_amount", "credited_amount", "open_amount", "payments", "credit_notes"}
+DERIVED_DOCUMENT_FIELDS = {"paid_amount", "credited_amount", "open_amount", "payments", "credit_notes", "creditable"}
 
 
 def test_models_are_covered_by_the_schema():

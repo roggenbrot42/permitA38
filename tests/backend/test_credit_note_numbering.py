@@ -129,7 +129,9 @@ def test_finance_nets_a_partial_credit_note_on_its_own_date_accrual(repo, sales,
 
 
 def test_finance_nets_an_unpaid_partial_credit_note_in_the_cash_basis(repo, sales, cn):
-    init(repo)
+    # accounting.md 14 (last paragraph): the old computation nets a credit note on its own date, also against an unpaid
+    # invoice, until accounting covers the year; a start after 1 January keeps 2026 on the old computation
+    init(repo, start="2026-03-01")
     inv = issue(repo, sales, "2026-03-02", "1000.00")
     cn.create(inv["id"], credit_kind="partial", date="2026-04-05", reason="x", amounts={"19": "100.00"}, user=BOSS)
     res = finance(repo, 2026, today=date(2026, 6, 1))

@@ -386,7 +386,9 @@ def test_document_serialises_money_as_decimal_strings_in_json():
     assert out["payments"][0]["amount"] == "1000.00"
     assert out["credit_notes"][0]["gross"] == "595.00"
     assert out["credit_notes"][0]["number"] == "RK-2026-0001"
-    assert out["issued"] == {"gross": "1190.00"}
+    # accounting.md 9.1: `issued` is the typed IssuedSnapshot, unset fields serialise as null
+    assert out["issued"]["gross"] == "1190.00"
+    assert out["issued"]["regime"] is None
     # python mode keeps the stored type for internal callers
     assert doc.model_dump()["paid_amount"] == 1000
 

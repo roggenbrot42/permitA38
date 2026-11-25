@@ -10,7 +10,7 @@ from permita38.core.repository.schema import GUARDS
 from permita38.core.repository.sqlite import DB_FILENAME, SQLiteRepository
 from permita38.core.service.integrity import IntegrityService
 
-from .test_migrations import DIALECT_NAMES, HEAD, real_chain_copy, use_chain
+from .test_migrations import CHAIN, DIALECT_NAMES, HEAD, real_chain_copy, use_chain
 
 NAME = "project_planning"
 
@@ -19,9 +19,11 @@ NAME = "project_planning"
 def old_db(tmp_path, monkeypatch):
     """A database at the previous head (this migration removed from a copy of the real chain) with the rows of E8."""
     root = real_chain_copy(tmp_path)
+    # cut the chain at this migration: later migrations require it, so they go too (the chain must stay linear)
+    cut = next(i for i, m in enumerate(CHAIN) if m.name == NAME)
     for d in DIALECT_NAMES:
-        for f in (root / d).glob(f"*-{NAME}.sql"):
-            f.unlink()
+        for m in CHAIN[cut:]:
+            (root / d / m.file_name).unlink()
     data = tmp_path / "data"
     with monkeypatch.context() as m:
         use_chain(m, root)
@@ -111,9 +113,14 @@ def test_empty_customer_id_without_documents_becomes_internal(repo):
 def test_an_offer_or_invoice_makes_a_project_a_customer_project(tmp_path, monkeypatch):
     """An offer or an invoice that refers to a project also makes it a customer project (an offer alone, too)."""
     root = real_chain_copy(tmp_path)
+    # cut the chain at this migration: later migrations require it, so they go too (the chain must stay linear)
+    cut = next(i for i, m in enumerate(CHAIN) if m.name == NAME) if hasattr(CHAIN[0], "name") else None
+    if cut is None:
+        cut = next(i for i, m in enumerate(CHAIN) if m.path.name.endswith(f"-{NAME}.sql"))
     for d in DIALECT_NAMES:
-        for f in (root / d).glob(f"*-{NAME}.sql"):
-            f.unlink()
+        for m in CHAIN[cut:]:
+            for f in (root / d).glob(f"{m.path.name.split('-', 1)[0]}-*.sql"):
+                f.unlink()
     data = tmp_path / "data"
     with monkeypatch.context() as m:
         use_chain(m, root)

@@ -205,6 +205,7 @@ SWEEP_NUMERIC_KEYS = dict(SCHEMA_NUMERIC_ALLOWLIST) | {
 }
 # exact (route, key) pairs for names that are money elsewhere
 SWEEP_NUMERIC_PAIRS = {
+    ("/api/accounting/init/review", "no"): "external_returns[].no: period number (month or quarter) of a filed return",
     ("/api/finance", "rate"): "tax rate in percent (tax_actual / tax_projected)",
     ("/api/plan", "total"): "projects[].supply.total: hours of supply",
     ("/api/dashboard", "target"): "target hours of the week and of a day",
