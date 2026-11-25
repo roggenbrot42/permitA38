@@ -38,6 +38,7 @@ SCHEMA_NUMERIC_ALLOWLIST = {
     "created_at": "journal entry creation epoch seconds",
     "fiscal_year": "calendar year of a journal entry",
     "entry_no": "gapless journal entry number",
+    "closing_entry_no": "number of journal entries of a closed fiscal year",
     "line_no": "ordinal of a journal line",
     "bill_rev": "posting revision counter of an expense bill",
     "pay_rev": "posting revision counter of an expense payment",

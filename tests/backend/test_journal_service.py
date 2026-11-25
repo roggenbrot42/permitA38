@@ -568,9 +568,12 @@ def test_deleting_the_last_entry_of_an_open_year_reports_the_counter(svc, repo):
 
 
 def test_counter_of_a_closed_year_is_not_compared(svc, repo):
-    post(svc)
+    first = post(svc)
     year = repo.find("fiscal_years", year=2026)[0]
-    repo.save("fiscal_years", {**year, "closed_at": 5, "closed_by": "u1x000"})
+    repo.save(
+        "fiscal_years",
+        {**year, "closed_at": 5, "closed_by": "u1x000", "closing_hash": first.hash, "closing_entry_no": 1},
+    )
     seq = repo.find("number_sequences")[0]
     repo.save("number_sequences", {**seq, "last_value": 9})
     assert svc.verify_chain(2026) == []  # a closed year is checked against closing_entry_no (E18)
