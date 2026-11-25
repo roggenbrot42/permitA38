@@ -585,7 +585,7 @@ accounts and BU keys come from the chart and `datev/<year>.json`.
    (incl. write-offs and their reversals) gets a monotonic `seq` at creation (`number_sequences` doc type `event`,
    stored in the row's `extra`); rows without `seq` (created before this release) order by creation time, then id,
    a write-off reversal directly before the payment that triggered it; legacy `paid` + `paid_date` → one payment of the open amount on that date.
-   Expenses dated before the start but paid on/after it: accrual → opening payable; EÜR → an opening entry D
+   Expenses dated before the start and open at the start (paid on/after it, or not paid yet): accrual → opening payable; EÜR → an opening entry D
    `opening_balance` / C `input_vat_clearing` for their input VAT (already deducted in an earlier return), then the
    payment event posts the cost and clears it.
 5a. Any line whose `vat_date` lies before the accounting start (a Soll invoice, a § 13b bill or an `eu_b2b_service`
@@ -594,7 +594,10 @@ accounts and BU keys come from the chart and `datev/<year>.json`.
    `vat_date`, falls into no app return, and is listed with a warning in the report "before the accounting start".
    Expenses dated on/after the start with `paid_on` before the start (prepaid) also go to the review list.
    Invoices issued before the start but fully settled before it get their pre-start baseline (step 4) lazily, when a
-   later credit note or refund arrives.
+   later credit note or refund arrives. A payment or credit note dated **before** the start that is entered after the initialisation changes
+   the baseline: the difference posts as an opening adjustment (`open:<year>:invoice:<id>:r<n>`, dated the start date,
+   against `opening_balance`, balance-sheet roles only) — never as a normal event; the same for a pre-start expense
+   whose `paid_on` is set or changed to a date before the start after initialisation.
 5b. **Returns already filed outside the app** for months on/after the start: the wizard asks per period for the filed
    Kz 83 (and Kz 39) and the filing date and stores them as `vat_returns` with `status = final`, `filed_on`, `external =
    true` and the entered figures; the months are locked after the backfill. Differences between the entered figures
