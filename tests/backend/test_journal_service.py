@@ -814,6 +814,8 @@ def test_income_date_mismatch_in_an_open_year_is_still_422_under_accrual(svc, re
 
 
 def test_a_pl_line_without_income_date_gets_the_booking_date(svc, repo):
+    year = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**year, "income_basis": "accrual"})  # the fill is an accrual rule (14.5)
     day = date(2026, 1, 15)
     e = post(
         svc, key="manual:dep", day=day,
@@ -826,6 +828,14 @@ def test_a_pl_line_without_income_date_gets_the_booking_date(svc, repo):
         lines=[PostLine(role="expense_other", amount_cents=500), PostLine(role="bank", amount_cents=-500)],
     )  # fmt: skip
     assert again.entry_no == e.entry_no
+
+
+def test_eur_year_does_not_fill_income_dates(svc, repo):
+    e = post(
+        svc, key="manual:eur", day=date(2026, 1, 15),
+        lines=[PostLine(role="expense_other", amount_cents=500), PostLine(role="bank", amount_cents=-500)],
+    )  # fmt: skip
+    assert [ln.income_date for ln in e.lines] == [None, None]  # EÜR (fixture default): nothing is filled
 
 
 def test_closing_entries_carry_no_income_date(svc, repo):

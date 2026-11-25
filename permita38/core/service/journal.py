@@ -254,7 +254,7 @@ class JournalService:
             return False
         normalised = self._normalise_income_dates(lines, booking)
         key = str(entry.get("event_key", ""))
-        for candidate in (lines, normalised, self._fill_income_dates(chart, normalised, booking, key)):
+        for candidate in (lines, normalised, self._fill_income_dates(chart, normalised, booking, key, rows[0])):
             try:
                 resolved = self._resolve(chart, candidate)
             except ServiceError:
@@ -292,10 +292,13 @@ class JournalService:
         return out
 
     @staticmethod
-    def _fill_income_dates(chart: Chart, lines: Sequence[PostLine], booking: date, event_key: str) -> list[PostLine]:
+    def _fill_income_dates(
+        chart: Chart, lines: Sequence[PostLine], booking: date, event_key: str, year_row: Record
+    ) -> list[PostLine]:
         """accounting 14.5: a line on a P&L account (chart class) without ``income_date`` gets the booking date, for
-        every origin. The closing entries (``close:<year>:...``) carry none, so the year's P&L report is unchanged."""
-        if event_key.startswith("close:"):
+        every origin, **accrual years only**: under EÜR a line without income date stays without (e.g. ``rc_vat_nondeductible``
+        of § 13b, which becomes an expense when paid with the return, 9.6, and must not count twice). The closing entries (``close:<year>:...``) carry none, so the year's P&L report is unchanged."""
+        if event_key.startswith("close:") or year_row.get("income_basis") != "accrual":
             return list(lines)
         klass = {str(a.account): a.account_class for a in chart.accounts}
         out: list[PostLine] = []
@@ -422,7 +425,9 @@ class JournalService:
             if rows[0].get("closed_at") is not None:
                 raise ServiceError(409, f"Fiscal year {year} is closed")
             chart = self._chart(rows[0], year)
-            lines = self._fill_income_dates(chart, self._normalise_income_dates(lines, booking), booking, event_key)
+            lines = self._fill_income_dates(
+                chart, self._normalise_income_dates(lines, booking), booking, event_key, rows[0]
+            )
             self._check_manual_vat_dates(source, lines)
             self._check_accrual_income_dates(rows[0], year, lines)
             resolved = self._resolve(chart, lines)
