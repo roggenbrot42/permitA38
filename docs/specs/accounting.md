@@ -597,7 +597,9 @@ accounts and BU keys come from the chart and `datev/<year>.json`.
    later credit note or refund arrives. A payment or credit note dated **before** the start that is entered after the initialisation changes
    the baseline: the difference posts as an opening adjustment (`open:<year>:invoice:<id>:r<n>`, dated the start date,
    against `opening_balance`, balance-sheet roles only) — never as a normal event; the same for a pre-start expense
-   whose `paid_on` is set or changed to a date before the start after initialisation.
+   whose `paid_on` is set or changed to a date before the start after initialisation. Opening entries and adjustments keep the start date as
+   document date; when the start month is already locked they are booked on the first open day (an opening item has
+   no VAT or income date, so only balance-sheet reports as of a date in the locked months change).
 5b. **Returns already filed outside the app** for months on/after the start: the wizard asks per period for the filed
    Kz 83 (and Kz 39) and the filing date and stores them as `vat_returns` with `status = final`, `filed_on`, `external =
    true` and the entered figures; the months are locked after the backfill. Differences between the entered figures
