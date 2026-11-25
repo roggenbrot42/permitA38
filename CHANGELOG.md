@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0-alpha.7] - 2026-11-24
+
+Bugfix release for alpha.6: manual time entry and the Today card layout, business trip bills, the billable flag of
+entries moved off an internal project, the side menu on short windows, the desktop build's tax tables, and the nightly
+randomized tests. No database migration: alpha.6 and alpha.7 open the same data folder.
+
 ### Fixed
 - **Manual time entry** (#121): start, stop and duration always agree on the Today card and in the *Add time* dialog.
   Editing start or stop sets the duration, editing the duration sets the stop (or the start when only the stop is
@@ -18,6 +24,8 @@ All notable changes to this project are documented here. The format is based on
   an *Edit bill* button.
 - **Side menu** (#102): on short windows the bottom of the menu (My settings, API tokens, Sign out) could not be
   reached; the menu now scrolls on its own.
+- **Desktop build** (#111): the tax rule tables were missing from the packaged desktop build; they are bundled now
+  and the package smoke test checks every parameterless GET endpoint.
 - **Billable flag** (#102): moving an entry from an internal project to no project kept it unbillable.
 - **Nightly randomized tests** (#102): the API model knows the 24-hours-per-day limit; the browser journeys select the
   allocation mode and do not wait for a re-render when the open page's link is clicked.
@@ -489,7 +497,8 @@ limitations and what is planned for the next alphas. Not for production bookkeep
 ## [0.1.0]
 - Initial version as *Timely*: time tracking, weekly goal, forecast, offers, invoices, expenses, tax estimates.
 
-[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.6...HEAD
+[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.7...HEAD
+[0.4.0-alpha.7]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.6...v0.4.0-alpha.7
 [0.4.0-alpha.6]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.5...v0.4.0-alpha.6
 [0.4.0-alpha.5]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.4...v0.4.0-alpha.5
 [0.4.0-alpha.4]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.3...v0.4.0-alpha.4
