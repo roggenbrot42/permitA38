@@ -379,6 +379,10 @@ class ApiMachine(RuleBasedStateMachine):
             return 403
         return None
 
+    def admin_id(self) -> str:
+        """An active boss for invariant checks: the first boss may have been deactivated or deleted since the setup."""
+        return next(u["id"] for u in self.m["users"].values() if u["role"] == "boss" and u["active"])
+
     def mint(self, user_id: str) -> Session:
         """A fresh valid session for invariant checks, independent of the login flow."""
         svc = self.app.state.services
@@ -540,9 +544,8 @@ class ApiMachine(RuleBasedStateMachine):
             exp["user_id"] = actor_user["id"]
         elif coll == "entries" and not exp.get("user_id"):  # an entry without a person belongs to its writer
             exp["user_id"] = (old or {}).get("user_id") or actor_user["id"]
-        # the service derives "internal, never billable" from the given project, else from the stored one (also when the
-        # update clears project_id, see test_known_bugs / PR notes); null fields never reach the service
-        pid = body.get("project_id") or (old or {}).get("project_id")
+        # "internal, never billable" follows the project after the write: the given one (null clears it), else the stored one
+        pid = body["project_id"] if "project_id" in body else (old or {}).get("project_id")
         if coll == "entries" and self.is_internal(pid):
             exp["billable"] = False  # internal projects are never billed, whatever the request says
         if coll == "entries" and actor_user["role"] != "boss":
@@ -750,7 +753,7 @@ class ApiMachine(RuleBasedStateMachine):
     def timer_stop(self, data, note):
         self.tick()
         s = data.draw(self.actor())
-        before = {e["id"] for e in self.call("GET", "/entries", self.mint(self.boss_id)).json()}
+        before = {e["id"] for e in self.call("GET", "/entries", self.mint(self.admin_id())).json()}
         days = {date.today().isoformat()}  # the server stamps the entry date; accept the day before/after the call
         r = self.call("POST", "/timer/stop", s, json={"note": note})
         days.add(date.today().isoformat())
@@ -826,19 +829,19 @@ class ApiMachine(RuleBasedStateMachine):
         """POST /timer/stop with discard=true resets the timer and writes no entry."""
         self.tick()
         s = data.draw(self.actor())
-        before = {e["id"] for e in self.call("GET", "/entries", self.mint(self.boss_id)).json()}
+        before = {e["id"] for e in self.call("GET", "/entries", self.mint(self.admin_id())).json()}
         r = self.call("POST", "/timer/stop", s, json={"discard": True, "note": note})
         if (g := self.gate(s)) is not None:
             assert r.status_code == g
             return
         assert r.status_code == 200 and r.json() == {"running": False}, r.text
-        after = {e["id"] for e in self.call("GET", "/entries", self.mint(self.boss_id)).json()}
+        after = {e["id"] for e in self.call("GET", "/entries", self.mint(self.admin_id())).json()}
         assert after == before
         self.timers[s.user_id] = None
         assert self.call("GET", "/timer", s).json()["running"] is False
 
     def _booked_entry(self, uid, t, note):
-        boss = self.mint(self.boss_id)
+        boss = self.mint(self.admin_id())
         mine = [e for e in self.call("GET", "/entries", boss).json() if e.get("user_id") == uid]
         known = {i for i in self.m["entries"]}
         new = [e for e in mine if e["id"] not in known]
