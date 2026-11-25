@@ -9315,12 +9315,98 @@
         }
       }
     },
+    "/api/accounting/years/{year}/close-preview": {
+      "get": {
+        "tags": [
+          "accounting"
+        ],
+        "summary": "Preview Year Close",
+        "description": "What closing the year would do: the blockers, the provision proposals (prepayments already expensed) and the\nplanned entries. Optional ``trade_tax`` / ``corporate_tax`` (decimal strings) are provisions the user is about to\nconfirm; the plan includes them. Writes nothing.",
+        "operationId": "preview_year_close_api_accounting_years__year__close_preview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "year",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Year"
+            }
+          },
+          {
+            "name": "trade_tax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trade Tax"
+            }
+          },
+          {
+            "name": "corporate_tax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Corporate Tax"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YearClosePreviewOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/accounting/years/{year}/close": {
       "post": {
         "tags": [
           "accounting"
         ],
         "summary": "Close Fiscal Year",
+        "description": "Close the year (boss only): accrual posts the confirmed provisions, the VAT transfer and the closing entries,\nEÜR just ends the year. 409 when blocked or closed already.",
         "operationId": "close_fiscal_year_api_accounting_years__year__close_post",
         "security": [
           {
@@ -9338,12 +9424,31 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/YearCloseIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FiscalYear"
+                }
               }
             }
           },
@@ -10359,6 +10464,74 @@
         ]
       }
     },
+    "/api/accounting/locks/preview": {
+      "get": {
+        "tags": [
+          "accounting"
+        ],
+        "summary": "Preview Period Lock",
+        "description": "The months a lock up to the given one would lock now, in order (empty when all are locked).",
+        "operationId": "preview_period_lock_api_accounting_locks_preview_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "year",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 2999,
+              "minimum": 1900,
+              "title": "Year"
+            }
+          },
+          {
+            "name": "month",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "maximum": 12,
+              "minimum": 1,
+              "title": "Month"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LockMonthOut"
+                  },
+                  "title": "Response Preview Period Lock Api Accounting Locks Preview Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/accounting/datev": {
       "get": {
         "tags": [
@@ -11369,7 +11542,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/VatReturn"
+                }
               }
             }
           },
@@ -11573,7 +11748,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SpecialPrepaymentOut"
+                }
               }
             }
           },
@@ -11615,7 +11792,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SpecialPrepaymentOut"
+                }
               }
             }
           },
@@ -12431,6 +12610,14 @@
               }
             ],
             "title": "Role"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles",
+            "default": []
           },
           "eur_line": {
             "anyOf": [
@@ -18656,6 +18843,28 @@
               }
             ],
             "title": "Closed By"
+          },
+          "closing_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing Hash"
+          },
+          "closing_entry_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing Entry No"
           }
         },
         "additionalProperties": true,
@@ -20174,6 +20383,17 @@
             ],
             "title": "Reverses Id"
           },
+          "reversed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reversed By"
+          },
           "counterparty_id": {
             "anyOf": [
               {
@@ -20684,6 +20904,24 @@
         "additionalProperties": true,
         "type": "object",
         "title": "LineIn"
+      },
+      "LockMonthOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "month": {
+            "type": "integer",
+            "title": "Month"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "month"
+        ],
+        "title": "LockMonthOut"
       },
       "LoginPayload": {
         "properties": {
@@ -22136,6 +22374,57 @@
         "type": "object",
         "title": "PlanIn"
       },
+      "PlanLineOut": {
+        "properties": {
+          "account": {
+            "type": "string",
+            "title": "Account"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "account",
+          "amount"
+        ],
+        "title": "PlanLineOut"
+      },
+      "PlannedEntryOut": {
+        "properties": {
+          "event_key": {
+            "type": "string",
+            "title": "Event Key"
+          },
+          "event": {
+            "type": "string",
+            "title": "Event"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/PlanLineOut"
+            },
+            "type": "array",
+            "title": "Lines"
+          }
+        },
+        "type": "object",
+        "required": [
+          "event_key",
+          "event",
+          "text",
+          "lines"
+        ],
+        "title": "PlannedEntryOut"
+      },
       "PnlOut": {
         "properties": {
           "year": {
@@ -22523,6 +22812,33 @@
           "name"
         ],
         "title": "ProjectIn"
+      },
+      "ProvisionProposalOut": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "prepayments_expensed": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Prepayments Expensed"
+          },
+          "booked": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Booked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "prepayments_expensed",
+          "booked"
+        ],
+        "title": "ProvisionProposalOut"
       },
       "ReceiptConfirmIn": {
         "properties": {
@@ -24277,6 +24593,140 @@
           "amount"
         ],
         "title": "SpecialPrepaymentIn"
+      },
+      "SpecialPrepaymentOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "dauerfrist": {
+            "type": "boolean",
+            "title": "Dauerfrist",
+            "default": false
+          },
+          "proposal": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Proposal",
+            "default": "0.00"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          },
+          "previous_kz83": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Previous Kz83",
+            "default": "0.00"
+          },
+          "previous_kz39": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Previous Kz39",
+            "default": "0.00"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "payment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpecialPrepaymentPayment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "year"
+        ],
+        "title": "SpecialPrepaymentOut",
+        "description": "Sondervorauszahlung of a year: proposal, entered amount and the booked payment (docs/specs/ustva.md)."
+      },
+      "SpecialPrepaymentPayment": {
+        "properties": {
+          "entry_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Key"
+          },
+          "paid_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid On"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "reversed": {
+            "type": "boolean",
+            "title": "Reversed",
+            "default": false
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "SpecialPrepaymentPayment",
+        "description": "The booked payment of a Sondervorauszahlung."
       },
       "SuggestStartIn": {
         "properties": {
@@ -28454,6 +28904,68 @@
         "title": "VatBox",
         "description": "One Kennzahl: base/tax (with booked figures) or a single amount, all decimal strings."
       },
+      "VatPayment": {
+        "properties": {
+          "entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Id"
+          },
+          "event_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Key"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ],
+            "title": "Kind",
+            "default": "payment"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Amount",
+            "default": "0.00"
+          },
+          "reversed": {
+            "type": "boolean",
+            "title": "Reversed",
+            "default": false
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "VatPayment",
+        "description": "One payment or refund of Kz 83 read from the journal (accounting.md 9.6); reversed ones are listed, flagged."
+      },
       "VatReturn": {
         "properties": {
           "id": {
@@ -28767,6 +29279,63 @@
               }
             ],
             "title": "Finalised By"
+          },
+          "payments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/VatPayment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payments"
+          },
+          "paid": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid"
+          },
+          "open": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open"
+          },
+          "payment_state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "open",
+                  "paid",
+                  "overpaid"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment State"
           }
         },
         "additionalProperties": true,
@@ -29051,6 +29620,105 @@
         "type": "object",
         "title": "WorkLimitsIn",
         "description": "The boss's own planning limits (S6); defaults as in the spec. Infos and warnings only, nothing is refused."
+      },
+      "YearCloseIn": {
+        "properties": {
+          "provisions": {
+            "items": {
+              "$ref": "#/components/schemas/YearCloseProvisionIn"
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Provisions",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "YearCloseIn",
+        "description": "Close a fiscal year (accounting.md 13). Accrual: the provisions the user confirms are posted first; EÜR takes\nnone. At most one provision per kind."
+      },
+      "YearClosePreviewOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "income_basis": {
+            "type": "string",
+            "title": "Income Basis"
+          },
+          "blockers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blockers"
+          },
+          "provisions": {
+            "items": {
+              "$ref": "#/components/schemas/ProvisionProposalOut"
+            },
+            "type": "array",
+            "title": "Provisions"
+          },
+          "plan": {
+            "items": {
+              "$ref": "#/components/schemas/PlannedEntryOut"
+            },
+            "type": "array",
+            "title": "Plan"
+          },
+          "next_year_opening": {
+            "items": {
+              "$ref": "#/components/schemas/PlanLineOut"
+            },
+            "type": "array",
+            "title": "Next Year Opening"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "income_basis",
+          "blockers",
+          "provisions",
+          "plan",
+          "next_year_opening"
+        ],
+        "title": "YearClosePreviewOut"
+      },
+      "YearCloseProvisionIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "trade_tax",
+              "corporate_tax"
+            ],
+            "title": "Kind"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
+            "title": "Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "amount"
+        ],
+        "title": "YearCloseProvisionIn",
+        "description": "A tax provision the user confirms for the year closing (accounting.md 9.7, 13): ``amount`` is the estimate\nalready net of the prepayments expensed in the year."
       },
       "ZmCreateIn": {
         "properties": {

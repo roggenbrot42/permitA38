@@ -248,9 +248,15 @@ class JournalService:
         stored = self._content(existing, existing["lines"])
         booking = date.fromisoformat(str(existing["booking_date"]))
         # a replay carries the original (un-normalised) income dates; the stored lines may hold the normalised ones
-        for candidate in (lines, self._normalise_income_dates(lines, booking)):
+        try:
+            chart = self._chart(rows[0], year)
+        except ServiceError:
+            return False
+        normalised = self._normalise_income_dates(lines, booking)
+        key = str(entry.get("event_key", ""))
+        for candidate in (lines, normalised, self._fill_income_dates(chart, normalised, booking, key, rows[0])):
             try:
-                resolved = self._resolve(self._chart(rows[0], year), candidate)
+                resolved = self._resolve(chart, candidate)
             except ServiceError:
                 return False
             if stored == self._content(entry, resolved):
@@ -267,8 +273,9 @@ class JournalService:
                 raise ServiceError(422, f"Line {i}: vat_date {ln.vat_date.isoformat()} lies in a locked month")
 
     def _normalise_income_dates(self, lines: Sequence[PostLine], booking: date) -> list[PostLine]:
-        """Closed-year rule (accounting 11), central for every poster: an ``income_date`` that lies in a closed
-        fiscal year becomes the entry's booking date (a late payment of a closed year is income of the open one)."""
+        """Closed-year rule (accounting 11, 14.5), central for every poster: an ``income_date`` that lies in a closed
+        **accrual** year becomes the entry's booking date (a late payment of a closed year is income of the open one).
+        Under EÜR the income date stays the payment date, also after the year end."""
         closed: dict[int, bool] = {}
         out: list[PostLine] = []
         for ln in lines:
@@ -276,8 +283,34 @@ class JournalService:
                 y = ln.income_date.year
                 if y not in closed:
                     rows = self.store.find("fiscal_years", year=y)
-                    closed[y] = bool(rows) and rows[0].get("closed_at") is not None
+                    closed[y] = (
+                        bool(rows) and rows[0].get("closed_at") is not None and rows[0].get("income_basis") == "accrual"
+                    )
                 if closed[y]:
+                    ln = replace(ln, income_date=booking)
+            out.append(ln)
+        return out
+
+    @staticmethod
+    def _fill_income_dates(
+        chart: Chart, lines: Sequence[PostLine], booking: date, event_key: str, year_row: Record
+    ) -> list[PostLine]:
+        """accounting 14.5: a line on a P&L account (chart class) without ``income_date`` gets the booking date, for
+        every origin, **accrual years only**: under EÜR a line without income date stays without (e.g. ``rc_vat_nondeductible``
+        of § 13b, which becomes an expense when paid with the return, 9.6, and must not count twice). The closing entries (``close:<year>:...``) carry none, so the year's P&L report is unchanged."""
+        if event_key.startswith("close:") or year_row.get("income_basis") != "accrual":
+            return list(lines)
+        klass = {str(a.account): a.account_class for a in chart.accounts}
+        out: list[PostLine] = []
+        for ln in lines:
+            if ln.income_date is None:
+                account = ln.account
+                if ln.role is not None:
+                    try:
+                        account = str(chart.account(Role(ln.role)))
+                    except KeyError:
+                        account = None  # _resolve reports the unknown role
+                if account is not None and klass.get(account) == "pl":
                     ln = replace(ln, income_date=booking)
             out.append(ln)
         return out
@@ -391,10 +424,13 @@ class JournalService:
             rows = [self.ensure_year(year, source.created_by)]
             if rows[0].get("closed_at") is not None:
                 raise ServiceError(409, f"Fiscal year {year} is closed")
-            lines = self._normalise_income_dates(lines, booking)
+            chart = self._chart(rows[0], year)
+            lines = self._fill_income_dates(
+                chart, self._normalise_income_dates(lines, booking), booking, event_key, rows[0]
+            )
             self._check_manual_vat_dates(source, lines)
             self._check_accrual_income_dates(rows[0], year, lines)
-            resolved = self._resolve(self._chart(rows[0], year), lines)
+            resolved = self._resolve(chart, lines)
             warnings = self._drift_warnings(lines)
             if warnings:
                 entry["warnings"] = warnings  # unknown field: kept in the row's extra JSON, not hashed
@@ -451,7 +487,9 @@ class JournalService:
         recomputed from the stored content. A break means the journal changed outside the app or forked."""
         findings: list[ChainFinding] = []
         expected_prev = ZERO_HASH  # the chain is per fiscal year
+        recomputed_last = ZERO_HASH  # the recomputed hash of the last entry (a closed year is compared against it)
         expected_no = 1
+        seen = 0
         offset = 0
         while True:
             page = self.store.list_journal_entries(year=year, limit=PAGE, offset=offset)
@@ -466,16 +504,60 @@ class JournalService:
                     findings.append(
                         ChainFinding("journal.prev_hash", no, f"entry {no} does not follow the entry before")
                     )
-                if e.get("hash") != entry_hash(str(e.get("prev_hash")), e, e["lines"]):
+                recomputed_last = entry_hash(str(e.get("prev_hash")), e, e["lines"])
+                if e.get("hash") != recomputed_last:
                     findings.append(
                         ChainFinding("journal.hash", no, f"entry {no} changed outside the app (hash mismatch)")
                     )
                 expected_prev = str(e.get("hash"))
+                seen += 1
             if len(page) < PAGE:
                 break
             offset += PAGE
         findings.extend(self._counter_findings(year, expected_no - 1))
+        findings.extend(self._closing_findings(year, recomputed_last, seen))
         return findings
+
+    def _closing_findings(self, year: int, last_hash: str, count: int) -> list[ChainFinding]:
+        """A closed year's recomputed last hash and entry count must equal ``closing_hash`` / ``closing_entry_no``
+        (accounting 7.6; a truncated closed year after a restore, or a changed entry, shows up here)."""
+        rows = self.store.find("fiscal_years", year=year)
+        if not rows or rows[0].get("closed_at") is None:
+            return []
+        row = rows[0]
+        if not row.get("closing_hash") or row.get("closing_entry_no") is None:
+            return [
+                ChainFinding("journal.closing_missing", None, f"fiscal year {year} is closed without a closing hash")
+            ]
+        out: list[ChainFinding] = []
+        if last_hash != row["closing_hash"]:
+            out.append(
+                ChainFinding(
+                    "journal.closing_hash", count or None,
+                    f"the last entry of the closed year {year} does not match its closing hash",
+                )
+            )  # fmt: skip
+        if count != int(row["closing_entry_no"]):
+            out.append(
+                ChainFinding(
+                    "journal.closing_count", count or None,
+                    f"the closed year {year} has {count} entries but was closed with {int(row['closing_entry_no'])}",
+                )
+            )  # fmt: skip
+        return out
+
+    def chain_tail(self, year: int) -> tuple[str, int]:
+        """``(hash of the last entry, number of entries)`` of ``year``; ``(64 zeros, 0)`` for a year without entries.
+        The year closing stores both (accounting 7.6)."""
+        count = 0
+        offset = 0
+        while True:
+            page = self.store.list_journal_entries(year=year, limit=PAGE, offset=offset)
+            count += len(page)
+            if len(page) < PAGE:
+                break
+            offset += PAGE
+        return (self.store.last_journal_hash(year) or ZERO_HASH), count
 
     def _counter_findings(self, year: int, last_no: int) -> list[ChainFinding]:
         """An open year's last ``entry_no`` must equal its ``journal`` counter (a deleted last entry leaves the

@@ -6,13 +6,17 @@ API tokens: reads follow the owner's rights; every route that changes something 
 """
 
 from datetime import date
-from typing import Annotated, Any, NoReturn
+from decimal import Decimal
+from typing import Annotated, Any, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.api.responses import present
 from permita38.core import models, rights
+from permita38.core import validation as v
+from permita38.core.money import dec, q2
 from permita38.core.service.accounting_reports import (
     AccountOut,
     BalanceSheetOut,
@@ -24,6 +28,7 @@ from permita38.core.service.accounting_reports import (
     parse_date,
 )
 from permita38.core.service.manual_entries import EntryTemplate
+from permita38.core.service.year_closing import ProvisionInput
 
 router = APIRouter(prefix="/accounting", tags=["accounting"])
 payments_router = APIRouter(tags=["accounting"])
@@ -31,6 +36,7 @@ routers = [router, payments_router]
 
 Year = Annotated[int | None, Query(ge=2000, le=2100)]
 NOT_IMPLEMENTED = "not implemented yet"
+_PROVISION_AMOUNT: TypeAdapter[Decimal] = TypeAdapter(v.PositiveMoneyIn)
 
 
 def not_implemented() -> NoReturn:
@@ -68,6 +74,47 @@ PaymentWrite = Annotated[dict, NeedsInvoicesOrAccountingWrite]
 InvoiceRead = Annotated[dict, Needs("invoices", "read")]
 
 
+# ------------------------------------------------------------------ previews (read only)
+def _euros(cents: int) -> Decimal:
+    return Decimal(int(cents)).scaleb(-2)
+
+
+class LockMonthOut(BaseModel):
+    year: int
+    month: int
+
+
+class PlanLineOut(BaseModel):
+    account: str
+    amount: v.Money  # debit positive, credit negative
+
+
+class PlannedEntryOut(BaseModel):
+    event_key: str
+    event: str
+    text: str
+    lines: list[PlanLineOut]
+
+
+class ProvisionProposalOut(BaseModel):
+    kind: str
+    prepayments_expensed: v.Money
+    booked: v.Money
+
+
+class YearClosePreviewOut(BaseModel):
+    year: int
+    income_basis: str
+    blockers: list[str]
+    provisions: list[ProvisionProposalOut]
+    plan: list[PlannedEntryOut]
+    next_year_opening: list[PlanLineOut]
+
+
+def _plan_lines(lines) -> list[PlanLineOut]:
+    return [PlanLineOut(account=ln.account, amount=_euros(ln.amount_cents)) for ln in lines]
+
+
 # ------------------------------------------------------------------ fiscal years, initialisation
 @router.get("/years", name="list_fiscal_years", response_model=list[models.FiscalYear])
 def list_years(user: Read, services: ServicesDep):
@@ -86,9 +133,56 @@ def get_year(year: int, user: Read, services: ServicesDep):
     return models.FiscalYear(**services.fiscal_years.get(year))
 
 
-@router.post("/years/{year}/close", dependencies=[SessionOnly], name="close_fiscal_year")
-def close_year(year: int, user: Boss, services: ServicesDep):
-    not_implemented()
+@router.get("/years/{year}/close-preview", name="preview_year_close", response_model=YearClosePreviewOut)
+def close_preview(
+    year: int,
+    user: Read,
+    services: ServicesDep,
+    trade_tax: Annotated[str | None, Query(max_length=20)] = None,
+    corporate_tax: Annotated[str | None, Query(max_length=20)] = None,
+):
+    """What closing the year would do: the blockers, the provision proposals (prepayments already expensed) and the
+    planned entries. Optional ``trade_tax`` / ``corporate_tax`` (decimal strings) are provisions the user is about to
+    confirm; the plan includes them. Writes nothing."""
+    provisions: list[ProvisionInput] = []
+    typed: tuple[tuple[Literal["trade_tax", "corporate_tax"], str | None], ...] = (
+        ("trade_tax", trade_tax),
+        ("corporate_tax", corporate_tax),
+    )
+    for kind, raw in typed:
+        if raw is not None and raw != "":
+            try:
+                amount = _PROVISION_AMOUNT.validate_python(raw)
+            except ValidationError:
+                raise HTTPException(422, f"{kind} must be a positive amount with at most two decimals") from None
+            provisions.append(ProvisionInput(kind, int(q2(dec(amount)) * 100)))
+    p = services.year_closing.preview(year, provisions)
+    return YearClosePreviewOut(
+        year=p.year,
+        income_basis=p.income_basis,
+        blockers=list(p.blockers),
+        provisions=[
+            ProvisionProposalOut(
+                kind=x.kind, prepayments_expensed=_euros(x.prepayments_expensed_cents), booked=_euros(x.booked_cents)
+            )
+            for x in p.provisions
+        ],
+        plan=[
+            PlannedEntryOut(event_key=e.event_key, event=e.event, text=e.text, lines=_plan_lines(e.lines))
+            for e in p.plan
+        ],
+        next_year_opening=_plan_lines(p.next_year_opening),
+    )
+
+
+@router.post(
+    "/years/{year}/close", dependencies=[SessionOnly], name="close_fiscal_year", response_model=models.FiscalYear
+)
+def close_year(year: int, user: Boss, services: ServicesDep, body: models.YearCloseIn | None = None):
+    """Close the year (boss only): accrual posts the confirmed provisions, the VAT transfer and the closing entries,
+    EÜR just ends the year. 409 when blocked or closed already."""
+    provisions = [ProvisionInput(p.kind, int(q2(dec(p.amount)) * 100)) for p in (body.provisions if body else [])]
+    return models.FiscalYear(**services.year_closing.close(year, provisions, user))
 
 
 @router.post("/init", dependencies=[SessionOnly], name="init_accounting")
@@ -205,6 +299,17 @@ def report_ledger(
 @router.get("/locks", name="list_period_locks", response_model=list[models.PeriodLock])
 def locks(user: Read, services: ServicesDep):
     return [models.PeriodLock(**r) for r in services.locks.all()]
+
+
+@router.get("/locks/preview", name="preview_period_lock", response_model=list[LockMonthOut])
+def lock_preview(
+    user: Read,
+    services: ServicesDep,
+    year: Annotated[int, Query(ge=1900, le=2999)],
+    month: Annotated[int, Query(ge=1, le=12)],
+):
+    """The months a lock up to the given one would lock now, in order (empty when all are locked)."""
+    return [LockMonthOut(year=y, month=m) for y, m in services.locks.preview_lock_up_to(year, month)]
 
 
 @router.post(

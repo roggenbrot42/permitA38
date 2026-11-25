@@ -56,6 +56,21 @@ def test_journal_lists_entries_with_lines_and_decimal_strings(scenario):
     assert first["lines"][2]["tax_base"] == "100.00"
 
 
+def test_journal_marks_a_reversed_entry_even_when_the_reversal_is_filtered_out(scenario):
+    body = {
+        "date": "2026-03-01",
+        "text": "Entry to reverse",
+        "lines": [{"account": "9039", "amount": "10.00"}, {"account": "9001", "amount": "-10.00"}],
+    }
+    orig = scenario.post(f"{BASE}/entries", json=body).json()
+    rev = scenario.post(f"{BASE}/entries/{orig['id']}/reverse", json={"date": "2026-04-01"}).json()
+    by_no = {e["entry_no"]: e for e in get(scenario, "journal").json()}
+    assert [e["reversed_by"] for e in by_no.values()] == [None, None, None, None, rev["id"], None]
+    assert by_no[6]["reverses_id"] == orig["id"] and by_no[6]["reversed_by"] is None
+    only_march = get(scenario, "journal", **{"from": "2026-03-01", "to": "2026-03-31"}).json()
+    assert [(e["entry_no"], e["reversed_by"]) for e in only_march] == [(5, rev["id"])]  # the reversal lies in April
+
+
 def test_journal_filters(scenario):
     def nos(**p):
         r = get(scenario, "journal", **p)
@@ -101,6 +116,7 @@ def test_accounts_lists_the_chart_of_the_year(scenario):
     assert rows["9007"]["eur_line"] == "Line revenue_s19" and rows["9007"]["deductible"] is True
     assert rows["9037"]["deductible"] is False
     assert rows["9900"]["role"] is None
+    assert rows["9001"]["roles"] == ["bank"] and rows["9900"]["roles"] == []
     assert get(scenario, "accounts").json() == r.json()  # default: the latest fiscal year
 
 

@@ -39,7 +39,8 @@ class AccountOut(BaseModel):
     account: str
     name: str
     account_class: str
-    role: str | None = None
+    role: str | None = None  # the first role of the account
+    roles: list[str] = []  # every role the chart maps to this account (chart order)
     eur_line: str | None = None
     deductible: bool | None = None
     automatic: str | None = None
@@ -277,9 +278,16 @@ class AccountingReportService:
         ]
         return Loaded(int(fy["year"]), _extended_chart(base, unknown), lines)
 
-    def load_booked(self, fy: Record, date_from: date | None, date_to: date | None) -> Loaded:
-        """The lines of the entries booked in ``[date_from, date_to]`` (either end open)."""
-        return self._build(fy, self._entry_rows(self._all_entries(date_from, date_to)))
+    def load_booked(
+        self, fy: Record, date_from: date | None, date_to: date | None, skip_closing_balance: bool = False
+    ) -> Loaded:
+        """The lines of the entries booked in ``[date_from, date_to]`` (either end open). ``skip_closing_balance``
+        leaves out the year's own ``close:<year>:balance`` entry (the balance sheet of a closed year, 14.5)."""
+        entries = self._all_entries(date_from, date_to)
+        if skip_closing_balance:
+            skip = f"close:{int(fy['year'])}:balance"
+            entries = (e for e in entries if e.get("event_key") != skip)
+        return self._build(fy, self._entry_rows(entries))
 
     def load_income_year(self, fy: Record) -> Loaded:
         """The lines whose ``income_date`` lies in the calendar year of ``fy`` (EÜR, P&L)."""
@@ -302,6 +310,7 @@ class AccountingReportService:
         ``tax_key`` and come from ``source`` (``source_coll``, e.g. ``invoices``); paged after filtering."""
         out: list[models.JournalEntry] = []
         skipped = 0
+        reversed_by: dict[str, str] | None = None
         for e in self._all_entries(date_from, date_to):
             rows = e.get("lines", [])
             if source is not None and e.get("source_coll") != source:
@@ -313,7 +322,9 @@ class AccountingReportService:
             if skipped < offset:
                 skipped += 1
                 continue
-            out.append(models.JournalEntry.model_validate(e))
+            if reversed_by is None:  # the reversal may lie outside the filter, so look at the whole journal once
+                reversed_by = {str(r["reverses_id"]): str(r["id"]) for r in self._all_entries() if r.get("reverses_id")}
+            out.append(models.JournalEntry.model_validate({**e, "reversed_by": reversed_by.get(str(e.get("id")))}))
             if len(out) >= limit:
                 break
         return out
@@ -321,8 +332,10 @@ class AccountingReportService:
     def accounts(self, year: int | None) -> list[AccountOut]:
         chart = self._chart(self.fiscal_year(year))
         roles: dict[str, str] = {}
+        all_roles: dict[str, list[str]] = {}
         for role, acc in chart.roles:
             roles.setdefault(str(acc.account), str(role))
+            all_roles.setdefault(str(acc.account), []).append(str(role))
         seen: dict[str, ChartAccount] = {}
         for acc in (*(a for _, a in chart.roles), *chart.accounts):
             seen.setdefault(str(acc.account), acc)
@@ -332,6 +345,7 @@ class AccountingReportService:
                 name=acc.name,
                 account_class=acc.account_class,
                 role=roles.get(no),
+                roles=all_roles.get(no, []),
                 eur_line=acc.eur_line.line if acc.eur_line else None,
                 deductible=acc.eur_line.deductible if acc.eur_line else None,
                 automatic=acc.automatic,
@@ -452,7 +466,7 @@ class AccountingReportService:
         fy = self.fiscal_year(year)
         self._require_basis(fy, "accrual")
         day = as_of or date(int(fy["year"]), 12, 31)
-        data = self.load_booked(fy, None, day)
+        data = self.load_booked(fy, None, day, skip_closing_balance=fy.get("closed_at") is not None)
         b = reports.balance_sheet(data.lines, data.chart, day)
         # 14.5: the results of earlier years that are not closed yet are a line of their own
         year_start = date(data.year, 1, 1)

@@ -2081,6 +2081,8 @@ class FiscalYear(Record):
     opened_by: str | None = None
     closed_at: int | None = None
     closed_by: str | None = None
+    closing_hash: str | None = None
+    closing_entry_no: int | None = None
 
 
 class JournalLine(BaseModel):
@@ -2120,6 +2122,7 @@ class JournalEntry(Record):
     source_id: str | None = None
     source_number: str | None = None
     reverses_id: str | None = None
+    reversed_by: str | None = None  # id of the reversal of this entry (computed in the journal listing, not stored)
     counterparty_id: str | None = None
     cp_vat_id: str | None = None
     cp_country: str | None = None
@@ -2192,6 +2195,28 @@ class PeriodLockIn(v.CheckedBody):
     month: v.MonthNo
 
 
+class YearCloseProvisionIn(v.CheckedBody):
+    """A tax provision the user confirms for the year closing (accounting.md 9.7, 13): ``amount`` is the estimate
+    already net of the prepayments expensed in the year."""
+
+    kind: Literal["trade_tax", "corporate_tax"]
+    amount: v.PositiveMoneyIn
+
+
+class YearCloseIn(v.CheckedBody):
+    """Close a fiscal year (accounting.md 13). Accrual: the provisions the user confirms are posted first; EÜR takes
+    none. At most one provision per kind."""
+
+    provisions: Annotated[list[YearCloseProvisionIn], Field(max_length=2)] = []
+
+    @model_validator(mode="after")
+    def _one_per_kind(self):
+        kinds = [p.kind for p in self.provisions]
+        if len(set(kinds)) != len(kinds):
+            raise ValueError("at most one provision per kind")
+        return self
+
+
 class PeriodLock(Record):
     year: int
     month: int
@@ -2245,6 +2270,43 @@ class VatBox(BaseModel):
     flag: int | None = None  # Kz 10 (amended return): the marker 1
 
 
+class VatPayment(BaseModel):
+    """One payment or refund of Kz 83 read from the journal (accounting.md 9.6); reversed ones are listed, flagged."""
+
+    model_config = ConfigDict(extra="allow")
+    entry_id: str | None = None
+    event_key: str | None = None
+    date: str | None = None
+    kind: Literal["payment", "refund"] = "payment"
+    amount: v.Money = 0
+    reversed: bool = False
+
+
+class SpecialPrepaymentPayment(BaseModel):
+    """The booked payment of a Sondervorauszahlung."""
+
+    model_config = ConfigDict(extra="allow")
+    entry_key: str | None = None
+    paid_on: str | None = None
+    amount: v.Money | None = None
+    reversed: bool = False
+
+
+class SpecialPrepaymentOut(BaseModel):
+    """Sondervorauszahlung of a year: proposal, entered amount and the booked payment (docs/specs/ustva.md)."""
+
+    model_config = ConfigDict(extra="allow")
+    year: int
+    dauerfrist: bool = False
+    proposal: v.Money = 0
+    months: int | None = None
+    previous_kz83: v.Money = 0
+    previous_kz39: v.Money = 0
+    amount: v.Money | None = None
+    due_date: str | None = None
+    payment: SpecialPrepaymentPayment | None = None
+
+
 class VatReturn(Record):
     year: int
     period_kind: str | None = None
@@ -2272,6 +2334,10 @@ class VatReturn(Record):
     external: bool | None = None
     finalised_at: int | None = None
     finalised_by: str | None = None
+    payments: list[VatPayment] | None = None
+    paid: v.Money | None = None  # net paid so far (payments minus refunds, reversed ones excluded)
+    open: v.Money | None = None  # Kz 83 minus paid
+    payment_state: Literal["none", "open", "paid", "overpaid"] | None = None
 
     @model_validator(mode="before")
     @classmethod
