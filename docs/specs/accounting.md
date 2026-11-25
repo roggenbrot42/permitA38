@@ -497,7 +497,10 @@ postings start only after initialisation (section 16).
   notes and write-offs are dated in an open month and never drift — except the write-off reversal record, which is
   dated the payment date (drift case 2). Drift lines are listed on the return of their
   period and call for an amended return ([`ustva.md`](ustva.md)); ZM drift likewise ([`zm.md`](zm.md)).
-* `income_date` follows the document date within an open fiscal year; in a closed year it becomes the booking date.
+* `income_date` follows the document date within an open fiscal year; in a closed **accrual** year it becomes the
+  booking date. Under EÜR the income date is always the payment date (Zufluss/Abfluss), also after the year end; an
+  ended EÜR year therefore still receives late payments in its EÜR, and the EÜR page marks such a year "changed
+  after the year end" *(verify with the adviser)*.
 
 ## 12. Opening balances (accrual)
 
@@ -514,7 +517,9 @@ template); open receivables come from the backfill (section 16).
   a manual template), then the closing entry (balance accounts to `closing_balance`, P&L to `profit_carryforward` /
   `equity`), sets `closed_at`, and creates the next year's `fiscal_years` row (same bases unless changed) and opening
   entry.
-* EÜR: no closing entry; "end year" locks December and creates the next year's row. Open items stay open.
+* EÜR: no closing entry; "end year" locks December, stores the chain anchor (closing_hash/closing_entry_no) and
+  creates the next year's row. Open items stay open. Closing (accrual) and year end (EÜR) require the previous fiscal
+  year, if it exists, to be closed/ended first (409).
 
 ## 14. Reports (read only, from the journal)
 
@@ -533,7 +538,7 @@ template); open receivables come from the backfill (section 16).
    form of the year; the app does not file the Anlage EÜR.
 5. **P&L and balance sheet** (accrual): by account class of the chart; simple form (no HGB layout in v1). Under
    accrual every line's `income_date` lies in the entry's fiscal year: `JournalService` first applies the section 11
-   rule centrally (a line whose `income_date` lies in a **closed** year gets the entry's booking date — this covers
+   rule centrally (under accrual a line whose `income_date` lies in a **closed** year gets the entry's booking date — this covers
    late payments, refunds and write-off reversals of a closed year), then refuses any remaining line outside the year
    with 422,
    so the P&L result equals the balance-sheet result of the year; before the year closing the balance sheet shows the
