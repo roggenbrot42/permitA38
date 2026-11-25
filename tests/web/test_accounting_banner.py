@@ -70,7 +70,7 @@ def test_setup_panel_before_initialisation_boss_and_accountant(browser, srv):
         expect(pg.get_by_test_id("accounting-setup-link")).to_have_attribute("href", "#/accounting/setup")
         expect(pg.get_by_test_id("adviser-banner")).to_have_count(0)
     pg.get_by_test_id("accounting-setup-link").click()
-    expect(pg.get_by_test_id("accounting-setup-coming")).to_be_visible()
+    expect(pg.get_by_test_id("wz")).to_be_visible()
     ctx.close()
 
     ctx, pg, problems2 = open_as(browser, srv, "accountant")
