@@ -59,7 +59,14 @@ def make_server(tmp_path, basis):
     call(
         "POST",
         "/expenses",
-        json={"date": "2026-02-05", "net": 30, "vat": 5.7, "vendor": "Demo Soft", "description": "Software"},
+        json={
+            "date": "2026-02-05",
+            "net": 30,
+            "vat": 5.7,
+            "vendor": "Demo Supplier",
+            "supplier_id": call("POST", "/suppliers", json={"name": "Demo Supplier"})["id"],
+            "description": "Software",
+        },
     )
     s.call = call
     return s
@@ -163,6 +170,9 @@ def test_every_tab_shows_the_known_figures(browser, accrual):
     assert (
         totals["Total income"] == "100,00 €" and totals["Total expenses"] == "30,00 €" and totals["Profit"] == "70,00 €"
     )
+    by_name = {r[1]: r[2] for r in pnl if len(r) == 3 and r[0].isdigit()}
+    assert by_name["Synthetic expense_other"] == "30,00 €"  # an expense row is positive under "Expenses"
+    assert by_name["Synthetic revenue_s19"] == "100,00 €"
 
     # balance sheet
     pg.click("[data-testid=acc-tab-balance-sheet]")
@@ -177,6 +187,7 @@ def test_every_tab_shows_the_known_figures(browser, accrual):
     rec = rows(pg, "acc-open-receivable")
     assert rec[1] == ["RE-2026-0001", "Demo GmbH", "10.01.2026", "355", "69,00 €"]
     assert rows(pg, "acc-open-payable")[-1][-1] == "35,70 €"
+    assert rows(pg, "acc-open-payable")[1][1] == "Demo Supplier"
     assert rows(pg, "acc-open-payable")[1][2:3] == ["05.02.2026"]
     assert pg.locator("#toast.on.err").count() == 0
     assert problems == []
@@ -193,7 +204,7 @@ def test_eur_year_shows_eur_and_hides_pnl(browser, eur):
     assert cells["VAT received"] == "19,00 €" and cells["Input VAT paid"] == "5,70 €"
     # gross form: income 100.00 + 19.00 VAT = 119.00, expenses 30.00 + 5.70 = 35.70, profit 83.30
     assert cells["Total income"] == "119,00 €" and cells["Total expenses"] == "35,70 €" and cells["Profit"] == "83,30 €"
-    assert cells["Line revenue_s19"] == "100,00 €" and cells["Line expense_other"] == "-30,00 €"
+    assert cells["Revenue 19 %"] == "100,00 €" and cells["Other expenses"] == "30,00 €"
     # a P&L route of an EÜR year (API answers 422) falls back to the journal without an error
     pg.goto(eur.base + "/#/accounting/pnl")
     expect(pg.locator("[data-testid=acc-entry]").first).to_be_visible()
