@@ -679,9 +679,13 @@ class Journey:
         page = self.rng.choice(NAV_PAGES)
         top = page.split("/")[0]
         if "/" not in page and self.page.locator(f'a.nav[href="#/{top}"]').count():
-            self.mark_old()
+            # clicking the link of the page you are on changes no hash, so the router does not re-render: nothing to wait for
+            rerenders = self.page.evaluate("h => location.hash !== h", f"#/{top}")
+            if rerenders:
+                self.mark_old()
             self.page.click(f'a.nav[href="#/{top}"]')
-            self.wait_render()
+            if rerenders:
+                self.wait_render()
         else:
             self.nav("#/" + page)
         text = self.main_text()

@@ -787,7 +787,7 @@ A.editExpense = el => {
   // a new bill can be started from a business trip: data-trip, data-category and data-project preselect those fields
   if (el?.dataset?.id && !S.d.expenses.some(x => x.id === el.dataset.id)) return toast('This bill was not found', true);
   const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: el?.dataset?.category || EXP_CATS[0], project_id: el?.dataset?.project || '', trip_id: el?.dataset?.trip || '', trip_item_id: el?.dataset?.item || '' };
-  expenseDialog(e, null);
+  expenseDialog(e, null, !!el?.dataset?.trip);
 };
 /** A refused save stays in the dialog as an alert (the locked-period 409 included); the toast shows it too. */
 function showSaveError(msg) {
@@ -813,7 +813,7 @@ function bindTreatment(hasSup) {
   sel.addEventListener('change', sync); dt.addEventListener('input', sync); dt.addEventListener('change', sync); sync();
 }
 /** The bill dialog. scan: a flagged receipt ("Check receipt", draft filled in, Save confirms it) or null (a manual or booked bill). */
-function expenseDialog(e, scan) {
+function expenseDialog(e, scan, fromTrip = false) {
   const cats = e.category && !EXP_CATS.includes(e.category) ? [...EXP_CATS, e.category] : EXP_CATS;   // keep a category entered elsewhere
   const stored = Array.isArray(e.lines) ? e.lines : [];
   // a stored line keeps the fields this dialog does not show (line category, unknown fields); net/vat are derived
@@ -901,6 +901,10 @@ function expenseDialog(e, scan) {
     },
     del: e.id && !scan ? async () => { await api('DELETE', 'expenses/' + e.id); await loadAll(['expenses']); render(); } : null
   });
+  if (fromTrip && e.trip_id) {   // opened from a trip page: the bill stays on that trip (move it on the Expenses page)
+    const ts = $('#f_trip_id');
+    if (ts) { ts.value = e.trip_id; ts.disabled = true; ts.title = 'Opened from this trip; move the bill to another trip on the Expenses page'; }
+  }
   if (hasSup) SUP.bindExpense(e);
   bindTreatment(hasSup);
   const modalEl = $('#modal-root .modal');

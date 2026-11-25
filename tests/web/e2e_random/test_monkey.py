@@ -351,6 +351,14 @@ class Monkey:
             {"back": self.page.go_back, "forward": self.page.go_forward, "reload": self.page.reload}[d](timeout=5000)
         except Exception as e:
             self.say(f"  (skipped: {str(e)[:50]})")
+            return
+        if d == "back" and not self.page.url.startswith(self.base):
+            # went back past the app's first history entry (about:blank): return into the app
+            self.say("  (left the app, went forward again)")
+            try:
+                self.page.go_forward(timeout=5000)
+            except Exception:
+                self.page.goto(self.base + "/")
 
     # ---- purposeful episodes: a user opens a form, fills it (plausibly or hostilely) and submits
     def _plausible(self, kind: str) -> str:
