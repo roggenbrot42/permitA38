@@ -520,3 +520,27 @@ def test_eur_late_payment_of_an_ended_year_keeps_its_payment_date(eur):
     assert (e.fiscal_year, e.booking_date) == (2026, "2026-01-01")
     assert [ln.income_date for ln in e.lines] == [None, "2025-12-20"]
     assert float(AccountingReportService(w.repo).eur(2025).total_income) == 1.0
+
+
+def test_manual_pl_line_without_income_date_is_in_the_pnl_and_balances_after_closing(accrual):
+    w = accrual
+    w.scenario()
+    w.post(
+        "manual:dep", date(2025, 6, 1), "Depreciation",
+        [PostLine(role="expense_other", amount_cents=50000), PostLine(role="bank", amount_cents=-50000)],
+    )  # fmt: skip
+    reports = AccountingReportService(w.repo)
+    assert float(reports.pnl(2025).profit) == -420.0  # 80.00 of the scenario minus the 500.00 line
+    w.lock_november()
+    w.closing.close(2025, [], USER)
+    assert float(reports.pnl(2025).profit) == -420.0  # the closing leaves the P&L report as it was
+
+    bs = reports.balance_sheet(2025, None)
+    assert bs.debit_side and bs.credit_side  # the closed balances, not empty
+    assert float(bs.debit_total) == float(bs.credit_total) and float(bs.difference) == 0
+    carry = [r for r in bs.debit_side if r.account == ACC["carry"]]
+    assert carry and float(carry[0].balance) == 420.0
+
+    nxt = reports.balance_sheet(2026, date(2026, 1, 1))
+    assert float(nxt.difference) == 0 and float(nxt.result) == 0.0
+    assert float(nxt.debit_total) == float(nxt.credit_total) and nxt.debit_side

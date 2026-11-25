@@ -248,9 +248,15 @@ class JournalService:
         stored = self._content(existing, existing["lines"])
         booking = date.fromisoformat(str(existing["booking_date"]))
         # a replay carries the original (un-normalised) income dates; the stored lines may hold the normalised ones
-        for candidate in (lines, self._normalise_income_dates(lines, booking)):
+        try:
+            chart = self._chart(rows[0], year)
+        except ServiceError:
+            return False
+        normalised = self._normalise_income_dates(lines, booking)
+        key = str(entry.get("event_key", ""))
+        for candidate in (lines, normalised, self._fill_income_dates(chart, normalised, booking, key)):
             try:
-                resolved = self._resolve(self._chart(rows[0], year), candidate)
+                resolved = self._resolve(chart, candidate)
             except ServiceError:
                 return False
             if stored == self._content(entry, resolved):
@@ -281,6 +287,27 @@ class JournalService:
                         bool(rows) and rows[0].get("closed_at") is not None and rows[0].get("income_basis") == "accrual"
                     )
                 if closed[y]:
+                    ln = replace(ln, income_date=booking)
+            out.append(ln)
+        return out
+
+    @staticmethod
+    def _fill_income_dates(chart: Chart, lines: Sequence[PostLine], booking: date, event_key: str) -> list[PostLine]:
+        """accounting 14.5: a line on a P&L account (chart class) without ``income_date`` gets the booking date, for
+        every origin. The closing entries (``close:<year>:...``) carry none, so the year's P&L report is unchanged."""
+        if event_key.startswith("close:"):
+            return list(lines)
+        klass = {str(a.account): a.account_class for a in chart.accounts}
+        out: list[PostLine] = []
+        for ln in lines:
+            if ln.income_date is None:
+                account = ln.account
+                if ln.role is not None:
+                    try:
+                        account = str(chart.account(Role(ln.role)))
+                    except KeyError:
+                        account = None  # _resolve reports the unknown role
+                if account is not None and klass.get(account) == "pl":
                     ln = replace(ln, income_date=booking)
             out.append(ln)
         return out
@@ -394,10 +421,11 @@ class JournalService:
             rows = [self.ensure_year(year, source.created_by)]
             if rows[0].get("closed_at") is not None:
                 raise ServiceError(409, f"Fiscal year {year} is closed")
-            lines = self._normalise_income_dates(lines, booking)
+            chart = self._chart(rows[0], year)
+            lines = self._fill_income_dates(chart, self._normalise_income_dates(lines, booking), booking, event_key)
             self._check_manual_vat_dates(source, lines)
             self._check_accrual_income_dates(rows[0], year, lines)
-            resolved = self._resolve(self._chart(rows[0], year), lines)
+            resolved = self._resolve(chart, lines)
             warnings = self._drift_warnings(lines)
             if warnings:
                 entry["warnings"] = warnings  # unknown field: kept in the row's extra JSON, not hashed

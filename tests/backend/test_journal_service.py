@@ -811,3 +811,26 @@ def test_income_date_mismatch_in_an_open_year_is_still_422_under_accrual(svc, re
     repo.save("fiscal_years", {**year, "income_basis": "accrual"})  # 2025 stays open
     err = err_of(svc, lines=_payment(date(2025, 12, 31)))
     assert err.status == 422 and "income_date" in err.message
+
+
+def test_a_pl_line_without_income_date_gets_the_booking_date(svc, repo):
+    day = date(2026, 1, 15)
+    e = post(
+        svc, key="manual:dep", day=day,
+        lines=[PostLine(role="expense_other", amount_cents=500), PostLine(role="bank", amount_cents=-500)],
+    )  # fmt: skip
+    assert [ln.income_date for ln in e.lines] == ["2026-01-15", None]  # P&L line filled, balance line not
+    # an idempotent replay with the original (unfilled) lines is the same event
+    again = post(
+        svc, key="manual:dep", day=day,
+        lines=[PostLine(role="expense_other", amount_cents=500), PostLine(role="bank", amount_cents=-500)],
+    )  # fmt: skip
+    assert again.entry_no == e.entry_no
+
+
+def test_closing_entries_carry_no_income_date(svc, repo):
+    e = post(
+        svc, key="close:2026:pnl", day=date(2026, 1, 15),
+        lines=[PostLine(role="expense_other", amount_cents=500), PostLine(role="bank", amount_cents=-500)],
+    )  # fmt: skip
+    assert [ln.income_date for ln in e.lines] == [None, None]
