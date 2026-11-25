@@ -85,7 +85,14 @@ def test_partial_credit_note_reduces_the_open_amount():
     d = st.derive(inv(), 200000 + 38000, [], [credit(59500)])
     assert (d.fields["credited_amount"], d.fields["open_amount"], d.status) == ("595.00", "1785.00", "sent")
     assert d.fields["credit_notes"] == [
-        {"id": "c1", "number": "RK-1", "date": "2026-03-01", "credit_kind": "partial", "gross": "595.00", "reason": None}
+        {
+            "id": "c1",
+            "number": "RK-1",
+            "date": "2026-03-01",
+            "credit_kind": "partial",
+            "gross": "595.00",
+            "reason": None,
+        }
     ]
 
 

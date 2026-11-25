@@ -667,7 +667,7 @@ def validate(
     path: Path, store: Repository, *, allow_no_users: bool = False, today: date | None = None, replace: bool = False
 ) -> Plan:
     """Read the whole archive; nothing is written. Errors and warnings are collected in the returned plan."""
-    if replace and not getattr(store, "can_suspend_guards", True):
+    if replace and not getattr(store, "can_suspend_guards", False):
         raise ServiceError(409, "A replace-restore needs a database whose guards can be suspended (SQLite only).")
     plan = Plan(allow_no_users=allow_no_users, replace=replace)
     try:
