@@ -467,7 +467,7 @@ plus a new entry. Templates: opening balance, private withdrawal/deposit, VAT pa
 | invoice status | `sent` / `accepted` / `rejected` stay user-set labels; derived values win in this order: `cancelled` (a `storno` credited everything), then `paid` (open amount ≤ 0 and some cash received), then the label; stored for old clients |
 | credit note | issued on creation (no draft in v1); frozen like an invoice |
 | expense, trip | section 9.4 / 9.5 (repost while open, 409 when locked) |
-| import (`importer/service.py`) | imported invoices are posted like issued ones on their dates; undo of a batch posts reversals while the months are open, else 409 |
+| import (`importer/service.py`) | imported invoices are issued and posted like finalised ones on their dates; an imported `paid` is stored as the legacy `paid` + `paid_date` (a virtual payment, credit-notes-payments 2.3) and is materialised at once only when the invoice posts (accounting initialised, dated on/after the start). Undo of a batch: expenses are reversed and removed through the expense hook (409 when locked); an invoice is removed only while it has no journal entry, no `payments` row and no credit note — otherwise the undo is refused (409 "issued and booked; issue credit notes instead") and nothing changes. With accounting initialised, check the preview before running an import |
 
 These rules apply from the release on, with or without accounting initialised (issued invoices are always frozen);
 postings start only after initialisation (section 16).
