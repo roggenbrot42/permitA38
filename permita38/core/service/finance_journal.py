@@ -2,8 +2,12 @@
 
 Once accounting is initialised for a year, ``calc.finance`` takes revenue, costs and VAT per month from the journal:
 revenue and costs by ``income_date`` (EÜR: payment date, accrual: document date; the lines carry the right date for
-the basis), output and input VAT by ``vat_date``. Money stays exact (``Decimal`` euros, cents from the journal). The
-response shape is the old one; the caller adds ``approximate`` (``True`` for the old computation).
+the basis), output and input VAT by ``vat_date``, § 13b included (accounting.md 9.4: the RC tax lines are output VAT,
+their input lines input VAT). Money stays exact (``Decimal`` euros, cents from the journal). The response shape is the
+old one; the caller adds ``approximate`` (``True`` for the old computation).
+
+The page shows the booked tax (the VAT accounts); UStVA Kz 83 uses the form tax, so a cent difference between the two
+stays until the annual return (accounting.md 9.6).
 """
 
 from datetime import date
@@ -24,8 +28,8 @@ _REVENUE_PREFIX = "revenue_"
 _REVENUE_REDUCTIONS = ("bad_debts", "cash_discount_granted")
 _COST_PREFIX = "expense_"
 _COST_ROLES = ("meals_deductible", "travel_costs")
-_OUTPUT_KEYS = ("S19", "S7", "SX")
-_INPUT_KEY = "VST"
+_OUTPUT_KEYS = ("S19", "S7", "SX", "RC_EU_SVC", "RC_3C_SVC")  # tax_kind "tax"
+_INPUT_KEYS = ("VST", "RC_EU_SVC", "RC_3C_SVC")  # tax_kind "input"
 _FAR_FUTURE = date(9999, 12, 31)
 
 
@@ -77,7 +81,7 @@ def figures(store: Repository, year: int) -> tuple[list[dict[str, Any]], dict[st
         cents, key, kind = int(rec["amount_cents"]), rec.get("tax_key"), rec.get("tax_kind")
         if kind == "tax" and key in _OUTPUT_KEYS:
             months[when.month - 1]["vat_out"] -= _eur(cents)  # output VAT is a credit
-        elif kind == "input" and key == _INPUT_KEY:
+        elif kind == "input" and key in _INPUT_KEYS:
             months[when.month - 1]["vat_in"] += _eur(cents)
     return months, cats, _open_receivables(store, reports, fy)
 
@@ -86,5 +90,6 @@ def _open_receivables(store: Repository, reports: AccountingReportService, fy: d
     """Accrual years book receivables: their journal balance. A cash-basis (EÜR) year books none, so what is still
     owed comes from the documents like before (it is a position, not part of the profit)."""
     if str(fy.get("income_basis")) == "accrual":
-        return reports.open_items(int(fy["year"]), _FAR_FUTURE).receivables_total
+        total = reports.open_items(int(fy["year"]), _FAR_FUTURE).receivables_total  # a pydantic float field
+        return _eur(round(Decimal(str(total)) * 100))  # back to whole cents, never float arithmetic on the figure
     return calc.open_receivables_of_documents(store)

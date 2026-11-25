@@ -120,3 +120,46 @@ def test_year_that_began_before_the_accounting_start_stays_approximate(repo):
     init(repo, income="eur", vat="soll", start="2026-07-01")
     assert repo.settings()[ACCOUNTING_START_KEY] == "2026-07-01"
     assert calc.finance(repo, 2026, today=TODAY)["approximate"] is True
+
+
+def test_accrual_year_unpaid_invoice_is_an_open_receivable_end_to_end(repo, sales):
+    """Accrual: net 1,000.00 @ 19 % issued 2026-03-01, unpaid -> receivable 1,190.00 through ``calc.finance``."""
+    setup(repo, "accrual", "soll")
+    invoice(repo, sales, "inva00a", "2026-03-01", "1000", "19", "R-A")
+    got = finance_journal.figures(repo, 2026)
+    assert got is not None and isinstance(got[2], D) and got[2] == D("1190.00")
+    out = calc.finance(repo, 2026, today=TODAY)
+    assert out["approximate"] is False and out["open_receivables"] == 1190.0
+
+
+def test_documents_receivable_counts_only_positive_open_amounts(repo, sales, pay):
+    """A paid invoice adds nothing; the unpaid one (gross 119.00) adds 119.00."""
+    repo.save_settings({"accounting": "eur"})
+    invoice(repo, sales, "inva00a", "2026-02-10", "100", "19", "R-A")
+    invoice(repo, sales, "inva00b", "2026-02-11", "100", "19", "R-B")
+    pay.record("inva00b", date="2026-02-20", amount=D("119.00"), user=BOSS)
+    assert calc.open_receivables_of_documents(repo) == D("119.00")
+
+
+def test_13b_tax_is_output_and_input_vat_with_the_deductible_share(repo):
+    """Par. 13b EU service, net 1,000.00, 19 % -> tax 190.00 (vat_out); at 50 % share input VAT 95.00. A VST expense
+    of net 100.00 adds 19.00 input VAT: vat_in 114.00, vat_due = 190.00 - 114.00 = 76.00 (= Kz 83 minus the VST)."""
+    setup(repo, "accrual", "soll")
+    expense(repo, id="exprc1", date="2026-05-20", service_date="2026-05-20", net=1000.0, vat=0.0, vat_rate=19.0,
+            tax_treatment="reverse_charge_eu_service", vat_deductible=50)  # fmt: skip
+    expense(repo, id="expvst", date="2026-05-25", net=100.0, vat=19.0, vat_rate=19.0)
+    months, _, _ = finance_journal.figures(repo, 2026)
+    assert by_month(months, "vat_out") == {5: D("190.00")}
+    assert by_month(months, "vat_in") == {5: D("114.00")}
+    out = calc.finance(repo, 2026, today=TODAY)
+    assert out["months"][4]["vat_due"] == 76.0 and out["totals"]["vat_due"] == 76.0
+
+
+def test_small_business_keeps_its_13b_tax(repo):
+    """A small business owes the par. 13b tax (no input VAT): net 1,000.00 at 19 % -> vat_due 190.00."""
+    repo.save_settings({"accounting": "accrual", "kleinunternehmer": True})
+    init(repo, income="accrual", vat="soll", small_business=True)
+    expense(repo, id="exprc1", date="2026-05-20", service_date="2026-05-20", net=1000.0, vat=0.0, vat_rate=19.0,
+            tax_treatment="reverse_charge_eu_service")  # fmt: skip
+    out = calc.finance(repo, 2026, today=TODAY)
+    assert out["totals"]["vat_due"] == 190.0 and out["approximate"] is False

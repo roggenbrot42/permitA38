@@ -408,7 +408,8 @@ def open_receivables_of_documents(store) -> Decimal:
         )
         if st.status == "cancelled" or inv.get("status") == "cancelled":
             continue
-        total += Decimal(st.open_cents) / 100  # gross less credit notes and payments
+        if st.open_cents > 0:  # only what is still owed; an overpaid invoice is no receivable (as the old code)
+            total += Decimal(st.open_cents) / 100  # gross less credit notes and payments
     return total
 
 
@@ -501,7 +502,8 @@ def finance(store, year, today=None):
         months, cats, open_receivables = _legacy_figures(store, year, s, klein, accrual)
     for m in months:
         m["profit"] = m["revenue"] - m["expenses"]
-        m["vat_due"] = ZERO if klein else m["vat_out"] - m["vat_in"]
+        # a small business owes no VAT on its sales, but § 13b tax it self-assesses stays (journal: only RC lines exist)
+        m["vat_due"] = ZERO if klein and journal is None else m["vat_out"] - m["vat_in"]
 
     keys = (*_MONEY_KEYS, "profit", "vat_due")
     tot = {k: sum((m[k] for m in months), ZERO) for k in keys}
