@@ -1,9 +1,10 @@
 """Payments, refunds and reversals of issued invoices (docs/specs/credit-notes-payments.md 2.3 and 3).
 
 Every write materialises a legacy virtual payment first, inserts one append-only ``payments`` row (``amount_cents``
-signed: payments positive, refunds and reversals negative) and, when the accounting is initialised and the invoice is on
-or after the start, posts the 9.2 target delta through :class:`~permita38.core.service.postings.PaymentPostingService`
-in the same transaction (event key ``payment:<payment id>``). Before the initialisation the rows are only stored.
+signed: payments positive, refunds and reversals negative) and, when the accounting is initialised, posts the 9.2
+target delta through :class:`~permita38.core.service.postings.PaymentPostingService` in the same transaction
+(event key ``payment:<payment id>``; an invoice dated before the start gets its pre-start baseline first, step 5a).
+Before the initialisation the rows are only stored.
 A payment on a written-off invoice first stores and posts the write-off reversal record (spec 3, accounting 9.2).
 """
 

@@ -11,8 +11,10 @@
   ``n + 1``; the revisions are stored on the record (``bill_rev`` / ``pay_rev`` = the highest revision posted);
 * :meth:`~ExpensePostingService.unpost` runs before a delete: the reversals only.
 
-Nothing posts before the accounting is initialised (settings key ``accounting.start``) or for an expense dated before
-the start. A reversal of a bill entry whose booking date lies in a locked month is refused with 409; a payment entry
+Nothing posts before the accounting is initialised (settings key ``accounting.start``). An expense dated before the
+start posts no bill; while it is unpaid or paid on/after the start its open balance-sheet part is an opening item
+(``open:<year>:expense:<id>``, adjusted by ``...:r<n>`` when ``paid_on`` later moves before the start, or back) and only
+a payment on/after the start posts the payment entry. A reversal of a bill entry whose booking date lies in a locked month is refused with 409; a payment entry
 carries no VAT line, so its reversal is allowed and booked in the first open month (spec 9.4). No SQL here.
 """
 
@@ -22,7 +24,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, Literal, cast
 
-from permita38.core import calc
+from permita38.core import calc, models
 from permita38.core.accounting.postings_expense import (
     Expense,
     ExpenseLine,
@@ -112,6 +114,9 @@ class ExpensePostingService:
             data["reverse_charge"] = True
         else:
             data.pop("reverse_charge", None)  # derived output: true only for the two reverse-charge treatments
+        if treatment == "no_input_vat" and not data.get("lines"):  # no reclaimable VAT: the gross is the cost (spec 5)
+            data["net"] = to_float(dec(data.get("net")) + dec(data.get("vat")))
+            data["vat"] = 0.0
         if treatment not in RC_TREATMENTS:
             return []
         return self._self_assess(data)
@@ -126,14 +131,16 @@ class ExpensePostingService:
             lines = []
             for ln in raw_lines:
                 net = dec(ln.get("gross"))
-                rate = dec(ln["vat_rate"]) if ln.get("vat_rate") is not None else DEFAULT_RC_RATE
+                rate = dec(ln.get("vat_rate")) or DEFAULT_RC_RATE  # missing or 0 = the regular rate (spec 5)
                 nets[rate] = nets.get(rate, Decimal(0)) + net
                 lines.append({**ln, "net": to_float(net), "vat": 0.0})
             data["lines"] = lines
             data["net"] = to_float(sum(nets.values(), Decimal(0)))
             data["vat"] = to_float(sum((_tax(n, r) for r, n in nets.items()), Decimal(0)))
             return []
-        rate = dec(data["vat_rate"]) if data.get("vat_rate") is not None else DEFAULT_RC_RATE
+        # a missing or 0 rate is the regular rate of the year (19 %, spec 5) and is stored as such
+        rate = dec(data.get("vat_rate")) or DEFAULT_RC_RATE
+        data["vat_rate"] = to_float(rate)
         computed = _tax(dec(data.get("net")), rate)
         sent = dec(data.get("vat"))
         data["vat"] = to_float(computed)
@@ -218,8 +225,14 @@ class ExpensePostingService:
         ``stored`` / ``year_closed`` are for change detection only (see :meth:`_engine_first`)."""
         start = accounting_start(self.store.settings())
         day = _day(rec.get("date"))
-        if start is None or day is None or day < start:
+        if start is None or day is None:
             return {"bill": None, "pay": None}
+        prestart = day < start
+        if prestart:  # the bill is an opening item; only a payment on/after the start posts
+            paid_day = _day(rec.get("paid_on"))
+            if paid_day is None or paid_day < start:
+                return {"bill": None, "pay": None}
+            day = start
         fy = self.journal.ensure_year(day.year, "system")
         bases = Bases(cast(IncomeBasis, fy["income_basis"]), cast(VatBasis, fy["vat_basis"]))
         first_open = first_unlocked_from(self.store.list("period_locks"))
@@ -228,7 +241,7 @@ class ExpensePostingService:
         paid = engine.paid_on or (engine.date if bases.income == "eur" else None)
         bill_first = self._engine_first(engine.date, first_open, stored.get("bill"))
         bill_closed = self._closed(engine.date) if year_closed is None else year_closed
-        bill = expense_bill_entry(engine, bases, bill_first, bill_closed)
+        bill = None if prestart else expense_bill_entry(engine, bases, bill_first, bill_closed)
         pay = None
         pay_first = bill_first
         if paid is not None:
@@ -325,6 +338,12 @@ class ExpensePostingService:
     ) -> dict[str, Any]:
         """Bring the journal in line with a saved expense (inside the caller's transaction); returns the record
         with its revisions. 409 when a bill entry to be reversed lies in a locked month."""
+        self.sync_opening(saved, user)
+        return self._sync_parts(saved, old, user)
+
+    def _sync_parts(
+        self, saved: dict[str, Any], old: Mapping[str, Any] | None, user: Mapping[str, Any] | None
+    ) -> dict[str, Any]:
         revs: dict[Part, int] = {"bill": _rev(saved, "bill"), "pay": _rev(saved, "pay")}
         if accounting_start(self.store.settings()) is None and not any(revs.values()):
             return saved
@@ -398,6 +417,7 @@ class ExpensePostingService:
     def unpost(self, expense: Mapping[str, Any], user: Mapping[str, Any] | None = None) -> None:
         """Before a delete: the reversals of the live entries only (409 for a bill entry in a locked month)."""
         lives = {part: self._live(str(expense["id"]), part, _rev(expense, part)) for part in PARTS}
+        self.sync_opening(expense, user, deleted=True)
         for part in PARTS:  # check first, so a refusal posts nothing at all
             stored = lives[part]
             if part == "bill" and stored is not None:
@@ -409,6 +429,41 @@ class ExpensePostingService:
             stored = lives[part]
             if stored is not None:
                 self._reverse(expense, part, stored, user)
+
+    # ---------- the opening item of an expense dated before the start (spec 16 step 5)
+    def sync_opening(
+        self, rec: Mapping[str, Any], user: Mapping[str, Any] | None = None, *, deleted: bool = False
+    ) -> models.JournalEntry | None:
+        """The opening item of an expense dated before the start and unpaid or paid on/after it: accrual the open
+        payable, EÜR the input VAT already deducted (``input_vat_clearing``), each against ``opening_balance``. A
+        later change (``paid_on`` before the start, a deletion) posts the adjustment ``open:<year>:expense:<id>:r<n>``.
+        ``None`` for any other expense or when its bill holds no such line."""
+        from permita38.core.service.opening_items import (  # opening_items imports this module's siblings
+            EXPENSE_BALANCE_ROLES,
+            OpeningItemService,
+        )
+
+        start = accounting_start(self.store.settings())
+        day, paid = _day(rec.get("date")), _day(rec.get("paid_on"))
+        if start is None or day is None or day >= start:
+            return None
+        uid = str((user or {}).get("id") or "system")
+        lines: list[PostLine] = []
+        if not deleted and (paid is None or paid >= start):
+            fy = self.journal.ensure_year(start.year, uid)
+            bases = Bases(cast(IncomeBasis, fy["income_basis"]), cast(VatBasis, fy["vat_basis"]))
+            engine = self._engine(rec, fy, (1, 1))
+            bill = expense_bill_entry(engine, bases, engine.date, False)
+            for ln in bill.lines if bill is not None else ():
+                if str(ln.role) in EXPENSE_BALANCE_ROLES and ln.amount_cents:
+                    lines.append(PostLine(amount_cents=int(ln.amount_cents), role=str(ln.role)))
+        source = dataclasses.replace(self._source(rec, "bill", user, False), event="opening_expense", origin="opening")
+        name = str(rec.get("vendor") or rec.get("description") or rec["id"])
+        return OpeningItemService(self.store, self.journal).sync(
+            "expense", str(rec["id"]), lines, source, f"Opening item expense {name}"[:200]
+        )
+
+    post_opening = sync_opening
 
 
 def _line_key(ln: Mapping[str, Any]) -> tuple[Any, ...]:

@@ -267,17 +267,19 @@ def test_nothing_posts_before_the_initialisation(repo, rs):
     assert entries(repo) == []
 
 
-def test_an_expense_dated_before_the_start_does_not_post(repo, rs):
+def test_an_expense_dated_before_the_start_posts_no_bill(repo, rs):
     init(repo, start="2026-03-01")
     rec = make(repo, rs, date="2026-02-20", paid_on="2026-03-05")
-    assert entries(repo) == [] and "bill_rev" not in rec
+    eid = rec["id"]  # the bill is an opening item, only the payment is a normal event
+    assert keys(repo) == [f"open:2026:expense:{eid}", f"expense:{eid}:pay:r1"] and "bill_rev" not in rec
 
 
 def test_moving_the_date_before_the_start_reverses_the_entries(repo, rs):
     init(repo, start="2026-03-01")
     rec = make(repo, rs, date="2026-03-10")
     rec = put(rs, rec, date="2026-02-20")
-    assert keys(repo)[-1].endswith(":bill:r1:rev") and len(entries(repo)) == 2
+    eid = rec["id"]
+    assert keys(repo) == [f"expense:{eid}:bill:r1", f"open:2026:expense:{eid}", f"expense:{eid}:bill:r1:rev"]
     assert rec["bill_rev"] == 2
 
 
@@ -298,6 +300,23 @@ def test_old_reverse_charge_flag_maps_through_the_supplier(repo, rs, mode, expec
     rec = make(repo, rs, reverse_charge=True, supplier_id=supplier(repo, mode), vat=0.0)
     assert rec["tax_treatment"] == expected and rec["reverse_charge"] is True
     assert rec["vat"] == 19.0  # 100.00 at the stated 19 %
+
+
+def test_legacy_reverse_charge_shape_with_rate_zero_gets_the_regular_rate(repo, rs):
+    rec = make(repo, rs, reverse_charge=True, tax_treatment=None, vat=0.0, vat_rate=0, net=1000.0)
+    assert rec["tax_treatment"] == "reverse_charge_eu_service"
+    assert rec["vat"] == 190.0 and rec["vat_rate"] == 19.0 and rec["net"] == 1000.0
+
+
+def test_reverse_charge_without_a_rate_stores_the_regular_rate(repo, rs):
+    data = {"date": "2026-03-10", "net": 1000.0, "category": "software", "tax_treatment": "reverse_charge_eu_service"}
+    rec = rs.create(BOSS, "expenses", data)
+    assert rec["vat"] == 190.0 and rec["vat_rate"] == 19.0
+
+
+def test_no_input_vat_stores_vat_zero_and_net_equals_gross(repo, rs):
+    rec = make(repo, rs, tax_treatment="no_input_vat", net=100.0, vat=19.0, vat_rate=19.0)
+    assert rec["vat"] == 0.0 and rec["net"] == 119.0
 
 
 def test_old_reverse_charge_flag_without_a_supplier_is_eu(repo, rs):
