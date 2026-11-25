@@ -17,10 +17,11 @@ from typing import Any
 
 from permita38.core.errors import ServiceError
 from permita38.core.money import dec, line_amount, q2, to_float, vat_amount
+from permita38.core.numbering import PatternError, parse_pattern
 from permita38.core.repository import Repository, new_id
 from permita38.core.repository.schema import COLLECTIONS
 from permita38.core.service.journal import JournalService
-from permita38.core.service.numbering import NumberingService
+from permita38.core.service.numbering import CREDIT_NOTE, NumberingService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.settings import effective_settings
@@ -375,6 +376,14 @@ class ImportService:
         return outcomes, new
 
     # ------------------------------------------------------------------ documents and expenses
+    def _is_credit_note_number(self, number: str, day) -> bool:
+        """True if the credit note pattern (of the document's period) could produce ``number``."""
+        try:
+            pattern = parse_pattern(self.numbering.config(CREDIT_NOTE).pattern, strict=False)
+        except PatternError:
+            return False
+        return pattern.match(number) is not None and pattern.date_consistent(number, day)
+
     def _plan_documents(self, doc_type, rows, index, options, pdf_entries):
         settings = effective_settings(self.store.settings())
         customers = _CustomerIndex(self.store.list("customers"), bool(options.get("merge_similar")))
@@ -422,6 +431,18 @@ class ImportService:
             out.customer = customer_info
             _note_similar(out)
             doc_day = V.parse_date(record["date"]) if doc_type in DOC_KINDS else None
+            if (
+                doc_type == "invoices"
+                and doc_day is not None
+                and self._is_credit_note_number(record["number"], doc_day)
+            ):
+                out.action = "error"
+                out.messages.append(
+                    f"number {record['number']} could be produced by the credit note pattern; "
+                    "credit notes have their own number sequence, so an invoice must not use such a number"
+                )
+                outcomes.append(out)
+                continue
             if doc_day is not None:
                 note = self.numbering.imported_number_note(doc_type, record["number"], doc_day)
                 if note:

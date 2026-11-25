@@ -226,13 +226,15 @@ def test_expense_overwrite_into_a_locked_month_is_a_plan_error(repo, svc):
     assert report["applied"] is False and keys(repo) == before and repo.list("expenses")[0]["bill_rev"] == 1
 
 
-def test_a_number_in_the_credit_note_pattern_is_imported_as_an_invoice_number(repo, svc):
+def test_a_number_in_the_credit_note_pattern_is_a_row_error_but_other_numbers_import(repo, svc):
     init(repo)
-    run(svc, HEAD + "RK-2026-0001;05.02.2026;Acme;100;19;119;;sent\n")
-    inv = by_number(repo)["RK-2026-0001"]
-    assert inv.get("kind") != "credit_note" and len(keys(repo)) == 1
-    again = svc.plan((HEAD + "RK-2026-0001;05.02.2026;Acme;100;19;119;;sent\n").encode(), "x.csv", "invoices")
-    assert again["rows"][0]["action"] == "skip"  # now an ordinary invoice number
+    row = "RK-2026-0001;05.02.2026;Acme;100;19;119;;sent\n"
+    plan = svc.plan((HEAD + row).encode(), "x.csv", "invoices")
+    assert plan["rows"][0]["action"] == "error" and "credit note" in " ".join(plan["rows"][0]["messages"])
+    report = run(svc, HEAD + row)
+    assert report["applied"] is False and not repo.list("invoices") and keys(repo) == []
+    run(svc, HEAD + "RE-2026-0001;05.02.2026;Acme;100;19;119;;sent\n")
+    assert "RE-2026-0001" in by_number(repo)
 
 
 @pytest.mark.parametrize(
