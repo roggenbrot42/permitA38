@@ -27,6 +27,7 @@ from permita38.core.service.accounting_reports import (
     TrialBalanceOut,
     parse_date,
 )
+from permita38.core.service.accounting_status import AccountingStatusOut
 from permita38.core.service.integrity import ACCOUNTING_RULES, IntegrityService, summary
 from permita38.core.service.manual_entries import EntryTemplate
 from permita38.core.service.year_closing import ProvisionInput
@@ -116,7 +117,25 @@ def _plan_lines(lines) -> list[PlanLineOut]:
     return [PlanLineOut(account=ln.account, amount=_euros(ln.amount_cents)) for ln in lines]
 
 
-# ------------------------------------------------------------------ fiscal years, initialisation
+def _accounting_or_vat_read(user: CurrentUser) -> dict:
+    if not any(rights.allowed_for(user, a, "read") for a in ("accounting", "vat")):
+        raise HTTPException(403, "Forbidden")
+    return user
+
+
+# Either-or rule: read on `accounting` OR `vat` (`.rbac` names `accounting`, the same role set with the current matrix).
+_accounting_or_vat_read.rbac = ("accounting", "read", False)  # type: ignore[attr-defined]
+_accounting_or_vat_read.rbac_any = (("accounting", "read"), ("vat", "read"))  # type: ignore[attr-defined]
+StatusRead = Annotated[dict, Depends(_accounting_or_vat_read)]
+
+
+# ------------------------------------------------------------------ status, fiscal years, initialisation
+@router.get("/status", name="accounting_status", response_model=AccountingStatusOut)
+def status(user: StatusRead, services: ServicesDep):
+    """Initialised or not, the years with their bases and whether the rules in use are not yet adviser-confirmed."""
+    return services.accounting_status.status()
+
+
 @router.get("/years", name="list_fiscal_years", response_model=list[models.FiscalYear])
 def list_years(user: Read, services: ServicesDep):
     return [models.FiscalYear(**r) for r in services.fiscal_years.list()]

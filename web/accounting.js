@@ -430,6 +430,24 @@ A.accCloseGo = async el => {
   closeModal(); toast(`Year ${el.dataset.year} ${el.dataset.basis === 'eur' ? 'ended' : 'closed'}`); render();
 };
 
+/* ---------- status: set-up state and adviser banner (accounting.md 16) ---------- */
+/** GET accounting/status; null when it cannot be read (the pages then simply show their normal content). */
+async function accStatus() { try { return await api('GET', 'accounting/status'); } catch { return null; } }
+/** The "Set up accounting" panel shown instead of the tabs until accounting is initialised. The boss sets it up (W8), others ask the boss. */
+function accSetupPanel(title) {
+  const body = isBoss()
+    ? '<p>Accounting has not been set up yet.</p><p><a class="button primary" data-testid="accounting-setup-link" href="#/accounting/setup">Set up accounting</a></p>'
+    : '<p data-testid="accounting-setup-ask">Ask the boss to set up accounting.</p>';
+  return `<div class="head"><div><h1>${esc(title)}</h1></div></div><div class="card" data-testid="accounting-setup"><h2>Set up accounting</h2>${body}</div>`;
+}
+const accAdviserDismissed = () => { try { return sessionStorage.getItem('permita38.adviser.dismissed') === '1'; } catch { return false; } };
+/** The adviser banner while the rules in use are not confirmed by a tax adviser; dismissible per browser session. */
+function accAdviserBanner(st, id = '') {
+  if (!st?.initialised || !st.rules_unconfirmed || accAdviserDismissed()) return '';
+  return `<div class="banner" data-testid="adviser-banner"${id ? ` id="${id}"` : ''} role="status">${esc(st.banner_text)} <button type="button" class="ghost sm" data-a="adviserDismiss" aria-label="Dismiss">Dismiss</button></div>`;
+}
+A.adviserDismiss = el => { try { sessionStorage.setItem('permita38.adviser.dismissed', '1'); } catch { /* storage unavailable */ } el.closest('.banner')?.remove(); };
+
 /* ---------- DATEV export ---------- */
 async function accDatev() {
   const y = ACC.year;
@@ -469,8 +487,13 @@ A.closeModal = () => closeModal();
 const ACC_TABS = { entry: accEntryTab, periods: accPeriods, years: accYears, datev: accDatev, journal: accJournal, ledger: accLedger, 'trial-balance': accTrial, eur: accEur, pnl: accPnl, 'balance-sheet': accBalance, 'open-items': accOpenItems };
 
 PAGES.accounting = async (tab = 'journal') => {
+  const st = await accStatus();
+  if (tab === 'setup' || (st && !st.initialised)) {
+    if (tab === 'setup' && isBoss()) return '<div class="head"><div><h1>Accounting</h1></div></div><div class="card" data-testid="accounting-setup-coming"><h2>Set up accounting</h2><p>The set-up assistant is coming soon.</p></div>';
+    return accSetupPanel('Accounting');
+  }
   await accLoadYears();
-  if (ACC.year === null) return `<div class="head"><div><h1>Accounting</h1></div></div><div class="card">${accEmpty('No fiscal year has been opened yet.')}</div>`;
+  if (ACC.year === null) return accAdviserBanner(st) + `<div class="head"><div><h1>Accounting</h1></div></div><div class="card">${accEmpty('No fiscal year has been opened yet.')}</div>`;
   const basis = (ACC.years.find(y => y.year === ACC.year) || {}).income_basis;
   if (!accTabs(basis).some(([k]) => k === tab) && !accTabsB().some(([k]) => k === tab)) tab = 'journal';   // the EÜR tab of an accrual year (and vice versa) does not exist
   let body;
@@ -480,7 +503,7 @@ PAGES.accounting = async (tab = 'journal') => {
     else if (e.status === 404) body = `<div class="card">${accEmpty('No fiscal year opened for this year.')}</div>`;
     else throw e;
   }
-  return accYearBar(tab, basis) + body;
+  return accAdviserBanner(st) + accYearBar(tab, basis) + body;
 };
 
 A.accYear = el => { ACC.year = Number(el.value); lsSet('permita38.accounting.year', String(ACC.year)); ACC.ledger = ''; render(); };

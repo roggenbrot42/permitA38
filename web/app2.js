@@ -309,7 +309,7 @@ PAGES.doc = async (coll, id) => {
   const frozen = isFrozen(d), fz = frozen ? 'disabled' : '';   // an issued invoice: only the labels, due date, notes, reference change
   let smallYear = false;   // the year's regime sets small_business on a document; it is not chosen (credit-notes-payments.md 5)
   if (isInv && !frozen) {
-    try { const ys = await api('GET', 'years'), y = ys.find(r => String(r.year) === String(d.date || '').slice(0, 4)); smallYear = y ? !!y.small_business : !!s.kleinunternehmer; } catch { smallYear = !!s.kleinunternehmer; }
+    try { const ys = await api('GET', 'accounting/years'), y = ys.find(r => String(r.year) === String(d.date || '').slice(0, 4)); smallYear = y ? !!y.small_business : !!s.kleinunternehmer; } catch { smallYear = !!s.kleinunternehmer; }
   }
   const opt = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
   const klein = s.kleinunternehmer;

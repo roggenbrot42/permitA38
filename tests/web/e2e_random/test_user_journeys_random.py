@@ -141,6 +141,7 @@ class Model:
     absences: list[tuple[date, date]] = field(default_factory=list)
     contracts: int = 0
     allocs: list[tuple[str, float, str, str]] = field(default_factory=list)  # (project id, h/week, start, end)
+    credit_notes: int = 0  # numbered credit notes issued through the UI; they are documents in /api/invoices too
     counters: dict = field(default_factory=lambda: {"tag": 0, "name": 0, "offers": 0, "invoices": 0})
 
     def absent_days(self) -> set[date]:
@@ -571,6 +572,11 @@ class Journey:
         box = norm(self.page.inner_text("#d_totals"))
         assert f"Net {eur(net)}" in box and f"Total {eur(gross)}" in box, (box, eur(net), eur(gross))
         assert self.page.locator("input[data-k=description]").count() == len(lines)
+        tt = self.page.locator("#d_tt")  # tax treatment select of a draft (fixed when the year is small business)
+        if tt.count() and tt.is_enabled() and self.rng.random() < 0.5:
+            assert tt.input_value() == "standard"
+            self.page.select_option("#d_tt", "standard")
+            self.click_render("[data-a=docSave]")
         for e in picked:
             e.invoiced = True
         self.m.docs.append(doc)
@@ -580,17 +586,34 @@ class Journey:
         self._finalize(self.rng.choice([d for d in self.m.docs if d.kind == "invoices" and d.status == "draft"]))
 
     def a_mark_paid(self):
+        """Paid comes from recording a payment in the payments panel (the status menu has no "paid" any more)."""
         doc = self.rng.choice([d for d in self.m.docs if d.kind == "invoices" and d.status == "sent"])
         self._open_doc(doc)
-        # The user enters the "Paid on" date first: choosing "Paid" in the status menu alone leaves the date empty
-        # (see test_regressions.py::test_mark_paid_sets_paid_date).
-        self.page.fill("#d_paid", self.today.isoformat())
-        self.mark_old()
-        self.page.select_option("select[data-change=docStatus]", "paid")
-        self.wait_render()
+        assert self.page.locator("#d_frozen").count() == 1, "an issued invoice is shown frozen"
+        assert self.page.locator("select[data-change=docStatus] option[value=paid]").count() == 0
+        self.page.click("[data-a=payRecord]")
+        # the dialog is prefilled with today and the open amount; the user only confirms
+        assert self.page.input_value("#f_date") == self.today.isoformat()
+        assert self.page.input_value("#f_amount") not in ("", "0", "0,00", "0.00")
+        self.submit_modal()
         doc.status = "paid"
-        self.say(f"mark {doc.number} paid")
+        self.say(f"record payment for {doc.number}")
         assert "paid" in norm(self.page.inner_text("main h1"))
+        assert norm(self.page.inner_text("#pay_open")).startswith("0,00"), self.page.inner_text("#pay_open")
+
+    def a_storno_invoice(self):
+        """Cancel an unpaid issued invoice with a storno credit note (creditPanel, cnStorno)."""
+        doc = self.rng.choice([d for d in self.m.docs if d.kind == "invoices" and d.status == "sent"])
+        self._open_doc(doc)
+        self.page.click("[data-a=cnStorno]")
+        self.page.fill("#f_reason", "Auftrag storniert")
+        self.submit_modal()
+        doc.status = "cancelled"
+        self.m.credit_notes += 1
+        self.say(f"storno {doc.number}")
+        assert "cancelled" in norm(self.page.inner_text("main h1"))
+        assert self.page.locator("#cn_list").count() == 1
+        assert self.page.locator("[data-a=payRecord]").count() == 1  # still listed, but nothing is open any more
 
     # -- expenses, time off
     def a_add_expense(self):
@@ -746,7 +769,13 @@ class Journey:
         for kind in ("offers", "invoices"):
             recs = {d["id"]: d for d in api.get(f"/{kind}")}
             mine = [d for d in m.docs if d.kind == kind]
-            assert set(recs) == {d.id for d in mine}
+            extra = {i for i in recs if i not in {d.id for d in mine}}
+            if kind == "invoices":  # credit notes are documents of their own
+                assert {i for i in extra if recs[i].get("kind") == "credit_note"} == extra, extra
+                assert len(extra) == m.credit_notes, (len(extra), m.credit_notes)
+            else:
+                assert not extra
+            assert {d.id for d in mine} <= set(recs)
             for d in mine:
                 rec = recs[d.id]
                 assert rec["status"] == d.status and rec.get("number") == d.number, (d, rec)
@@ -814,6 +843,7 @@ class Journey:
             acts.append(("finalize_invoice", 5))
         if any(d.kind == "invoices" and d.status == "sent" for d in m.docs):
             acts.append(("mark_paid", 5))
+            acts.append(("storno_invoice", 1))
         return acts
 
     def step(self):
