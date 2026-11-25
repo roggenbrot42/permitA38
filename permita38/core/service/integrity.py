@@ -18,6 +18,7 @@ from pydantic import ValidationError
 
 from permita38.core import calc, documents, money
 from permita38.core import validation as v
+from permita38.core.accounting.types import Bases
 from permita38.core.models import RECORD_MODELS, scenario_project_refs
 from permita38.core.numbering import Pattern, PatternError, normalize_text, parse_pattern, period_key
 from permita38.core.repository import Repository
@@ -174,15 +175,19 @@ def rule_ref_dangling(ctx: Ctx) -> Iterable[Finding]:
         pairs: list[tuple[str, str | None]] = [(c, t) for c, t in REF_TARGETS.items() if table.column(c)]
         if coll == "document_scans":
             pairs.append(("record_id", None))  # the target collection is named by record_coll
+        if coll == "journal_entries":  # polymorphic: `source_coll` names the target collection
+            pairs = [(c, t) for c, t in pairs if c != "source_id"] + [("source_id", None)]
         for rec in rows:
             for col, target in pairs:
                 value = rec.get(col)
                 if not _filled(value) or not isinstance(value, str):
                     continue
-                if col == "record_id":
-                    target = rec.get("record_coll")
+                if col == "record_id" or (col == "source_id" and coll == "journal_entries"):
+                    target = rec.get("record_coll" if col == "record_id" else "source_coll")
                     if target not in ctx.ids:
-                        continue  # state.document_scan_record reports a bad record_coll
+                        continue  # state.document_scan_record reports a bad record_coll; other sources are free text
+                if col == "created_by" and value == "system":
+                    continue  # automatic postings carry the pseudo user "system"
                 if col == "template_id" and value in builtin:
                     continue
                 if value not in ctx.ids.get(target or "", set()):
@@ -685,6 +690,124 @@ def rule_file_sync_conflict(ctx: Ctx) -> Iterable[Finding]:
         yield Finding("file.sync_conflict", WARNING, None, None, None, f"sync conflict copy: {name}")
 
 
+# ---------------------------------------------------------------------------------------------- 10. accounting
+# docs/specs/accounting.md 7.1, 7.6, 7.9. Chain and balance findings are errors; the sanity checks are warnings.
+JOURNAL_PREFIXES = ("journal.", "accounting.")
+
+
+def _years(ctx: Ctx) -> list[int]:
+    years = {r.get("year") for r in ctx.rows("fiscal_years")} | {
+        r.get("fiscal_year") for r in ctx.rows("journal_entries")
+    }
+    return sorted(y for y in years if isinstance(y, int))
+
+
+def rule_journal_chain(ctx: Ctx) -> Iterable[Finding]:
+    """Per fiscal year: numbering gaps, balance, hash chain, the open year's counter and the closed year's anchor."""
+    from permita38.core.service.journal import JournalService
+
+    journal = JournalService(ctx.store)
+    for year in _years(ctx):
+        for f in journal.verify_chain(year):
+            where = f"{year}/{f.entry_no}" if f.entry_no is not None else str(year)
+            yield Finding(f.code, ERROR, "journal_entries", where, None, f.message)
+
+
+def _issued_invoices(ctx: Ctx, start: date) -> Iterable[dict]:
+    """Issued invoices on or after the accounting start. Credit notes (kind = credit_note) are another document."""
+    for inv in ctx.rows("invoices"):
+        day = _day(inv.get("date"))
+        if (
+            inv.get("status", "draft") != "draft"
+            and inv.get("kind") != _CN
+            and not inv.get("credit_kind")
+            and day is not None
+            and day >= start
+        ):
+            yield inv
+
+
+def _has_rates(doc: dict) -> bool:
+    snap = doc.get("issued")
+    return isinstance(snap, dict) and isinstance(snap.get("rates"), dict)
+
+
+def rule_accounting_sanity(ctx: Ctx) -> Iterable[Finding]:
+    from permita38.core.settings import accounting_start
+
+    start = accounting_start(ctx.settings)
+    if start is None:
+        return
+    keys = {r.get("event_key") for r in ctx.rows("journal_entries")}
+    by_id = {r["id"]: r for r in ctx.rows("invoices") if isinstance(r.get("id"), str)}
+    for inv in _issued_invoices(ctx, start):
+        if not _has_rates(inv):
+            yield Finding("accounting.invoice_no_snapshot", WARNING, "invoices", inv.get("id"), "issued",
+                          "issued after the accounting start without its snapshot")  # fmt: skip
+        elif f"issue:{inv.get('id')}" not in keys and _posts_issue_entry(ctx, inv):
+            yield Finding("accounting.invoice_no_entry", WARNING, "invoices", inv.get("id"), None,
+                          "issued after the accounting start but has no issue entry")  # fmt: skip
+    for note in ctx.rows("invoices"):
+        if note.get("kind") == _CN and note.get("status", "draft") != "draft" and not _has_rates(note):
+            yield Finding("accounting.credit_note_no_snapshot", WARNING, "invoices", note.get("id"), "issued",
+                          "credit note issued without its snapshot")  # fmt: skip
+    for pay in ctx.rows("payments"):
+        target = by_id.get(pay.get("document_id"))
+        day = _day(target.get("date")) if target else None
+        if target is None or day is None or day < start or target.get("credit_kind") or not _has_rates(target):
+            continue
+        if f"payment:{pay.get('id')}" not in keys:
+            yield Finding("accounting.payment_no_entry", WARNING, "payments", pay.get("id"), None,
+                          "payment has no payment entry")  # fmt: skip
+    for exp in ctx.rows("expenses"):
+        rev = exp.get("bill_rev")
+        if isinstance(rev, int) and rev > 0 and f"expense:{exp.get('id')}:bill:r{rev}" not in keys:
+            yield Finding("accounting.expense_no_entry", WARNING, "expenses", exp.get("id"), "bill_rev",
+                          f"bill revision {rev} has no matching entry")  # fmt: skip
+
+
+def _posts_issue_entry(ctx: Ctx, inv: dict) -> bool:
+    """Whether the engine posts an issue entry for this invoice (some basis/treatment combinations and all-zero
+    invoices post nothing, accounting 9.1). Unreadable snapshots count as posting, so the gap is reported."""
+    from permita38.core.accounting.postings_issue import issue_entry
+    from permita38.core.service.postings import stored_snapshot
+
+    try:
+        snap = stored_snapshot(inv)
+        day = _day(inv.get("date"))
+        fy = next((r for r in ctx.rows("fiscal_years") if day and r.get("year") == day.year), None)
+        if snap is None or day is None or fy is None:
+            return True
+        return issue_entry(snap, Bases(fy["income_basis"], fy["vat_basis"]), day) is not None
+    except (KeyError, TypeError, ValueError, ArithmeticError):
+        return True
+
+
+def rule_accounting_vat_drift(ctx: Ctx) -> Iterable[Finding]:
+    from permita38.core.service.locks import LockService
+    from permita38.core.service.vat_returns import VatReturnService
+
+    if not any(r.get("status") == "final" for r in ctx.rows("vat_returns")):
+        return
+    svc = VatReturnService(ctx.store, LockService(ctx.store))
+    for row in ctx.rows("vat_returns"):
+        if row.get("status") != "final":
+            continue
+        drift = svc.get(str(row["id"])).get("drift") or {}
+        if drift.get("entries") or drift.get("tax_cents"):
+            yield Finding("accounting.vat_drift", WARNING, "vat_returns", row.get("id"), None,
+                          "the final return differs from the journal (drift)")  # fmt: skip
+
+
+def rule_accounting_synced_folder(ctx: Ctx) -> Iterable[Finding]:
+    from permita38.core.settings import accounting_start
+
+    if accounting_start(ctx.settings) is not None and ctx.store.conflicts():
+        yield Finding("accounting.synced_folder", WARNING, None, None, None,
+                      "the data folder is synced and has conflict copies: use permitA38 on one device at a time "
+                      "while accounting is on")  # fmt: skip
+
+
 RULES: list[Callable[[Ctx], Iterable[Finding]]] = [
     rule_type_misplaced,
     rule_model_invalid,
@@ -710,6 +833,10 @@ RULES: list[Callable[[Ctx], Iterable[Finding]]] = [
     rule_file_missing,
     rule_file_orphan,
     rule_file_sync_conflict,
+    rule_journal_chain,
+    rule_accounting_sanity,
+    rule_accounting_vat_drift,
+    rule_accounting_synced_folder,
 ]
 
 

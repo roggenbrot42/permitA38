@@ -10443,13 +10443,16 @@
           "accounting"
         ],
         "summary": "Accounting Integrity",
+        "description": "Balance and hash chain per fiscal year plus the accounting sanity warnings (spec 7.1, 7.6, 7.9).",
         "operationId": "accounting_integrity_api_accounting_integrity_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/AccountingIntegrity"
+                }
               }
             }
           }
@@ -12584,6 +12587,26 @@
         ],
         "title": "AccountingInitIn",
         "description": "Initialisation request (accounting.md 16 step 1 and 9)."
+      },
+      "AccountingIntegrity": {
+        "properties": {
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/IntegrityFinding"
+            },
+            "type": "array",
+            "title": "Findings"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/IntegritySummary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "findings",
+          "summary"
+        ],
+        "title": "AccountingIntegrity"
       },
       "AdoptVendorItemIn": {
         "properties": {
@@ -19625,6 +19648,85 @@
           "end"
         ],
         "title": "IncomingPlanIn"
+      },
+      "IntegrityFinding": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "collection": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collection"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "severity",
+          "message"
+        ],
+        "title": "IntegrityFinding"
+      },
+      "IntegritySummary": {
+        "properties": {
+          "errors": {
+            "type": "integer",
+            "title": "Errors"
+          },
+          "warnings": {
+            "type": "integer",
+            "title": "Warnings"
+          },
+          "info": {
+            "type": "integer",
+            "title": "Info"
+          }
+        },
+        "type": "object",
+        "required": [
+          "errors",
+          "warnings",
+          "info"
+        ],
+        "title": "IntegritySummary"
       },
       "InvoiceIn": {
         "properties": {

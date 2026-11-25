@@ -486,6 +486,7 @@ IMPLEMENTED = {
     ("GET", "/api/accounting/entry-templates"),
     ("POST", "/api/accounting/entries"),
     ("POST", "/api/accounting/entries/{entry_id}/reverse"),
+    ("GET", "/api/accounting/integrity"),
     ("GET", "/api/invoices/{rid}/payments"),
     ("POST", "/api/invoices/{rid}/payments"),
     ("POST", "/api/payments/{payment_id}/reverse"),
