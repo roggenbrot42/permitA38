@@ -92,7 +92,7 @@ def test_special_prepayment_and_credit(eur):
     c = eur.special_prepayment_credit(2026, "dec26", 20000, USER)
     assert c is not None
     # Kz 39 = 200,00: D vat_prepayments 20000 / C vat_special_prepayment -20000, no income_date, 31 Dec
-    assert c.event_key == "vat:dec26:credit" and c.origin == "auto" and str(c.document_date) == "2026-12-31"
+    assert c.event_key == "vat:dec26:credit:r1" and c.origin == "auto" and str(c.document_date) == "2026-12-31"
     assert lines(c) == [("vat_prepayments", 20000, None), ("vat_special_prepayment", -20000, None)]
     again = eur.special_prepayment_credit(2026, "dec26", 20000, USER)
     assert again is not None and again.id == c.id
@@ -324,7 +324,7 @@ def test_credit_reversal_on_reopen(eur):
     c = eur.special_prepayment_credit(2026, "dec26", 20000, USER)
     assert c is not None
     r = eur.special_prepayment_credit_reverse(2026, "dec26", USER)
-    assert r is not None and r.event_key == "vat:dec26:credit:rev" and r.reverses_id == c.id
+    assert r is not None and r.event_key == "vat:dec26:credit:r1:rev" and r.reverses_id == c.id
     assert lines(r) == [("vat_prepayments", -20000, None), ("vat_special_prepayment", 20000, None)]
     again = eur.special_prepayment_credit_reverse(2026, "dec26", USER)
     assert again is not None and again.id == r.id

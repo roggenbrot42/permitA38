@@ -11369,7 +11369,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/VatReturn"
+                }
               }
             }
           },
@@ -11573,7 +11575,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SpecialPrepaymentOut"
+                }
               }
             }
           },
@@ -11615,7 +11619,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SpecialPrepaymentOut"
+                }
               }
             }
           },
@@ -24278,6 +24284,145 @@
         ],
         "title": "SpecialPrepaymentIn"
       },
+      "SpecialPrepaymentOut": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "dauerfrist": {
+            "type": "boolean",
+            "title": "Dauerfrist",
+            "default": false
+          },
+          "applies": {
+            "type": "boolean",
+            "title": "Applies",
+            "default": false
+          },
+          "proposal": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Proposal",
+            "default": "0.00"
+          },
+          "months": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months"
+          },
+          "previous_kz83": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Previous Kz83",
+            "default": "0.00"
+          },
+          "previous_kz39": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Previous Kz39",
+            "default": "0.00"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due Date"
+          },
+          "payment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpecialPrepaymentPayment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "year"
+        ],
+        "title": "SpecialPrepaymentOut",
+        "description": "Sondervorauszahlung of a year: proposal, entered amount and the booked payment (docs/specs/ustva.md)."
+      },
+      "SpecialPrepaymentPayment": {
+        "properties": {
+          "entry_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Key"
+          },
+          "paid_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid On"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "reversed": {
+            "type": "boolean",
+            "title": "Reversed",
+            "default": false
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "SpecialPrepaymentPayment",
+        "description": "The booked payment of a Sondervorauszahlung."
+      },
       "SuggestStartIn": {
         "properties": {
           "hours": {
@@ -28454,6 +28599,68 @@
         "title": "VatBox",
         "description": "One Kennzahl: base/tax (with booked figures) or a single amount, all decimal strings."
       },
+      "VatPayment": {
+        "properties": {
+          "entry_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Id"
+          },
+          "event_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Key"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "payment",
+              "refund"
+            ],
+            "title": "Kind",
+            "default": "payment"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+            "format": "decimal",
+            "title": "Amount",
+            "default": "0.00"
+          },
+          "reversed": {
+            "type": "boolean",
+            "title": "Reversed",
+            "default": false
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "VatPayment",
+        "description": "One payment or refund of Kz 83 read from the journal (accounting.md 9.6); reversed ones are listed, flagged."
+      },
       "VatReturn": {
         "properties": {
           "id": {
@@ -28767,6 +28974,63 @@
               }
             ],
             "title": "Finalised By"
+          },
+          "payments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/VatPayment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payments"
+          },
+          "paid": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paid"
+          },
+          "open": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]+\\.[0-9]{2,6}$",
+                "format": "decimal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open"
+          },
+          "payment_state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "none",
+                  "open",
+                  "paid",
+                  "overpaid"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment State"
           }
         },
         "additionalProperties": true,

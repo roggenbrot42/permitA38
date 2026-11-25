@@ -4,14 +4,15 @@ Area `vat`: boss and accountant read and write, employee nothing. Handlers answe
 land. Every route that changes something is ``SessionOnly``: no write to `vat` through API tokens in v1.
 """
 
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response
 
 from permita38.api.deps import Needs, ServicesDep, SessionOnly
-from permita38.api.routers.accounting import not_implemented
 from permita38.core import models
 from permita38.core.errors import ServiceError
+from permita38.core.service.special_prepayment import to_cents
 from permita38.core.service.vat_returns import VatReturnListItem
 from permita38.core.service.zm_reports import ZmListItem
 from permita38.core.validation import VatPeriodKind
@@ -61,7 +62,7 @@ def finalize_return(rid: str, user: Write, services: ServicesDep, confirm_gap: A
 
 @returns.post("/{rid}/reopen", dependencies=[SessionOnly], name="reopen_vat_return", response_model=models.VatReturn)
 def reopen_return(rid: str, user: Write, services: ServicesDep):
-    return models.VatReturn(**services.vat_returns.reopen(rid))
+    return models.VatReturn(**services.vat_returns.reopen(rid, user))
 
 
 @returns.post("/{rid}/filed", dependencies=[SessionOnly], name="mark_vat_return_filed", response_model=models.VatReturn)
@@ -80,9 +81,16 @@ def box_lines(rid: str, kz: str, user: Read, services: ServicesDep):
     return services.vat_returns.lines(rid, kz)
 
 
-@returns.post("/{rid}/payment", status_code=201, dependencies=[SessionOnly], name="pay_vat_return")
+@returns.post(
+    "/{rid}/payment",
+    status_code=201,
+    dependencies=[SessionOnly],
+    name="pay_vat_return",
+    response_model=models.VatReturn,
+)
 def pay_return(rid: str, body: models.VatReturnPaymentIn, user: Write, services: ServicesDep):
-    not_implemented()
+    cents = to_cents(body.amount)
+    return models.VatReturn(**services.vat_returns.pay(rid, date.fromisoformat(body.date), cents, body.kind, user))
 
 
 def _export_view(rid: str, services: ServicesDep) -> tuple[dict, dict[str, list[dict]]]:
@@ -139,14 +147,19 @@ def export_return_json(rid: str, user: Read, services: ServicesDep):
 
 
 # ------------------------------------------------------------------ special prepayment (Dauerfristverlaengerung)
-@special.get("/special-prepayment", name="get_special_prepayment")
+@special.get("/special-prepayment", name="get_special_prepayment", response_model=models.SpecialPrepaymentOut)
 def get_special_prepayment(year: Year, user: Read, services: ServicesDep):
-    not_implemented()
+    return models.SpecialPrepaymentOut(**services.special_prepayment.get(year))
 
 
-@special.put("/special-prepayment", dependencies=[SessionOnly], name="set_special_prepayment")
+@special.put(
+    "/special-prepayment",
+    dependencies=[SessionOnly],
+    name="set_special_prepayment",
+    response_model=models.SpecialPrepaymentOut,
+)
 def put_special_prepayment(body: models.SpecialPrepaymentIn, user: Write, services: ServicesDep):
-    not_implemented()
+    return models.SpecialPrepaymentOut(**services.special_prepayment.put(body.year, body.amount, body.paid_on, user))
 
 
 # ------------------------------------------------------------------ ZM

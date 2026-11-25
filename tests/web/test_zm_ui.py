@@ -86,11 +86,11 @@ def test_zm_quarter_cycle_correction_banner_and_hostile_text(browser, srv):
     pg.goto(srv.base + "/#/today")
     pg.wait_for_selector("#vat-banners .banner.bad:has-text('ZM Q1 2026')")
     assert "Overdue" in pg.inner_text("#vat-banners .banner.bad")
-    # VAT page: navigation entry, tabs, the Returns placeholder
+    # VAT page: navigation entry, tabs, the Returns tab
     pg.click("nav.side a[href='#/vat']")
     pg.wait_for_selector(".tabs a:has-text('ZM')")
     pg.click(".tabs a:has-text('Returns')")
-    pg.wait_for_selector("text=coming")
+    pg.wait_for_selector("#vat-list")
     pg.click(".tabs a:has-text('ZM')")
     row = pg.locator("tr[data-href='#/vat/zm/2026/1']")
     row.wait_for()
