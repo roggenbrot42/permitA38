@@ -310,32 +310,204 @@ def test_money_uses_the_customer_rate_and_grows_while_the_timer_runs(pg, srv):
     assert clock.inner_text().strip().count(":") == 2
 
 
-def test_duration_only_for_today_ends_now(pg, srv):
-    pg.clock.set_fixed_time("2026-11-06T14:30:00")
-    pg.fill("#t_date", "2026-11-06")
-    pg.dispatch_event("#t_date", "change")
-    pg.fill("#t_dur", "1:30")
-    pg.dispatch_event("#t_dur", "change")
-    assert pg.input_value("#t_start") == "13:00" and pg.input_value("#t_end") == "14:30"
-    assert pg.input_value("#t_dur") == "1:30"
+def _set(pg, sel, value):
+    pg.fill(sel, value)
+    pg.dispatch_event(sel, "change")
 
 
-def test_duration_only_for_today_never_starts_before_midnight(pg, srv):
-    pg.clock.set_fixed_time("2026-11-06T00:20:00")
-    pg.fill("#t_date", "2026-11-06")
-    pg.fill("#t_dur", "1:00")
-    pg.dispatch_event("#t_dur", "change")
-    assert pg.input_value("#t_start") == "00:00" and pg.input_value("#t_end") == "01:00"
+def _vals(pg):
+    return {k: pg.input_value("#t_" + k) for k in ("date", "start", "end_date", "end", "dur")}
 
 
-def test_duration_only_for_another_day_starts_at_nine(pg, srv):
-    pg.clock.set_fixed_time("2026-11-06T14:30:00")
-    pg.fill("#t_date", "2026-11-03")
-    pg.dispatch_event("#t_date", "change")
-    pg.fill("#t_dur", "2:15")
-    pg.dispatch_event("#t_dur", "change")
-    assert pg.input_value("#t_start") == "09:00" and pg.input_value("#t_end") == "11:15"
-    assert "err" not in (pg.get_attribute("#toast", "class") or "")
+def test_duration_after_start_sets_stop_on_the_next_day(pg, srv):  # #121 example 1
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "22:00")
+    _set(pg, "#t_dur", "8:00")
+    v = _vals(pg)
+    assert (v["end_date"], v["end"], v["dur"]) == ("2026-11-21", "06:00", "8:00")
+
+
+def test_start_and_stop_give_the_duration(pg, srv):  # #121 example 2
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "09:00")
+    _set(pg, "#t_end", "12:30")
+    assert _vals(pg)["dur"] == "3:30"
+
+
+def test_stop_and_duration_give_the_start(pg, srv):  # #121 example 3
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_dur", "1:30")
+    assert pg.input_value("#t_start") == "" and pg.input_value("#t_end") == ""  # nothing is guessed
+    _set(pg, "#t_end", "17:00")
+    v = _vals(pg)
+    assert (v["date"], v["start"], v["dur"]) == ("2026-11-20", "15:30", "1:30")
+
+
+def test_overnight_stop_date_gives_the_duration(pg, srv):  # #121 example 4
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "23:30")
+    _set(pg, "#t_end_date", "2026-11-21")
+    _set(pg, "#t_end", "00:15")
+    assert _vals(pg)["dur"] == "0:45"
+
+
+def test_stop_before_start_is_invalid_and_add_is_refused(pg, srv):  # #121 example 5
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "10:00")
+    _set(pg, "#t_end", "09:00")
+    assert pg.input_value("#t_dur") == ""
+    assert pg.get_attribute("#t_end", "aria-invalid") == "true"
+    pg.click("[data-a=timerAdd]")
+    assert "Stop must be after start" in pg.inner_text("#toast")
+    assert api(srv, "GET", "entries") == []
+
+
+def test_more_than_24_hours_is_invalid(pg, srv):
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "08:00")
+    _set(pg, "#t_end_date", "2026-11-21")
+    _set(pg, "#t_end", "09:00")
+    assert pg.input_value("#t_dur") == "" and pg.get_attribute("#t_end", "aria-invalid") == "true"
+    assert (
+        pg.get_attribute("#t_end_date", "max") == "2026-11-21"
+        and pg.get_attribute("#t_end_date", "min") == "2026-11-20"
+    )
+
+
+def test_moving_the_start_date_moves_the_stop_date(pg, srv):  # #121 example 6
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "08:00")
+    _set(pg, "#t_end", "10:00")
+    _set(pg, "#t_date", "2026-11-19")
+    v = _vals(pg)
+    assert (v["date"], v["end_date"], v["start"], v["end"], v["dur"]) == (
+        "2026-11-19",
+        "2026-11-19",
+        "08:00",
+        "10:00",
+        "2:00",
+    )
+
+
+def test_overnight_entry_is_saved_with_end_before_start(pg, srv):
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "22:00")
+    _set(pg, "#t_dur", "8:00")
+    pg.click("[data-a=timerAdd]")
+    pg.wait_for_function("() => document.querySelector('#toast').textContent === 'Saved'")
+    (e,) = api(srv, "GET", "entries")
+    assert (e["date"], e["start"], e["end"], e["minutes"]) == ("2026-11-20", "22:00", "06:00", 480)
+
+
+def test_duration_only_entry_is_saved_without_times(pg, srv):
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_dur", "1:30")
+    pg.click("[data-a=timerAdd]")
+    pg.wait_for_function("() => document.querySelector('#toast').textContent === 'Saved'")
+    (e,) = api(srv, "GET", "entries")
+    assert (e["date"], e.get("start"), e.get("end"), e["minutes"]) == ("2026-11-20", None, None, 90)
+
+
+def test_card_is_one_row_in_both_modes(browser, srv):
+    api(srv, "POST", "timer/start", {})
+    api(srv, "POST", "timer/stop", {"discard": True})
+    for width in (1400, 1920):
+        for running in (False, True):
+            ctx = browser.new_context(viewport={"width": width, "height": 900})
+            ctx.add_init_script(f"localStorage.setItem('permita38.token', '{srv.token}')")
+            page = ctx.new_page()
+            page.goto(srv.base + "/#/today")
+            page.wait_for_selector("#t_proj")
+            if running:
+                page.click("[data-a=timeMode][data-mode=tracker]")
+                page.click("[data-a=timerStart]")
+                page.wait_for_selector("[data-a=timerStop]")
+            heights = []
+            for mode in ("manual", "tracker", "manual"):
+                page.click(f"[data-a=timeMode][data-mode={mode}]")
+                where = (width, running, mode)
+                box = page.locator("#t_note").bounding_box()  # buttons are centred against label+input by design
+                lo, hi = box["y"], box["y"] + box["height"]
+                # manual mode always shows Add (a running timer is edited via the form); tracker shows Stop or Start
+                action = (
+                    "[data-a=timerAdd]"
+                    if mode == "manual"
+                    else ("[data-a=timerStop]" if running else "[data-a=timerStart]")
+                )
+                for sel in (
+                    "[data-a=timeMode][data-mode=manual]",
+                    "[data-a=timeMode][data-mode=tracker]",
+                    action,
+                ):
+                    b = page.locator(sel).bounding_box()
+                    centre = b["y"] + b["height"] / 2
+                    assert lo <= centre <= hi, (where, sel, centre, lo, hi)
+                heights.append(
+                    page.locator(".timer").first.evaluate("e => e.closest('.card').getBoundingClientRect().height")
+                )
+                if mode == "manual":
+                    assert page.evaluate(
+                        "['#t_date', '#t_end_date', '#t_start', '#t_end', '#t_dur'].every(q => { const e = document.querySelector(q); return e.scrollWidth <= e.clientWidth; })"
+                    ), (where, "input clipped")
+                assert page.locator("#t_note").bounding_box()["width"] >= 100, where
+                assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+            assert max(heights) - min(heights) <= 2, (width, running, heights)
+            if running:
+                page.click("[data-a=timeMode][data-mode=tracker]")
+                page.click("[data-a=timerStop]")
+                page.wait_for_selector("[data-a=timerStart]")
+            ctx.close()
+
+
+def test_add_after_typing_duration_over_start_and_stop_counts_as_edit(pg, srv):
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "09:00")
+    _set(pg, "#t_end", "12:30")
+    pg.fill("#t_dur", "1:00")  # no change event
+    pg.click("[data-a=timerAdd]")
+    pg.wait_for_function("() => document.querySelector('#toast').textContent === 'Saved'")
+    (e,) = api(srv, "GET", "entries")
+    assert (e["start"], e["end"], e["minutes"]) == ("09:00", "10:00", 60)
+
+
+def test_add_after_typing_stop_with_start_set_counts_as_edit(pg, srv):
+    _set(pg, "#t_date", "2026-11-20")
+    _set(pg, "#t_start", "09:00")
+    _set(pg, "#t_end", "12:30")
+    pg.fill("#t_end", "11:00")  # no change event
+    pg.click("[data-a=timerAdd]")
+    pg.wait_for_function("() => document.querySelector('#toast').textContent === 'Saved'")
+    (e,) = api(srv, "GET", "entries")
+    assert (e["start"], e["end"], e["minutes"]) == ("09:00", "11:00", 120)
+
+
+def _prefill(pg, started_local, now_local):
+    """timerPrefill() with S.timer.started and the clock set to the given local times (ISO strings)."""
+    return pg.evaluate(
+        """([a, n]) => {
+            const RealDate = Date, fixed = new RealDate(n).getTime();
+            globalThis.Date = class extends RealDate { constructor(...x) { super(...(x.length ? x : [fixed])); } static now() { return fixed; } };
+            try { S.timer = { running: true, started: new RealDate(a).getTime() / 1000 }; return timerPrefill(); }
+            finally { globalThis.Date = RealDate; }
+        }""",
+        [started_local, now_local],
+    )
+
+
+def test_timer_prefill_across_midnight(pg):
+    v = _prefill(pg, "2026-11-20T22:00:00", "2026-11-21T01:30:00")
+    assert (v["date"], v["start"], v["endDate"], v["end"], v["dur"]) == (
+        "2026-11-20",
+        "22:00",
+        "2026-11-21",
+        "01:30",
+        "3:30",
+    )
+
+
+def test_timer_prefill_over_24_hours_stops_at_2359_of_the_start_day(pg):
+    v = _prefill(pg, "2026-11-20T09:00:00", "2026-11-22T10:00:00")
+    assert (v["date"], v["start"], v["endDate"], v["end"]) == ("2026-11-20", "09:00", "2026-11-20", "23:59")
 
 
 def _stop_requests(pg):
