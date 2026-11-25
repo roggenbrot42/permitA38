@@ -27,6 +27,7 @@ from permita38.core.service.sales import SalesService
 from permita38.core.service.trips import TripService
 from permita38.core.settings import ACCOUNTING_START_KEY
 
+from .test_init_review import answer_external_periods  # noqa: F401  (autouse fixture)
 from .test_invoice_freeze import cust, issue, store  # noqa: F401  (fixtures)
 from .test_issue_posting import customer, init, line, repo, sales  # noqa: F401  (fixtures and helpers)
 from .test_payments import BOSS, TODAY, pay  # noqa: F401  (fixtures)

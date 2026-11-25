@@ -160,7 +160,7 @@ class OpeningItemService:
         if not delta:
             return self.journal.get_by_event_key(base) if count else None
         lines = [
-            PostLine(role=r, amount_cents=v, open_item_id=ident if r in OPEN_ITEM_ROLES else None)
+            PostLine(role=r, amount_cents=v, open_item_id=ident.split(":")[0] if r in OPEN_ITEM_ROLES else None)
             for r, v in delta.items()
         ]
         key = base if count == 0 else f"{base}:r{count}"

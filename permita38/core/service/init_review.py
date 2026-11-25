@@ -92,6 +92,10 @@ class ExternalPeriod:
     from_date: date
     to_date: date
 
+    @property
+    def key(self) -> str:
+        return f"external_return:{self.year}:{self.kind}:{self.no}"
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "year": self.year,
@@ -183,8 +187,8 @@ class ReviewApplier:
                 else:
                     self._keep_as_paid(rec)
             elif item.code == "expense_prepaid":
-                # a year before the start has no journal: the payment posts on the start date, the stored date is kept
-                self.store.save("expenses", {**rec, "paid_on": start.isoformat(), "paid_on_original": rec["paid_on"]})
+                # nothing to change: the record keeps its paid_on; the posting turns the pre-start payment into the
+                # opening item ``open:<year>:expense:<id>:prepaid``
                 bump("prepaid")
             elif ans.action == "date":
                 self.store.save("invoices", {**rec, "paid_date": ans.date})

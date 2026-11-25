@@ -244,6 +244,8 @@ class ExpensePostingService:
         bill = None if prestart else expense_bill_entry(engine, bases, bill_first, bill_closed)
         pay = None
         pay_first = bill_first
+        if engine.paid_on is not None and engine.paid_on < start:
+            paid = None  # paid before the start: the payment is the opening item ``...:prepaid``, never an entry
         if paid is not None:
             pay_first = self._engine_first(paid, first_open, stored.get("pay"))
             pay_closed = self._closed(paid) if year_closed is None else year_closed
@@ -445,22 +447,40 @@ class ExpensePostingService:
 
         start = accounting_start(self.store.settings())
         day, paid = _day(rec.get("date")), _day(rec.get("paid_on"))
-        if start is None or day is None or day >= start:
+        if start is None or day is None:
             return None
+        late = day >= start  # dated on/after the start: only a payment before it makes an opening item (step 5a)
+        prepaid = late and paid is not None and paid < start
         uid = str((user or {}).get("id") or "system")
         lines: list[PostLine] = []
-        if not deleted and (paid is None or paid >= start):
+        if not deleted and (prepaid or not late):
             fy = self.journal.ensure_year(start.year, uid)
             bases = Bases(cast(IncomeBasis, fy["income_basis"]), cast(VatBasis, fy["vat_basis"]))
             engine = self._engine(rec, fy, (1, 1))
-            bill = expense_bill_entry(engine, bases, engine.date, False)
-            for ln in bill.lines if bill is not None else ():
-                if str(ln.role) in EXPENSE_BALANCE_ROLES and ln.amount_cents:
-                    lines.append(PostLine(amount_cents=int(ln.amount_cents), role=str(ln.role)))
+            if prepaid:  # the balance-sheet lines of the payment, the bank line is the opening counter line
+                entry = expense_pay_entry(engine, bases, start, False)
+                for ln in entry.lines if entry is not None else ():
+                    if str(ln.role) in EXPENSE_BALANCE_ROLES and ln.amount_cents:
+                        lines.append(
+                            PostLine(
+                                amount_cents=int(ln.amount_cents),
+                                role=str(ln.role),
+                                open_item_id=str(rec["id"]) if ln.role == "payables" else None,
+                            )
+                        )
+            elif paid is None or paid >= start:
+                bill = expense_bill_entry(engine, bases, engine.date, False)
+                for ln in bill.lines if bill is not None else ():
+                    if str(ln.role) in EXPENSE_BALANCE_ROLES and ln.amount_cents:
+                        lines.append(PostLine(amount_cents=int(ln.amount_cents), role=str(ln.role)))
         source = dataclasses.replace(self._source(rec, "bill", user, False), event="opening_expense", origin="opening")
         name = str(rec.get("vendor") or rec.get("description") or rec["id"])
         return OpeningItemService(self.store, self.journal).sync(
-            "expense", str(rec["id"]), lines, source, f"Opening item expense {name}"[:200]
+            "expense",
+            f"{rec['id']}:prepaid" if late else str(rec["id"]),
+            lines,
+            source,
+            f"Opening item expense {name}"[:200],
         )
 
     post_opening = sync_opening

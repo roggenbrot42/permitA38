@@ -19,6 +19,7 @@ from permita38.core.service.journal import JournalService
 from permita38.core.service.opening_items import OpeningItemService
 
 from .test_expense_postings import rs  # noqa: F401  (fixture)
+from .test_init_review import answer_external_periods  # noqa: F401  (autouse fixture)
 from .test_invoice_freeze import cust, issue, store  # noqa: F401  (fixtures)
 from .test_issue_posting import customer, line, lock_through, repo, sales  # noqa: F401  (fixtures and helpers)
 from .test_payments import BOSS, pay  # noqa: F401  (fixtures)

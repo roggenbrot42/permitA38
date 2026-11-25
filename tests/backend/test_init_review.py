@@ -29,6 +29,25 @@ TODAY = date(2026, 6, 10)  # the months January..May 2026 have ended
 PARAMS = models.AccountingInitIn(chart="skr03", income_basis="accrual", vat_basis="soll", accounting_start="2026-01-01")
 
 
+@pytest.fixture(autouse=True)
+def answer_external_periods(monkeypatch):
+    """Every ended period needs an answer (step 5b). Tests that do not care for it get "none filed" for all periods;
+    a test that passes any ``external_returns`` itself is left alone."""
+    real = AccountingInitService.run
+
+    def run(self, params, user=None, today=None):
+        if not params.external_returns:
+            try:
+                periods = self.external_periods(params, today)
+            except ServiceError:  # an invalid start: the run itself refuses
+                periods = []
+            none = [models.ExternalReturnIn(year=p.year, kind=p.kind, no=p.no, none_filed=True) for p in periods]
+            params = params.model_copy(update={"external_returns": none})
+        return real(self, params, user, today)
+
+    monkeypatch.setattr(AccountingInitService, "run", run)
+
+
 def res(key: str, action: str, **extra) -> models.ReviewResolutionIn:
     return models.ReviewResolutionIn(key=key, action=action, **extra)
 
@@ -193,6 +212,8 @@ def test_all_resolutions_apply_and_every_effect_is_stored(repo):
         models.ExternalReturnIn(year=2026, kind="month", no=1, kz83="123.45", filed_on="2026-02-10"),
         models.ExternalReturnIn(year=2026, kind="month", no=2, kz83="-50.00", kz39="10.00", filed_on="2026-03-09"),
         models.ExternalReturnIn(year=2026, kind="month", no=3, none_filed=True),
+        models.ExternalReturnIn(year=2026, kind="month", no=4, none_filed=True),
+        models.ExternalReturnIn(year=2026, kind="month", no=5, none_filed=True),
     ]
     params = PARAMS.model_copy(update={"review_resolutions": answers(repo), "external_returns": filed})
     result = AccountingInitService(repo).run(params, BOSS, TODAY)
@@ -205,9 +226,9 @@ def test_all_resolutions_apply_and_every_effect_is_stored(repo):
     typed = repo.get("expenses", "rctyped1")
     assert typed["tax_treatment"] == "reverse_charge_eu_service" and typed["vat"] == 38.0
 
-    # prepaid before the start: its payment posts on the start date, the stored date is kept beside it
+    # prepaid before the start: the record is untouched (its payment is the opening item ``...:prepaid``)
     pre = repo.get("expenses", "prepaid1")
-    assert (pre["paid_on"], pre["paid_on_original"]) == ("2026-01-01", "2025-12-30")
+    assert pre["paid_on"] == "2025-12-30" and "paid_on_original" not in pre
 
     # legacy paid dates: given, the invoice date, kept as stored (before the invoice date)
     assert repo.get("invoices", "paidnodt1")["paid_date"] == "2026-03-05"
@@ -318,7 +339,9 @@ def test_api_review_resolutions_and_external_returns(app, clients, tmp_path, mon
         {"key": "expenses:rcnosup1:rc_without_supplier", "action": "treatment", "treatment": "standard"},
         {"key": "invoices:paidnodt1:legacy_paid_no_date", "action": "confirm"},
     ]
-    body["external_returns"] = [{"year": 2026, "kind": "month", "no": 1, "kz83": "10.50", "filed_on": "2026-02-12"}]
+    body["external_returns"] = [{"year": 2026, "kind": "month", "no": 1, "kz83": "10.50", "filed_on": "2026-02-12"}] + [
+        {"year": p["year"], "kind": p["kind"], "no": p["no"], "none_filed": True} for p in got["external_returns"][1:]
+    ]  # every other ended period (the real today in the test is not pinned)
     bad = boss.post(
         "/api/accounting/init", json={**body, "external_returns": [{"year": 2026, "kind": "month", "no": 1}]}
     )
@@ -328,3 +351,80 @@ def test_api_review_resolutions_and_external_returns(app, clients, tmp_path, mon
     assert r.json()["counts"]["external_returns"] == 1
     assert store.get("expenses", "rcnosup1")["tax_treatment"] == "standard"
     assert store.get("invoices", "paidnodt1")["paid_date"] == "2026-03-01"
+
+
+def _cents_of(ln) -> int:
+    return int(round(Decimal(str(ln.amount)) * 100))
+
+
+def _roles(entries, key_part):
+    """role -> summed cents over the entries whose key contains ``key_part``."""
+    out: dict[str, int] = {}
+    for e in entries:
+        if key_part in e.event_key:
+            for ln in e.lines:
+                out[str(ln.role)] = out.get(str(ln.role), 0) + _cents_of(ln)
+    return out
+
+
+def _prepaid_run(repo, basis: str):
+    """A bill of 10.00 net + 19 % = 11.90 gross dated 2026-02-01, paid 2025-12-30 (before the start)."""
+    repo.save(
+        "expenses",
+        {"id": "prepaid1", "date": "2026-02-01", "net": 10.0, "vat": 1.9, "vat_rate": 19.0, "category": "software",
+         "paid_on": "2025-12-30"},
+    )  # fmt: skip
+    svc = AccountingInitService(repo)
+    params = PARAMS.model_copy(update={"income_basis": basis})
+    key = next(r.key for r in svc.check(params, TODAY) if r.id == "prepaid1")
+    params = params.model_copy(update={"review_resolutions": [res(key, "confirm")]})
+    svc.run(params, BOSS, TODAY)
+    return JournalService(repo).entries(2026, limit=500)
+
+
+def test_prepaid_expense_accrual_posts_an_opening_item_and_keeps_paid_on(repo):
+    entries = _prepaid_run(repo, "accrual")
+    # opening item: the payment's payables line (D 1190) against opening_balance (C 1190)
+    assert _roles(entries, "open:2026:expense:prepaid1:prepaid") == {"payables": 1190, "opening_balance": -1190}
+    # the bill posts normally: C payables 1190; no payment entry. Payables: -1190 (bill) + 1190 (opening) = 0
+    assert _roles(entries, "expense:prepaid1:bill").get("payables") == -1190
+    assert not any(":pay:" in e.event_key for e in entries)
+    assert sum(_cents_of(ln) for e in entries for ln in e.lines if ln.role == "payables") == 0
+    rec = repo.get("expenses", "prepaid1")
+    assert rec["paid_on"] == "2025-12-30" and "paid_on_original" not in rec
+
+
+def test_prepaid_expense_eur_has_no_cost_and_the_clearing_nets_out(repo):
+    entries = _prepaid_run(repo, "eur")
+    # EÜR: bill D input VAT 190 / C input_vat_clearing 190; the opening item D input_vat_clearing 190 / C opening 190
+    assert _roles(entries, "open:2026:expense:prepaid1:prepaid") == {"input_vat_clearing": 190, "opening_balance": -190}
+    bill = _roles(entries, "expense:prepaid1:bill")
+    assert bill["input_vat_clearing"] == -190 and sum(bill.values()) == 0
+    assert sum(_cents_of(ln) for e in entries for ln in e.lines if ln.role == "input_vat_clearing") == 0
+    # no payment entry, so no cost line and no bank line (the cost belongs to the year before the start)
+    assert not any(":pay:" in e.event_key for e in entries)
+    assert not any(ln.role == "bank" for e in entries for ln in e.lines)
+
+
+def _external_answers(repo, upto: int):
+    periods = AccountingInitService(repo).external_periods(PARAMS, TODAY)
+    return [
+        models.ExternalReturnIn(year=p.year, kind=p.kind, no=p.no, none_filed=True) for p in periods if p.no <= upto
+    ]
+
+
+def test_an_unanswered_external_period_blocks_with_409_and_none_filed_for_all_passes(repo):
+    svc = AccountingInitService(repo)
+    partial = PARAMS.model_copy(update={"external_returns": _external_answers(repo, 4)})  # May (5) is missing
+    with pytest.raises(ServiceError) as err:
+        svc.run(partial, BOSS, TODAY)
+    assert err.value.status == 409
+    assert err.value.body["unresolved"] == ["external_return:2026:month:5"]
+    assert err.value.body["external_returns"] == [
+        {"year": 2026, "kind": "month", "no": 5, "from": "2026-05-01", "to": "2026-05-31"}
+    ]
+    assert repo.find("fiscal_years") == [] and ACCOUNTING_START_KEY not in repo.settings()
+    full = PARAMS.model_copy(update={"external_returns": _external_answers(repo, 5)})
+    result = svc.run(full, BOSS, TODAY)
+    assert "external_returns" not in result.counts  # none filed stores nothing
+    assert repo.settings()[ACCOUNTING_START_KEY] == "2026-01-01"
