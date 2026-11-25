@@ -2301,6 +2301,7 @@ class SpecialPrepaymentOut(BaseModel):
     model_config = ConfigDict(extra="allow")
     year: int
     dauerfrist: bool = False
+    applies: bool = False
     proposal: v.Money = 0
     months: int | None = None
     previous_kz83: v.Money = 0
