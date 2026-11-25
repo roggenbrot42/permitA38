@@ -2451,13 +2451,43 @@ class ReviewResolutionIn(v.CheckedBody):
     """The user's answer to one row of the initialisation review list (accounting.md 16 step 9)."""
 
     key: Annotated[str, StringConstraints(min_length=1, max_length=200)]
-    action: Literal["treatment", "confirm", "credit_note"]
-    treatment: Annotated[str, StringConstraints(max_length=60)] | None = None
+    action: Literal["treatment", "confirm", "credit_note", "date"]
+    treatment: v.ExpenseTreatment | None = None
+    date: v.OptDate = None
 
     @model_validator(mode="after")
-    def _treatment(self):
+    def _arguments(self):
         if (self.action == "treatment") != (self.treatment is not None):
             raise ValueError("treatment is required for, and only for, the action treatment")
+        if (self.action == "date") != (self.date is not None):
+            raise ValueError("date is required for, and only for, the action date")
+        return self
+
+
+_Kz39In: Any = v.money_in("0", "1000000000")
+
+
+class ExternalReturnIn(v.CheckedBody):
+    """A VAT return of a period on/after the accounting start that was filed outside the app (accounting.md 16 step
+    5b): the filed Kz 83 (and Kz 39) and the filing date; or ``none_filed`` (nothing was filed for the period)."""
+
+    year: Annotated[int, Field(ge=2000, le=2100)]
+    kind: Literal["month", "quarter"]
+    no: Annotated[int, Field(ge=1, le=12)]
+    none_filed: StrictBool = False
+    kz83: v.MoneyIn | None = None
+    kz39: _Kz39In = Decimal(0)  # type: ignore[valid-type]
+    filed_on: v.OptDate = None
+
+    @model_validator(mode="after")
+    def _figures(self):
+        if self.none_filed:
+            if self.kz83 is not None or self.filed_on is not None or self.kz39 != 0:
+                raise ValueError("none_filed excludes kz83, kz39 and filed_on")
+        elif self.kz83 is None or self.filed_on is None:
+            raise ValueError("kz83 and filed_on are required unless none_filed")
+        if self.kind == "quarter" and self.no > 4:
+            raise ValueError("a quarter is 1..4")
         return self
 
 
@@ -2473,9 +2503,13 @@ class AccountingInitIn(v.CheckedBody):
     accounting_start: v.OptDate = None  # null = 1 January of the current year (service)
     opening_balances: Annotated[list[OpeningBalanceIn], Field(max_length=200)] = []
     review_resolutions: Annotated[list[ReviewResolutionIn], Field(max_length=5000)] = []
+    external_returns: Annotated[list[ExternalReturnIn], Field(max_length=200)] = []
 
     @model_validator(mode="after")
     def _no_duplicates(self):
+        periods = [(r.year, r.kind, r.no) for r in self.external_returns]
+        if len(periods) != len(set(periods)):
+            raise ValueError("external_returns: duplicate period")
         keys = [r.key for r in self.review_resolutions]
         if len(keys) != len(set(keys)):
             raise ValueError("review_resolutions: duplicate key")

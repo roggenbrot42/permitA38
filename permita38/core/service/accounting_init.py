@@ -12,9 +12,12 @@ Pre-start items (E23, ``opening_items.py``): an invoice issued before the start 
 expense dated before the start and paid on/after it its opening entry, before the replay; the events on/after the
 start of those invoices then replay like any other.
 
-Cases that need a decision of the user (vat dates before the start, legacy cancelled invoices, reverse-charge
-expenses that cannot be classified, ...) are NOT guessed in this step: :meth:`check` lists them and :meth:`run`
-refuses with 409 and that list, writing nothing (E24 resolves them). No SQL here.
+Cases that need a decision of the user (vat dates before the start, paid-then-cancelled invoices, reverse-charge
+expenses that cannot be classified, legacy paid dates, ...) are NOT guessed: :meth:`check` lists them with their
+allowed resolutions, :meth:`run` applies the answers (``review_resolutions``, ``init_review.py``) and refuses with 409
+and the unanswered rows, writing nothing, while one is missing. Legacy cancelled invoices that were never paid get
+their storno credit note automatically; the returns filed outside the app (``external_returns``) are stored and their
+months locked after the replay. No SQL here.
 """
 
 from collections.abc import Callable, Iterable, Mapping
@@ -29,9 +32,17 @@ from permita38.core.money import dec, q2
 from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service import invoice_state
+from permita38.core.service.credit_notes import CreditNoteService
 from permita38.core.service.expense_postings import RC_TREATMENTS
 from permita38.core.service.fiscal_years import FiscalYearService
+from permita38.core.service.init_review import (
+    ExternalPeriod,
+    ReviewApplier,
+    ReviewItem,
+    external_periods,
+)
 from permita38.core.service.journal import JournalService
+from permita38.core.service.locks import LockService
 from permita38.core.service.opening_items import (
     OpeningItemService,
     PrestartCreditPosting,
@@ -43,38 +54,16 @@ from permita38.core.service.postings import IssuePostingService, build_snapshot
 from permita38.core.service.sales import gross_cents_of
 from permita38.core.service.tax_bookings import TaxBookingService
 from permita38.core.service.trip_postings import TripPostingService
+from permita38.core.service.vat_returns import VatReturnService
 from permita38.core.settings import ACCOUNTING_START_KEY, accounting_start, effective_settings
 
 __all__ = ["AccountingInitService", "InitResult", "ReviewItem"]
 
-REVIEW_MESSAGE = "needs the review list — coming in a later step"
 SYSTEM_USER: dict[str, Any] = {"id": "system", "role": "boss"}
 
 # the order of events of the same day: an issue first, everything else after it in creation order (``seq``, see
 # :func:`_row_order`); the only rank is issue-before-cash
 RANK_ISSUE, RANK_OTHER = 0, 1
-
-
-@dataclass(frozen=True)
-class ReviewItem:
-    """One record the initialisation cannot decide alone (accounting.md 16 step 9)."""
-
-    key: str
-    code: str
-    collection: str
-    id: str
-    number: str | None
-    message: str
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "key": self.key,
-            "code": self.code,
-            "collection": self.collection,
-            "id": self.id,
-            "number": self.number,
-            "message": self.message,
-        }
 
 
 @dataclass
@@ -170,6 +159,13 @@ class AccountingInitService:
         self.opening_items = OpeningItemService(store, self.journal)
         self.trip_posting = TripPostingService(store, self.journal)
 
+    def _applier(self, today: date | None) -> ReviewApplier:
+        clock = (lambda: today) if today is not None else date.today
+        payments = PaymentService(self.store, self.journal, today=clock)
+        return ReviewApplier(
+            self.store, self.expense_posting, CreditNoteService(self.store, self.journal, payments), payments
+        )
+
     # ------------------------------------------------------------------ parameters
     @staticmethod
     def start_of(params: models.AccountingInitIn, today: date | None = None) -> date:
@@ -198,17 +194,24 @@ class AccountingInitService:
                 continue
             day = _day(inv.get("date"))
             assert day is not None
+            rows = payments.get(str(inv["id"]), [])
+            if inv.get("status") == "paid" and not rows and gross_cents_of(inv, st) != 0:  # a legacy paid invoice
+                if not inv.get("paid_date"):
+                    item("legacy_paid_no_date", "invoices", inv, "Marked paid without a date; the invoice date is used")
+                elif (_day(inv["paid_date"]) or day) < day:
+                    item("legacy_paid_before_invoice", "invoices", inv, "Paid before the invoice date; kept as stored")
             if day >= start:
                 if inv.get("status") == "cancelled" and not any(
                     n.get("credit_kind") == "storno" for n in notes.get(str(inv["id"]), [])
                 ):
-                    paid = bool(payments.get(str(inv["id"]))) or inv.get("paid_date")
-                    item(
-                        "legacy_cancelled",
-                        "invoices",
-                        inv,
-                        "Cancelled before credit notes existed" + (" and paid" if paid else "") + "; " + REVIEW_MESSAGE,
-                    )
+                    if rows or inv.get("paid_date"):  # an unpaid one gets its storno automatically (step 8)
+                        item(
+                            "legacy_cancelled_paid",
+                            "invoices",
+                            inv,
+                            "Cancelled after payment, before credit notes existed: issue a storno credit note and "
+                            "refund, or keep it as paid",
+                        )
                     continue
                 perf = self._perf(inv, st, day)
                 if (
@@ -217,7 +220,12 @@ class AccountingInitService:
                     and not params.small_business
                     and ((params.vat_basis == "soll" and self._carries_vat(inv, st, day)) or self._b2b_service(inv))
                 ):
-                    item("vat_before_start", "invoices", inv, "VAT date before the accounting start; " + REVIEW_MESSAGE)
+                    item(
+                        "vat_before_start",
+                        "invoices",
+                        inv,
+                        "VAT date before the accounting start: declared outside the app",
+                    )
         for exp in self.store.list("expenses"):
             self._check_expense(exp, start, item)
         return out
@@ -272,17 +280,27 @@ class AccountingInitService:
         if day < start:  # an expense dated before the start posts an opening entry (E23), never a review case
             return
         if paid_on is not None and paid_on < start:
-            item("expense_prepaid", "expenses", exp, "Paid before the accounting start; " + REVIEW_MESSAGE)
+            item("expense_prepaid", "expenses", exp, "Paid before the accounting start: confirm")
         if not exp.get("tax_treatment") and exp.get("reverse_charge"):
             sid = exp.get("supplier_id")
             if not sid or not self.store.get("suppliers", str(sid)):
-                item("rc_without_supplier", "expenses", exp, "Reverse charge without a supplier; " + REVIEW_MESSAGE)
+                item(
+                    "rc_without_supplier",
+                    "expenses",
+                    exp,
+                    "Reverse charge without a supplier: choose the tax treatment",
+                )
             elif q2(dec(exp.get("vat"))) != 0:
-                item("rc_stored_vat", "expenses", exp, "Reverse charge with a typed VAT; " + REVIEW_MESSAGE)
+                item(
+                    "rc_stored_vat",
+                    "expenses",
+                    exp,
+                    "Reverse charge with a typed VAT: recompute the self-assessed VAT, or choose another treatment",
+                )
         treatment = self.expense_posting.resolve_treatment(exp)
         service = _day(exp.get("service_date"))
         if treatment in RC_TREATMENTS and service is not None and service < start:
-            item("vat_before_start", "expenses", exp, "VAT date before the accounting start; " + REVIEW_MESSAGE)
+            item("vat_before_start", "expenses", exp, "VAT date before the accounting start: declared outside the app")
 
     # ------------------------------------------------------------------ the initialisation
     def run(
@@ -294,15 +312,27 @@ class AccountingInitService:
                 raise ServiceError(409, "Accounting is already initialised")
             start = self.start_of(params, today)
             review = self.check(params, today)
-            if review:
+            answers = {r.key: r for r in params.review_resolutions}
+            applier = self._applier(today)
+            applier.validate(review, answers)
+            open_rows = [r for r in review if r.key not in answers]
+            if open_rows:
                 raise ServiceError(
                     409,
-                    f"{len(review)} record(s) {REVIEW_MESSAGE}",
-                    body={"review": [r.as_dict() for r in review]},
+                    f"{len(open_rows)} record(s) need a decision before the accounting can start",
+                    body={"review": [r.as_dict() for r in open_rows], "unresolved": [r.key for r in open_rows]},
                 )
+            periods = self.external_periods(params, today)
+            filed = applier.returns_to_store(params.external_returns, periods)
             balances = self._balances(params)
             if balances and params.income_basis != "accrual":
                 raise ServiceError(422, "Opening balances exist only under the accrual basis")
+            # the answers change records and issue credit notes while accounting is not initialised yet: recorded,
+            # not posted; the replay posts them
+            counts: dict[str, int] = dict(applier.apply(review, answers, user, start))
+            cancelled = self._unpaid_cancelled(start, review)
+            if cancelled:
+                counts["migrated_cancellation"] = applier.storno_unpaid(cancelled, user)
             self.fiscal_years.create(
                 user,
                 models.FiscalYearIn(
@@ -318,15 +348,18 @@ class AccountingInitService:
             settings = dict(self.store.settings())
             settings[ACCOUNTING_START_KEY] = start.isoformat()
             self.store.save_settings(settings)
-            counts: dict[str, int] = {}
             if balances:
                 self.tax_bookings.opening_balances(start.year, balances, user)
                 counts["opening_entry"] = 1
-            self._open_years(start)
+            self._open_years(start, max((r.year for r in filed), default=start.year))
             counts["snapshots"] = self._snapshots(start)
             counts.update(self._opening_items(start, user))
             for kind, n in self._replay(start, user).items():
                 counts[kind] = n
+            if filed:  # last: it locks the months up to the filed periods
+                locks = LockService(self.store, today=(lambda: today) if today is not None else date.today)
+                service = VatReturnService(self.store, locks, bookings=self.tax_bookings)
+                counts["external_returns"] = applier.store_returns(service, filed, user)
             return InitResult(start.year, start.isoformat(), counts)
 
     @staticmethod
@@ -338,9 +371,36 @@ class AccountingInitService:
             out.append((str(key), int(q2(dec(b.amount)) * 100)))
         return out
 
-    def _open_years(self, start: date) -> None:
-        """Open every fiscal year up to the last year of an event (each copied from its predecessor)."""
-        last = start.year
+    def external_periods(self, params: models.AccountingInitIn, today: date | None = None) -> list[ExternalPeriod]:
+        """Step 5b: the ended VAT periods on/after the start, for which a return filed outside the app may be entered
+        (``external_returns``; a period without an answer counts as none filed). A small business files quarterly."""
+        kind = "quarter" if params.small_business else params.frequency
+        return external_periods(self.start_of(params, today), today or date.today(), kind)
+
+    def _unpaid_cancelled(self, start: date, review: list[ReviewItem]) -> list[Record]:
+        """Step 8: the legacy cancelled invoices on/after the start that were never paid and have no storno yet."""
+        asked = {r.id for r in review if r.code == "legacy_cancelled_paid"}
+        notes = invoice_state.group_by(
+            [r for r in self.store.list("invoices") if r.get("kind") == "credit_note"], "corrects_id"
+        )
+        out = []
+        for inv in self.store.list("invoices"):
+            day = _day(inv.get("date"))
+            if (
+                _issued(inv)
+                and inv.get("status") == "cancelled"
+                and day is not None
+                and day >= start
+                and str(inv["id"]) not in asked
+                and not any(n.get("credit_kind") == "storno" for n in notes.get(str(inv["id"]), []))
+            ):
+                out.append(inv)
+        return out
+
+    def _open_years(self, start: date, until: int) -> None:
+        """Open every fiscal year up to the last year of an event or of a filed return (each copied from its
+        predecessor)."""
+        last = max(start.year, until)
         for coll in ("invoices", "expenses"):
             for r in self.store.list(coll):
                 day = _day(r.get("date"))
