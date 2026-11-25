@@ -9,6 +9,7 @@ from permita38.core.errors import ServiceError
 from permita38.core.service.importer import ImportService
 from permita38.core.service.journal import JournalService
 from permita38.core.service.numbering import NumberingService
+from permita38.core.service.sales import SalesService
 
 from .test_issue_posting import init, lock_through, repo  # noqa: F401  (fixture and helpers)
 
@@ -157,3 +158,94 @@ def test_undo_after_a_lock_is_409_and_nothing_changes(repo, svc):
     assert len(repo.list("invoices")) == 1 and len(repo.list("expenses")) == 1
     assert keys(repo) == before
     assert all(b["status"] == "imported" for b in svc.batches())
+
+
+def test_row_in_a_closed_fiscal_year_is_refused(repo, svc):
+    init(repo)
+    fy = repo.find("fiscal_years", year=2026)[0]
+    repo.save("fiscal_years", {**fy, "closed_at": 5, "closed_by": "u1x000"})
+    report = run(svc, HEAD + "A-1;05.02.2026;Acme;100;19;119;;sent\n")
+    assert report["applied"] is False and "locked" in report["rows"][0]["messages"][0]
+    assert repo.list("invoices") == [] and keys(repo) == []
+
+
+def test_a_failure_in_the_middle_of_the_batch_rolls_everything_back(repo, svc, monkeypatch):
+    init(repo)
+    counters = repo.settings()
+    next_before = svc.numbering.preview("invoice", 1)
+    real = SalesService.finalize
+    calls = []
+
+    def flaky(self, *a, **k):
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("boom")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(SalesService, "finalize", flaky)
+    with pytest.raises(RuntimeError):
+        run(svc, HEAD + ROWS)
+    assert len(calls) == 2
+    assert repo.list("invoices") == [] and repo.list("customers") == [] and repo.list("import_batches") == []
+    assert keys(repo) == [] and repo.list("payments") == []
+    assert repo.settings() == counters and svc.numbering.preview("invoice", 1) == next_before
+
+
+def test_invoice_overwrite_is_refused_once_the_import_is_posted(repo, svc):
+    init(repo)
+    run(svc, HEAD + "A-1;05.02.2026;Acme;100;19;119;;sent\n")
+    again = HEAD + "A-1;05.02.2026;Acme;200;38;238;;sent\n"
+    report = run(svc, again, options={"on_duplicate": "overwrite"})
+    assert report["applied"] is False
+    assert "posted to the journal" in " ".join(report["rows"][0]["messages"])
+    assert len(repo.list("invoices")) == 1 and len(keys(repo)) == 1
+
+
+def test_a_user_edited_expense_is_skipped_not_overwritten(repo, svc):
+    init(repo)
+    run(svc, EXP_HEAD + EXP, "expenses")
+    exp = repo.list("expenses")[0]
+    repo.save("expenses", {**exp, "description": "edited by the user"})
+    changed = EXP_HEAD + "10.03.2026;Demo Supplier;200,00;38,00;software;E-1\n"
+    report = run(svc, changed, "expenses", options={"on_duplicate": "overwrite"})
+    assert report["rows"][0]["action"] == "skip" and report["counts"]["overwrite"] == 0
+    stored = repo.list("expenses")
+    assert len(stored) == 1 and stored[0]["description"] == "edited by the user" and stored[0]["bill_rev"] == 1
+    assert len(keys(repo)) == 1
+
+
+def test_expense_overwrite_into_a_locked_month_is_a_plan_error(repo, svc):
+    init(repo)
+    run(svc, EXP_HEAD + EXP, "expenses")
+    lock_through(repo, 3)
+    before = keys(repo)
+    changed = EXP_HEAD + "10.03.2026;Demo Supplier;200,00;38,00;software;E-1\n"
+    plan = svc.plan(changed.encode(), "x.csv", "expenses", options={"on_duplicate": "overwrite"})
+    assert plan["rows"][0]["action"] == "error" and "locked" in " ".join(plan["rows"][0]["messages"])
+    report = run(svc, changed, "expenses", options={"on_duplicate": "overwrite"})
+    assert report["applied"] is False and keys(repo) == before and repo.list("expenses")[0]["bill_rev"] == 1
+
+
+def test_a_number_in_the_credit_note_pattern_is_imported_as_an_invoice_number(repo, svc):
+    init(repo)
+    run(svc, HEAD + "RK-2026-0001;05.02.2026;Acme;100;19;119;;sent\n")
+    inv = by_number(repo)["RK-2026-0001"]
+    assert inv.get("kind") != "credit_note" and len(keys(repo)) == 1
+    again = svc.plan((HEAD + "RK-2026-0001;05.02.2026;Acme;100;19;119;;sent\n").encode(), "x.csv", "invoices")
+    assert again["rows"][0]["action"] == "skip"  # now an ordinary invoice number
+
+
+@pytest.mark.parametrize(
+    "row, word",
+    [
+        ("A-1;05.02.2026;Acme;=1+1;19;119;;sent\n", "not an amount"),
+        ("A-1;05.02.2026;Acme;abc;19;119;;sent\n", "not an amount"),
+        ("A-1;05.02.2026;" + "x" * 5000 + ";100;19;119;;sent\n", "longer than"),
+    ],
+)
+def test_formula_wrong_type_and_huge_cells_are_row_errors_and_nothing_is_written(repo, svc, row, word):
+    init(repo)
+    report = run(svc, HEAD + row)
+    assert report["applied"] is False
+    assert report["rows"][0]["action"] == "error" and word in " ".join(report["rows"][0]["messages"])
+    assert repo.list("invoices") == [] and repo.list("customers") == [] and keys(repo) == []

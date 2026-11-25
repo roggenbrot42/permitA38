@@ -19,6 +19,7 @@ from permita38.core.errors import ServiceError
 from permita38.core.money import dec, line_amount, q2, to_float, vat_amount
 from permita38.core.repository import Repository, new_id
 from permita38.core.repository.schema import COLLECTIONS
+from permita38.core.service.journal import JournalService
 from permita38.core.service.numbering import NumberingService
 from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
@@ -53,8 +54,6 @@ ALLOWED_STATUS = {"invoices": ("draft", "sent", "paid", "cancelled"),
                   "offers": ("draft", "sent", "accepted", "rejected")}  # fmt: skip
 MAX_PDF_BYTES = 20 * 1024 * 1024
 REVIEW_CANCELLED = "cancelled_import"
-IMPORT_NOTE = "imported"
-OVERWRITE_NOTE = "import overwritten"
 SYSTEM_USER = {"id": "system", "role": "boss"}
 
 
@@ -164,8 +163,6 @@ class ImportService:
                             rec[k] = prev[k]
                     if o.coll == "expenses":  # the revisions go on counting: the repost is r2, r3, ...
                         rec.update({k: prev[k] for k in ("bill_rev", "pay_rev") if k in prev})
-                    elif o.coll == "invoices":  # payment rows are append-only: the old ones are reversed
-                        self._reverse_import_payments(prev)
                 saved = self._save_imported(o.coll, {**rec, "import_batch": batch_id}, prev or None)
                 if o.action == "overwrite":
                     overwritten.append([o.coll, saved["id"], _digest(saved)])
@@ -226,16 +223,6 @@ class ImportService:
             # spec 2.3: the stored paid + paid_date is a virtual payment; it becomes a row only when the invoice posts
             saved = self.sales.payments.materialize(saved, SYSTEM_USER)
         return saved
-
-    def _reverse_import_payments(self, invoice: dict) -> None:
-        """Overwrite: reverse the payment rows of the earlier import (rows are never deleted)."""
-        rows = self.store.find("payments", document_id=invoice["id"])
-        reversed_ids = {r.get("reverses_id") for r in rows}
-        for row in rows:
-            if row.get("kind") == "payment" and row["id"] not in reversed_ids:
-                self.sales.payments._reverse_row(
-                    invoice, row, str(row["date"]), OVERWRITE_NOTE, SYSTEM_USER, check_date=False
-                )
 
     def batches(self) -> list[dict]:
         out = []
@@ -477,6 +464,9 @@ class ImportService:
                     out.overwrite_id = old["id"]
                     out.previous = old
                     out.messages.append("replaces the earlier import with this external id")
+                    if why := self._locked_repost(old):
+                        out.action = "error"
+                        out.messages.append(why)
                 else:
                     out.action = "skip"
                     out.messages.append("already imported (same external id)")
@@ -542,15 +532,24 @@ class ImportService:
         pdf_unmatched = [n for n in pdf_entries if n not in pdf_used]
         return outcomes, new_customers, pdf_unmatched
 
+    def _locked_repost(self, old: dict) -> str | None:
+        """An expense overwrite reverses the old bill entry: refuse it in the plan when that entry's month is locked."""
+        entry = self.store.get_journal_entry_by_event_key(f"expense:{old['id']}:bill:r{old.get('bill_rev') or 1}")
+        if entry is None:
+            return None
+        try:
+            JournalService(self.store).check_reversible(entry)
+        except ServiceError as e:
+            return e.message
+        return None
+
     def _frozen_overwrite(self, old: dict) -> str | None:
         """Why an earlier imported invoice cannot be replaced: it is posted, or payments / credit notes were added."""
         rid = old["id"]
         if self.store.get_journal_entry_by_event_key(f"issue:{rid}") is not None:
             return "the earlier import is already posted to the journal; overwrite refused"
         pays = self.store.find("payments", document_id=rid)
-        if any(p.get("note") not in (IMPORT_NOTE, OVERWRITE_NOTE) for p in pays) or self.store.find(
-            "invoices", corrects_id=rid
-        ):
+        if pays or self.store.find("invoices", corrects_id=rid):
             return "payments or credit notes were added since the import; overwrite refused"
         return None
 
