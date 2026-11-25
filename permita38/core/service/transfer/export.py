@@ -145,6 +145,7 @@ def build(store: Repository, opts: ExportOptions, tmp_dir: Path) -> ExportResult
             collections = manifest.master_data_collections() if master else manifest.exported_collections()
             settings: dict = {}
             sequences: list[dict] = []
+            journal: list[dict] = []
             with store.transaction():  # one consistent snapshot
                 for coll in collections:
                     records = [manifest.scrub_record(coll, r, include_accounts) for r in store.list(coll)]
@@ -154,6 +155,8 @@ def build(store: Repository, opts: ExportOptions, tmp_dir: Path) -> ExportResult
                         add(f"csv/{coll}.csv", csvout.csv_chunks(manifest.columns_for(coll, include_accounts), records))
                     if coll == "number_sequences":
                         sequences = records
+                    elif coll == "journal_entries":
+                        journal = records
                 if not master:
                     settings = manifest.exportable_settings(store.settings())
                     payload = json.dumps({"settings": settings}, ensure_ascii=False, sort_keys=True) + "\n"
@@ -186,6 +189,7 @@ def build(store: Repository, opts: ExportOptions, tmp_dir: Path) -> ExportResult
                 "include_attachments": include_attachments,
                 "counts": counts,
                 "numbering": numbering_state(sequences),
+                "accounting": {"journal": manifest.journal_tails(journal)},
                 "excluded": excluded,
                 "files": dict(sorted(files.items())),
             }
