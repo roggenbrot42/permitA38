@@ -49,6 +49,7 @@ from permita38.core.service.totp import TotpService
 from permita38.core.service.transfer.service import TransferService, clean_stale_tmp
 from permita38.core.service.trips import TripService
 from permita38.core.service.vat_returns import VatReturnService
+from permita38.core.service.year_closing import YearClosingService
 from permita38.core.service.zm_reports import ZmReportService
 from permita38.core.settings import effective_settings
 
@@ -93,6 +94,7 @@ class Services:
     vat_returns: VatReturnService
     special_prepayment: SpecialPrepaymentService
     zm_reports: ZmReportService
+    year_closing: YearClosingService
     datev_export: DatevExportService
 
     @classmethod
@@ -142,6 +144,7 @@ class Services:
             locks=locks,
             manual_entries=ManualEntryService(store, journal),
             tax_bookings=tax_bookings,
+            year_closing=YearClosingService(store, journal, locks, tax_bookings),
             vat_returns=VatReturnService(store, locks, bookings=tax_bookings),
             special_prepayment=SpecialPrepaymentService(store, tax_bookings),
             zm_reports=ZmReportService(store),

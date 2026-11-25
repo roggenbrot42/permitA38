@@ -9321,6 +9321,7 @@
           "accounting"
         ],
         "summary": "Close Fiscal Year",
+        "description": "Close the year (boss only): accrual posts the confirmed provisions, the VAT transfer and the closing entries,\nEÜR just ends the year. 409 when blocked or closed already.",
         "operationId": "close_fiscal_year_api_accounting_years__year__close_post",
         "security": [
           {
@@ -9338,12 +9339,31 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/YearCloseIn"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FiscalYear"
+                }
               }
             }
           },
@@ -18662,6 +18682,28 @@
               }
             ],
             "title": "Closed By"
+          },
+          "closing_hash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing Hash"
+          },
+          "closing_entry_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closing Entry No"
           }
         },
         "additionalProperties": true,
@@ -29310,6 +29352,55 @@
         "type": "object",
         "title": "WorkLimitsIn",
         "description": "The boss's own planning limits (S6); defaults as in the spec. Infos and warnings only, nothing is refused."
+      },
+      "YearCloseIn": {
+        "properties": {
+          "provisions": {
+            "items": {
+              "$ref": "#/components/schemas/YearCloseProvisionIn"
+            },
+            "type": "array",
+            "maxItems": 2,
+            "title": "Provisions",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "YearCloseIn",
+        "description": "Close a fiscal year (accounting.md 13). Accrual: the provisions the user confirms are posted first; EÜR takes\nnone. At most one provision per kind."
+      },
+      "YearCloseProvisionIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "trade_tax",
+              "corporate_tax"
+            ],
+            "title": "Kind"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
+            "title": "Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "amount"
+        ],
+        "title": "YearCloseProvisionIn",
+        "description": "A tax provision the user confirms for the year closing (accounting.md 9.7, 13): ``amount`` is the estimate\nalready net of the prepayments expensed in the year."
       },
       "ZmCreateIn": {
         "properties": {
