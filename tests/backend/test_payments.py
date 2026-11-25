@@ -235,7 +235,8 @@ def test_nothing_posts_before_the_initialisation_or_for_an_invoice_before_the_st
     assert view["status"] == "paid" and view["open_amount"] == "0.00"
     repo.save_settings({"accounting.start": "2026-04-01"})
     pay.record(inv["id"], date="2026-03-06", amount=Decimal("1.00"), kind="refund", user=BOSS)
-    assert entries(repo) == []  # the invoice is dated before the start
+    # the invoice is dated before the start: its refund is part of the baseline (an opening entry, no payment event)
+    assert [e.event_key for e in entries(repo)] == [f"open:2026:invoice:{inv['id']}"]
 
 
 def test_a_legacy_paid_invoice_is_materialised_and_posted_before_the_refund(repo, sales, pay):

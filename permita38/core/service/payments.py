@@ -1,9 +1,10 @@
 """Payments, refunds and reversals of issued invoices (docs/specs/credit-notes-payments.md 2.3 and 3).
 
 Every write materialises a legacy virtual payment first, inserts one append-only ``payments`` row (``amount_cents``
-signed: payments positive, refunds and reversals negative) and, when the accounting is initialised and the invoice is on
-or after the start, posts the 9.2 target delta through :class:`~permita38.core.service.postings.PaymentPostingService`
-in the same transaction (event key ``payment:<payment id>``). Before the initialisation the rows are only stored.
+signed: payments positive, refunds and reversals negative) and, when the accounting is initialised, posts the 9.2
+target delta through :class:`~permita38.core.service.postings.PaymentPostingService` in the same transaction
+(event key ``payment:<payment id>``; an invoice dated before the start gets its pre-start baseline first, step 5a).
+Before the initialisation the rows are only stored.
 A payment on a written-off invoice first stores and posts the write-off reversal record (spec 3, accounting 9.2).
 """
 
@@ -34,6 +35,13 @@ from permita38.core.settings import effective_settings
 __all__ = ["PaymentService"]
 
 MAX_PAYMENT_CENTS = 10_000_000_00
+EVENT_SEQUENCE = "event"
+
+
+def next_event_seq(store: Repository) -> int:
+    """The next monotonic ``seq`` of a payment or credit-note row (accounting.md 16 step 5): the order of events of
+    one day. Allocated in the caller's transaction; stored in the row's ``extra``."""
+    return store.next_number(EVENT_SEQUENCE, "all")
 
 
 def _insert_row(
@@ -58,6 +66,7 @@ def _insert_row(
         kind=kind,
         created_at=int(time.time()),
         created_by=str((user or {}).get("id") or "system"),
+        seq=next_event_seq(store),
     )
     if note:
         row["note"] = note
@@ -184,6 +193,7 @@ class PaymentService:
             "status": "sent",
             "lines": [],
             "reason": "Write-off reversed by a payment",
+            "seq": next_event_seq(self.store),  # created before the payment row: the lower seq
             "issued": credit_snapshot(inv, [(g.rate, int(g.net), int(g.vat)) for g in groups], day[:10], self.now()),
         }
         for key in ("project_id", "tax_treatment"):
