@@ -34,6 +34,13 @@ from permita38.core.settings import effective_settings
 __all__ = ["PaymentService"]
 
 MAX_PAYMENT_CENTS = 10_000_000_00
+EVENT_SEQUENCE = "event"
+
+
+def next_event_seq(store: Repository) -> int:
+    """The next monotonic ``seq`` of a payment or credit-note row (accounting.md 16 step 5): the order of events of
+    one day. Allocated in the caller's transaction; stored in the row's ``extra``."""
+    return store.next_number(EVENT_SEQUENCE, "all")
 
 
 def _insert_row(
@@ -58,6 +65,7 @@ def _insert_row(
         kind=kind,
         created_at=int(time.time()),
         created_by=str((user or {}).get("id") or "system"),
+        seq=next_event_seq(store),
     )
     if note:
         row["note"] = note
@@ -184,6 +192,7 @@ class PaymentService:
             "status": "sent",
             "lines": [],
             "reason": "Write-off reversed by a payment",
+            "seq": next_event_seq(self.store),  # created before the payment row: the lower seq
             "issued": credit_snapshot(inv, [(g.rate, int(g.net), int(g.vat)) for g in groups], day[:10], self.now()),
         }
         for key in ("project_id", "tax_treatment"):
