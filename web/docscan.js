@@ -89,8 +89,10 @@ window.DS = (() => {
     updatePanel();
     if (!running) run();
   };
+  let pruneTimer = null;
   async function run() {
     running = true;
+    clearTimeout(pruneTimer);  // a timer of an earlier run must not drop the rows of this one
     try {
       for (;;) {
         const row = D.rows.find(r => r.file && r.state === 'scanning');
@@ -124,7 +126,7 @@ window.DS = (() => {
         if (/^#\/sales/.test(location.hash) && !$('#modal-root').firstChild) await render();
       }
     } finally { running = false; }
-    setTimeout(() => { D.rows = D.rows.filter(r => r.state === 'scanning' || r.state === 'duplicate' || r.state === 'error'); updatePanel(); }, 8000);
+    pruneTimer = setTimeout(() => { D.rows = D.rows.filter(r => r.state === 'scanning' || r.state === 'duplicate' || r.state === 'error'); updatePanel(); }, 8000);
   }
 
   /* ---------- drop target (the whole page) ---------- */

@@ -185,6 +185,7 @@ def test_lock_up_to_a_month_with_gap_confirmation_and_no_unlock(browser, accrual
     assert len(api_call(accrual, "GET", "/accounting/locks").json()) == 1  # nothing before the confirmation
     pg.click("[data-testid=acc-lock-confirm]")
     pg.wait_for_selector("#toast.on")
+    expect(pg.locator("[data-testid=acc-locks] tbody tr")).to_have_count(4)  # the page re-renders after the toast
     assert [r[0] for r in rows(pg, "acc-locks")[1:]] == ["2026-01", "2026-02", "2026-03", "2026-04"]
     assert len(api_call(accrual, "GET", "/accounting/locks").json()) == 4
     # a month that is already locked is refused in the page
