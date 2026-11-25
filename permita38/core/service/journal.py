@@ -267,8 +267,9 @@ class JournalService:
                 raise ServiceError(422, f"Line {i}: vat_date {ln.vat_date.isoformat()} lies in a locked month")
 
     def _normalise_income_dates(self, lines: Sequence[PostLine], booking: date) -> list[PostLine]:
-        """Closed-year rule (accounting 11), central for every poster: an ``income_date`` that lies in a closed
-        fiscal year becomes the entry's booking date (a late payment of a closed year is income of the open one)."""
+        """Closed-year rule (accounting 11, 14.5), central for every poster: an ``income_date`` that lies in a closed
+        **accrual** year becomes the entry's booking date (a late payment of a closed year is income of the open one).
+        Under EÜR the income date stays the payment date, also after the year end."""
         closed: dict[int, bool] = {}
         out: list[PostLine] = []
         for ln in lines:
@@ -276,7 +277,9 @@ class JournalService:
                 y = ln.income_date.year
                 if y not in closed:
                     rows = self.store.find("fiscal_years", year=y)
-                    closed[y] = bool(rows) and rows[0].get("closed_at") is not None
+                    closed[y] = (
+                        bool(rows) and rows[0].get("closed_at") is not None and rows[0].get("income_basis") == "accrual"
+                    )
                 if closed[y]:
                     ln = replace(ln, income_date=booking)
             out.append(ln)

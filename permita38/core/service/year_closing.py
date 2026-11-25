@@ -160,6 +160,9 @@ class YearClosingService:
         if row.get("closed_at") is not None:
             out.append(f"Fiscal year {year} is closed already")
             return out
+        prev = self.store.find(COLLECTION, year=year - 1)
+        if prev and prev[0].get("closed_at") is None:
+            out.append(f"Fiscal year {year - 1} is not closed")
         start = self._start()
         locked = {(int(r["year"]), int(r["month"])) for r in self.store.list("period_locks")}
         for month in range(1, 12):
@@ -174,6 +177,20 @@ class YearClosingService:
         if nxt and nxt[0].get("chart") != row.get("chart") and row.get("income_basis") == "accrual":
             out.append(f"Fiscal year {year + 1} uses another chart; its opening balances need a manual entry")
         return out
+
+    def _opening_conflict(self, year: int, carried: Mapping[str, int]) -> str | None:
+        """A blocker when ``year`` + 1 holds an opening entry whose content differs from the closing balances."""
+        existing = self.store.get_journal_entry_by_event_key(f"open:{year + 1}:balances")
+        if existing is None:
+            return None
+        stored: dict[str, int] = {}
+        for ln in existing["lines"]:
+            acc = str(ln["account"])
+            stored[acc] = stored.get(acc, 0) + int(ln["amount_cents"])
+        stored = {a: c for a, c in stored.items() if c}
+        if stored != {a: c for a, c in carried.items() if c}:
+            return f"Fiscal year {year + 1} already holds an opening entry with different balances"
+        return None
 
     def _kinds(self) -> list[ProvisionKind]:
         company = effective_settings(self.store.settings()).get("company_type")
@@ -275,6 +292,9 @@ class YearClosingService:
                 balances.get(role_acc[_PROVISION_ROLE[p.kind]], 0) - p.amount_cents
             )
         plan, carried = self._plan(year, chart, balances)
+        conflict = self._opening_conflict(year, carried)
+        if conflict and row.get("closed_at") is None:
+            blockers.append(conflict)
         opening = tuple(PlanLine(a, b) for a, b in sorted(carried.items()))
         return YearClosingPreview(year, "accrual", tuple(blockers), proposals, tuple(plan), opening)
 
@@ -334,6 +354,9 @@ class YearClosingService:
                     raise ServiceError(422, f"Unknown provision kind '{p.kind}'")
             chart = self._chart(row)
             plan, carried = self._plan(year, chart, self._balances(year))
+            conflict = self._opening_conflict(year, carried)
+            if conflict:
+                raise ServiceError(409, conflict)
             for entry in plan:
                 self._post_plan(row, entry, user)
             closed = self._seal(year, user)

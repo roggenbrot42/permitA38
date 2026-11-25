@@ -987,7 +987,10 @@ def _accounting_row_state_guards() -> list[Guard]:
         Guard("guard_fiscal_years_closed_by_once", "fiscal_years", "set_once", ("closed_by",), "state.set_once"),
         Guard("guard_fiscal_years_closing_hash_once", "fiscal_years", "set_once", ("closing_hash",), "state.set_once"),
         Guard(
-            "guard_fiscal_years_closing_entry_no_once", "fiscal_years", "set_once", ("closing_entry_no",),
+            "guard_fiscal_years_closing_entry_no_once",
+            "fiscal_years",
+            "set_once",
+            ("closing_entry_no",),
             "state.set_once",
         ),
     ]

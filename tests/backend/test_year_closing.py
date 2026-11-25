@@ -418,3 +418,105 @@ def test_close_route_is_boss_only_and_closes(api, app):
     assert api["boss"].get("/api/accounting/years/2026").status_code == 200
     again = api["boss"].post(url)
     assert again.status_code == 409
+
+
+# ------------------------------------------------------------------ review findings (E18)
+def test_previous_open_year_blocks_close_and_end_year(accrual):
+    w = accrual
+    w.repo.save("fiscal_years", fiscal_year(2026, income_basis="accrual"))
+    w.locks.today = lambda: date(2027, 3, 1)
+    w.locks.lock_up_to(2026, 11, "manual", "u1x000")
+    blocker = "Fiscal year 2025 is not closed"
+    assert blocker in w.closing.preview(2026).blockers
+    for call in (lambda: w.closing.close(2026, [], USER), lambda: w.closing.end_year(2026, USER)):
+        with pytest.raises(ServiceError) as err:
+            call()
+        assert err.value.status in (409, 422) and (err.value.status == 422 or blocker in err.value.message)
+    assert w.repo.find("fiscal_years", year=2026)[0].get("closed_at") is None
+    # out of order is refused; in order works: 2025 first, then 2026
+    w.lock_november()
+    w.closing.close(2025, [], USER)
+    assert blocker not in w.closing.preview(2026).blockers
+
+
+def test_eur_previous_open_year_blocks_year_end(eur):
+    w = eur
+    w.repo.save("fiscal_years", fiscal_year(2026))
+    w.locks.today = lambda: date(2027, 3, 1)
+    w.locks.lock_up_to(2026, 11, "manual", "u1x000")
+    with pytest.raises(ServiceError) as err:
+        w.closing.end_year(2026, USER)
+    assert err.value.status == 409 and "Fiscal year 2025 is not closed" in err.value.message
+
+
+def test_a_failure_inside_close_leaves_nothing(accrual, monkeypatch):
+    w = accrual
+    w.scenario()
+    w.lock_november()
+    before = sorted(e["event_key"] for e in w.repo.list("journal_entries"))
+    locks = len(w.repo.list("period_locks"))
+
+    def boom(*a, **k):
+        raise RuntimeError("forced")
+
+    monkeypatch.setattr(w.tax, "opening_balances", boom)
+    with pytest.raises(RuntimeError):
+        w.closing.close(2025, [ProvisionInput("trade_tax", 500)], USER)
+    assert sorted(e["event_key"] for e in w.repo.list("journal_entries")) == before
+    assert len(w.repo.list("period_locks")) == locks
+    assert w.repo.find("fiscal_years", year=2025)[0].get("closed_at") is None
+    assert w.repo.find("fiscal_years", year=2026) == []
+
+
+def test_closing_with_december_already_locked_by_a_vat_return(accrual):
+    w = accrual
+    w.scenario()
+    w.locks.lock_up_to(2025, 12, "vat_return:ret1", "u1x000")
+    assert w.closing.preview(2025).blockers == ()
+    closed = w.closing.close(2025, [], USER)
+    assert closed["closed_at"] is not None
+    assert w.locks.locked_months(2025) == list(range(1, 13))
+    assert w.journal.verify_chain(2025) == []
+
+
+def test_a_year_with_entries_but_zero_pnl_and_vat(accrual):
+    w = accrual
+    w.tax.opening_balances(2025, [("bank", 5000), ("equity", -5000)], USER)
+    w.lock_november()
+    closed = w.closing.close(2025, [], USER)
+    assert closed["closed_at"] is not None
+    keys = [e["event_key"] for e in w.repo.list_journal_entries(year=2025, limit=100)]
+    assert keys == ["open:2025:balances", "close:2025:balance"]  # no VAT and no P&L entry
+    assert w.balances(2025) == {}
+    opening = w.journal.get_by_event_key("open:2026:balances")
+    assert lines_of(opening) == [
+        (ACC["bank"], 5000), (ACC["equity"], -5000), (ACC["opening"], -5000), (ACC["opening"], 5000),
+    ]  # fmt: skip
+
+
+def test_an_opening_entry_of_the_next_year_with_other_content_blocks_closing(accrual):
+    w = accrual
+    w.scenario()
+    w.lock_november()
+    w.tax.opening_balances(2026, [("bank", 5), ("equity", -5)], USER)
+    assert any("already holds an opening entry" in b for b in w.closing.preview(2025).blockers)
+    before = len(w.repo.list("journal_entries"))
+    with pytest.raises(ServiceError) as err:
+        w.closing.close(2025, [], USER)
+    assert err.value.status == 409 and "opening entry" in err.value.message
+    assert len(w.repo.list("journal_entries")) == before
+    assert w.repo.find("fiscal_years", year=2025)[0].get("closed_at") is None
+
+
+def test_eur_late_payment_of_an_ended_year_keeps_its_payment_date(eur):
+    w = eur
+    w.lock_november()
+    w.closing.end_year(2025, USER)
+    day = date(2025, 12, 20)
+    e = w.post(
+        "late", day, "Late payment",
+        [PostLine(role="bank", amount_cents=100), PostLine(role="revenue_s19", amount_cents=-100, income_date=day)],
+    )  # fmt: skip
+    assert (e.fiscal_year, e.booking_date) == (2026, "2026-01-01")
+    assert [ln.income_date for ln in e.lines] == [None, "2025-12-20"]
+    assert float(AccountingReportService(w.repo).eur(2025).total_income) == 1.0
