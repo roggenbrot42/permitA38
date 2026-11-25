@@ -44,7 +44,11 @@ def with_extras(base: dict, extras: dict) -> dict:
 HASH = "pbkdf2_sha256$1000$" + "ab" * 16 + "$" + "cd" * 32
 LOCAL_HASH = "pbkdf2_sha256$1000$" + "12" * 16 + "$" + "34" * 32
 #: collections filled generically (a record with a name and unknown extra fields); the rest has dedicated code
-SPECIAL = ("users", "number_sequences", "invoices", "settings")
+#: the journal tables are written only by real postings (hash chain, append-only guards): they stay empty here; the
+#: other accounting tables get valid rows in `populate` (required fields of the schema.py guards, docs/specs/accounting.md 8.1)
+ACCOUNTING = ("fiscal_years", "vat_returns", "zm_reports", "period_locks", "payments")
+JOURNAL = ("journal_entries", "journal_lines")
+SPECIAL = ("users", "number_sequences", "invoices", "settings", *ACCOUNTING, *JOURNAL)
 GENERIC = [c for c in manifest.exported_collections() if c not in SPECIAL]
 
 
@@ -56,6 +60,8 @@ def datasets(draw) -> dict:
         data["records"][coll] = [
             with_extras({"name": draw(TEXT)}, draw(EXTRAS)) for _ in range(draw(st.integers(0, 2)))
         ]
+    for coll in ACCOUNTING:
+        data["records"][coll] = [with_extras({}, draw(EXTRAS)) for _ in range(draw(st.integers(0, 2)))]
     for i in range(draw(st.integers(0, 3))):
         data["invoices"].append(
             with_extras(
@@ -88,8 +94,25 @@ def boss_row(store, hash_value: str) -> dict:
     )
 
 
+def fiscal_year(year: int, user_id: str) -> dict:
+    return {
+        "year": year, "chart": "skr03", "income_basis": "eur", "vat_basis": "soll", "vat_frequency": "quarter",
+        "dauerfrist": False, "small_business": False, "rules_version": "1", "opened_at": 1_700_000_000,
+        "opened_by": user_id,
+    }  # fmt: skip
+
+
+def vat_return(i: int) -> dict:
+    return {
+        "year": 2026, "period_kind": "month", "period_no": i + 1, "from_date": "2026-01-01", "to_date": "2026-01-31",
+        "due_date": "2026-02-10", "status": "draft", "amends_key": "",
+    }  # fmt: skip
+
+
 def populate(store, data: dict) -> None:
     for coll, recs in data["records"].items():
+        if coll in ACCOUNTING:
+            continue  # saved below, once the user and the invoices exist
         for rec in recs:
             if coll == "allocations":  # exactly one owner: the instance's first user (no dangling reference)
                 owner = {
@@ -111,11 +134,31 @@ def populate(store, data: dict) -> None:
             store.save(coll, rec)
     for u in data["users"]:
         store.save("users", u)
+    boss_id = next(u["id"] for u in store.list("users") if u["username"] == "boss")
+    for i, rec in enumerate(data["records"].get("fiscal_years", [])):  # one row per year (unique index)
+        store.save("fiscal_years", {**rec, **fiscal_year(2020 + i, boss_id)})
+    for i, rec in enumerate(data["records"].get("vat_returns", [])):
+        store.save("vat_returns", {**rec, **vat_return(i)})
+    for i, rec in enumerate(data["records"].get("zm_reports", [])):
+        store.save(
+            "zm_reports",
+            {**rec, "year": 2026, "quarter": i + 1, "status": "draft", "due_date": "2026-04-25", "amends_key": ""},
+        )
+    for i, rec in enumerate(data["records"].get("period_locks", [])):
+        store.save(
+            "period_locks",
+            {**rec, "year": 2026, "month": i + 1, "locked_at": 1_700_000_000, "locked_by": boss_id, "reason": "manual"},
+        )
     names = [store.save_attachment("f.bin", blob) for blob in data["attachments"]]
     for i, name in enumerate(names):
         store.save("expenses", {"date": "2026-02-01", "net": 1.5, "vendor": "=cmd|' /C calc'!A0", "attachment": name})
-    for inv in data["invoices"]:
-        store.save("invoices", inv)
+    saved = [store.save("invoices", inv) for inv in data["invoices"]]
+    for i, rec in enumerate(data["records"].get("payments", [])):  # a payment needs an existing invoice
+        if saved:
+            row = {"document_id": saved[0]["id"], "date": "2026-03-05", "amount_cents": 1000 + i, "method": "bank"}
+            store.save(
+                "payments", {**rec, **row, "kind": "payment", "created_at": 1_700_000_000, "created_by": boss_id}
+            )
     if data["counter"]:
         sid = NumberingService(store)._row_id("invoices", "2026")
         store.save(
