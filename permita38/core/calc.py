@@ -351,6 +351,7 @@ _PUBLIC_TOP = (
     "totals",
     "categories",
     "open_receivables",
+    "approximate",
     "kleinunternehmer",
     "company_type",
     "projected_profit",
@@ -385,12 +386,35 @@ def redact_tax(result: dict) -> dict:
     return out
 
 
-def finance(store, year, today=None):
-    today = today or date.today()
-    s = raw = store.settings()
-    klein = bool(s.get("kleinunternehmer"))
-    accrual = s.get("accounting", "eur") == "accrual"
-    months: list[dict[str, Any]] = [dict(month=m, **{k: ZERO for k in _MONEY_KEYS}) for m in range(1, 13)]
+def empty_months() -> list[dict[str, Any]]:
+    return [dict(month=m, **{k: ZERO for k in _MONEY_KEYS}) for m in range(1, 13)]
+
+
+def open_receivables_of_documents(store) -> Decimal:
+    """What customers still owe, from the invoice documents (gross less credit notes and payments)."""
+    from permita38.core.service import invoice_state
+
+    s = store.settings()
+    pay_rows = invoice_state.group_by(store.list("payments"), "document_id")
+    invoices = store.list("invoices")
+    notes = invoice_state.group_by(invoice_state.credit_notes_of(invoices), "corrects_id")
+    total = ZERO
+    for inv in invoices:
+        if inv.get("status") == "draft" or inv.get("kind") == "credit_note":
+            continue
+        t = doc_totals(dict(inv), s)
+        st = invoice_state.derive(
+            inv, int(dec(t["gross"]) * 100), pay_rows.get(inv["id"], []), notes.get(inv["id"], [])
+        )
+        if st.status == "cancelled" or inv.get("status") == "cancelled":
+            continue
+        total += Decimal(st.open_cents) / 100  # gross less credit notes and payments
+    return total
+
+
+def _legacy_figures(store, year, s, klein, accrual):
+    """The old per-document computation (known differences: accounting.md section 14, last paragraph)."""
+    months = empty_months()
     open_receivables = ZERO
     from permita38.core.service import invoice_state  # derived status/paid date of an issued invoice (spec 2.3)
 
@@ -460,6 +484,21 @@ def finance(store, year, today=None):
             amount = dec(item["amount"])
             months[when.month - 1]["expenses"] += amount  # deductible 100 %, no VAT (also in Kleinunternehmer mode)
             cats[item["category"]] += amount
+    return months, cats, open_receivables
+
+
+def finance(store, year, today=None):
+    today = today or date.today()
+    s = raw = store.settings()
+    klein = bool(s.get("kleinunternehmer"))
+    accrual = s.get("accounting", "eur") == "accrual"
+    from permita38.core.service import finance_journal  # figures from the journal once accounting is initialised
+
+    journal = finance_journal.figures(store, year)
+    if journal is not None:
+        months, cats, open_receivables = journal
+    else:
+        months, cats, open_receivables = _legacy_figures(store, year, s, klein, accrual)
     for m in months:
         m["profit"] = m["revenue"] - m["expenses"]
         m["vat_due"] = ZERO if klein else m["vat_out"] - m["vat_in"]
@@ -564,6 +603,7 @@ def finance(store, year, today=None):
         warnings=warnings,
         kleinunternehmer=klein,
         company_type=s.get("company_type", "freiberufler"),
+        approximate=journal is None,  # accounting.md 14: the old computation until the year is initialised
     )
 
 
