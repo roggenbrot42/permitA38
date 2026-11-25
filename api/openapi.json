@@ -9188,6 +9188,36 @@
         }
       }
     },
+    "/api/accounting/status": {
+      "get": {
+        "tags": [
+          "accounting"
+        ],
+        "summary": "Accounting Status",
+        "description": "Initialised or not, the years with their bases and whether the rules in use are not yet adviser-confirmed.",
+        "operationId": "accounting_status_api_accounting_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountingStatusOut"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ]
+      }
+    },
     "/api/accounting/years": {
       "get": {
         "tags": [
@@ -12584,6 +12614,49 @@
         ],
         "title": "AccountingInitIn",
         "description": "Initialisation request (accounting.md 16 step 1 and 9)."
+      },
+      "AccountingStatusOut": {
+        "properties": {
+          "initialised": {
+            "type": "boolean",
+            "title": "Initialised"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "years": {
+            "items": {
+              "$ref": "#/components/schemas/StatusYear"
+            },
+            "type": "array",
+            "title": "Years"
+          },
+          "rules_unconfirmed": {
+            "type": "boolean",
+            "title": "Rules Unconfirmed"
+          },
+          "banner_text": {
+            "type": "string",
+            "title": "Banner Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "initialised",
+          "start",
+          "years",
+          "rules_unconfirmed",
+          "banner_text"
+        ],
+        "title": "AccountingStatusOut"
       },
       "AdoptVendorItemIn": {
         "properties": {
@@ -24459,6 +24532,46 @@
         "type": "object",
         "title": "SpecialPrepaymentPayment",
         "description": "The booked payment of a Sondervorauszahlung."
+      },
+      "StatusYear": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "title": "Year"
+          },
+          "income_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Income Basis"
+          },
+          "vat_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vat Basis"
+          },
+          "closed": {
+            "type": "boolean",
+            "title": "Closed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "closed"
+        ],
+        "title": "StatusYear"
       },
       "SuggestStartIn": {
         "properties": {
