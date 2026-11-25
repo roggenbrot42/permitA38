@@ -266,7 +266,6 @@ def test_review_cases_refuse_with_the_list_and_write_nothing(repo, sales, pay):
     assert err.value.status == 409
     review = err.value.body["review"]
     assert {(r["id"], r["code"]) for r in review} == {
-        ("preopen1", "prestart_open_invoice"),
         ("oldcancel", "legacy_cancelled"),
         ("rcnosup1", "rc_without_supplier"),
         ("rctyped1", "rc_stored_vat"),

@@ -8,9 +8,13 @@ notes, expenses (the expense hook), trips. There is no posting code here. A post
 payment / credit note" of an invoice, so the replay hands them a view of the store in which the events that have not
 been replayed yet are hidden: each delta is then what posting the event live, at that moment, would have produced.
 
-Cases that need a decision of the user (pre-start baseline, vat dates before the start, legacy cancelled invoices,
-reverse-charge expenses that cannot be classified, ...) are NOT guessed in this step: :meth:`check` lists them and
-:meth:`run` refuses with 409 and that list, writing nothing (E23/E24 resolve them). No SQL here.
+Pre-start items (E23, ``opening_items.py``): an invoice issued before the start and open at it gets its baseline, an
+expense dated before the start and paid on/after it its opening entry, before the replay; the events on/after the
+start of those invoices then replay like any other.
+
+Cases that need a decision of the user (vat dates before the start, legacy cancelled invoices, reverse-charge
+expenses that cannot be classified, ...) are NOT guessed in this step: :meth:`check` lists them and :meth:`run`
+refuses with 409 and that list, writing nothing (E24 resolves them). No SQL here.
 """
 
 from collections.abc import Callable, Iterable, Mapping
@@ -25,16 +29,17 @@ from permita38.core.money import dec, q2
 from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service import invoice_state
-from permita38.core.service.expense_postings import RC_TREATMENTS, ExpensePostingService
+from permita38.core.service.expense_postings import RC_TREATMENTS
 from permita38.core.service.fiscal_years import FiscalYearService
 from permita38.core.service.journal import JournalService
-from permita38.core.service.payments import PaymentService
-from permita38.core.service.postings import (
-    CreditPostingService,
-    IssuePostingService,
-    PaymentPostingService,
-    build_snapshot,
+from permita38.core.service.opening_items import (
+    OpeningItemService,
+    PrestartCreditPosting,
+    PrestartExpensePosting,
+    PrestartPaymentPosting,
 )
+from permita38.core.service.payments import PaymentService
+from permita38.core.service.postings import IssuePostingService, build_snapshot
 from permita38.core.service.sales import gross_cents_of
 from permita38.core.service.tax_bookings import TaxBookingService
 from permita38.core.service.trip_postings import TripPostingService
@@ -161,7 +166,8 @@ class AccountingInitService:
         self.fiscal_years = fiscal_years or FiscalYearService(store)
         self.tax_bookings = tax_bookings or TaxBookingService(store, self.journal)
         self.issue_posting = IssuePostingService(store, self.journal)
-        self.expense_posting = ExpensePostingService(store, self.journal)
+        self.expense_posting = PrestartExpensePosting(store, self.journal)
+        self.opening_items = OpeningItemService(store, self.journal)
         self.trip_posting = TripPostingService(store, self.journal)
 
     # ------------------------------------------------------------------ parameters
@@ -175,7 +181,7 @@ class AccountingInitService:
 
     # ------------------------------------------------------------------ the review list (read only)
     def check(self, params: models.AccountingInitIn, today: date | None = None) -> list[ReviewItem]:
-        """The records the backfill would need a decision for (step 4, 5a, 6, 8; E23/E24 resolve them)."""
+        """The records the backfill would need a decision for (step 5a, 6, 8; E24 resolves them)."""
         start = self.start_of(params, today)
         st = effective_settings(self.store.settings())
         out: list[ReviewItem] = []
@@ -212,13 +218,6 @@ class AccountingInitService:
                     and ((params.vat_basis == "soll" and self._carries_vat(inv, st, day)) or self._b2b_service(inv))
                 ):
                     item("vat_before_start", "invoices", inv, "VAT date before the accounting start; " + REVIEW_MESSAGE)
-            elif self._open_at_start(inv, st, start, payments.get(str(inv["id"]), []), notes.get(str(inv["id"]), [])):
-                item(
-                    "prestart_open_invoice",
-                    "invoices",
-                    inv,
-                    "Issued before the accounting start and still open at it; " + REVIEW_MESSAGE,
-                )
         for exp in self.store.list("expenses"):
             self._check_expense(exp, start, item)
         return out
@@ -270,14 +269,7 @@ class AccountingInitService:
         if day is None:
             return
         paid_on = _day(exp.get("paid_on"))
-        if day < start:
-            if paid_on is not None and paid_on >= start:
-                item(
-                    "expense_prestart_open",
-                    "expenses",
-                    exp,
-                    "Dated before the accounting start, paid after it; " + REVIEW_MESSAGE,
-                )
+        if day < start:  # an expense dated before the start posts an opening entry (E23), never a review case
             return
         if paid_on is not None and paid_on < start:
             item("expense_prepaid", "expenses", exp, "Paid before the accounting start; " + REVIEW_MESSAGE)
@@ -332,6 +324,7 @@ class AccountingInitService:
                 counts["opening_entry"] = 1
             self._open_years(start)
             counts["snapshots"] = self._snapshots(start)
+            counts.update(self._opening_items(start, user))
             for kind, n in self._replay(start, user).items():
                 counts[kind] = n
             return InitResult(start.year, start.isoformat(), counts)
@@ -372,11 +365,34 @@ class AccountingInitService:
             n += 1
         return n
 
+    # ------------------------------------------------------------------ steps 4, 5: pre-start items
+    def _opening_items(self, start: date, user: Mapping[str, Any]) -> dict[str, int]:
+        """The baseline of every invoice issued before the start and open at it, the opening entry of every expense
+        dated before the start and paid on/after it (their events on/after the start replay afterwards)."""
+        st = effective_settings(self.store.settings())
+        counts: dict[str, int] = {}
+        for inv in self.store.list("invoices"):
+            day = _day(inv.get("date"))
+            if not _issued(inv) or day is None or day >= start:
+                continue
+            pays = self.store.find("payments", document_id=inv["id"])
+            notes = [n for n in self.store.find("invoices", corrects_id=inv["id"]) if n.get("kind") == "credit_note"]
+            if self._open_at_start(inv, st, start, pays, notes) and self.opening_items.ensure_invoice_baseline(
+                inv, user
+            ):
+                counts["opening_invoice"] = counts.get("opening_invoice", 0) + 1
+        for exp in self.store.list("expenses"):
+            data = dict(exp)
+            self.expense_posting.prepare(data, exp)  # the treatment, like a save does
+            if self.expense_posting.post_opening(data, user) is not None:
+                counts["opening_expense"] = counts.get("opening_expense", 0) + 1
+        return counts
+
     # ------------------------------------------------------------------ steps 1, 5, 7: the replay
     def _replay(self, start: date, user: Mapping[str, Any]) -> dict[str, int]:
         view = _ReplayStore(self.store)
-        pay_post = PaymentPostingService(view, self.journal)  # type: ignore[arg-type]
-        credit_post = CreditPostingService(view, self.journal)  # type: ignore[arg-type]
+        pay_post = PrestartPaymentPosting(view, self.journal)  # type: ignore[arg-type]
+        credit_post = PrestartCreditPosting(view, self.journal)  # type: ignore[arg-type]
         pay_service = PaymentService(view, self.journal)  # type: ignore[arg-type]
         events: list[_Event] = []
 
@@ -387,6 +403,9 @@ class AccountingInitService:
 
         invoices = {str(r["id"]): r for r in self.store.list("invoices") if _issued(r)}
         late = {k: v for k, v in invoices.items() if (_day(v["date"]) or start) >= start}
+        # issued before the start: their baseline is posted; only the events on/after the start replay
+        early = {k: v for k, v in invoices.items() if k not in late and v.get("status") != "cancelled"}
+        replayed = {**late, **early}
 
         def stored(inv_id: str) -> Record:
             return self.store.get("invoices", inv_id) or {}
@@ -412,14 +431,27 @@ class AccountingInitService:
             if not has_rows and inv.get("status") == "paid" and gross_cents_of(inv, settings) != 0:
                 paid_day = invoice_state.legacy_payment_date(inv)
                 add(paid_day, RANK_OTHER, (0, 0, 1), inv_id, "legacy_payment", partial(legacy, inv_id))
+        for inv_id, inv in early.items():
+            paid_day = invoice_state.legacy_payment_date(inv)
+            if (
+                not self.store.find("payments", document_id=inv_id)
+                and inv.get("status") == "paid"
+                and gross_cents_of(inv, settings) != 0
+                and (_day(paid_day) or start) >= start
+            ):
+                add(paid_day, RANK_OTHER, (0, 0, 1), inv_id, "legacy_payment", partial(legacy, inv_id))
         for pay in self.store.list("payments"):
-            if str(pay.get("document_id")) in late:
+            if str(pay.get("document_id")) in replayed and (
+                str(pay.get("document_id")) in late or (_day(pay.get("date")) or start) >= start
+            ):
                 view.hidden["payments"].add(str(pay["id"]))
                 order = _row_order(pay, pay.get("created_at"), 2)
                 add(str(pay["date"])[:10], RANK_OTHER, order, str(pay["id"]), "payment", partial(payment, pay))
         for note in self.store.list("invoices"):
-            if note.get("kind") != "credit_note" or str(note.get("corrects_id")) not in late:
+            if note.get("kind") != "credit_note" or str(note.get("corrects_id")) not in replayed:
                 continue
+            if str(note.get("corrects_id")) in early and (_day(note.get("date")) or start) < start:
+                continue  # part of the baseline
             view.hidden["invoices"].add(str(note["id"]))
             reversal = note.get("credit_kind") == "write_off_reversal"
             order = _row_order(note, (note.get("issued") or {}).get("issued_at"), 1 if reversal else 0)
@@ -429,6 +461,15 @@ class AccountingInitService:
             if day is not None and day >= start:
                 add(
                     day.isoformat(), RANK_OTHER, (0, 0, 0), str(exp["id"]), "expense", partial(self._expense, exp, user)
+                )
+            elif day is not None and (paid := _day(exp.get("paid_on"))) is not None and paid >= start:
+                add(  # dated before the start: only its payment posts (the bill is in the opening entry)
+                    paid.isoformat(),
+                    RANK_OTHER,
+                    (0, 0, 0),
+                    str(exp["id"]),
+                    "expense_payment",
+                    partial(self._expense, exp, user),
                 )
         for trip in self.store.list("trips"):
             end = _day(trip.get("end"))
