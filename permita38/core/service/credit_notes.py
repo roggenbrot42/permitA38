@@ -28,7 +28,7 @@ from permita38.core.service import invoice_state
 from permita38.core.service.journal import JournalService
 from permita38.core.service.locks import first_unlocked_from
 from permita38.core.service.numbering import NumberingService
-from permita38.core.service.payments import MAX_PAYMENT_CENTS, PaymentService
+from permita38.core.service.payments import MAX_PAYMENT_CENTS, PaymentService, next_event_seq
 from permita38.core.service.postings import (
     CreditPostingService,
     credit_snapshot,
@@ -181,6 +181,7 @@ class CreditNoteService:
             "lines": lines if lines is not None else [self._line(r, n, reason) for r, n, _v in groups],
             "reason": reason,
             "issued": self._snapshot(inv, groups, day),
+            "seq": next_event_seq(self.store),
         }
         if credit_kind != "write_off":
             record["number"] = self.numbering.allocate(DOC_TYPE, date_of(day))

@@ -267,17 +267,19 @@ def test_nothing_posts_before_the_initialisation(repo, rs):
     assert entries(repo) == []
 
 
-def test_an_expense_dated_before_the_start_does_not_post(repo, rs):
+def test_an_expense_dated_before_the_start_posts_no_bill(repo, rs):
     init(repo, start="2026-03-01")
     rec = make(repo, rs, date="2026-02-20", paid_on="2026-03-05")
-    assert entries(repo) == [] and "bill_rev" not in rec
+    eid = rec["id"]  # the bill is an opening item, only the payment is a normal event
+    assert keys(repo) == [f"open:2026:expense:{eid}", f"expense:{eid}:pay:r1"] and "bill_rev" not in rec
 
 
 def test_moving_the_date_before_the_start_reverses_the_entries(repo, rs):
     init(repo, start="2026-03-01")
     rec = make(repo, rs, date="2026-03-10")
     rec = put(rs, rec, date="2026-02-20")
-    assert keys(repo)[-1].endswith(":bill:r1:rev") and len(entries(repo)) == 2
+    eid = rec["id"]
+    assert keys(repo) == [f"expense:{eid}:bill:r1", f"open:2026:expense:{eid}", f"expense:{eid}:bill:r1:rev"]
     assert rec["bill_rev"] == 2
 
 

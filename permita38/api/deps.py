@@ -12,6 +12,7 @@ from permita38.core import rights
 from permita38.core.config import Config
 from permita38.core.netsafe import SafeFetcher
 from permita38.core.repository import Repository, auto_backup, create_repository
+from permita38.core.service.accounting_init import AccountingInitService
 from permita38.core.service.accounting_reports import AccountingReportService
 from permita38.core.service.accounting_status import AccountingStatusService
 from permita38.core.service.allocations import AllocationService
@@ -87,6 +88,7 @@ class Services:
     audit: AuditService
     fiscal_years: FiscalYearService
     accounting_reports: AccountingReportService
+    accounting_init: AccountingInitService
     journal: JournalService
     credit_notes: CreditNoteService
     locks: LockService
@@ -142,6 +144,7 @@ class Services:
             audit=AuditService(store),
             fiscal_years=fiscal_years,
             accounting_reports=AccountingReportService(store),
+            accounting_init=AccountingInitService(store, journal, fiscal_years, tax_bookings),
             journal=journal,
             locks=locks,
             manual_entries=ManualEntryService(store, journal),

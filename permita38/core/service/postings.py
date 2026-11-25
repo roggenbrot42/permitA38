@@ -3,7 +3,9 @@
 :func:`build_snapshot` freezes the amounts of an invoice (the ``issued`` snapshot, spec 9.1); :class:`IssuePostingService`
 turns the snapshot into the engine event (``core/accounting/postings_issue.py``, pure) and posts it through
 :class:`~permita38.core.service.journal.JournalService` with the event key ``issue:<invoice id>``. Nothing posts before
-the accounting is initialised (settings key ``accounting.start``) or for an invoice dated before the start. No SQL here.
+the accounting is initialised (settings key ``accounting.start``) or for an invoice dated before the start. A payment
+or credit note of an invoice dated before the start posts its baseline first (``open:<year>:invoice:<id>``) and, when it
+is itself dated before the start, only an opening adjustment (``...:r<n>``); see ``opening_items.py``. No SQL here.
 """
 
 import copy
@@ -272,6 +274,9 @@ class PaymentPostingService:
     def __init__(self, store: Repository, journal: JournalService | None = None):
         self.store = store
         self.journal = journal or JournalService(store)
+        from permita38.core.service.opening_items import OpeningItemService  # opening_items imports this module
+
+        self.opening = OpeningItemService(store, self.journal)
 
     def post_payment(
         self, invoice: Mapping[str, Any], row: Mapping[str, Any], user: Mapping[str, Any] | None = None
@@ -285,8 +290,13 @@ class PaymentPostingService:
             return None
         invoice_date = date.fromisoformat(str(invoice["date"])[:10])
         snap = stored_snapshot(invoice)
-        if invoice_date < start or snap is None:
+        if snap is None:
             return None
+        if invoice_date < start:  # issued before the start: the baseline first (idempotent), then the event
+            self.opening.sync_invoice(invoice, user)
+            if date.fromisoformat(str(row["date"])[:10]) < start:
+                return None  # part of the baseline: an opening adjustment at most, never a normal event
+            invoice_date = start
         uid = str((user or {}).get("id") or "system")
         fy = self.journal.ensure_year(invoice_date.year, uid)
         bases = Bases(cast(IncomeBasis, fy["income_basis"]), cast(VatBasis, fy["vat_basis"]))
@@ -326,6 +336,9 @@ class CreditPostingService:
     def __init__(self, store: Repository, journal: JournalService | None = None):
         self.store = store
         self.journal = journal or JournalService(store)
+        from permita38.core.service.opening_items import OpeningItemService  # opening_items imports this module
+
+        self.opening = OpeningItemService(store, self.journal)
 
     def post_credit(
         self, invoice: Mapping[str, Any], note: Mapping[str, Any], user: Mapping[str, Any] | None = None
@@ -340,8 +353,13 @@ class CreditPostingService:
             return None
         invoice_date = date.fromisoformat(str(invoice["date"])[:10])
         snap = stored_snapshot(invoice)
-        if invoice_date < start or snap is None:
+        if snap is None:
             return None
+        if invoice_date < start:  # issued before the start: the baseline first (idempotent), then the event
+            self.opening.sync_invoice(invoice, user)
+            if date.fromisoformat(str(note["date"])[:10]) < start:
+                return None  # part of the baseline: an opening adjustment at most, never a normal event
+            invoice_date = start
         uid = str((user or {}).get("id") or "system")
         fy = self.journal.ensure_year(invoice_date.year, uid)
         bases = Bases(cast(IncomeBasis, fy["income_basis"]), cast(VatBasis, fy["vat_basis"]))
