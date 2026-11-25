@@ -202,6 +202,40 @@ def _check_db(services, args) -> int:
     return 1 if counts["errors"] else 0
 
 
+def _accounting_init(services, args) -> None:
+    from pydantic import ValidationError
+
+    from permita38.core import models
+
+    try:
+        balances = json.loads(args.opening_file.read_text(encoding="utf-8")) if args.opening_file else []
+        params = models.AccountingInitIn(
+            chart=args.chart,
+            income_basis=args.income_basis,
+            vat_basis=args.vat_basis,
+            frequency=args.frequency,
+            dauerfrist=args.dauerfrist,
+            small_business=args.small_business,
+            accounting_start=args.start,
+            opening_balances=balances,
+        )
+    except (OSError, ValueError, ValidationError) as e:
+        sys.exit(f"Invalid input: {e}")
+    try:
+        result = services.accounting_init.run(params, {"id": "cli", "role": "boss"})
+    except ServiceError as e:
+        review = e.body.get("review")
+        if review:
+            print(f"{e.message}:", file=sys.stderr)
+            for r in review:
+                print(f"  {r['key']}  {r['number'] or ''}  {r['message']}", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(e.message)
+    print(f"Accounting initialised: fiscal year {result.year}, start {result.start}.")
+    for kind, n in sorted(result.counts.items()):
+        print(f"  {kind}: {n}")
+
+
 def main(argv: list[str] | None = None):
     ap = argparse.ArgumentParser(
         prog="permita38",
@@ -272,6 +306,17 @@ def main(argv: list[str] | None = None):
     cal = sub.add_parser("calendar", help="calendar subscriptions")
     cal_sub = cal.add_subparsers(dest="calendar_command", required=True)
     cal_sub.add_parser("refresh", help="download every connected calendar link now (files are not touched)")
+    ac = sub.add_parser("accounting", help="accounting setup")
+    ac_sub = ac.add_subparsers(dest="accounting_command", required=True)
+    ai = ac_sub.add_parser("init", help="initialise the accounting of this data folder (backfills existing records)")
+    ai.add_argument("--chart", required=True, choices=["skr03", "skr04"])
+    ai.add_argument("--income-basis", required=True, choices=["eur", "accrual"])
+    ai.add_argument("--vat-basis", choices=["soll", "ist"], default="soll")
+    ai.add_argument("--frequency", choices=["month", "quarter", "none"], default="month")
+    ai.add_argument("--dauerfrist", action="store_true")
+    ai.add_argument("--small-business", action="store_true")
+    ai.add_argument("--start", required=True, metavar="YYYY-MM-DD", help="accounting start (first day of a month)")
+    ai.add_argument("--opening-file", type=Path, help="JSON list of opening balances [{account|role, amount}]")
     cu = sub.add_parser("create-user", help="create a user (e.g. via `docker compose run --rm permita38 create-user`)")
     cu.add_argument("--username", required=True)
     cu.add_argument("--name", required=True)
@@ -366,6 +411,9 @@ def main(argv: list[str] | None = None):
             return _import_archive(services, args)
         if command == "import-documents":
             return _import_documents(services, args)
+        if command == "accounting":
+            services.store.startup()
+            return _accounting_init(services, args)
         if command == "calendar":
             services.store.startup()
             for name, status in services.calendar.refresh_all():

@@ -9501,6 +9501,7 @@
           "accounting"
         ],
         "summary": "Init Accounting",
+        "description": "Initialise the accounting (boss only): fiscal year, opening entry, snapshots, backfill of every event on or\nafter the start, in one transaction. ``review_resolutions`` answers the review list, ``external_returns`` carries\nthe returns filed outside the app. 409 when already initialised or when review rows are unanswered (listed).",
         "operationId": "init_accounting_api_accounting_init_post",
         "requestBody": {
           "content": {
@@ -9545,7 +9546,89 @@
           "accounting"
         ],
         "summary": "Accounting Init Review",
+        "description": "The records that need a decision before the accounting can start, each with its allowed resolutions, and the\nended VAT periods for which a return filed outside the app may be entered (read only).",
         "operationId": "accounting_init_review_api_accounting_init_review_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiToken": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "chart",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(skr03|skr04)$",
+              "default": "skr03",
+              "title": "Chart"
+            }
+          },
+          {
+            "name": "income_basis",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(eur|accrual)$",
+              "default": "eur",
+              "title": "Income Basis"
+            }
+          },
+          {
+            "name": "accounting_start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 10
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Accounting Start"
+            }
+          },
+          {
+            "name": "vat_basis",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(soll|ist)$",
+              "default": "soll",
+              "title": "Vat Basis"
+            }
+          },
+          {
+            "name": "frequency",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(month|quarter|none)$",
+              "default": "month",
+              "title": "Frequency"
+            }
+          },
+          {
+            "name": "small_business",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Small Business"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -9554,16 +9637,18 @@
                 "schema": {}
               }
             }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
           },
-          {
-            "ApiToken": []
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        ]
+        }
       }
     },
     "/api/accounting/journal": {
@@ -12768,6 +12853,15 @@
             "type": "array",
             "maxItems": 5000,
             "title": "Review Resolutions",
+            "default": []
+          },
+          "external_returns": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalReturnIn"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "title": "External Returns",
             "default": []
           }
         },
@@ -18812,6 +18906,86 @@
         ],
         "title": "ExtendIn"
       },
+      "ExternalReturnIn": {
+        "properties": {
+          "year": {
+            "type": "integer",
+            "maximum": 2100.0,
+            "minimum": 2000.0,
+            "title": "Year"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "month",
+              "quarter"
+            ],
+            "title": "Kind"
+          },
+          "no": {
+            "type": "integer",
+            "maximum": 12.0,
+            "minimum": 1.0,
+            "title": "No"
+          },
+          "none_filed": {
+            "type": "boolean",
+            "title": "None Filed",
+            "default": false
+          },
+          "kz83": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": -1000000000.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kz83"
+          },
+          "kz39": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^-?[0-9]{1,10}(\\.[0-9]{1,6})?$"
+              }
+            ],
+            "title": "Kz39",
+            "default": "0"
+          },
+          "filed_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filed On"
+          }
+        },
+        "type": "object",
+        "required": [
+          "year",
+          "kind",
+          "no"
+        ],
+        "title": "ExternalReturnIn",
+        "description": "A VAT return of a period on/after the accounting start that was filed outside the app (accounting.md 16 step\n5b): the filed Kz 83 (and Kz 39) and the filing date; or ``none_filed`` (nothing was filed for the period)."
+      },
       "FiscalYear": {
         "properties": {
           "id": {
@@ -23441,7 +23615,8 @@
             "enum": [
               "treatment",
               "confirm",
-              "credit_note"
+              "credit_note",
+              "date"
             ],
             "title": "Action"
           },
@@ -23449,13 +23624,29 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 60
+                "enum": [
+                  "standard",
+                  "no_input_vat",
+                  "reverse_charge_eu_service",
+                  "reverse_charge_third_country"
+                ]
               },
               {
                 "type": "null"
               }
             ],
             "title": "Treatment"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
           }
         },
         "type": "object",
