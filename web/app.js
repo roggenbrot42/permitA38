@@ -183,7 +183,7 @@ function entryForm(e = {}, after) {
 /* ---------- layout + router ---------- */
 /* nav: [route, icon, label, area needed to see it, 'write' if it needs write access (or 'all' when the read scope must be all, not a restricted view)] */
 const NAV = [['today', '⏱', 'Today', 'timer'], ['time', '🗓', 'Timesheet', 'time', 'write'], ['timeoff', '🏖', 'Time off', 'absences'], ['plan', '📈', 'Planning', 'planning'], ['customers', '👥', 'Customers', 'customers'], ['projects', '📁', 'Projects', 'projects', 'all'],
-  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['suppliers', '🏭', 'Suppliers', 'suppliers'], ['incoming', '📨', 'Incoming offers', 'procurement'], ['trips', '🧳', 'Business trips', 'trips'], ['money', '💶', 'Money & Taxes', 'finance'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['timeline', '📅', 'Team timeline', 'team_timeline'], ['settings', '⚙️', 'Business settings', 'settings', 'all'], ['me', '👤', 'My settings', '*'], ['tokens', '🔑', 'API tokens', '*']];
+  ['sales', '🧾', 'Offers & Invoices', 'invoices'], ['expenses', '💳', 'Expenses', 'expenses'], ['suppliers', '🏭', 'Suppliers', 'suppliers'], ['incoming', '📨', 'Incoming offers', 'procurement'], ['trips', '🧳', 'Business trips', 'trips'], ['money', '💶', 'Money & Taxes', 'finance'], ['vat', '🧾', 'VAT', 'vat'], ['team', '🧑‍🤝‍🧑', 'Team', 'team', 'write'], ['timeline', '📅', 'Team timeline', 'team_timeline'], ['settings', '⚙️', 'Business settings', 'settings', 'all'], ['me', '👤', 'My settings', '*'], ['tokens', '🔑', 'API tokens', '*']];
 const navAllowed = ([, , , area, need]) => (area === '*' ? true : need === 'write' ? can(area, 'write') : need === 'all' ? scopeOf(area) === 'all' : can(area));
 const navFor = () => NAV.filter(n => navAllowed(n) && !(n[0] === 'timeoff' && can('planning')));
 /* which area (and, for the read-only lock, which write area) a page belongs to */
@@ -340,7 +340,9 @@ PAGES.today = async () => {
     const st = S.settings, steps = [[numLog.length > 0 || S.d.invoices.some(i => i.number), 'Check your document numbering (start number, pattern)', '#/numbering'], [batches.length > 0 || S.d.invoices.some(i => i.imported), 'Import existing offers and invoices (optional)', '#/import'], [!!st.company_name && !!(st.tax_number || st.vat_id), 'Fill in your business details (address, tax number, bank)', '#/settings'], [S.d.customers.length > 0, 'Add your first customer', '#/customers'], [S.d.projects.length > 0, 'Create a project (customer work or internal)', '#/projects'], [entries.length > 0 || S.d.entries.length > 0, 'Track your first hour with the Start button above', '#/today']];
     extras = `<div class="card" style="border-color:var(--accent)"><h2>👋 Getting started</h2><div class="muted small" style="margin-bottom:8px">Four steps to your first tracked hour. Full guide: <code>docs/getting-started.md</code></div>${steps.map(([done, t, h]) => `<div style="padding:4px 0">${done ? '✅' : '⬜'} <a href="${h}">${t}</a></div>`).join('')}</div>` + extras;
   }
-  render.after = () => { timerUpd(); timerTick(); };
+  const vatSlot = can('vat') && typeof vatFillBanners === 'function';   // the VAT/ZM banners load after the page is drawn
+  if (vatSlot) extras = '<div id="vat-banners"></div>' + extras;
+  render.after = () => { timerUpd(); timerTick(); if (vatSlot) vatFillBanners(); };
   return `<div class="head"><div><h1>${hello}, ${esc(S.me.name.split(' ')[0])}</h1><div class="muted">${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })}</div></div><button data-a="addTime">+ Add time manually</button></div>
   ${timerCard()}
   <div class="card"><div class="row" style="align-items:center"><div><h2 style="margin:0">This week</h2><div class="muted">${hm(dash.worked)} of ${hm(dash.target)} h</div></div>
