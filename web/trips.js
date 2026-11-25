@@ -44,7 +44,10 @@ const fmtDT = s => s ? `${fmtDate(s.slice(0, 10))} ${s.slice(11, 16)}` : '';
 const selOpts = (opts, cur) => opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur ?? '') ? 'selected' : ''}>${esc(l)}</option>`).join('');
 /** Trips for the bill dialog's trip select (newest first, as the server sends them). */
 const tripOptions = keep => {
-  const opts = (S.d.trips || []).map(t => [t.id, `${fmtDate(t.start.slice(0, 10))} ${t.title || t.purpose}`]);
+  const opts = (S.d.trips || []).map(t => {
+    const s = t.start.slice(0, 10), e = (t.end || '').slice(0, 10);
+    return [t.id, `${fmtDate(s)}${e && e !== s ? '–' + fmtDate(e) : ''} ${t.title || t.purpose} · ${destinationOf(t)}`];
+  });
   if (keep && !opts.some(o => o[0] === keep)) opts.push([keep, 'Other trip']);   // never drop a link the list does not know: saving would unlink the bill
   return opts;
 };
@@ -77,14 +80,17 @@ PAGES.trips = async (id, step) => {
     await loadAll(['trips', 'customers', 'projects', 'expenses']);
     return tripListHTML();
   }
+  const seq = render.seq;   // render() bumped it before calling us; a newer render makes this one stale
   await loadAll(['customers', 'projects', 'expenses', 'trips']);
   const trip = await api('GET', `trips/${encodeURIComponent(id)}`);
   const cur = TRIP_STEPS.some(s => s[0] === step) ? step : 'expenses';   // a stored trip opens on its expenses
-  TRIP_PAGE = { trip, step: cur, ro: !can('trips', 'write') || trip.status === 'final', legs: null, rate: null };
+  const page = { trip, step: cur, ro: !can('trips', 'write') || trip.status === 'final', legs: null, rate: null };
   // the private car rate comes from the server: only needed for the mileage rows of the expenses table
   if (cur === 'expenses' && trip.mileage?.length && can('trips', 'write')) {
-    try { TRIP_PAGE.rate = (await api('POST', 'trips/preview', tripIn(trip))).mileage_rate ?? null; } catch { TRIP_PAGE.rate = null; }
+    try { page.rate = (await api('POST', 'trips/preview', tripIn(trip))).mileage_rate ?? null; } catch { page.rate = null; }
   }
+  if (seq !== render.seq) return '';   // superseded: render() drops this HTML, and TRIP_PAGE must keep describing the page that is shown
+  TRIP_PAGE = page;
   render.after = tripAfter;
   return tripPageHTML();
 };
@@ -476,8 +482,9 @@ function itemRowHTML(i, bills, ro, canBill) {
     `<button type="button" class="ghost sm" data-a="tripItemEdit" data-id="${esc(i.id)}" aria-label="Edit ${esc(label)} ${esc(fmtDate(i.date))}">Edit</button>`,
     bills.length ? '' : `<button type="button" class="ghost sm" data-a="tripItemDel" data-id="${esc(i.id)}" aria-label="Remove ${esc(label)} ${esc(fmtDate(i.date))}">Remove</button>`,
   ].join(' ');
+  const editBills = canBill ? bills.map(b => `<button type="button" class="ghost sm" data-a="editExpense" data-id="${esc(b.id)}" data-trip="${esc(TRIP_PAGE.trip.id)}" aria-label="Edit bill ${esc(b.vendor || fmtDate(b.date))}">Edit bill</button>`).join(' ') : '';
   return `<tr data-item="${esc(i.id)}"><td class="nowrap">${esc(i.date_to ? `${fmtDate(i.date)} – ${fmtDate(i.date_to)}` : fmtDate(i.date))}</td>
-    <td>${esc(label)}</td><td>${esc(desc)}${outside}</td><td class="num">${exp}</td><td class="num">${esc(actual)}</td><td>${receiptHTML(bills)}</td><td>${acts}</td></tr>`;
+    <td>${esc(label)}</td><td>${esc(desc)}${outside}</td><td class="num">${exp}</td><td class="num">${esc(actual)}</td><td>${receiptHTML(bills)}</td><td>${editBills}${editBills && acts ? ' ' : ''}${acts}</td></tr>`;
 }
 function carRowHTML(m, k, ro) {
   const cost = TRIP_PAGE.rate != null ? eur(kmCost(m.km, TRIP_PAGE.rate)) : '—';
