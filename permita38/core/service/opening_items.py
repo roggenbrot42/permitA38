@@ -30,30 +30,15 @@ from permita38.core.accounting.postings_targets import targets
 from permita38.core.accounting.types import Bases, IncomeBasis, InvoiceState, VatBasis
 from permita38.core.repository import Repository
 from permita38.core.service import invoice_state
-from permita38.core.service.expense_postings import ExpensePostingService
 from permita38.core.service.journal import JournalService, JournalSource, PostLine
-from permita38.core.service.postings import (
-    CreditPostingService,
-    PaymentPostingService,
-    invoice_state_of,
-    stored_snapshot,
-)
+from permita38.core.service.posting_state import invoice_state_of, stored_snapshot
 from permita38.core.settings import accounting_start
 
 __all__ = [
     "OpeningItemService",
-    "PrestartCreditPosting",
-    "PrestartExpensePosting",
-    "PrestartPaymentPosting",
 ]
 
-# Thin names kept for the importers; the pre-start handling lives in the base posting services.
-PrestartPaymentPosting = PaymentPostingService
-PrestartCreditPosting = CreditPostingService
-PrestartExpensePosting = ExpensePostingService
-
 OPENING_ROLE = "opening_balance"
-EXPENSE_BALANCE_ROLES = ("payables", "input_vat_clearing")
 OPEN_ITEM_ROLES = ("receivables", "payables")
 
 

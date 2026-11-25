@@ -15,9 +15,9 @@ import pytest
 from hypothesis import HealthCheck, event, given, settings
 from hypothesis import strategies as st
 
-from permita38.core.accounting import postings_credit as pc
 from permita38.core.accounting import postings_issue as pi
 from permita38.core.accounting import postings_targets as pt
+from permita38.core.accounting import postings_writeoff as pc
 from permita38.core.accounting.types import (
     Bases,
     Cents,

@@ -14,7 +14,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from permita38.core import calc
+from permita38.core import doc_totals
 from permita38.core.money import ZERO
 from permita38.core.repository import Repository
 from permita38.core.service.accounting_reports import AccountingReportService
@@ -63,7 +63,7 @@ def figures(store: Repository, year: int) -> tuple[list[dict[str, Any]], dict[st
         return None
     reports = AccountingReportService(store)
     data = reports.load_income_year(fy)
-    months = calc.empty_months()
+    months = doc_totals.empty_months()
     cats: dict[str, Decimal] = {}
     for p in data.lines:
         when, role, cents = p.line.income_date, str(p.line.role), int(p.line.amount_cents)
@@ -92,4 +92,4 @@ def _open_receivables(store: Repository, reports: AccountingReportService, fy: d
     if str(fy.get("income_basis")) == "accrual":
         total = reports.open_items(int(fy["year"]), _FAR_FUTURE).receivables_total  # a pydantic float field
         return _eur(round(Decimal(str(total)) * 100))  # back to whole cents, never float arithmetic on the figure
-    return calc.open_receivables_of_documents(store)
+    return doc_totals.open_receivables_of_documents(store)

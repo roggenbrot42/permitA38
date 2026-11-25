@@ -15,10 +15,12 @@ from datetime import date
 from decimal import Decimal
 from typing import Any
 
-from permita38.core import models
-from permita38.core.accounting.postings_credit import write_off_reversal_amounts
+from permita38.core import calc, models
+from permita38.core.accounting.postings_writeoff import write_off_reversal_amounts
 from permita38.core.accounting.types import Cents, PaymentEvent
+from permita38.core.doc_totals import doc_totals
 from permita38.core.errors import ServiceError
+from permita38.core.money import dec, q2
 from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service import invoice_state
@@ -26,6 +28,7 @@ from permita38.core.service.journal import JournalService
 from permita38.core.service.postings import (
     CreditPostingService,
     PaymentPostingService,
+    build_snapshot,
     credit_snapshot,
     invoice_state_of,
     stored_snapshot,
@@ -96,6 +99,45 @@ def _cents(amount: Decimal) -> int:
     return int(scaled)
 
 
+def gross_cents_of(invoice: Mapping[str, Any], settings: Mapping[str, Any]) -> int:
+    """The gross of an issued invoice in cents: the snapshot's, else the current totals (legacy invoice)."""
+    issued = invoice.get("issued")
+    if isinstance(issued, Mapping) and issued.get("gross") is not None:
+        return int(issued["gross"])
+    return int(q2(dec(doc_totals(dict(invoice), dict(settings))["gross"]) * 100))
+
+
+def materialize_legacy_payment(
+    store: Repository,
+    invoice: dict[str, Any],
+    settings: Mapping[str, Any],
+    user: Mapping[str, Any] | None = None,
+    post: Callable[[dict[str, Any], dict[str, Any]], Any] | None = None,
+) -> dict[str, Any]:
+    """Before the first write that acts on payments or credits of an issued invoice (spec 2.3): write the missing
+    ``issued`` snapshot, and turn a legacy virtual payment (stored ``paid``, no rows) into a real ``payments`` row,
+    in the caller's transaction. Idempotent. Returns the invoice as stored afterwards."""
+    with store.transaction():
+        inv = invoice
+        if not inv.get("issued"):
+            day = calc.d(inv.get("date")) or date.today()  # type: ignore[no-untyped-call]
+            inv = store.save("invoices", {**inv, "issued": build_snapshot(store, inv, dict(settings), day)})
+        if inv.get("status") == "paid" and not store.find("payments", document_id=inv["id"]):
+            gross = int(inv["issued"]["gross"])
+            if gross != 0:
+                row = _insert_row(
+                    store,
+                    inv["id"],
+                    date=invoice_state.legacy_payment_date(inv),
+                    amount_cents=gross,
+                    note=invoice_state.LEGACY_NOTE,
+                    user=user,
+                )
+                if post is not None:  # the materialised payment posts like any other (once accounting runs)
+                    post(inv, row)
+        return inv
+
+
 class PaymentService:
     def __init__(
         self,
@@ -122,8 +164,6 @@ class PaymentService:
         return inv
 
     def _derive(self, inv: Mapping[str, Any]) -> invoice_state.Derived:
-        from permita38.core.service.sales import gross_cents_of  # sales imports this module
-
         st = effective_settings(self.store.settings())
         pays = self.store.find("payments", document_id=inv["id"])
         notes = invoice_state.credit_notes_of(self.store.find("invoices", corrects_id=inv["id"]))
@@ -138,8 +178,6 @@ class PaymentService:
     def materialize(self, inv: Record, user: Mapping[str, Any] | None = None) -> Record:
         """Spec 2.3: write the missing snapshot and turn a legacy virtual payment into a real row (posted like any
         payment). Idempotent; returns the invoice as stored afterwards."""
-        from permita38.core.service.sales import materialize_legacy_payment
-
         st = effective_settings(self.store.settings())
         return materialize_legacy_payment(
             self.store, inv, st, user, post=lambda i, row: self.posting.post_payment(i, row, user)

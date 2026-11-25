@@ -17,8 +17,8 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from permita38.core.accounting.postings_credit import discount_amounts, write_off_amounts
 from permita38.core.accounting.postings_issue import rate_str
+from permita38.core.accounting.postings_writeoff import discount_amounts, write_off_amounts
 from permita38.core.accounting.types import Cents, InvoiceState, IssuedSnapshot, RateGroup
 from permita38.core.errors import ServiceError
 from permita38.core.money import vat_amount

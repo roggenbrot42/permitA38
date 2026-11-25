@@ -182,6 +182,7 @@ class RecordService:
             # time always belongs to a person: without one it would count for the project and as unbilled work but
             # appear in nobody's timesheet, Today list or weekly hours (an update without user_id keeps the owner)
             data["user_id"] = (old or {}).get("user_id") or me["id"]
+        expense_warnings: list[dict[str, Any]] = []  # only an expense collects any
         if coll in _PROJECT_REF_COLLECTIONS:
             self._check_project_exists(data, old)
         if coll in PROJECT_CUSTOMER_COLLECTIONS:

@@ -33,7 +33,7 @@ from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service import invoice_state
 from permita38.core.service.credit_notes import CreditNoteService
-from permita38.core.service.expense_postings import RC_TREATMENTS
+from permita38.core.service.expense_postings import RC_TREATMENTS, ExpensePostingService
 from permita38.core.service.fiscal_years import FiscalYearService
 from permita38.core.service.init_review import (
     ExternalPeriod,
@@ -43,15 +43,14 @@ from permita38.core.service.init_review import (
 )
 from permita38.core.service.journal import JournalService
 from permita38.core.service.locks import LockService
-from permita38.core.service.opening_items import (
-    OpeningItemService,
-    PrestartCreditPosting,
-    PrestartExpensePosting,
-    PrestartPaymentPosting,
+from permita38.core.service.opening_items import OpeningItemService
+from permita38.core.service.payments import PaymentService, gross_cents_of
+from permita38.core.service.postings import (
+    CreditPostingService,
+    IssuePostingService,
+    PaymentPostingService,
+    build_snapshot,
 )
-from permita38.core.service.payments import PaymentService
-from permita38.core.service.postings import IssuePostingService, build_snapshot
-from permita38.core.service.sales import gross_cents_of
 from permita38.core.service.tax_bookings import TaxBookingService
 from permita38.core.service.trip_postings import TripPostingService
 from permita38.core.service.vat_returns import VatReturnService
@@ -155,7 +154,7 @@ class AccountingInitService:
         self.fiscal_years = fiscal_years or FiscalYearService(store)
         self.tax_bookings = tax_bookings or TaxBookingService(store, self.journal)
         self.issue_posting = IssuePostingService(store, self.journal)
-        self.expense_posting = PrestartExpensePosting(store, self.journal)
+        self.expense_posting = ExpensePostingService(store, self.journal)
         self.opening_items = OpeningItemService(store, self.journal)
         self.trip_posting = TripPostingService(store, self.journal)
 
@@ -457,8 +456,8 @@ class AccountingInitService:
     # ------------------------------------------------------------------ steps 1, 5, 7: the replay
     def _replay(self, start: date, user: Mapping[str, Any]) -> dict[str, int]:
         view = _ReplayStore(self.store)
-        pay_post = PrestartPaymentPosting(view, self.journal)  # type: ignore[arg-type]
-        credit_post = PrestartCreditPosting(view, self.journal)  # type: ignore[arg-type]
+        pay_post = PaymentPostingService(view, self.journal)  # type: ignore[arg-type]
+        credit_post = CreditPostingService(view, self.journal)  # type: ignore[arg-type]
         pay_service = PaymentService(view, self.journal)  # type: ignore[arg-type]
         events: list[_Event] = []
 

@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
+from permita38.core.accounting.postings_issue import rate_str
+from permita38.core.service.posting_state import creditable_nets, stored_snapshot
+
 __all__ = [
     "FLAG_NO_PAID_DATE",
     "FLAG_PAID_BEFORE_INVOICE",
@@ -123,8 +126,6 @@ def _payment_out(row: Mapping[str, Any]) -> dict[str, Any]:
 
 def _creditable(doc: Mapping[str, Any], notes: Sequence[Mapping[str, Any]]) -> dict[str, str] | None:
     """Per rate string the net still creditable (the rule of the over-credit check, shared); None without a snapshot."""
-    from permita38.core.accounting.postings_issue import rate_str
-    from permita38.core.service.postings import creditable_nets, stored_snapshot
 
     try:
         snap = stored_snapshot(doc)

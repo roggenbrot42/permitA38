@@ -17,7 +17,6 @@ from decimal import Decimal
 from typing import Any, cast, get_args
 
 from permita38.core import models
-from permita38.core.accounting.postings_credit import CreditState
 from permita38.core.accounting.postings_issue import issue_entry, rate_str, snapshot_from_document
 from permita38.core.accounting.postings_targets import apply_event, event_entry
 from permita38.core.accounting.types import (
@@ -26,8 +25,6 @@ from permita38.core.accounting.types import (
     CreditEvent,
     CreditKind,
     IncomeBasis,
-    InvoiceState,
-    IssuedSnapshot,
     Line,
     PaymentEvent,
     RateGroup,
@@ -40,6 +37,8 @@ from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service.journal import JournalService, JournalSource, PostLine
 from permita38.core.service.locks import first_unlocked_from, vat_date_for
+from permita38.core.service.opening_items import OpeningItemService
+from permita38.core.service.posting_state import creditable_nets, invoice_state_of, stored_snapshot
 from permita38.core.settings import accounting_start
 
 __all__ = [
@@ -105,25 +104,6 @@ def build_snapshot(
         "issued_at": int(time.time() if clock is None else clock),
         "rules_version": fy.get("rules_version") if fy is not None else None,
     }
-
-
-def stored_snapshot(doc: Mapping[str, Any]) -> IssuedSnapshot | None:
-    """The engine view of a stored ``issued`` snapshot; ``None`` for a draft or an invoice without one."""
-    raw = doc.get("issued")
-    if not isinstance(raw, dict) or not isinstance(raw.get("rates"), dict):
-        return None
-    groups = sorted(
-        (RateGroup(Decimal(r), Cents(int(v["net"])), Cents(int(v["vat"]))) for r, v in raw["rates"].items()),
-        key=lambda g: g.rate,
-        reverse=True,
-    )
-    return IssuedSnapshot(
-        document_id=str(doc["id"]),
-        regime=raw["regime"],
-        treatment=raw["treatment"],
-        rates=tuple(groups),
-        perf=date.fromisoformat(str(raw["perf"])),
-    )
 
 
 def post_line(ln: Line) -> PostLine:
@@ -225,57 +205,12 @@ def credit_snapshot(
     }
 
 
-def invoice_state_of(snap: IssuedSnapshot, credit_notes: Iterable[Mapping[str, Any]], kept_cents: int) -> InvoiceState:
-    """The 9.2 state of an invoice: its snapshot, the credited net and VAT per rate group summed from the credit
-    documents' own snapshots (``issued.rates``; a write-off reversal is stored negative) and the cash kept.
-    Discounts and write-offs are tracked separately (``CreditState``) because they post to their own accounts."""
-    index = {g.rate: i for i, g in enumerate(snap.rates)}
-    credited = [[0, 0] for _ in snap.rates]
-    disc = [[0, 0] for _ in snap.rates]
-    wo = [[0, 0] for _ in snap.rates]
-    for note in credit_notes:
-        raw = note.get("issued")
-        rates = raw.get("rates") if isinstance(raw, Mapping) else None
-        if not isinstance(rates, Mapping):
-            continue
-        kind = note.get("credit_kind")
-        for key, val in rates.items():
-            i = index.get(Decimal(str(key)))
-            if i is None:
-                continue
-            net, vat = int(val["net"]), int(val["vat"])
-            targets = [credited[i]]
-            if kind == "discount":
-                targets.append(disc[i])
-            if kind in ("write_off", "write_off_reversal"):
-                targets.append(wo[i])
-            for t in targets:
-                t[0] += net
-                t[1] += vat
-
-    def groups(rows: list[list[int]]) -> tuple[RateGroup, ...]:
-        return tuple(RateGroup(g.rate, Cents(r[0]), Cents(r[1])) for g, r in zip(snap.rates, rows, strict=True))
-
-    if any(v for row in (*disc, *wo) for v in row):
-        return CreditState(snap, groups(credited), Cents(kept_cents), groups(disc), groups(wo))
-    return InvoiceState(snap, groups(credited), Cents(kept_cents))
-
-
-def creditable_nets(snap: IssuedSnapshot, credit_notes: Iterable[Mapping[str, Any]]) -> list[tuple[Decimal, int, int]]:
-    """``(rate, net, vat)`` still creditable per rate group: the snapshot minus everything credited by the credit
-    documents, write-offs included and their reversals given back (the one rule of the over-credit check)."""
-    state = invoice_state_of(snap, credit_notes, 0)
-    return [(g.rate, int(g.net) - int(k.net), int(g.vat) - int(k.vat)) for g, k in zip(snap.rates, state.credited)]
-
-
 class PaymentPostingService:
     """Posts the payment events of an issued invoice with the target rule (accounting 9.2, 11)."""
 
     def __init__(self, store: Repository, journal: JournalService | None = None):
         self.store = store
         self.journal = journal or JournalService(store)
-        from permita38.core.service.opening_items import OpeningItemService  # opening_items imports this module
-
         self.opening = OpeningItemService(store, self.journal)
 
     def post_payment(
@@ -336,8 +271,6 @@ class CreditPostingService:
     def __init__(self, store: Repository, journal: JournalService | None = None):
         self.store = store
         self.journal = journal or JournalService(store)
-        from permita38.core.service.opening_items import OpeningItemService  # opening_items imports this module
-
         self.opening = OpeningItemService(store, self.journal)
 
     def post_credit(

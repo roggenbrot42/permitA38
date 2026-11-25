@@ -40,6 +40,7 @@ from permita38.core.repository import Repository
 from permita38.core.repository.base import Record
 from permita38.core.service.journal import JournalService, JournalSource, PostLine
 from permita38.core.service.locks import first_unlocked_from, vat_date_for
+from permita38.core.service.opening_items import OpeningItemService
 from permita38.core.service.planning_warnings import warning
 from permita38.core.service.postings import post_line
 from permita38.core.settings import accounting_start
@@ -48,6 +49,7 @@ __all__ = ["ExpensePostingService", "WARNINGS_KEY"]
 
 WARNINGS_KEY = "accounting_warnings"  # response-only list on a saved expense (never stored)
 RC_TREATMENTS = ("reverse_charge_eu_service", "reverse_charge_third_country")
+EXPENSE_BALANCE_ROLES = ("payables", "input_vat_clearing")  # the open balance of an expense: payable and input VAT
 DEFAULT_RC_RATE = Decimal(19)
 LOCKED = "The period is locked; book a correction"
 Part = Literal["bill", "pay"]
@@ -440,11 +442,6 @@ class ExpensePostingService:
         payable, EÜR the input VAT already deducted (``input_vat_clearing``), each against ``opening_balance``. A
         later change (``paid_on`` before the start, a deletion) posts the adjustment ``open:<year>:expense:<id>:r<n>``.
         ``None`` for any other expense or when its bill holds no such line."""
-        from permita38.core.service.opening_items import (  # opening_items imports this module's siblings
-            EXPENSE_BALANCE_ROLES,
-            OpeningItemService,
-        )
-
         start = accounting_start(self.store.settings())
         day, paid = _day(rec.get("date")), _day(rec.get("paid_on"))
         if start is None or day is None:

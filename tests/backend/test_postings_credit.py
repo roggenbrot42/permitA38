@@ -10,14 +10,9 @@ from typing import Any
 
 import pytest
 
-from permita38.core.accounting.postings_credit import (
-    CreditState,
-    credit_split,
-    discount_amounts,
-    write_off_amounts,
-    write_off_reversal_amounts,
-)
+from permita38.core.accounting.postings_credit import CreditState, credit_split
 from permita38.core.accounting.postings_targets import apply_event, event_entry, targets
+from permita38.core.accounting.postings_writeoff import discount_amounts, write_off_amounts, write_off_reversal_amounts
 from permita38.core.accounting.types import (
     Bases,
     Cents,

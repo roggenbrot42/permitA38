@@ -355,7 +355,7 @@ def test_legacy_paid_back_to_sent_materialises_and_reverses(boss_client, cust, s
 
 
 def test_materialisation_writes_the_row_and_the_snapshot_exactly_once(store, cust, app):
-    from permita38.core.service.sales import materialize_legacy_payment
+    from permita38.core.service.payments import materialize_legacy_payment
 
     inv = legacy(store, cust, paid_date="2026-02-10")
     st = app.state.services.sales.settings()
@@ -370,7 +370,7 @@ def test_materialisation_writes_the_row_and_the_snapshot_exactly_once(store, cus
 
 
 def test_materialisation_keeps_a_legacy_paid_date_before_the_invoice_date(store, cust, app):
-    from permita38.core.service.sales import materialize_legacy_payment
+    from permita38.core.service.payments import materialize_legacy_payment
 
     inv = legacy(store, cust, paid_date="2026-01-15")  # before the invoice date 2026-02-01: stored as is
     materialize_legacy_payment(store, inv, app.state.services.sales.settings())
@@ -378,7 +378,7 @@ def test_materialisation_keeps_a_legacy_paid_date_before_the_invoice_date(store,
 
 
 def test_materialisation_of_a_paid_invoice_without_date_uses_the_invoice_date(store, cust, app):
-    from permita38.core.service.sales import materialize_legacy_payment
+    from permita38.core.service.payments import materialize_legacy_payment
 
     inv = legacy(store, cust)
     materialize_legacy_payment(store, inv, app.state.services.sales.settings())
@@ -386,7 +386,7 @@ def test_materialisation_of_a_paid_invoice_without_date_uses_the_invoice_date(st
 
 
 def test_materialisation_of_an_unpaid_invoice_writes_only_the_snapshot(store, cust, app):
-    from permita38.core.service.sales import materialize_legacy_payment
+    from permita38.core.service.payments import materialize_legacy_payment
 
     inv = legacy(store, cust, status="sent")
     out = materialize_legacy_payment(store, inv, app.state.services.sales.settings())

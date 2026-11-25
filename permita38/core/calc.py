@@ -13,8 +13,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from . import tax
+from .doc_totals import _MONEY_KEYS, doc_totals, empty_months, open_receivables_of_documents, snapshot_totals  # noqa: F401
 from .holidays import holidays as de_holidays
-from .money import ZERO, dec, line_amount, q2, split_gross, to_float, vat_amount
+from .money import ZERO, dec, q2, split_gross, to_float
+from .service import finance_journal  # figures from the journal once accounting is initialised
 from .service.personal_tax import NOT_SAVED_WARNING, PersonalTaxService
 from .tax_rules import rules_for
 from .values import d, fnum  # noqa: F401  (re-exported: callers use calc.d and calc.fnum)
@@ -66,24 +68,6 @@ def context(store):
 
 
 # -- offers / invoices -------------------------------------------------------
-def snapshot_totals(issued: dict) -> dict:
-    """Totals in the shape of :func:`doc_totals` from an ``issued`` snapshot (integer cents, accounting.md 9.1)."""
-
-    def eur(cents) -> float:
-        return to_float(dec(int(cents)) / 100)
-
-    rates = issued["rates"]
-    net = sum(int(v["net"]) for v in rates.values())
-    vat = sum(int(v["vat"]) for v in rates.values())
-    return dict(
-        net=eur(net),
-        vat={float(r): eur(v["vat"]) for r, v in rates.items()},
-        vat_total=eur(vat),
-        gross=eur(net + vat),
-        by_rate={float(r): eur(v["net"]) for r, v in rates.items()},
-    )
-
-
 def with_year_regime(store, doc):
     """A copy of a draft or offer for a preview (PDF): when the fiscal year of its date is a small-business year, it
     carries the treatment ``small_business`` so ``doc_totals`` prints no VAT, as the snapshot will when it is issued.
@@ -95,44 +79,6 @@ def with_year_regime(store, doc):
     if rows and rows[0].get("small_business") and doc.get("tax_treatment") in (None, "", "standard"):
         return {**doc, "tax_treatment": "small_business"}
     return doc
-
-
-def doc_totals(doc, settings):
-    """Net, VAT per rate and gross of an offer/invoice, in exact cents (rule: see :mod:`permita38.core.money`).
-
-    Also fills ``amount`` on every line. Returned amounts are floats with at most 2 decimals; ``vat`` and
-    ``by_rate`` are keyed by the VAT rate.
-    """
-    klein = bool(settings.get("kleinunternehmer")) or doc.get("tax_treatment") in ("small_business", "eu_b2b_service")
-    if klein:
-        default_vat = ZERO
-    else:
-        raw = doc.get("vat_rate")
-        default_vat = dec(raw if raw not in (None, "") else settings.get("vat_rate", 19))
-    net = ZERO
-    by_rate: dict[Decimal, Decimal] = defaultdict(lambda: ZERO)
-    lines = doc.get("lines")
-    for ln in lines if isinstance(lines, list) else []:
-        if not isinstance(ln, dict):
-            continue
-        amt = line_amount(ln.get("qty"), ln.get("price"))
-        ln["amount"] = to_float(amt)
-        net += amt
-        raw_vat = ln.get("vat")
-        rate = ZERO if klein else (dec(raw_vat) if raw_vat not in (None, "") else default_vat)
-        by_rate[rate] += amt
-    issued = doc.get("issued")
-    if isinstance(issued, dict) and isinstance(issued.get("rates"), dict):
-        return snapshot_totals(issued)  # an issued document keeps its frozen figures (no retroactive repricing)
-    vat = {r: vat_amount(a, r) for r, a in by_rate.items()}
-    vat_total = sum(vat.values(), ZERO)
-    return dict(
-        net=to_float(net),
-        vat={float(r): to_float(v) for r, v in vat.items()},
-        vat_total=to_float(vat_total),
-        gross=to_float(net + vat_total),
-        by_rate={float(r): to_float(a) for r, a in by_rate.items()},
-    )
 
 
 # -- capacity ----------------------------------------------------------------
@@ -245,9 +191,6 @@ def dashboard(store, user, today=None):
 def invoice_amounts(inv, settings):
     t = doc_totals(dict(inv), settings)
     return t
-
-
-_MONEY_KEYS = ("revenue", "vat_out", "expenses", "vat_in")
 
 
 def _line_view(net, vat, deductible, vat_deductible) -> dict[str, Decimal | None]:
@@ -386,33 +329,6 @@ def redact_tax(result: dict) -> dict:
     return out
 
 
-def empty_months() -> list[dict[str, Any]]:
-    return [dict(month=m, **{k: ZERO for k in _MONEY_KEYS}) for m in range(1, 13)]
-
-
-def open_receivables_of_documents(store) -> Decimal:
-    """What customers still owe, from the invoice documents (gross less credit notes and payments)."""
-    from permita38.core.service import invoice_state
-
-    s = store.settings()
-    pay_rows = invoice_state.group_by(store.list("payments"), "document_id")
-    invoices = store.list("invoices")
-    notes = invoice_state.group_by(invoice_state.credit_notes_of(invoices), "corrects_id")
-    total = ZERO
-    for inv in invoices:
-        if inv.get("status") == "draft" or inv.get("kind") == "credit_note":
-            continue
-        t = doc_totals(dict(inv), s)
-        st = invoice_state.derive(
-            inv, int(dec(t["gross"]) * 100), pay_rows.get(inv["id"], []), notes.get(inv["id"], [])
-        )
-        if st.status == "cancelled" or inv.get("status") == "cancelled":
-            continue
-        if st.open_cents > 0:  # only what is still owed; an overpaid invoice is no receivable (as the old code)
-            total += Decimal(st.open_cents) / 100  # gross less credit notes and payments
-    return total
-
-
 def _legacy_figures(store, year, s, klein, accrual):
     """The old per-document computation (known differences: accounting.md section 14, last paragraph)."""
     months = empty_months()
@@ -493,8 +409,6 @@ def finance(store, year, today=None):
     s = raw = store.settings()
     klein = bool(s.get("kleinunternehmer"))
     accrual = s.get("accounting", "eur") == "accrual"
-    from permita38.core.service import finance_journal  # figures from the journal once accounting is initialised
-
     journal = finance_journal.figures(store, year)
     if journal is not None:
         months, cats, open_receivables = journal
