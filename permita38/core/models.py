@@ -2122,6 +2122,7 @@ class JournalEntry(Record):
     source_id: str | None = None
     source_number: str | None = None
     reverses_id: str | None = None
+    reversed_by: str | None = None  # id of the reversal of this entry (computed in the journal listing, not stored)
     counterparty_id: str | None = None
     cp_vat_id: str | None = None
     cp_country: str | None = None

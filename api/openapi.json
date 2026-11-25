@@ -9321,7 +9321,7 @@
           "accounting"
         ],
         "summary": "Preview Year Close",
-        "description": "What closing the year would do: the blockers, the provision proposals (prepayments already expensed) and the\nplanned entries. Writes nothing.",
+        "description": "What closing the year would do: the blockers, the provision proposals (prepayments already expensed) and the\nplanned entries. Optional ``trade_tax`` / ``corporate_tax`` (decimal strings) are provisions the user is about to\nconfirm; the plan includes them. Writes nothing.",
         "operationId": "preview_year_close_api_accounting_years__year__close_preview_get",
         "security": [
           {
@@ -9339,6 +9339,40 @@
             "schema": {
               "type": "integer",
               "title": "Year"
+            }
+          },
+          {
+            "name": "trade_tax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Trade Tax"
+            }
+          },
+          {
+            "name": "corporate_tax",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Corporate Tax"
             }
           }
         ],
@@ -12576,6 +12610,14 @@
               }
             ],
             "title": "Role"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles",
+            "default": []
           },
           "eur_line": {
             "anyOf": [
@@ -20340,6 +20382,17 @@
               }
             ],
             "title": "Reverses Id"
+          },
+          "reversed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reversed By"
           },
           "counterparty_id": {
             "anyOf": [

@@ -7,10 +7,10 @@ API tokens: reads follow the owner's rights; every route that changes something 
 
 from datetime import date
 from decimal import Decimal
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any, Literal, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from permita38.api.deps import CurrentUser, Needs, ServicesDep, SessionOnly
 from permita38.api.responses import present
@@ -36,6 +36,7 @@ routers = [router, payments_router]
 
 Year = Annotated[int | None, Query(ge=2000, le=2100)]
 NOT_IMPLEMENTED = "not implemented yet"
+_PROVISION_AMOUNT: TypeAdapter[Decimal] = TypeAdapter(v.PositiveMoneyIn)
 
 
 def not_implemented() -> NoReturn:
@@ -133,10 +134,29 @@ def get_year(year: int, user: Read, services: ServicesDep):
 
 
 @router.get("/years/{year}/close-preview", name="preview_year_close", response_model=YearClosePreviewOut)
-def close_preview(year: int, user: Read, services: ServicesDep):
+def close_preview(
+    year: int,
+    user: Read,
+    services: ServicesDep,
+    trade_tax: Annotated[str | None, Query(max_length=20)] = None,
+    corporate_tax: Annotated[str | None, Query(max_length=20)] = None,
+):
     """What closing the year would do: the blockers, the provision proposals (prepayments already expensed) and the
-    planned entries. Writes nothing."""
-    p = services.year_closing.preview(year)
+    planned entries. Optional ``trade_tax`` / ``corporate_tax`` (decimal strings) are provisions the user is about to
+    confirm; the plan includes them. Writes nothing."""
+    provisions: list[ProvisionInput] = []
+    typed: tuple[tuple[Literal["trade_tax", "corporate_tax"], str | None], ...] = (
+        ("trade_tax", trade_tax),
+        ("corporate_tax", corporate_tax),
+    )
+    for kind, raw in typed:
+        if raw is not None and raw != "":
+            try:
+                amount = _PROVISION_AMOUNT.validate_python(raw)
+            except ValidationError:
+                raise HTTPException(422, f"{kind} must be a positive amount with at most two decimals") from None
+            provisions.append(ProvisionInput(kind, int(q2(dec(amount)) * 100)))
+    p = services.year_closing.preview(year, provisions)
     return YearClosePreviewOut(
         year=p.year,
         income_basis=p.income_basis,

@@ -562,3 +562,21 @@ def test_close_preview_route_reads_blockers_and_proposals_and_writes_nothing(api
     assert all(set(e) == {"event_key", "event", "text", "lines"} for e in body["plan"])
     assert api["boss"].get("/api/accounting/years/2025").json()["closed_at"] is None
     assert api["boss"].get("/api/accounting/years/1999/close-preview").status_code == 404
+
+
+def test_close_preview_route_takes_the_typed_provisions_into_the_plan(api, app):
+    app.state.services.store.save_settings({ACCOUNTING_START_KEY: "2025-01-01", "company_type": "gewerbe"})
+    url = "/api/accounting/years/2025/close-preview"
+
+    def plan(**params):
+        r = api["boss"].get(url, params=params)
+        assert r.status_code == 200, r.text
+        return {e["event_key"]: [(ln["account"], ln["amount"]) for ln in e["lines"]] for e in r.json()["plan"]}
+
+    assert plan() == {}  # an empty year plans nothing
+    # a provision of 5.00 is expensed (debit 5.00) and closed into the profit carry-forward as a loss of 5.00
+    assert plan(trade_tax="5.00")["close:2025:pnl"] == [("9042", "-5.00"), ("9052", "5.00")]
+    assert api["boss"].get(url, params={"trade_tax": "5,00"}).status_code == 422
+    assert api["boss"].get(url, params={"trade_tax": "0"}).status_code == 422
+    assert api["boss"].get(url, params={"corporate_tax": "x"}).status_code == 422
+    assert app.state.services.store.list("journal_entries") == []  # a preview posts nothing

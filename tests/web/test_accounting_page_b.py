@@ -156,14 +156,16 @@ def test_reverse_a_manual_entry(browser, accrual):
     pg.click("[data-testid=acc-reverse-confirm]")
     pg.wait_for_selector("#toast.on")
     expect(pg.locator("[data-testid=acc-entry]")).to_have_count(5)
-    rev = journal(accrual)[-1] if journal(accrual)[-1]["reverses_id"] else None
     entries = journal(accrual)
     rev = next(x for x in entries if x.get("reverses_id"))
     assert rev["text"] == "Reversal demo"
     assert {(ln["account"], ln["amount"]) for ln in rev["lines"]} == {("9039", "-10.00"), ("9001", "10.00")}
     assert "Reversal" in pg.locator("[data-testid=acc-entry]").last.inner_text()
-    # the reversal itself offers no further reversal
-    assert pg.locator("[data-testid=acc-reverse]").count() == 1
+    # neither the reversed original nor the reversal offers a (further) reversal; the original is marked
+    assert pg.locator("[data-testid=acc-reverse]").count() == 0
+    original = pg.locator("[data-testid=acc-entry]").nth(3)
+    assert "Reversed" in original.locator("summary").inner_text()
+    assert next(x for x in entries if x["text"] == "Entry to reverse")["reversed_by"] == rev["id"]
     assert problems == []
     ctx.close()
 
@@ -215,10 +217,8 @@ def test_boss_ends_an_eur_year_with_locked_months(browser, eur):
     expect(pg.locator("[data-testid=acc-close-2026]")).to_have_text("End year")
     pg.click("[data-testid=acc-close-2026]")
     expect(pg.locator("#modal-root")).to_contain_text("This is final")
-    pg.click("[data-testid=acc-close-confirm]")
-    expect(pg.locator("[data-testid=acc-close-blockers]")).not_to_be_empty()  # the server's blockers, inline
-    blockers = pg.locator("[data-testid=acc-close-blockers]").inner_text()
-    assert "lock" in blockers.lower() or "month" in blockers.lower(), blockers
+    expect(pg.locator("[data-testid=acc-close-preview-blockers]")).to_contain_text("2026-01")  # the unlocked months
+    expect(pg.locator("[data-testid=acc-close-confirm]")).to_be_disabled()  # no confirming while blockers exist
     assert api_call(eur, "GET", "/accounting/years/2026").json()["closed_at"] is None
     pg.click("#modal-root [data-a=closeModal]")
     # lock January to November on the periods tab, then end the year
@@ -247,12 +247,14 @@ def test_accrual_close_dialog_shows_the_server_preview(browser, accrual):
     expect(pg.locator("[data-testid=acc-close-preview-blockers]")).to_contain_text("2026-01")
     expect(pg.locator("[data-testid=acc-prov-prepaid-trade_tax]")).to_contain_text("0,00")
     assert pg.locator("#acc_prov_corp").count() == 0  # a Gewerbe has no corporate tax
+    expect(pg.locator("[data-testid=acc-close-confirm]")).to_be_disabled()  # blockers: months are not locked
     pg.fill("#acc_prov_trade", "1.234,56")
-    pg.click("[data-testid=acc-close-confirm]")
+    pg.press("#acc_prov_trade", "Tab")
     expect(pg.locator("[data-testid=acc-close-blockers]")).to_contain_text("decimal separator")
+    expect(pg.locator("[data-testid=acc-close-confirm]")).to_be_disabled()
     pg.fill("#acc_prov_trade", "")
-    pg.click("[data-testid=acc-close-confirm]")
-    expect(pg.locator("[data-testid=acc-close-blockers]")).not_to_be_empty()  # months not locked: the server's blockers
+    pg.press("#acc_prov_trade", "Tab")
+    expect(pg.locator("[data-testid=acc-close-blockers]")).to_be_empty()
     assert api_call(accrual, "GET", "/accounting/years/2026").json()["closed_at"] is None
     assert problems == []
     ctx.close()
@@ -321,4 +323,107 @@ def test_employee_has_no_part_b_tabs(browser, accrual):
     ctx, pg, problems = open_page(browser, accrual, "entry", token=token)
     pg.wait_for_selector("nav.side a.nav")
     assert pg.locator("#acc_tpl").count() == 0
+    ctx.close()
+
+
+def test_s19_and_vst_manual_tax_lines_post_through_the_form(browser, accrual):
+    ctx, pg, problems = open_page(browser, accrual, "entry")
+    expect(pg.locator("#acc_tpl")).to_be_visible()
+    # a sale with 19 % VAT: D bank 119,00 / C revenue 100,00 / C VAT 19,00 (S19, base 100,00)
+    pg.click("[data-a=accAddLine]")
+    pick_account(pg, 0, "9001")
+    pick_account(pg, 1, "9007")
+    pick_account(pg, 2, "9013")
+    pg.fill("#acc_l0_d", "119")
+    pg.fill("#acc_l1_c", "100")
+    pg.fill("#acc_l2_c", "19")
+    pg.select_option("#acc_l2_tk", "S19")
+    pg.fill("#acc_l2_rate", "19")
+    pg.fill("#acc_l2_base", "100")
+    pg.fill("#acc_l2_vdate", "2026-03-10")
+    pg.fill("#acc_etext", "Manual sale S19")
+    pg.fill("#acc_edate", "2026-03-10")
+    pg.click("[data-testid=acc-entry-submit]")
+    pg.wait_for_selector("#toast.on")
+    e = next(x for x in journal(accrual) if x["text"] == "Manual sale S19")
+    vat = next(ln for ln in e["lines"] if ln["account"] == "9013")
+    assert (vat["amount"], vat["tax_key"], vat["tax_base"], vat["vat_date"]) == ("-19.00", "S19", "100.00", "2026-03-10")
+    assert float(vat["tax_rate"]) == 19.0
+
+    # an input VAT line: D expense 100,00 / D input VAT 19,00 / C bank 119,00 (VST needs no base)
+    pg.goto(accrual.base + "/#/accounting/entry")
+    expect(pg.locator("#acc_tpl")).to_be_visible()
+    pg.click("[data-a=accAddLine]")
+    pick_account(pg, 0, "9039")
+    pick_account(pg, 1, "9031")
+    pick_account(pg, 2, "9001")
+    pg.fill("#acc_l0_d", "100")
+    pg.fill("#acc_l1_d", "19")
+    pg.fill("#acc_l2_c", "119")
+    pg.select_option("#acc_l1_tk", "VST")
+    pg.fill("#acc_l1_rate", "19")
+    pg.fill("#acc_l1_vdate", "2026-03-11")
+    pg.fill("#acc_etext", "Manual input VAT")
+    pg.fill("#acc_edate", "2026-03-11")
+    pg.click("[data-testid=acc-entry-submit]")
+    pg.wait_for_selector("#toast.on")
+    e = next(x for x in journal(accrual) if x["text"] == "Manual input VAT")
+    vst = next(ln for ln in e["lines"] if ln["account"] == "9031")
+    assert (vst["amount"], vst["tax_key"], vst["vat_date"]) == ("19.00", "VST", "2026-03-11")
+    assert problems == []
+    ctx.close()
+
+
+def test_accrual_year_closes_through_the_dialog_with_a_provision(browser, accrual):
+    accrual.app.state.services.locks.today = lambda: date(2027, 1, 15)
+    api_call(accrual, "PUT", "/settings", json={"company_type": "gewerbe", "state": "BY", "hebesatz": 400})
+    api_call(accrual, "POST", "/accounting/locks", json={"year": 2026, "month": 11})
+    ctx, pg, problems = open_page(browser, accrual, "years")
+    pg.click("[data-testid=acc-close-2026]")
+    expect(pg.locator("[data-testid=acc-close-confirm]")).to_be_enabled()
+    expect(pg.locator("[data-testid=acc-close-preview-blockers]")).to_have_count(0)
+    plan = pg.locator("[data-testid=acc-close-plan]")
+    expect(plan).to_contain_text("(3)")
+    assert "9042" not in plan.inner_text()  # no trade tax expense without a provision
+    # typing the provision asks the server again: the planned P&L closing now holds the trade tax expense
+    pg.fill("#acc_prov_trade", "12,00")
+    pg.press("#acc_prov_trade", "Tab")
+    expect(plan).to_contain_text("9042")
+    pg.click("[data-testid=acc-close-confirm]")
+    pg.wait_for_selector("#toast.on")
+    assert api_call(accrual, "GET", "/accounting/years/2026").json()["closed_at"] is not None
+    prov = next(e for e in journal(accrual) if "trade_tax_provision" in (e.get("event_key") or ""))
+    assert {(ln["account"], ln["amount"]) for ln in prov["lines"]} == {("9042", "12.00"), ("9043", "-12.00")}
+    assert problems == []
+    ctx.close()
+
+
+def test_a_booked_provision_is_shown_read_only(browser, accrual):
+    accrual.app.state.services.locks.today = lambda: date(2027, 1, 15)
+    api_call(accrual, "PUT", "/settings", json={"company_type": "gewerbe", "state": "BY", "hebesatz": 400})
+    api_call(accrual, "POST", "/accounting/locks", json={"year": 2026, "month": 11})
+    accrual.app.state.services.tax_bookings.trade_tax_provision(2026, 700, {"id": "u1x000", "role": "boss"})
+    ctx, pg, problems = open_page(browser, accrual, "years")
+    pg.click("[data-testid=acc-close-2026]")
+    # trade tax is booked already: shown read-only, no input; a Gewerbe has no corporate tax
+    expect(pg.locator("[data-testid=acc-prov-booked-trade_tax]")).to_contain_text("7,00")
+    assert pg.locator("#acc_prov_trade").count() == 0 and pg.locator("#acc_prov_corp").count() == 0
+    assert problems == []
+    ctx.close()
+
+
+def test_a_read_only_user_sees_no_write_forms(browser, accrual):
+    # the rights table the server sends to a user with accounting read but no write (no such fixed role exists:
+    # a read-only API token or a custom role gets exactly this table); the page only follows it
+    ctx, pg, problems = open_page(browser, accrual, "journal")
+    expect(pg.locator("[data-testid=acc-entry]")).to_have_count(3)
+    assert pg.locator("[data-testid=acc-tab-entry]").count() == 1
+    pg.evaluate("() => { S.me.permissions.accounting.write = 'none'; render(); }")
+    for tab in ("entry", "periods", "datev"):
+        expect(pg.locator(f"[data-testid=acc-tab-{tab}]")).to_have_count(0)
+    assert pg.locator("[data-testid=acc-tab-years]").count() == 1
+    pg.goto(accrual.base + "/#/accounting/entry")  # a direct visit falls back to the journal
+    expect(pg.locator("[data-testid=acc-entry]")).to_have_count(3)
+    assert pg.locator("#acc_tpl").count() == 0
+    assert problems == []
     ctx.close()

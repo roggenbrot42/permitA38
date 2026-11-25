@@ -24,6 +24,8 @@ const accTabs = basis => [['journal', 'Journal'], ['ledger', 'Ledger'], ['trial-
   ['open-items', 'Open items']];
 /** Second tab row: the bookkeeping actions. Inline styles keep the first row (the reports) a clean `.tabs`. */
 const ACC_TABS_B = [['entry', 'Manual entry'], ['periods', 'Periods'], ['years', 'Years'], ['datev', 'DATEV export']];
+/** The forms (entry, periods, DATEV) are write actions: without accounting write only the read-only Years list stays. */
+const accTabsB = () => (can('accounting', 'write') ? ACC_TABS_B : ACC_TABS_B.filter(([k]) => k === 'years'));
 const accAccountLabel = n => { const a = ACC.accounts.find(x => x.account === n); return a ? `${n} ${a.name}` : n; };
 /** Expense amount (income-signed in the reports) shown as a positive figure; a refund keeps its minus. */
 const accNeg = a => (Money.isZero(a) ? a : Money.isNeg(a) ? Money.abs(a) : '-' + Money.abs(a));
@@ -56,13 +58,13 @@ const accYearBar = (tab, basis) => `<div class="head"><div><h1>Accounting</h1><d
   <div class="field" style="margin:0"><label for="acc_year">Fiscal year</label><select id="acc_year" data-change="accYear">${ACC.years.map(y => `<option value="${y.year}" ${y.year === ACC.year ? 'selected' : ''}>${y.year}</option>`).join('')}</select></div></div>
   <div class="small muted" id="acc-basis" style="margin-bottom:8px">${esc(ACC_BASIS[basis] || basis || '')}</div>
   <div class="tabs" role="tablist">${accTabs(basis).map(([k, l]) => `<a href="#/accounting/${k}" role="tab" aria-selected="${k === tab}" data-testid="acc-tab-${k}" class="${k === tab ? 'on' : ''}">${esc(l)}</a>`).join('')}</div>
-  <div role="tablist" data-testid="acc-tabs-b" style="display:flex;gap:4px;margin:-8px 0 16px;flex-wrap:wrap">${ACC_TABS_B.map(([k, l]) => `<a href="#/accounting/${k}" role="tab" aria-selected="${k === tab}" data-testid="acc-tab-${k}" style="padding:4px 12px;border-radius:14px;border:1px solid var(--line);${k === tab ? 'color:var(--accent);border-color:var(--accent);font-weight:600' : 'color:var(--muted)'}">${esc(l)}</a>`).join('')}</div>`;
+  <div role="tablist" data-testid="acc-tabs-b" style="display:flex;gap:4px;margin:-8px 0 16px;flex-wrap:wrap">${accTabsB().map(([k, l]) => `<a href="#/accounting/${k}" role="tab" aria-selected="${k === tab}" data-testid="acc-tab-${k}" style="padding:4px 12px;border-radius:14px;border:1px solid var(--line);${k === tab ? 'color:var(--accent);border-color:var(--accent);font-weight:600' : 'color:var(--muted)'}">${esc(l)}</a>`).join('')}</div>`;
 
 /* ---------- journal ---------- */
 function accEntryHTML(e) {
   const pills = [];
   if (e.reverses_id) pills.push('<span class="pill blue" title="Reverses another entry">Reversal</span>');
-  if (e.reversed) pills.push('<span class="pill">Reversed</span>');   // the API sends no such flag yet: the original stays unmarked, the reversal is marked
+  if (e.reversed_by) pills.push('<span class="pill" title="A reversal entry exists">Reversed</span>');
   if (e.warnings?.length) pills.push(`<span class="pill warn" title="${esc(e.warnings.join('; '))}">VAT drift</span>`);
   if (e.origin === 'manual') pills.push('<span class="pill">Manual</span>');
   const hash = e.hash ? `<code title="hash ${esc(e.hash)}, previous ${esc(e.prev_hash || 'none')}">#${esc(String(e.hash).slice(0, 8))}</code>` : '<span class="muted">no hash</span>';
@@ -75,7 +77,7 @@ function accEntryHTML(e) {
     <span class="acc-text">${esc(e.text || '')}</span> ${e.source_number ? `<span class="small muted">${esc(e.source_number)}</span>` : ''} ${pills.join(' ')} <span class="small muted right">${hash}</span></summary>
     <div class="table-wrap"><table><caption class="sr-only">Lines of entry ${esc(e.entry_no)}</caption><thead><tr><th>Role</th><th>Account</th><th class="num">Debit</th><th class="num">Credit</th><th>Tax key</th><th>VAT date</th><th>Income date</th></tr></thead><tbody>${lines}</tbody></table></div>
     <div class="small muted">Document date ${esc(fmtDate(e.document_date))}${e.source_coll ? ` · source ${esc(e.source_coll)}` : ''}</div>
-    ${e.origin === 'manual' && !e.reverses_id && can('accounting', 'write') ? `<div style="margin-top:8px"><button type="button" class="sm" data-testid="acc-reverse" data-a="accReverse" data-id="${esc(e.id)}" data-no="${esc(e.entry_no)}">Reverse</button></div>` : ''}</details>`;
+    ${e.origin === 'manual' && !e.reverses_id && !e.reversed_by && can('accounting', 'write') ? `<div style="margin-top:8px"><button type="button" class="sm" data-testid="acc-reverse" data-a="accReverse" data-id="${esc(e.id)}" data-no="${esc(e.entry_no)}">Reverse</button></div>` : ''}</details>`;
 }
 async function accJournal() {
   await accLoadAccounts();
@@ -261,7 +263,7 @@ function accBuildEntry() {
 A.accTemplate = el => {
   accCollect(); const d = ACC.draft, t = ACC.tpls.find(x => x.key === el.value);
   if (!t) d.lines = [accBlankLine(), accBlankLine()];
-  else d.lines = t.lines.map(tl => ({ ...accBlankLine(), tpl: tl.side, account: (ACC.accounts.find(a => a.role === tl.role) || {}).account || '' }));
+  else d.lines = t.lines.map(tl => ({ ...accBlankLine(), tpl: tl.side, account: (ACC.accounts.find(a => (a.roles || []).includes(tl.role)) || {}).account || '' }));
   $('#acc_amount_wrap').hidden = !t; accRedrawLines(); accApplyAmount();
 };
 /** A template is one debit and one credit line: the typed amount goes on both sides. */
@@ -363,38 +365,67 @@ async function accYears() {
       <td>${boss && !y.closed_at ? `<button type="button" class="sm" data-testid="acc-close-${esc(y.year)}" data-a="accCloseAsk" data-year="${esc(y.year)}" data-basis="${esc(y.income_basis)}">${y.income_basis === 'eur' ? 'End year' : 'Close year'}</button>` : ''}</td></tr>`).join('')}</tbody></table></div>
     <p class="small muted">Closing a year is final. Only the boss can close or end a year.</p></div>`;
 }
+const ACC_PROV = { trade_tax: ['Provision for trade tax', 'acc_prov_trade', 'trade tax'], corporate_tax: ['Provision for corporate tax', 'acc_prov_corp', 'corporate tax'] };
+/** Blockers and the planned entries of a close preview; the part that changes while provisions are typed. */
+function accCloseDyn(pv) {
+  const blockers = pv.blockers.length ? `<div class="small" role="alert" data-testid="acc-close-preview-blockers" style="color:var(--danger,#b00020)"><b>This year cannot be closed yet:</b><ul>${pv.blockers.map(b => `<li>${esc(b)}</li>`).join('')}</ul></div>` : '';
+  const plan = pv.plan.length ? `<details data-testid="acc-close-plan"><summary>Entries the closing will post (${pv.plan.length})</summary>${pv.plan.map(e => `<p class="small"><b>${esc(e.text)}</b><br>${e.lines.map(l => `${esc(l.account)}: ${esc(eur(l.amount))}`).join(' · ')}</p>`).join('')}</details>` : '';
+  return blockers + plan;
+}
+/** The provisions typed so far: {provisions: [{kind, amount}]} or {error}. A kind that is already booked has no input. */
+function accCloseProvisions() {
+  const provisions = [];
+  for (const [kind, [, id, label]] of Object.entries(ACC_PROV)) {
+    if (!$(`#${id}`)) continue;
+    const p = Money.parseInput($(`#${id}`).value);
+    if (!p.ok) return { error: `Provision for ${label}: ${p.error}` };
+    if (p.value !== null && !Money.isZero(p.value)) {
+      if (Money.isNeg(p.value)) return { error: `Provision for ${label} must be positive.` };
+      provisions.push({ kind, amount: p.value });
+    }
+  }
+  return { provisions };
+}
 A.accCloseAsk = async el => {
   const y = el.dataset.year, eurYear = el.dataset.basis === 'eur';
   let pv;
   try { pv = await api('GET', `accounting/years/${encodeURIComponent(y)}/close-preview`); }
   catch (e) { toast(e.message, true); return; }
-  const blockers = pv.blockers.length ? `<div class="small" role="alert" data-testid="acc-close-preview-blockers" style="color:var(--danger,#b00020)"><b>This year cannot be closed yet:</b><ul>${pv.blockers.map(b => `<li>${esc(b)}</li>`).join('')}</ul></div>` : '';
-  const KIND = { trade_tax: ['Provision for trade tax', 'acc_prov_trade'], corporate_tax: ['Provision for corporate tax', 'acc_prov_corp'] };
-  const prov = pv.provisions.length ? `<p class="small muted" data-testid="acc-close-note">Enter your estimate of the tax still to be paid for the year, net of the prepayments already expensed. Leave a field empty to post no provision.</p>
-    <div class="row" style="gap:10px;flex-wrap:wrap">${pv.provisions.map(p => `<div class="field" data-testid="acc-prov-${esc(p.kind)}"><label for="${KIND[p.kind][1]}">${esc(KIND[p.kind][0])} (optional)</label><input id="${KIND[p.kind][1]}" inputmode="decimal" autocomplete="off">
-      <div class="small muted">Prepayments expensed: <span data-testid="acc-prov-prepaid-${esc(p.kind)}">${esc(eur(p.prepayments_expensed))}</span>${Money.isZero(p.booked) ? '' : `; already booked: ${esc(eur(p.booked))}`}</div></div>`).join('')}</div>` : '';
-  const plan = pv.plan.length ? `<details data-testid="acc-close-plan"><summary>Entries the closing will post (${pv.plan.length})</summary>${pv.plan.map(e => `<p class="small"><b>${esc(e.text)}</b><br>${e.lines.map(l => `${esc(l.account)}: ${esc(eur(l.amount))}`).join(' · ')}</p>`).join('')}</details>` : '';
+  const field = p => {
+    const [label, id] = ACC_PROV[p.kind], prepaid = `Prepayments expensed: <span data-testid="acc-prov-prepaid-${esc(p.kind)}">${esc(eur(p.prepayments_expensed))}</span>`;
+    if (!Money.isZero(p.booked)) return `<div class="field" data-testid="acc-prov-${esc(p.kind)}"><b>${esc(label)}</b><div data-testid="acc-prov-booked-${esc(p.kind)}">Already booked for this year: ${esc(eur(p.booked))}</div><div class="small muted">${prepaid}</div></div>`;
+    return `<div class="field" data-testid="acc-prov-${esc(p.kind)}"><label for="${id}">${esc(label)} (optional)</label><input id="${id}" inputmode="decimal" autocomplete="off" data-change="accCloseRefresh"><div class="small muted">${prepaid}</div></div>`;
+  };
+  const prov = pv.provisions.length ? `<p class="small muted" data-testid="acc-close-note">Enter the provision for the tax still to be paid for the year (the amount to book, net of the prepayments already expensed). Leave a field empty to post no provision.</p>
+    <div class="row" style="gap:10px;flex-wrap:wrap">${pv.provisions.map(field).join('')}</div>` : '';
   modal(`<h2>${eurYear ? 'End' : 'Close'} year ${esc(y)}</h2>
     <p>${eurYear ? 'December is locked, the end of the year is sealed in the journal chain and the next year is opened. Open items stay open.' : 'The provisions are posted, the VAT accounts are transferred, the closing entry is made, December is locked and the next year is opened with its opening balances.'} This is final.</p>
-    ${blockers}${prov}${plan}
+    ${prov}<div id="acc-close-dyn">${accCloseDyn(pv)}</div>
     <div id="acc-close-err" class="small" role="alert" data-testid="acc-close-blockers" style="color:var(--danger,#b00020)"></div>
-    <div class="actions"><button type="button" data-a="closeModal">Cancel</button><button type="button" class="primary" data-testid="acc-close-confirm" data-a="accCloseGo" data-year="${esc(y)}" data-basis="${esc(el.dataset.basis)}">${eurYear ? 'End year' : 'Close year'}</button></div>`);
+    <div class="actions"><button type="button" data-a="closeModal">Cancel</button><button type="button" class="primary" data-testid="acc-close-confirm" data-a="accCloseGo" data-year="${esc(y)}" data-basis="${esc(el.dataset.basis)}" ${pv.blockers.length ? 'disabled' : ''}>${eurYear ? 'End year' : 'Close year'}</button></div>`);
+  ACC.closeYear = y; ACC.closeSeq = 0;
+};
+/** A provision was typed: ask the server again, so the planned entries and the blockers reflect it. */
+A.accCloseRefresh = async () => {
+  const err = $('#acc-close-err'), btn = $('[data-testid=acc-close-confirm]'); if (!err || !btn) return;
+  err.textContent = '';
+  const r = accCloseProvisions();
+  if (r.error) { err.textContent = r.error; btn.disabled = true; return; }
+  const q = {}; r.provisions.forEach(p => { q[p.kind] = p.amount; });
+  const seq = ++ACC.closeSeq;
+  let pv;
+  try { pv = await api('GET', `accounting/years/${encodeURIComponent(ACC.closeYear)}/close-preview${accQuery(q)}`); }
+  catch (e) { if (seq === ACC.closeSeq && $('#acc-close-err')) { $('#acc-close-err').textContent = e.message; btn.disabled = true; } return; }
+  if (seq !== ACC.closeSeq || !$('#acc-close-dyn')) return;
+  $('#acc-close-dyn').innerHTML = accCloseDyn(pv);
+  btn.disabled = pv.blockers.length > 0;
 };
 A.accCloseGo = async el => {
-  const err = $('#acc-close-err'); err.textContent = ''; const provisions = [];
-  if (el.dataset.basis !== 'eur') {
-    for (const [id, kind, label] of [['acc_prov_trade', 'trade_tax', 'trade tax'], ['acc_prov_corp', 'corporate_tax', 'corporate tax']]) {
-      if (!$(`#${id}`)) continue;
-      const p = Money.parseInput($(`#${id}`).value);
-      if (!p.ok) { err.textContent = `Provision for ${label}: ${p.error}`; return; }
-      if (p.value !== null && !Money.isZero(p.value)) {
-        if (Money.isNeg(p.value)) { err.textContent = `Provision for ${label} must be positive.`; return; }
-        provisions.push({ kind, amount: p.value });
-      }
-    }
-  }
+  const err = $('#acc-close-err'); err.textContent = '';
+  const r = el.dataset.basis === 'eur' ? { provisions: [] } : accCloseProvisions();
+  if (r.error) { err.textContent = r.error; return; }
   el.disabled = true;
-  try { await api('POST', `accounting/years/${el.dataset.year}/close`, { provisions }); }
+  try { await api('POST', `accounting/years/${el.dataset.year}/close`, { provisions: r.provisions }); }
   catch (e) { err.textContent = e.message; el.disabled = false; return; }
   closeModal(); toast(`Year ${el.dataset.year} ${el.dataset.basis === 'eur' ? 'ended' : 'closed'}`); render();
 };
@@ -441,7 +472,7 @@ PAGES.accounting = async (tab = 'journal') => {
   await accLoadYears();
   if (ACC.year === null) return `<div class="head"><div><h1>Accounting</h1></div></div><div class="card">${accEmpty('No fiscal year has been opened yet.')}</div>`;
   const basis = (ACC.years.find(y => y.year === ACC.year) || {}).income_basis;
-  if (!accTabs(basis).some(([k]) => k === tab) && !ACC_TABS_B.some(([k]) => k === tab)) tab = 'journal';   // the EÜR tab of an accrual year (and vice versa) does not exist
+  if (!accTabs(basis).some(([k]) => k === tab) && !accTabsB().some(([k]) => k === tab)) tab = 'journal';   // the EÜR tab of an accrual year (and vice versa) does not exist
   let body;
   try { body = await ACC_TABS[tab](); }
   catch (e) {
