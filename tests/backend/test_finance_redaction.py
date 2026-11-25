@@ -84,7 +84,7 @@ def assert_nothing_personal(boss, serialised):
 BOSS_TOP = {
     "year", "months", "totals", "tax_actual", "tax_projected", "tax_owed", "reserve", "projected_profit",
     "extrapolated", "effective_rate", "social_year", "take_home", "categories", "open_receivables", "warnings",
-    "kleinunternehmer", "company_type",
+    "kleinunternehmer", "company_type", "approximate",
 }  # fmt: skip
 BOSS_MONTH = {
     "month", "revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due", "tax_set_aside", "social",
@@ -99,7 +99,7 @@ BOSS_TAX = {
 }  # fmt: skip
 
 RED_TOP = {
-    "year", "months", "totals", "categories", "open_receivables", "kleinunternehmer", "company_type",
+    "year", "months", "totals", "categories", "open_receivables", "kleinunternehmer", "company_type", "approximate",
     "projected_profit", "extrapolated", "warnings", "tax_actual", "tax_projected", "tax_owed", "reserve", "redacted",
 }  # fmt: skip
 RED_MONTH = {"month", "revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due", "vat_set_aside"}
