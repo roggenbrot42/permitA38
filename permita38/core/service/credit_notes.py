@@ -29,7 +29,13 @@ from permita38.core.service.journal import JournalService
 from permita38.core.service.locks import first_unlocked_from
 from permita38.core.service.numbering import NumberingService
 from permita38.core.service.payments import MAX_PAYMENT_CENTS, PaymentService
-from permita38.core.service.postings import CreditPostingService, credit_snapshot, invoice_state_of, stored_snapshot
+from permita38.core.service.postings import (
+    CreditPostingService,
+    credit_snapshot,
+    creditable_nets,
+    invoice_state_of,
+    stored_snapshot,
+)
 
 __all__ = ["CreditNoteService"]
 
@@ -106,11 +112,6 @@ class CreditNoteService:
         first_open = first_unlocked_from(self.store.list("period_locks"))
         if first_open is not None and d < first_open:
             raise ServiceError(409, "The credit note date lies in a locked period; use a date in an open month")
-
-    @staticmethod
-    def _remaining(snap: IssuedSnapshot, credited: Any) -> builtins.list[tuple[Decimal, int, int]]:
-        """``(rate, net, vat)`` still creditable per rate group of the snapshot."""
-        return [(g.rate, int(g.net) - int(k.net), int(g.vat) - int(k.vat)) for g, k in zip(snap.rates, credited)]
 
     @staticmethod
     def _line(rate: Decimal, net: int, text: str) -> dict[str, Any]:
@@ -231,7 +232,7 @@ class CreditNoteService:
                         inv, credit_kind=credit_kind, day=day, reason=reason, groups=groups, lines=None, user=user
                     )
                 )
-            groups = self._amounts(self._remaining(snap, state.credited), credit_kind, amounts)
+            groups = self._amounts(creditable_nets(snap, notes), credit_kind, amounts)
             lines = None
             if credit_kind == "storno" and not notes and inv.get("lines"):
                 lines = copy.deepcopy(inv["lines"])  # the whole invoice: the same lines, quantities and prices

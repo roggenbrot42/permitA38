@@ -13,6 +13,23 @@ const num = (n, d = 1) => new Intl.NumberFormat('de-DE', { maximumFractionDigits
 const hm = h => { const m = Math.round(Math.abs(h) * 60); return (h < 0 ? '-' : '') + Math.floor(m / 60) + ':' + String(m % 60).padStart(2, '0'); };
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const todayISO = () => iso(new Date());
+/* Overdue invoice (docs/specs/accounting.md 22, W1): an issued invoice whose open amount is above zero and whose due date has
+ * passed - never judged by the status label alone (a paid, credited or written-off invoice is not overdue). The server
+ * sends open_amount as a decimal string; an old response without it falls back to the label 'sent'. */
+const invOpenAmount = i => (i.open_amount === null || i.open_amount === undefined ? null : Money.str(i.open_amount));
+/** What an invoice still owes: its open amount when positive, else 0 (never a credit note, a draft or a cancelled invoice). An old
+ *  response without open_amount falls back to the total of a 'sent' invoice. One helper for the customer list, the Sales tile. */
+const invOpenDue = i => {
+  if (!i || i.kind === 'credit_note' || i.status === 'draft' || i.status === 'cancelled') return '0.00';
+  const open = invOpenAmount(i);
+  if (open === null) return i.status === 'sent' ? Money.str(docTotal(i)) : '0.00';
+  return Money.cmp(open, 0) > 0 ? open : '0.00';
+};
+const isOverdue = (i, today = todayISO()) => {
+  if (!i || i.kind === 'credit_note' || i.status === 'draft' || !i.due_date || !(i.due_date < today)) return false;
+  const open = invOpenAmount(i);
+  return open === null ? i.status === 'sent' : Money.cmp(open, 0) > 0;
+};
 const parseD = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
 const addDays = (s, n) => { const d = parseD(s); d.setDate(d.getDate() + n); return iso(d); };
 const mondayOf = s => { const d = parseD(s); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return iso(d); };
@@ -196,7 +213,7 @@ const ROLE_LABEL = { boss: 'Boss', employee: 'Employee', accountant: 'Accountant
 function route() { const [p, ...a] = (location.hash.replace(/^#\/?/, '') || 'today').split('/'); return [p, a]; }
 function deny() { toast('Not available for your role'); const first = navFor()[0]; location.hash = '#/' + (first ? first[0] : 'today'); }
 /* a page whose area the role may read but not write: take the write controls away */
-const WRITE_ACTIONS = ['editCustomer', 'newDoc', 'billTime', 'billTimeInto', 'editProject', 'editTask', 'supNew', 'supEdit', 'supDelete', 'supAdopt', 'offNew', 'offEdit', 'offDelete', 'offReview', 'offAccept', 'offReject', 'offReopen', 'offUnaccept', 'allocCancel', 'docSave', 'docFinalize', 'docAccept', 'docToInvoice', 'addLine', 'saveSettings', 'editTemplate', 'editUser', 'delLine', 'docPdfDelete', 'newTrip', 'timerStart', 'timerStop', 'timerAdd', 'timerPlay'];
+const WRITE_ACTIONS = ['editCustomer', 'newDoc', 'billTime', 'billTimeInto', 'editProject', 'editTask', 'supNew', 'supEdit', 'supDelete', 'supAdopt', 'offNew', 'offEdit', 'offDelete', 'offReview', 'offAccept', 'offReject', 'offReopen', 'offUnaccept', 'allocCancel', 'docSave', 'docFinalize', 'docAccept', 'docToInvoice', 'payRecord', 'payReverse', 'addLine', 'saveSettings', 'editTemplate', 'editUser', 'delLine', 'docPdfDelete', 'newTrip', 'timerStart', 'timerStop', 'timerAdd', 'timerPlay'];
 function lockPage(root, p) {
   root.querySelectorAll('[data-a]').forEach(el => { if (WRITE_ACTIONS.includes(el.dataset.a)) { if (el.tagName === 'TR') { delete el.dataset.a; el.classList.remove('click'); } else el.remove(); } });
   root.querySelectorAll('[data-change="docStatus"]').forEach(el => el.remove());
@@ -327,11 +344,11 @@ PAGES.today = async () => {
   moneyView = false;   // a fresh view starts on time, not money
   if (isBoss()) {
     const inv = S.d.invoices, off = S.d.offers, rep = await api('GET', 'project-report');
-    const overdue = inv.filter(i => i.status === 'sent' && i.due_date && i.due_date < now);
+    const overdue = inv.filter(i => isOverdue(i, now));
     const unbilled = Money.sum(Object.values(rep).map(r => r.unbilled_revenue));
     const openOff = off.filter(o => o.status === 'sent');
     extras = `<div class="grid g4"><div class="card kpi ${Money.isZero(unbilled) ? '' : 'warn'}"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a href="#/sales" class="small">Create invoice →</a></div>
-      <div class="card kpi ${overdue.length ? 'bad' : ''}"><div class="l">Overdue invoices</div><div class="v">${overdue.length}</div><span class="small muted">${eur(Money.sum(overdue.map(docTotal)))}</span></div>
+      <div class="card kpi ${overdue.length ? 'bad' : ''}"><div class="l">Overdue invoices</div><div class="v">${overdue.length}</div><span class="small muted">${eur(Money.sum(overdue.map(i => invOpenAmount(i) ?? docTotal(i))))}</span></div>
       <div class="card kpi"><div class="l">Open offers</div><div class="v">${openOff.length}</div><span class="small muted">${eur(Money.sum(openOff.map(docTotal)))}</span></div>
       <div class="card kpi"><div class="l">Flex-time balance</div><div class="v">${dash.balance === null ? '–' : (dash.balance >= 0 ? '+' : '') + hm(dash.balance)}</div><span class="small muted">${dash.balance === null ? 'set "tracking since" in Team' : 'worked − target'}</span></div></div>`;
   }
