@@ -196,10 +196,11 @@ class Repository(ABC):
     def transaction(self) -> AbstractContextManager[None]: ...
 
     @abstractmethod
-    def guards_suspended(self, kinds: set[str]) -> AbstractContextManager[None]:
+    def guards_suspended(self, kinds: set[str], *, restore: bool = False) -> AbstractContextManager[None]:
         """Switch the database guards of the given kinds (``date``, ``non_negative``, ``order``) off inside the block.
         Only allowed inside ``transaction()`` (RuntimeError otherwise); ``unique`` is never allowed (ValueError).
-        The guards are back before the block is left, and a rollback restores them too."""
+        The guards are back before the block is left, and a rollback restores them too.
+        ``append_only`` guards may be suspended only with ``restore=True`` (the transfer importer's restore)."""
 
     # ---- settings (one key/value document per installation) ----
     @abstractmethod

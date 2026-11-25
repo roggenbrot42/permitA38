@@ -126,7 +126,9 @@ def _import_archive(services, args) -> None:
     path: Path = args.file
     if not path.is_file():
         sys.exit(f"{path} is not a file.")
-    report = transfer.preview(None, path, log=False)  # a dry run writes nothing, not even the transfer log
+    report = transfer.preview(
+        None, path, log=False, replace=args.replace
+    )  # a dry run writes nothing, not even the transfer log
     for coll, n in report["counts"].items():
         print(f"  {coll}: {n}")
     print(f"  attachments: {report['attachments']['files']} files, {report['attachments']['bytes']} bytes")
@@ -151,7 +153,7 @@ def _import_archive(services, args) -> None:
         if input("Import now? [y/N] ").strip().lower() not in ("y", "yes"):
             sys.exit("Cancelled.")
     try:
-        res = transfer.run(None, path)
+        res = transfer.run(None, path, replace=args.replace, confirm_shorten=args.confirm_shorten)
     except ImportRefused as e:
         sys.exit(e.body()["detail"])
     except ServiceError as e:
@@ -255,6 +257,12 @@ def main(argv: list[str] | None = None):
     mi.add_argument("file", type=Path)
     mi.add_argument("--dry-run", action="store_true", help="validate and report only")
     mi.add_argument("--yes", action="store_true", help="do not ask")
+    mi.add_argument(
+        "--replace", action="store_true", help="replace the data of a non-empty instance (command line only)"
+    )
+    mi.add_argument(
+        "--confirm-shorten", action="store_true", help="with --replace: accept an archive with fewer journal entries"
+    )
     cp = sub.add_parser(
         "create-migration", help="create a new migration file (random id, requires = current head) in all dialects"
     )

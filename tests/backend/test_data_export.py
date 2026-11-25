@@ -77,7 +77,7 @@ def test_manifest_counts_hashes_and_head(source):
     _, client, store, _ = source
     files = zip_files(export_archive(client))
     man = json.loads(files["manifest.json"])
-    assert man["format"] == "permita38-export" and man["format_version"] == 1
+    assert man["format"] == "permita38-export" and man["format_version"] == 2
     assert man["schema_head"] == head_id() and man["scope"] == "full"
     assert man["excluded"] and man["include_accounts"] is False
     assert man["counts"] == {c: len(store.list(c)) for c in manifest.exported_collections()}

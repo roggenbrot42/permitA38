@@ -74,6 +74,10 @@ NO_UPGRADE_NEEDED: dict[str, str] = {
     "2fe799c1": "0015-document_scans: adds a table; without rows no old document was scanned",
     "e4b70dba": "0016-guards: adds triggers and indexes only; values are unchanged (the restore checks duplicate numbers up front)",
     "dea6e12b": "0017-reference_guards: adds triggers and indexes only; values are unchanged (dangling references in an archive are restored with warnings)",
+    "0aacb7a9": "0019-accounting_journal: adds tables and columns; an old archive has no journal rows, absent means no journal",
+    "ae32358b": "0020-accounting_documents: adds tables and nullable columns; absent means no VAT return, ZM report or payment",
+    "10bcb698": "0021-accounting_row_state: adds triggers only; values are unchanged",
+    "522011c0": "0022-year_closing_hash: adds nullable columns; absent means the year is not closed",
 }
 
 
