@@ -592,7 +592,10 @@ accounts and BU keys come from the chart and `datev/<year>.json`.
    invoice in January for a December service) belongs to a return or ZM outside the app. In the backfill such lines go
    to the **review list** ("declared outside the app"); after initialisation the same case posts normally, keeps its
    `vat_date`, falls into no app return, and is listed with a warning in the report "before the accounting start".
-   Expenses dated on/after the start with `paid_on` before the start (prepaid) also go to the review list.
+   Expenses dated on/after the start with `paid_on` before the start (prepaid) also go to the review list; confirming
+   one turns its pre-start payment into an opening item (`open:<year>:expense:<id>:prepaid`): the lines the payment
+   event would post, balance-sheet roles only, the bank line replaced by `opening_balance` (cost and income lines
+   belong to the period before the start); the record's `paid_on` is never changed.
    Invoices issued before the start but fully settled before it get their pre-start baseline (step 4) lazily, when a
    later credit note or refund arrives. A payment or credit note dated **before** the start that is entered after the initialisation changes
    the baseline: the difference posts as an opening adjustment (`open:<year>:invoice:<id>:r<n>`, dated the start date,
@@ -600,7 +603,8 @@ accounts and BU keys come from the chart and `datev/<year>.json`.
    whose `paid_on` is set or changed to a date before the start after initialisation. Opening entries and adjustments keep the start date as
    document date; when the start month is already locked they are booked on the first open day (an opening item has
    no VAT or income date, so only balance-sheet reports as of a date in the locked months change).
-5b. **Returns already filed outside the app** for months on/after the start: the wizard asks per period for the filed
+5b. **Returns already filed outside the app** for months on/after the start: the wizard asks per period — every
+   ended period needs an explicit answer, "none filed" included; an unanswered period blocks like a review row — for the filed
    Kz 83 (and Kz 39) and the filing date and stores them as `vat_returns` with `status = final`, `filed_on`, `external =
    true` and the entered figures; the months are locked after the backfill. Differences between the entered figures
    and the journal show as drift on those returns, and the special-prepayment base uses the entered Kz 83.
