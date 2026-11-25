@@ -125,6 +125,9 @@ A.vatExport = el => vatDownload(el, '#vat-export-err', 'ustva-export');
     not filed after its due date, and ZM drift. More than VAT_BANNER_MAX collapse into one summary. '' without the vat right. */
 async function vatTodayBanners() {
   if (!can('vat')) return '';
+  let st = null;
+  try { st = await api('GET', 'accounting/status'); } catch { return ''; }
+  if (!st || !st.initialised) return '';   // no VAT/ZM calls while accounting is not set up (they would answer 422)
   const now = todayISO(), y = parseD(now).getFullYear(), out = [];
   const get = async p => { try { return await api('GET', p); } catch { return []; } };   // e.g. accounting not initialised for that year
   for (const year of [y - 1, y]) {

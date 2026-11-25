@@ -876,14 +876,7 @@ def test_random_user_journey(seed, make_page, live_server, api):
     try:
         j.run(env_int("PERMITA38_E2E_ACTIONS", 20))
         # the only HTTP errors a well-behaved user may trigger: the logged-out bootstrap and wrong passwords
-        # ... plus the Today page's VAT banners: vat.js asks for the returns and ZM of last and this year and swallows the
-        # 422 "Accounting is not initialised"; a journey never initialises accounting, so exactly these two GETs are
-        # expected here (app note: the banner request fires on every Today render; it could skip uninitialised years).
-        unexpected = [
-            x
-            for x in watch.http_4xx
-            if not x.startswith("401 ") and not re.fullmatch(r"422 GET /api/(vat-returns|zm)\?year=\d{4}", x)
-        ]
+        unexpected = [x for x in watch.http_4xx if not x.startswith("401 ")]
         assert not unexpected, unexpected
     except Exception as exc:
         detail = report_failure("journey", seed, j.log)
