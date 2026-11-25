@@ -222,3 +222,25 @@ def test_there_is_no_unlock_route(clients, method):
     boss = clients["boss"]
     for path in (URL, f"{URL}/1", f"{URL}/2024/1"):
         assert getattr(boss, method)(path).status_code in (404, 405)
+
+
+def test_api_lock_preview_lists_the_gap_and_writes_nothing(app, clients):
+    boss, acc, emp = clients["boss"], clients["accountant"], clients["employee"]
+    assert (
+        boss.post("/api/accounting/years", json={"year": 2024, "chart": "skr03", "income_basis": "eur"}).status_code
+        == 201
+    )
+    url = f"{URL}/preview"
+    r = acc.get(url, params={"year": 2024, "month": 3})
+    assert r.status_code == 200, r.text
+    assert r.json() == [{"year": 2024, "month": m} for m in (1, 2, 3)]
+    boss.post(URL, json={"year": 2024, "month": 2})
+    assert acc.get(url, params={"year": 2024, "month": 4}).json() == [
+        {"year": 2024, "month": 3},
+        {"year": 2024, "month": 4},
+    ]
+    assert acc.get(url, params={"year": 2024, "month": 2}).json() == []
+    assert len(app.state.services.store.list("period_locks")) == 2
+    assert boss.get(url, params={"year": 2999, "month": 1}).status_code == 422  # the future
+    assert boss.get(url, params={"year": 2024, "month": 13}).status_code == 422
+    assert emp.get(url, params={"year": 2024, "month": 3}).status_code == 403
