@@ -631,8 +631,8 @@ extended. API tokens: read scopes follow the existing token rules; no write to `
 | `POST /api/accounting/entries` | manual entry; `POST /api/accounting/entries/{id}/reverse` (manual entries only; automatic entries are corrected through their source document); `GET /api/accounting/entry-templates` (the 9.8 templates with their preset lines) |
 | `GET /api/accounting/accounts?year` | the chart's account list |
 | `GET /api/accounting/reports/{trial-balance,eur,pnl,balance-sheet,open-items,ledger}` | reports |
-| `GET /api/accounting/locks`, `POST /api/accounting/locks` `{year, month}` | period lock |
-| `POST /api/accounting/years/{year}/close` (boss) | closing |
+| `GET /api/accounting/locks`, `POST /api/accounting/locks` `{year, month}`, `GET /api/accounting/locks/preview?year&month` (the months that would be locked) | period lock |
+| `POST /api/accounting/years/{year}/close` (boss), `GET /api/accounting/years/{year}/close-preview` (accounting read: blockers, provision proposals with prepayments expensed, planned entries) | closing |
 | `GET /api/accounting/datev?from&to` | DATEV export ([`datev-export.md`](datev-export.md)) |
 | `GET /api/accounting/integrity` | balance + hash chain check |
 | payments, credit notes | [`credit-notes-payments.md`](credit-notes-payments.md) |
