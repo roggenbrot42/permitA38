@@ -189,7 +189,8 @@ def close_year(year: int, user: Boss, services: ServicesDep, body: models.YearCl
 @router.post("/init", dependencies=[SessionOnly], name="init_accounting")
 def init_accounting(body: models.AccountingInitIn, user: Boss, services: ServicesDep):
     """Initialise the accounting (boss only): fiscal year, opening entry, snapshots, backfill of every event on or
-    after the start, in one transaction. 409 when already initialised or when records need the review list."""
+    after the start, in one transaction. ``review_resolutions`` answers the review list, ``external_returns`` carries
+    the returns filed outside the app. 409 when already initialised or when review rows are unanswered (listed)."""
     return services.accounting_init.run(body, user).as_dict()
 
 
@@ -201,17 +202,23 @@ def init_review(
     income_basis: Annotated[str, Query(pattern="^(eur|accrual)$")] = "eur",
     accounting_start: Annotated[str | None, Query(max_length=10)] = None,
     vat_basis: Annotated[str, Query(pattern="^(soll|ist)$")] = "soll",
+    frequency: Annotated[str, Query(pattern="^(month|quarter|none)$")] = "month",
     small_business: bool = False,
 ):
-    """The records that need a decision before the accounting can start (read only)."""
+    """The records that need a decision before the accounting can start, each with its allowed resolutions, and the
+    ended VAT periods for which a return filed outside the app may be entered (read only)."""
     params = models.AccountingInitIn(
         chart=chart,  # type: ignore[arg-type]
         income_basis=income_basis,  # type: ignore[arg-type]
         vat_basis=vat_basis,  # type: ignore[arg-type]
+        frequency=frequency,  # type: ignore[arg-type]
         small_business=small_business,
         accounting_start=accounting_start,  # type: ignore[arg-type]
     )
-    return [r.as_dict() for r in services.accounting_init.check(params)]
+    return {
+        "review": [r.as_dict() for r in services.accounting_init.check(params)],
+        "external_returns": [p.as_dict() for p in services.accounting_init.external_periods(params)],
+    }
 
 
 # ------------------------------------------------------------------ journal, accounts

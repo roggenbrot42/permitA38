@@ -38,6 +38,8 @@ PARAMS = models.AccountingInitIn(chart="skr03", income_basis="accrual", vat_basi
 EUR = PARAMS.model_copy(update={"income_basis": "eur"})
 RC_RAW = {"date": "2026-03-01", "net": 100.0, "vat": 0.0, "category": "software", "reverse_charge": True}
 
+pytestmark = pytest.mark.usefixtures("none_filed")  # every ended period needs an answer (step 5b)
+
 
 def all_entries(repo) -> list:
     out: list = []
@@ -266,11 +268,11 @@ def test_review_cases_refuse_with_the_list_and_write_nothing(repo, sales, pay):
     assert err.value.status == 409
     review = err.value.body["review"]
     assert {(r["id"], r["code"]) for r in review} == {
-        ("oldcancel", "legacy_cancelled"),
         ("rcnosup1", "rc_without_supplier"),
         ("rctyped1", "rc_stored_vat"),
     }
-    assert all(r["key"] and r["message"].endswith("coming in a later step") for r in review)
+    assert all(r["key"] and r["resolutions"] for r in review)
+    assert err.value.body["unresolved"] == [r["key"] for r in review]
     assert all_entries(repo) == []
     assert repo.find("fiscal_years") == [] and ACCOUNTING_START_KEY not in repo.settings()
     assert "issued" not in repo.get("invoices", "preopen1") and "issued" not in repo.get("invoices", "oldcancel")
@@ -483,7 +485,7 @@ def test_api_init_review_and_rights(clients):
     assert acc.post("/api/accounting/init", json=body).status_code == 403
     assert emp.post("/api/accounting/init", json=body).status_code == 403
     assert emp.get("/api/accounting/init/review").status_code == 403
-    assert acc.get("/api/accounting/init/review").json() == []
+    assert acc.get("/api/accounting/init/review").json()["review"] == []
     r = boss.post("/api/accounting/init", json=body)
     assert r.status_code == 200, r.text
     assert r.json()["accounting_start"] == "2026-01-01" and r.json()["year"] == 2026
@@ -497,6 +499,6 @@ def test_api_refusal_carries_the_review_list(app, clients):
     assert r.status_code == 409
     assert [x["code"] for x in r.json()["review"]] == ["rc_without_supplier"]
     got = clients["accountant"].get("/api/accounting/init/review", params={"accounting_start": "2026-01-01"}).json()
-    assert [x["id"] for x in got] == ["rcnosup1"]
+    assert [x["id"] for x in got["review"]] == ["rcnosup1"]
     bad = clients["accountant"].get("/api/accounting/init/review", params={"chart": "skr99"})
     assert bad.status_code == 422
