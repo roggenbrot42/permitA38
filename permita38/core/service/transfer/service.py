@@ -117,18 +117,32 @@ class TransferService:
             return result
 
     # ------------------------------------------------------------------ import
-    def preview(self, user_id: str | None, path: Path, today: date | None = None, *, log: bool = True) -> dict:
+    def preview(
+        self, user_id: str | None, path: Path, today: date | None = None, *, log: bool = True, replace: bool = False
+    ) -> dict:
         with _Single():
             with _clean_errors("import check"):
-                plan = importer.validate(path, self.store, allow_no_users=self.allow_no_users, today=today)
+                plan = importer.validate(
+                    path, self.store, allow_no_users=self.allow_no_users, today=today, replace=replace
+                )
             if log:
                 self._log(user_id, "import_preview", plan.ok, _accounts(plan), plan.counts(), None)
             return plan.preview()
 
-    def run(self, user_id: str | None, path: Path, today: date | None = None) -> dict:
+    def run(
+        self,
+        user_id: str | None,
+        path: Path,
+        today: date | None = None,
+        *,
+        replace: bool = False,
+        confirm_shorten: bool = False,
+    ) -> dict:
         with _Single():
             with _clean_errors("import check"):
-                plan = importer.validate(path, self.store, allow_no_users=self.allow_no_users, today=today)
+                plan = importer.validate(
+                    path, self.store, allow_no_users=self.allow_no_users, today=today, replace=replace
+                )
             if not plan.ok:
                 self._log(user_id, "import", False, _accounts(plan), {}, None)
                 if plan.empty_reason and len(plan.errors) == 1:
@@ -136,7 +150,7 @@ class TransferService:
                 raise ImportRefused(plan)
             try:
                 with _clean_errors("import"):
-                    res = importer.apply(path, self.store, plan)
+                    res = importer.apply(path, self.store, plan, confirm_shorten=confirm_shorten)
             except BaseException:
                 self._log(user_id, "import", False, _accounts(plan), {}, None)
                 raise

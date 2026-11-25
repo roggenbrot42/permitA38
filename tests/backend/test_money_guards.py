@@ -38,6 +38,9 @@ SCHEMA_NUMERIC_ALLOWLIST = {
     "created_at": "journal entry creation epoch seconds",
     "fiscal_year": "calendar year of a journal entry",
     "entry_no": "gapless journal entry number",
+    "errors": "integrity check finding counter",
+    "warnings": "integrity check finding counter",
+    "info": "integrity check finding counter",
     "closing_entry_no": "number of journal entries of a closed fiscal year",
     "line_no": "ordinal of a journal line",
     "bill_rev": "posting revision counter of an expense bill",
@@ -622,7 +625,7 @@ SWEEP_ID_RECORD = {
 
 
 # GET routes parametrised by a calendar year, not by a record id: swept with the current year
-SWEEP_YEAR_ROUTES = {"/api/accounting/years/{year}"}
+SWEEP_YEAR_ROUTES = {"/api/accounting/years/{year}", "/api/accounting/years/{year}/close-preview"}
 
 
 def _id_url(path, ids):

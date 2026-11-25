@@ -75,6 +75,11 @@ class SQLRepository(Repository):
         """Names of the guard triggers the database currently has."""
         raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
 
+    @property
+    def can_suspend_guards(self) -> bool:
+        """Whether ``guards_suspended`` works (trigger based guards: SQLite only)."""
+        return type(self)._guard_triggers is not SQLRepository._guard_triggers
+
     def _drop_guard(self, name: str) -> None:
         raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
 
@@ -278,15 +283,13 @@ class SQLRepository(Repository):
                 self._commit()
 
     @contextmanager
-    def guards_suspended(self, kinds: set[str]) -> Iterator[None]:
+    def guards_suspended(self, kinds: set[str], *, restore: bool = False) -> Iterator[None]:
         kinds = set(kinds)
         unknown = kinds - set(GUARD_KINDS)
         if unknown or "unique" in kinds:
             raise ValueError(f"guards of kind {sorted(unknown | (kinds & {'unique'}))} cannot be suspended")
-        if "append_only" in kinds:
-            raise ValueError(
-                "guards of kind 'append_only' cannot be suspended here (only the transfer importer may, later)"
-            )
+        if "append_only" in kinds and not restore:
+            raise ValueError("guards of kind 'append_only' cannot be suspended (only the transfer importer may)")
         with self.lock:
             self._ensure()
             if not self._depth:
