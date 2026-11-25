@@ -581,7 +581,10 @@ accounts and BU keys come from the chart and `datev/<year>.json`.
    `vat_not_due_r` for the VAT not yet due; EÜR/Soll → `vat_soll_clearing_r` for the declared VAT not yet received;
    EÜR/Ist → nothing. Their payments dated on/after the start then post normally (Ist VAT, EÜR income).
 5. Invoices issued on/after the start: the issue entry; payments and credit notes stored before the initialisation
-   post as their events in date order; legacy `paid` + `paid_date` → one payment of the open amount on that date.
+   post as their events in date order — within a day in creation order: every `payments` row and every credit note
+   (incl. write-offs and their reversals) gets a monotonic `seq` at creation (`number_sequences` doc type `event`,
+   stored in the row's `extra`); rows without `seq` (created before this release) order by creation time, then id,
+   a write-off reversal directly before the payment that triggered it; legacy `paid` + `paid_date` → one payment of the open amount on that date.
    Expenses dated before the start but paid on/after it: accrual → opening payable; EÜR → an opening entry D
    `opening_balance` / C `input_vat_clearing` for their input VAT (already deducted in an earlier return), then the
    payment event posts the cost and clears it.
