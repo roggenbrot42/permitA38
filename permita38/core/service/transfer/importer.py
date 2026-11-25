@@ -82,10 +82,8 @@ POLYMORPHIC_REFERENCES: dict[str, tuple[str, ...]] = {
     "journal_entries.counterparty_id": ("customers", "suppliers"),
     "journal_lines.open_item_id": ("invoices", "expenses"),
 }
-#: journal_entries.source_coll values whose source_id is checked (the others are not collections of the archive)
-REFERENCES_OF_SOURCE: dict[str, str] = {
-    c: c for c in ("invoices", "expenses", "trips", "vat_returns", "zm_reports", "fiscal_years", "payments")
-}
+#: id columns that are not checked: the journal is the record of what happened, its source may be deleted later
+UNCHECKED_REFERENCES = {"journal_entries.source_id"}
 LIST_REFERENCES: dict[str, tuple[str, str]] = {  # (collection, column) -> target collection
     "contracts.user_ids": ("contracts", "users"),
 }
@@ -228,6 +226,25 @@ def _journal_shortened(plan: Plan, store: Repository) -> None:
             f"The journal will be shortened: year {year} has {d['current']} entries now but {d['archive']} in the archive.",
             "manifest.json",
         )
+
+
+def _attachment_collisions(plan: Plan, store: Repository) -> None:
+    """A replace keeps the existing attachment files; an archive file with the same name but other content would
+    fail after the commit, so it is refused here (nothing is deleted)."""
+    for name in sorted(plan.attachments):
+        existing = store.attachment_path(name)
+        if existing is None:
+            continue
+        sha = hashlib.sha256()
+        with open(existing, "rb") as f:
+            while chunk := f.read(limits.CHUNK):
+                sha.update(chunk)
+        if sha.hexdigest() != plan.attachment_sha.get(name):
+            plan.error(
+                "attachment_conflict",
+                f"The attachment {name} exists with other content; remove it first or restore into a fresh instance.",
+                f"attachments/{name}",
+            )
 
 
 # ------------------------------------------------------------------ validation
@@ -429,11 +446,8 @@ def _check_references(plan: Plan) -> None:
                     if not value or any(value in ids.get(t, set()) for t in targets):
                         continue
                     target = targets[0]
-                elif key == "journal_entries.source_id":
-                    # polymorphic (``source_coll`` names the collection), not a calendar source
-                    target = REFERENCES_OF_SOURCE.get(rec.get("source_coll") or "")
-                    if target is None or not value or value in ids.get(target, set()):
-                        continue
+                elif key in UNCHECKED_REFERENCES:
+                    continue
                 elif target is None or not value or value in ids.get(target, set()):
                     continue
                 total += 1
@@ -653,6 +667,8 @@ def validate(
     path: Path, store: Repository, *, allow_no_users: bool = False, today: date | None = None, replace: bool = False
 ) -> Plan:
     """Read the whole archive; nothing is written. Errors and warnings are collected in the returned plan."""
+    if replace and not getattr(store, "can_suspend_guards", True):
+        raise ServiceError(409, "A replace-restore needs a database whose guards can be suspended (SQLite only).")
     plan = Plan(allow_no_users=allow_no_users, replace=replace)
     try:
         with ArchiveReader(path) as reader:
@@ -662,6 +678,7 @@ def validate(
     plan.empty_reason = instance_state(store, allow_no_users=allow_no_users, replace=replace)
     if replace and plan.ok:
         _journal_shortened(plan, store)
+        _attachment_collisions(plan, store)
     if plan.empty_reason:
         plan.error("not_empty", plan.empty_reason)
     return plan
@@ -803,8 +820,21 @@ def _check_restored_journal(store: Repository, plan: Plan) -> None:
     acc = (plan.manifest or {}).get("accounting")
     if acc is None:  # an archive of format 1 has no journal
         return
-    if manifest.journal_tails(store.list("journal_entries")) != acc["journal"]:
+    entries = store.list("journal_entries")
+    if manifest.journal_tails(entries) != acc["journal"]:
         raise ServiceError(422, "The restored journal does not match the manifest; nothing was imported.")
+    from permita38.core.service.journal import JournalService
+
+    journal = JournalService(store)
+    found = [
+        f"{year}: {f.message}"
+        for year in sorted({int(e["fiscal_year"]) for e in entries})
+        for f in journal.verify_chain(year)
+    ]
+    if found:
+        raise ServiceError(
+            422, "The restored journal fails the chain check; nothing was imported: " + "; ".join(found[:10])
+        )
 
 
 def apply(path: Path, store: Repository, plan: Plan, *, confirm_shorten: bool = False) -> dict:

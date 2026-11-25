@@ -1,6 +1,7 @@
 """Export / replace-restore with the accounting tables (docs/specs/accounting.md 7.2, 22 row E26).
 Synthetic chart and invented data; two throwaway repositories play source and target."""
 
+import hashlib
 import json
 import shutil
 import zipfile
@@ -16,7 +17,7 @@ from permita38.core.repository import create_repository
 from permita38.core.service.journal import JournalService, JournalSource, PostLine
 from permita38.core.service.transfer import manifest
 from permita38.core.service.transfer.export import ExportOptions
-from permita38.core.service.transfer.service import TransferService
+from permita38.core.service.transfer.service import ImportRefused, TransferService
 
 FIXTURE = Path(__file__).parent / "fixtures" / "chart_synthetic.json"
 SRC = JournalSource(event="issue", created_by="u1x000", source_coll="invoices", source_id="inv1abc")
@@ -261,3 +262,101 @@ def test_cli_replace_needs_confirm_shorten_for_a_shorter_journal(tmp_path, capsy
     reopened = make_repo(tmp_path, "target")
     assert len(reopened.list("journal_entries")) == 1
     reopened.close()
+
+
+def rewrite(path: Path, out: Path, change) -> Path:
+    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(out, "w") as zout:
+        for info in sorted(zin.infolist(), key=lambda i: i.filename == "manifest.json"):  # manifest last
+            zout.writestr(info.filename, change(info.filename, zin.read(info.filename)))
+    return out
+
+
+def test_entry_whose_source_was_deleted_restores_without_a_warning(source, tmp_path):
+    source.delete("invoices", SRC.source_id)  # the journal outlives its source (like E25)
+    path = export(source, tmp_path)
+    target = make_repo(tmp_path, "target")
+    out = service(target, tmp_path).run(None, path)
+    assert not [w for w in out["warnings"] if ".source_id" in w["message"]]
+    assert snapshot(target) == snapshot(source)
+    target.close()
+
+
+def test_replace_is_refused_when_the_dialect_cannot_suspend_guards(source, tmp_path, monkeypatch):
+    path = export(source, tmp_path)
+    target = make_repo(tmp_path, "target")
+    monkeypatch.setattr(type(target), "can_suspend_guards", property(lambda self: False))
+    with pytest.raises(ServiceError) as err:
+        service(target, tmp_path).run(None, path, replace=True)
+    assert err.value.status == 409 and "SQLite" in err.value.message
+    target.close()
+
+
+def test_tampered_middle_entry_with_a_correct_tail_is_refused(source, tmp_path):
+    path = export(source, tmp_path)
+
+    new: dict[str, bytes] = {}
+
+    def tamper(name, data):
+        if name == "manifest.json":  # the file hashes are re-sealed: only the chain check can catch this
+            man = json.loads(data)
+            meta = man["files"]["data/journal_entries.json"]
+            meta["sha256"], meta["bytes"] = hashlib.sha256(new["j"]).hexdigest(), len(new["j"])
+            return json.dumps(man).encode()
+        if name != "data/journal_entries.json":
+            return data
+        body = json.loads(data)
+        mid = next(r for r in body["records"] if r["fiscal_year"] == 2026 and r["entry_no"] == 2)
+        mid["text"] = "changed outside the app"
+        new["j"] = json.dumps(body).encode()
+        return new["j"]
+
+    bad = rewrite(path, tmp_path / "tampered.zip", tamper)
+    target = make_repo(tmp_path, "target")
+    with pytest.raises(ServiceError) as err:
+        service(target, tmp_path).run(None, bad)
+    assert err.value.status == 422 and "entry 2" in err.value.message
+    assert target.list("journal_entries") == []
+    target.close()
+
+
+def test_replace_with_an_archive_without_accounting_needs_confirmation(tmp_path):
+    plain = make_repo(tmp_path, "plain")
+    path = export(plain, tmp_path)  # no journal at all
+    plain.close()
+
+    def strip(name, data):
+        if name == "manifest.json":
+            man = json.loads(data)
+            man.pop("accounting", None)
+            return json.dumps(man).encode()
+        return data
+
+    old = rewrite(path, tmp_path / "old.zip", strip)
+    target = make_repo(tmp_path, "target")
+    fill(target, {2026: 2})
+    before = snapshot(target)
+    svc = service(target, tmp_path)
+    with pytest.raises(ServiceError) as err:
+        svc.run(None, old, replace=True)
+    assert err.value.status == 409 and "shortened" in err.value.message
+    assert snapshot(target) == before
+    svc.run(None, old, replace=True, confirm_shorten=True)
+    assert target.list("journal_entries") == []
+    target.close()
+
+
+def test_replace_refuses_an_attachment_with_other_content_before_writing(tmp_path):
+    src = make_repo(tmp_path, "src")
+    name = src.save_attachment("receipt.pdf", b"%PDF-1.4 one")
+    src.save("expenses", {"id": "e1x000", "attachment": name})
+    path = TransferService(src, tmp_path / "o", allow_no_users=True).export(None, ExportOptions()).path
+    target = make_repo(tmp_path, "target")
+    target.restore_attachment(name, b"%PDF-1.4 other")
+    target.save("invoices", {"id": "i1x000", "number": "R-9"})
+    before = target.list("invoices")
+    with pytest.raises(ImportRefused) as err:
+        service(target, tmp_path).run(None, path, replace=True)
+    assert "attachment_conflict" in [e["code"] for e in err.value.body()["errors"]]
+    assert target.list("invoices") == before
+    src.close()
+    target.close()

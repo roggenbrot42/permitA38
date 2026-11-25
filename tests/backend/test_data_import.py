@@ -469,3 +469,18 @@ def test_cli_refuses_a_corrupt_archive(tmp_path):
     with pytest.raises(SystemExit) as e:
         main([*_cli(tmp_path, "y"), "import", str(bad), "--dry-run"])
     assert e.value.code not in (0, 2)
+
+
+def test_http_import_ignores_a_replace_parameter(source, target):
+    """The replace-restore is CLI only: the HTTP form has no such field, an extra one changes nothing."""
+    _, src_client, _ = source
+    _, dst_client, _ = target
+    blob = export_archive(src_client)
+    assert post_run(dst_client, blob).status_code == 200
+    again = login(target[0], "boss").post(
+        "/api/data/import/run",
+        files={"file": ("a.zip", blob)},
+        data={"confirm": "true", "replace": "true", "confirm_shorten": "true"},
+    )
+    assert again.status_code == 409
+    assert again.json()["detail"].startswith("This instance already contains data (")

@@ -75,6 +75,11 @@ class SQLRepository(Repository):
         """Names of the guard triggers the database currently has."""
         raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
 
+    @property
+    def can_suspend_guards(self) -> bool:
+        """Whether ``guards_suspended`` works (trigger based guards: SQLite only)."""
+        return type(self)._guard_triggers is not SQLRepository._guard_triggers
+
     def _drop_guard(self, name: str) -> None:
         raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
 
