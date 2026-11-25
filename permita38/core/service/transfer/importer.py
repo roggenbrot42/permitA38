@@ -56,6 +56,35 @@ REFERENCES: dict[str, str] = {
     "login_user_id": "users",
     "expense_id": "expenses",
     "created_by": "users",
+    # accounting tables: a name shared by tables with different targets has its default here and the others in
+    # TABLE_REFERENCES / POLYMORPHIC_REFERENCES
+    "corrects_id": "invoices",
+    "document_id": "invoices",
+    "entry_id": "journal_entries",
+    "reverses_id": "journal_entries",
+    "amends_id": "vat_returns",
+    "replaced_by": "vat_returns",
+    "counterparty_id": "customers",
+    "open_item_id": "invoices",
+    "opened_by": "users",
+    "closed_by": "users",
+    "locked_by": "users",
+    "finalised_by": "users",
+}
+#: "table.column" -> target, where the column name alone points elsewhere
+TABLE_REFERENCES: dict[str, str] = {
+    "payments.reverses_id": "payments",
+    "zm_reports.amends_id": "zm_reports",
+    "zm_reports.replaced_by": "zm_reports",
+}
+#: "table.column" -> collections the id may live in (the first match wins; none of them is checked against REFERENCES)
+POLYMORPHIC_REFERENCES: dict[str, tuple[str, ...]] = {
+    "journal_entries.counterparty_id": ("customers", "suppliers"),
+    "journal_lines.open_item_id": ("invoices", "expenses"),
+}
+#: journal_entries.source_coll values whose source_id is checked (the others are not collections of the archive)
+REFERENCES_OF_SOURCE: dict[str, str] = {
+    c: c for c in ("invoices", "expenses", "trips", "vat_returns", "zm_reports", "fiscal_years", "payments")
 }
 LIST_REFERENCES: dict[str, tuple[str, str]] = {  # (collection, column) -> target collection
     "contracts.user_ids": ("contracts", "users"),
@@ -390,13 +419,22 @@ def _check_references(plan: Plan) -> None:
             for col in table.columns:
                 if col.type != ID or col.name == "id":
                     continue
-                target = REFERENCES.get(col.name)
+                key = f"{coll}.{col.name}"
+                target = TABLE_REFERENCES.get(key) or REFERENCES.get(col.name)
                 value = rec.get(col.name)
                 if target == "trips.items":
                     continue  # checked below, against the items of the trip
-                if coll == "journal_entries" and col.name == "source_id":
-                    continue  # polymorphic (``source_coll`` names the collection), not a calendar source
-                if target is None or not value or value in ids.get(target, set()):
+                if key in POLYMORPHIC_REFERENCES:
+                    targets = POLYMORPHIC_REFERENCES[key]
+                    if not value or any(value in ids.get(t, set()) for t in targets):
+                        continue
+                    target = targets[0]
+                elif key == "journal_entries.source_id":
+                    # polymorphic (``source_coll`` names the collection), not a calendar source
+                    target = REFERENCES_OF_SOURCE.get(rec.get("source_coll") or "")
+                    if target is None or not value or value in ids.get(target, set()):
+                        continue
+                elif target is None or not value or value in ids.get(target, set()):
                     continue
                 total += 1
                 if shown < 20:

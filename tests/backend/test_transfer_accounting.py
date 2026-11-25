@@ -59,6 +59,7 @@ def make_repo(tmp_path, name: str):
 def fill(repo, per_year: dict[int, int]) -> None:
     """Fiscal years, ``per_year[year]`` entries each, one period lock and one filed VAT return (invented)."""
     svc = JournalService(repo, clock=lambda: 1_800_000_000)
+    repo.save("invoices", {"id": SRC.source_id, "number": "R-1"})  # the entries' source exists (checked on restore)
     for year, n in per_year.items():
         repo.save("fiscal_years", fiscal_year(year))
         for i in range(1, n + 1):
@@ -237,3 +238,26 @@ def test_a_longer_archive_is_no_warning(source, tmp_path):
     preview = service(target, tmp_path).preview(None, path, replace=True)
     assert preview["ok"] and not [w for w in preview["warnings"] if w["code"] == "journal_shortened"]
     target.close()
+
+
+def test_cli_replace_needs_confirm_shorten_for_a_shorter_journal(tmp_path, capsys):
+    """The replace-restore is reachable from the command line only (``import --replace [--confirm-shorten]``)."""
+    from permita38.cli.main import main
+
+    older = make_repo(tmp_path, "older")
+    fill(older, {2026: 1})
+    path = export(older, tmp_path)
+    older.close()
+    target = make_repo(tmp_path, "target")
+    fill(target, {2026: 3})
+    target.close()
+    cli = ["-c", str(tmp_path / "target.yaml"), "--data", str(tmp_path / "target")]
+    with pytest.raises(SystemExit):  # without --replace the instance is not empty
+        main([*cli, "import", str(path), "--yes"])
+    with pytest.raises(SystemExit, match="confirm_shorten"):
+        main([*cli, "import", str(path), "--replace", "--yes"])
+    main([*cli, "import", str(path), "--replace", "--confirm-shorten", "--yes"])
+    assert "Imported." in capsys.readouterr().out
+    reopened = make_repo(tmp_path, "target")
+    assert len(reopened.list("journal_entries")) == 1
+    reopened.close()

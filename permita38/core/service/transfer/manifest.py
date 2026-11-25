@@ -27,7 +27,7 @@ EXCLUDED_TABLES: dict[str, str] = {
 #: Setting keys that are never exported besides the ones matching SECRET_SETTING_RE.
 SECRET_SETTING_KEYS: tuple[str, ...] = (LOG_KEY,)
 #: Real setting names (core/models.py Settings) must not match; tests/backend/test_data_export.py pins that.
-SECRET_SETTING_RE = re.compile(r"(?i)(secret|token|pass|cred|auth|api[_-]?key|private|key$)")
+SECRET_SETTING_RE = re.compile(r"(?i)(secret|token|pass|cred(?!it)|auth|api[_-]?key|private|key$)")
 
 EXCLUDED_NOTES = [
     "secret key",
