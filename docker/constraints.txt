@@ -6,7 +6,7 @@ anyio==4.16.0
     # via starlette
 click==8.5.1
     # via uvicorn
-fastapi==0.162.2
+fastapi==0.165.0
     # via permita38 (pyproject.toml)
 h11==0.16.0
     # via uvicorn
