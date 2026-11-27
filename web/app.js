@@ -31,7 +31,7 @@ api.onUnauthorized = () => { if (S.me) S.expired = true; S.me = null; render(); 
 function toast(msg, err) { const t = $('#toast'); t.textContent = msg; t.className = 'on' + (err ? ' err' : ''); clearTimeout(toast.t); toast.t = setTimeout(() => t.className = '', err ? 4000 : 1800); }
 const guard = fn => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message, true); } };
 
-const COLL_AREA = { customers: 'customers', projects: 'projects', tasks: 'projects', entries: 'time', contracts: 'contracts', absences: 'absences', offers: 'offers', invoices: 'invoices', expenses: 'expenses', trips: 'trips', users: 'team' };
+const COLL_AREA = { customers: 'customers', projects: 'projects', tasks: 'projects', entries: 'time', contracts: 'contracts', absences: 'absences', offers: 'offers', invoices: 'invoices', expenses: 'expenses', trips: 'trips', templates: 'templates', users: 'team' };
 async function loadAll(only) {
   const colls = (only || Object.keys(COLL_AREA)).filter(c => can(COLL_AREA[c]));
   const res = await Promise.all(colls.map(c => api('GET', c)));
