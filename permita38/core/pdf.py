@@ -2,6 +2,7 @@
 
 import hashlib
 import math
+import threading
 import unicodedata
 import zlib
 from collections import OrderedDict
@@ -238,6 +239,7 @@ _PNG_MAX_PIXELS = 4_000_000
 _PNG_MAX_IDAT = 15 * 1024 * 1024
 _PNG_CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
 _PNG_CACHE_MAX = 8
+_PNG_CACHE_LOCK = threading.Lock()
 _PNG_CACHE: "OrderedDict[bytes, dict | None]" = (
     OrderedDict()
 )  # sha256 digest -> image record (None: unusable), at most _PNG_CACHE_MAX entries
@@ -349,7 +351,7 @@ def _png_decode(data):
         return None
     if comp or filt or inter or ctype not in _PNG_CHANNELS or not idat:
         return None
-    if depth != 8 and not (ctype == 3 and depth in (1, 2, 4)):
+    if depth != 8 and not (ctype in (0, 3) and depth in (1, 2, 4)):
         return None
     ch = _PNG_CHANNELS[ctype]
     stride = math.ceil(w * ch * depth / 8)
@@ -362,14 +364,16 @@ def _png_decode(data):
     if pix is None:
         return None
     alpha = None
-    if ctype == 3:
-        if not plte or len(plte) % 3 or len(plte) > 768:
-            return None
+    idx = b""
+    if ctype in (0, 3):
         if depth == 8:
             idx = bytes(pix)
         else:
             tab = _unpack_table(depth)
             idx = b"".join(b"".join(tab[b] for b in pix[y * stride : (y + 1) * stride])[:w] for y in range(h))
+    if ctype == 3:
+        if not plte or len(plte) % 3 or len(plte) > 768:
+            return None
         if max(idx) >= len(plte) // 3:
             return None
         colour = idx
@@ -378,12 +382,13 @@ def _png_decode(data):
             t = bytes(trns[:256])
             alpha = idx.translate(t + b"\xff" * (256 - len(t)))
     elif ctype == 0:
-        colour = bytes(pix)
         space = b"/DeviceGray"
+        top = (1 << depth) - 1
         if trns and len(trns) >= 2:
-            gkey = int.from_bytes(trns[:2], "big")
-            if gkey < 256:
-                alpha = colour.translate(bytes(0 if i == gkey else 255 for i in range(256)))
+            gkey = int.from_bytes(trns[:2], "big")  # compared at the sample's own depth, before scaling
+            if gkey <= top:
+                alpha = idx.translate(bytes(0 if i == gkey else 255 for i in range(256)))
+        colour = idx if depth == 8 else idx.translate(bytes(min(i, top) * 255 // top for i in range(256)))
     elif ctype == 2:
         colour = bytes(pix)
         space = b"/DeviceRGB"
@@ -424,17 +429,21 @@ def _png_record(data):
     """Decoded PNG as an image record, cached by content hash; None if unsupported. Never raises."""
     try:
         key = hashlib.sha256(data).digest()
-        if key in _PNG_CACHE:
-            _PNG_CACHE.move_to_end(key)
-            rec = _PNG_CACHE[key]
-        else:
+        with _PNG_CACHE_LOCK:
+            hit = key in _PNG_CACHE
+            if hit:
+                _PNG_CACHE.move_to_end(key)
+                rec = _PNG_CACHE[key]
+        if not hit:
             try:
-                rec = _png_decode(data)
+                rec = _png_decode(data)  # decoded outside the lock
             except Exception:
                 rec = None
-            _PNG_CACHE[key] = rec
-            while len(_PNG_CACHE) > _PNG_CACHE_MAX:
-                _PNG_CACHE.popitem(last=False)
+            with _PNG_CACHE_LOCK:
+                _PNG_CACHE[key] = rec
+                _PNG_CACHE.move_to_end(key)
+                while len(_PNG_CACHE) > _PNG_CACHE_MAX:
+                    _PNG_CACHE.popitem(last=False)
         return dict(rec) if rec else None
     except Exception:
         return None
