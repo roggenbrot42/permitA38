@@ -4,7 +4,7 @@ permitA38 numbers offers and invoices with one counter per document type and per
 document is **finalized** (not when it is drafted), in the same transaction that saves the document, so a failed
 finalize does not use up a number.
 
-Settings → Numbering (or the API below) shows the next number and lets you change it.
+The next number is shown on the Settings page in the card "Document numbering" (with a link to the numbering page where you change it) and in the banner of every draft; the API below does the same.
 
 ## Legal note
 
@@ -72,7 +72,7 @@ All routes are for the boss only.
 | `GET /api/numbering/log?type=invoice` | audit trail of every change |
 
 `PUT /api/settings` refuses to change the numbering settings (pattern, reset, shared sequence) with a 400 that
-points here, so every change goes through the checks. The web page is Settings → Numbering (`#/numbering`).
+points here, so every change goes through the checks. The web page is `#/numbering`, reached from the Settings card "Document numbering".
 
 `PUT /api/numbering` returns **409** with the warnings when a change is risky and `confirm` is not `true`. Nothing
 is written in that case.

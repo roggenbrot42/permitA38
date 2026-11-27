@@ -83,6 +83,10 @@ def open_app(browser, me, stored=True, page="settings"):
             if me["role"] != "boss":
                 return _json(route, 403, {"detail": "Not allowed"})
             return _json(route, 200, {"stored": stored, "health": {"mode": "pkv"}, "children": {"count": 2}})
+        if path.startswith("numbering/status"):
+            kind = "invoice" if "invoice" in req.url else "offer"
+            nxt = "RE-2026-0042" if kind == "invoice" else "AN-2026-0007"
+            return _json(route, 200, {"type": kind, "pattern": "XX-{YYYY}-{NNNN}", "next": [nxt]})
         if path == "tokens":
             return _json(route, 200, [])
         if path in ("calendars", "calendars/suggestions"):
@@ -119,13 +123,18 @@ def test_business_settings_cards_as_grouped(browser):
     expect(pg.locator("#card-bank #logo_file")).to_have_count(1)
     expect(pg.locator("#card-tax #f_vat_rate")).to_have_count(1)
     expect(pg.locator("#card-defaults #f_default_rate")).to_have_count(1)
-    expect(pg.locator("#card-defaults a[href='#/numbering']")).to_have_count(1)
+    expect(pg.locator("#card-defaults a[href='#/numbering']")).to_have_count(0)
+    expect(pg.locator("#card-numbering")).to_contain_text("Next invoice number: RE-2026-0042")
+    expect(pg.locator("#card-numbering")).to_contain_text("Next offer number: AN-2026-0007")
     expect(pg.locator("#card-defaults [data-a=editTemplate]").first).to_be_visible()
     # moved to My settings or removed
     expect(pg.locator("#tokens-card")).to_have_count(0)
     expect(pg.locator("#calendars")).to_have_count(0)
     for legacy in ("social_monthly", "church_tax", "splitting", "other_income", "other_deductions"):
         expect(pg.locator(f"#f_{legacy}")).to_have_count(0)
+    pg.click("#card-numbering #numbering-link")
+    pg.wait_for_function("() => location.hash === '#/numbering'")
+    expect(pg.locator("#main h1")).to_contain_text("umbering")
     assert problems == []
     ctx.close()
 

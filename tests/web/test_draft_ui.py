@@ -165,3 +165,19 @@ def test_draft_can_be_deleted_from_the_editor(browser, srv):
     pg.click("[data-a=docDelete]")
     pg.wait_for_function("() => location.hash === '#/sales/offers'")
     assert httpx.get(srv.base + "/api/offers", headers=h).json() == []
+
+
+def test_draft_banner_shows_next_number_and_link(browser, srv):
+    h = {"Authorization": "Bearer " + srv.token}
+    cust = httpx.post(srv.base + "/api/customers", headers=h, json={"name": "Demo GmbH"}).json()
+    expected = httpx.get(srv.base + "/api/numbering/preview?type=invoice", headers=h).json()["next"][0]
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    ctx.add_init_script(f"localStorage.setItem('permita38.token', '{srv.token}')")
+    pg = ctx.new_page()
+    pg.goto(srv.base + "/#/doc/invoices/new-" + cust["id"])
+    pg.wait_for_selector("#d_totals")
+    banner = pg.locator(".banner.info")
+    assert f"The next number is currently {expected}" in banner.inner_text()
+    banner.locator("a[href='#/numbering']").click()
+    pg.wait_for_function("() => location.hash === '#/numbering'")
+    ctx.close()

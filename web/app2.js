@@ -247,6 +247,10 @@ PAGES.doc = async (coll, id) => {
     DOC = { coll, ...rec, lines: rec.lines || [] };
   }
   const d = DOC, locked = d.number && d.status !== 'draft', isNew = !d.id;
+  let nextNoHTML = '';
+  if (d.status === 'draft' && !d.number && can('settings', 'write') && scopeOf('settings') === 'all') {
+    try { const pv = await api('GET', 'numbering/preview?type=' + (isInv ? 'invoice' : 'offer')); if (pv?.next?.[0]) nextNoHTML = ` The next number is currently <b>${esc(pv.next[0])}</b> (<a href="#/numbering">change numbering</a>).`; } catch (e) { /* keep the plain banner */ }
+  }
   const opt = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
   const klein = s.kleinunternehmer;
   const statuses = isInv ? [['sent', 'Sent'], ['paid', 'Paid'], ['cancelled', 'Cancelled']] : [['sent', 'Sent'], ['accepted', 'Accepted'], ['rejected', 'Rejected']];
@@ -255,7 +259,7 @@ PAGES.doc = async (coll, id) => {
     <div class="row tight" style="flex:none">${d.id ? `<button data-a="docPdf">Preview PDF</button>` : ''}<button class="${d.number ? '' : 'primary'}" data-a="docSave">${d.status === 'draft' ? 'Save draft' : 'Save'}</button>
     ${d.id && !d.number ? `<button class="primary" data-a="docFinalize">Finalize & number</button>` : ''}${d.id && !d.number ? `<button class="danger" data-a="docDelete">Delete draft</button>` : ''}${d.id && d.number ? `<select style="width:auto" data-change="docStatus"><option value="">Set status…</option>${opt(statuses, '')}</select>` : ''}
     ${d.id && !isInv && d.number && d.status !== 'accepted' ? `<button data-a="docAccept">✓ Accepted → create project</button>` : ''}${d.id && !isInv ? `<button data-a="docToInvoice">→ Invoice</button>` : ''}</div></div>
-  ${d.status === 'draft' && !d.number ? `<div class="banner info">This is a <b>draft</b>: it has no number yet, is not counted in revenue or planning, and the PDF is marked as a draft. It gets its ${isInv ? 'invoice' : 'offer'} number when you press <b>Finalize &amp; number</b>.</div>` : ''}
+  ${d.status === 'draft' && !d.number ? `<div class="banner info">This is a <b>draft</b>: it has no number yet, is not counted in revenue or planning, and the PDF is marked as a draft. It gets its ${isInv ? 'invoice' : 'offer'} number when you press <b>Finalize &amp; number</b>.${nextNoHTML}</div>` : ''}
   ${locked ? '<div class="banner">This document has a number and was probably sent. Changing it now changes the PDF – only edit for corrections.</div>' : ''}
   <div class="card"><div class="grid g3"><div class="field"><label>Customer</label><select id="d_cust">${opt([['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])], d.customer_id)}</select></div>
     <div class="field"><label>Project</label><select id="d_proj">${opt(projectOptions(true, d.customer_id || '', d.project_id, true), d.project_id || '')}</select></div><div class="field"><label>Title / subject</label><input id="d_title" value="${esc(d.title || '')}"></div>
@@ -880,8 +884,13 @@ function logoShowStored() {
   if (note) { note.className = 'small muted logo-note'; note.textContent = logoRemoved ? 'Logo will be removed – click Save to apply.' : cur ? 'A logo is set. Choose a new file to replace it.' : ''; }
 }
 PAGES.settings = async () => {
-  S.settings = await api('GET', 'settings'); await loadAll(['templates']); logoReset();
+  const canNumbering = can('settings', 'write') && scopeOf('settings') === 'all';
+  const nextNo = type => canNumbering ? api('GET', 'numbering/status?type=' + type).catch(() => null) : Promise.resolve(null);
+  const [, numInv, numOff] = await Promise.all([(async () => { S.settings = await api('GET', 'settings'); await loadAll(['templates']); logoReset(); })(), nextNo('invoice'), nextNo('offer')]);
   const s = S.settings;
+  const numLine = (label, st) => `<p>${label}: <b>${esc(st?.next?.[0] ?? '—')}</b>${st?.pattern ? ` <span class="muted small">(pattern ${esc(st.pattern)})</span>` : ''}</p>`;
+  const numberingCard = canNumbering ? `<div class="card" id="card-numbering"><h2>Document numbering</h2>${numLine('Next invoice number', numInv)}${numLine('Next offer number', numOff)}
+    <p><a class="btn" href="#/numbering" id="numbering-link">Change numbering…</a></p><p class="muted small">Pattern, start number, reset (yearly/monthly) and the history of changes.</p></div>` : '';
   const f = (k, l, t = 'text', extra = '') => fieldHTML({ k, l, t, ...extra }, s);
   const tpls = S.d.templates || [];
   const hebesatz = ['gewerbe', 'gmbh'].includes(s.company_type);
@@ -900,8 +909,9 @@ PAGES.settings = async () => {
     <div class="row">${fieldHTML({ k: 'vat_rate', l: 'Default VAT %', t: 'select', o: [19, 7, 0] }, s)}<div id="hebesatz_wrap" ${hebesatz ? '' : 'hidden'}>${f('hebesatz', 'Gewerbesteuer Hebesatz %', 'number')}</div></div>
     ${fieldHTML({ k: 'accounting', l: 'Revenue counted…', t: 'select', o: [['eur', 'when paid (EÜR / Ist-Versteuerung)'], ['accrual', 'when invoiced (Soll)']] }, s)}
     <p class="small muted">Tax figures are planning estimates (Einkommensteuer tariff §32a, Soli, Gewerbesteuer incl. §35 credit). Always confirm with your Steuerberater.</p></div>
-  <div class="card" id="card-defaults"><h2>Documents and defaults</h2><div class="row">${f('default_rate', 'Default hourly rate €', 'number')}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div><p class="small">Document numbers: <a href="#/numbering">Numbering</a> (patterns, next number, preview, history).</p>
+  <div class="card" id="card-defaults"><h2>Documents and defaults</h2><div class="row">${f('default_rate', 'Default hourly rate €', 'number')}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div>
     <h3 style="margin-top:12px">Document templates</h3><div class="row" style="align-items:center"><div class="right auto"><button data-a="editTemplate">+ New template</button></div></div><table>${S.templates.map(t => `<tr><td><b>${esc(t.name)}</b> <span class="muted small">${esc(t.layout)} · ${esc(t.language)}</span></td><td><span class="dot" style="background:${esc(t.accent)}"></span></td><td class="right"><button class="sm" data-a="editTemplate" data-id="${t.id}">${tpls.find(x => x.id === t.id) ? 'Edit' : 'Copy & customise'}</button></td></tr>`).join('')}</table></div>
+  ${numberingCard}
   ${teamVisibilityCard()}
   <div class="card" id="card-data"><h2>Data & sync</h2><p>Data folder on this device:<br><code>${esc(S.data_dir || '')}</code></p><p class="muted small">Put this folder inside a Syncthing-shared folder and start permitA38 with <code>permita38 --data &lt;that folder&gt;</code> on each device. See the README for details.</p>
     ${can('settings', 'write') && scopeOf('settings') === 'all' ? `<h3 style="margin-top:12px">Data transfer</h3>
