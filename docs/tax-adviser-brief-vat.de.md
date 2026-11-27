@@ -138,6 +138,31 @@ ersten offenen Monat des neuen Jahres abgezogen. Ist das so in Ordnung? Bei der 
 Jahresende erfasste Zahlung des alten Jahres ihr Zahlungsdatum (Zufluss) und ändert die EÜR des alten Jahres. Richtig?
 Antwort:
 
+**TA-46 Steuerkonten und § 13b.** Die Kontenrahmen SKR03/SKR04 2026 (Zuordnung in `docs/specs/charts-2026.md`) buchen
+die Umsatzsteuer auf 1776/1771/1770, die Vorsteuer auf 1576/1571/1570 und § 13b auf 1787 und 1577 (SKR04 3806/3801/3800,
+1406/1401/1400, 3837, 1407). Sind das die Konten, die DATEV bei den BU-Schlüsseln 2, 3, 8, 9 und den § 13b-Schlüsseln
+selbst bebucht? Welche BU-Schlüssel gelten 2026 für § 13b-Leistungen aus dem EU-Ausland und aus Drittländern?
+Antwort:
+
+**TA-47 Kategorien.** Software-Abos auf 4806/6495 (EÜR Zeile 51), "Büro & Coworking" als Miete 4210/6310 (Zeile 40),
+Hardware als GWG 4855/6260 (Zeile 37), unabhängig vom Betrag. Passt das, oder Software besser auf 4964/6837
+(Lizenzen)?
+Antwort:
+
+**TA-48 Reisen.** Dienstreisen buchen derzeit alle Positionen als Fahrtkosten 4673/6673 (Zeile 71). Geplant ist die
+Aufteilung: Übernachtung auf 4676/6680 (Zeile 45), Verpflegungspauschalen auf 4674/6674 (Zeile 65). Richtig?
+Antwort:
+
+**TA-49 Rechtsform.** Die Eigenkapitalkonten passen für Einzelunternehmer: Kapital 0880/2010, Privatentnahmen
+1800/2100, Privateinlagen 1890/2180, der Gewinn wird ins Kapital abgeschlossen. Für eine GmbH sind gezeichnetes
+Kapital und Gewinnvortrag 0860/2970 vorgesehen. Richtig, und welche Konten nutzen Sie bei einer GmbH?
+Antwort:
+
+**TA-50 EÜR-Verrechnungskonten.** Soll-Versteuerung bei EÜR über 1371/1486, Vorsteuer vor Zahlung über 1580/1480
+("Gegenkonto Vorsteuer § 4 Abs. 3 EStG"), nicht abziehbare § 13b-Steuer über 1692/3612, deren Privatanteil über
+1693/3613. Erwarten Sie diese Konten beim DATEV-Import eines EÜR-Mandanten?
+Antwort:
+
 ---
 
 **Rückgabe.** Bitte senden Sie die ausgefüllte Liste an die Person, von der Sie sie bekommen haben. Wir tragen Ihre
