@@ -225,13 +225,16 @@ def _rgb(h):
 
 MM = 72 / 25.4
 
+# JPEG start-of-frame markers (C4, C8 and CC are not frames)
+_SOF_MARKERS = frozenset({0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF})
+
 
 class Pdf:
     W, H = 595.28, 841.89
 
     def __init__(self):
         self.pages = []
-        self.images = []  # (data, w, h)
+        self.images = []  # (data, w, h, colour space, decode entry)
         self.new_page()
 
     def new_page(self):
@@ -274,26 +277,58 @@ class Pdf:
             lines.append(cur)
         return lines
 
+    @staticmethod
+    def _jpeg_info(data):
+        """Read (width, height, components, adobe) from the JPEG markers; None if unusable. Never raises."""
+        n = len(data)
+        if n < 4 or data[:2] != b"\xff\xd8":
+            return None
+        adobe = False
+        i = 2
+        while i < n:
+            if data[i] != 0xFF:
+                return None  # garbage between segments
+            while i < n and data[i] == 0xFF:  # fill bytes
+                i += 1
+            if i >= n:
+                return None
+            m = data[i]
+            i += 1
+            if m == 0x01 or m == 0x00 or 0xD0 <= m <= 0xD7:
+                continue  # standalone marker without a length
+            if m in (0xD9, 0xDA):  # EOI / SOS before any SOF
+                return None
+            if i + 2 > n:
+                return None
+            seg = int.from_bytes(data[i : i + 2], "big")
+            if seg < 2 or i + seg > n:
+                return None
+            body = data[i + 2 : i + seg]
+            if m == 0xEE and body[:5] == b"Adobe":
+                adobe = True
+            if m in _SOF_MARKERS:
+                if len(body) < 6:
+                    return None
+                h = int.from_bytes(body[1:3], "big")
+                w = int.from_bytes(body[3:5], "big")
+                if not w or not h:
+                    return None
+                return w, h, body[5], adobe
+            i += seg
+        return None
+
     def jpeg(self, data, x, y, max_w, max_h):
         """Place a JPEG; returns False if the data is not a readable JPEG."""
-        w = h = None
-        i = 2
-        try:
-            while i < len(data):
-                if data[i] != 0xFF:
-                    i += 1
-                    continue
-                m = data[i + 1]
-                if m in (0xC0, 0xC1, 0xC2):
-                    h, w = int.from_bytes(data[i + 5 : i + 7], "big"), int.from_bytes(data[i + 7 : i + 9], "big")
-                    break
-                i += 2 + int.from_bytes(data[i + 2 : i + 4], "big")
-        except Exception:
+        info = self._jpeg_info(data)
+        if info is None:
             return False
-        if not w or data[:2] != b"\xff\xd8":
+        w, h, nf, adobe = info
+        space = {1: b"/DeviceGray", 3: b"/DeviceRGB", 4: b"/DeviceCMYK"}.get(nf)
+        if space is None:
             return False
+        decode = b" /Decode [1 0 1 0 1 0 1 0]" if nf == 4 and adobe else b""
         k = min(max_w / w, max_h / h)
-        self.images.append((data, w, h))
+        self.images.append((data, w, h, space, decode))
         n = len(self.images)
         self.cur.append(("q %.2f 0 0 %.2f %.2f %.2f cm /Im%d Do Q" % (w * k, h * k, x, self.H - y - h * k, n)).encode())
         return True
@@ -310,12 +345,12 @@ class Pdf:
         f1 = add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
         f2 = add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
         img_ids = []
-        for data, w, h in self.images:
+        for data, w, h, space, decode in self.images:
             img_ids.append(
                 add(
-                    b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB "
-                    b"/BitsPerComponent 8 /Filter /DCTDecode /Length %d >>\nstream\n"
-                    % (w, h, len(data))
+                    b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s "
+                    b"/BitsPerComponent 8%s /Filter /DCTDecode /Length %d >>\nstream\n"
+                    % (w, h, space, decode, len(data))
                     + data
                     + b"\nendstream"
                 )
