@@ -431,6 +431,7 @@ GUARD_KINDS = (
     "range",
     "implies",
     "reference",
+    "append_only",
 )
 
 # number of columns a guard of this kind names in `columns` (None = derived from its conditions)
@@ -446,6 +447,7 @@ _KIND_ARITY: dict[str, int | None] = {
     "range": 1,
     "implies": None,
     "reference": 1,
+    "append_only": 0,  # table-level: refuses every UPDATE and DELETE
 }
 
 
@@ -529,6 +531,8 @@ class Guard:
                 raise ValueError(f"a reference guard's code must be 'ref.dangling', got {self.code!r}")
             if self.table in TABLES and not TABLES[self.table].column(self.columns[0]):
                 raise ValueError(f"{self.table}.{self.columns[0]} does not exist")
+        if self.kind == "append_only" and self.code != "state.append_only":
+            raise ValueError(f"an append_only guard's code must be 'state.append_only', got {self.code!r}")
         if self.kind == "implies":
             if self.code != f"state.implies:{self.name}":
                 raise ValueError(f"an implies guard's code must be 'state.implies:{self.name}', got {self.code!r}")

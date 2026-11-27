@@ -57,6 +57,8 @@ include = ["permita38*"]
 "permita38.core" = ["templates/*.json"]
 "permita38.core.trip_rates" = ["*.json"]
 "permita38.core.tax_rules" = ["*.json"]
+"permita38.core.vat_rules" = ["*.json"]
+"permita38.core.charts" = ["*.json"]
 "permita38.core.schema" = ["migrations/*/*.sql"]
 
 [tool.ruff]
@@ -72,6 +74,22 @@ ignore_missing_imports = true
 check_untyped_defs = true
 pretty = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["permita38.core.accounting.*", "permita38.core.vat.*", "permita38.core.vat_rules.*", "permita38.core.charts.*"]
+# mypy has no per-module `strict`; these are the flags `--strict` enables
+strict_equality = true
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+warn_unused_ignores = true
+warn_return_any = true
+no_implicit_reexport = true
+extra_checks = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"
