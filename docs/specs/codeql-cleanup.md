@@ -16,7 +16,7 @@ integration PR #196 (`feat/accounting-m4-base`) adds one note of its own: `py/un
 | warning | 5 | py/unreachable-statement 3, py/file-not-closed 1, py/constant-conditional-expression 1 |
 | note | 75 | ineffectual-statement 17, empty-except 13, unused-import 11, mixed-returns 9, unused-global 7, cyclic-import 7, js unused-local 5, import-and-import-from 3, catch-base-exception 2, py unused-local 1 |
 
-Outcome: **33 fixed in code** (32 on `main` plus 1 from #196), **24 closed by a CodeQL config filter**, and **47
+Outcome: **33 fixed in code** (32 on `main` plus 1 from #196), **17 closed by a CodeQL config filter**, and **54
 dismissed with a written reason**. Every alert gets one of these outcomes, so the list is empty when the release
 goes out.
 
@@ -55,8 +55,8 @@ locations.
 
 ### WP-2: side-effect asserts in backend tests (implementer-small, Light)
 - Files: `tests/backend/test_atomicity.py`, `test_auth.py`, `test_calendar_api.py`, `test_flow.py`,
-  `test_import_review2.py`, `test_repository_contract.py` (alerts 20–27, 79–82). This package has 6 files, so it goes
-  to `implementer`, or it is split into two `implementer-small` runs of 3 files each.
+  `test_import_review2.py`, `test_repository_contract.py` (alerts 20–27, 79–82). It runs as **two `implementer-small`
+  runs**: WP-2a covers the first three files and WP-2b covers the last three.
 - Change `assert c.delete(...).status_code == N` (or any other call with a side effect inside `assert`) to
   `r = c.delete(...)` followed by `assert r.status_code == N`. The behaviour stays the same.
 - In the same files: alert `py/unused-local-variable` `test_repository_contract.py` (~line 576). Drop the binding.
@@ -69,11 +69,12 @@ locations.
 
 ### WP-4: small production-code fixes (implementer-small, Light)
 - Files: `packaging/smoke_test.py` (alert 56: open `server.log` in a `with` block or close it in `finally`; also the
-  empty `except` there gets a one-line comment that says why it is ignored), `permita38/core/config.py` (the empty
-  `except OSError: pass` around `chmod` gets a comment: on Windows and some file systems `chmod` fails and that is
-  harmless), `permita38/core/service/calendar/ics.py` (the empty `except (ValueError, OverflowError): pass` gets a
-  comment that a broken VTIMEZONE rule is skipped).
-- CodeQL `py/empty-except` does not report a handler that contains a comment.
+  empty `except … : pass` there becomes `contextlib.suppress(...)` with the same exception types),
+  `permita38/core/config.py` (`try: os.chmod(...) except OSError: pass` becomes `with contextlib.suppress(OSError):`
+  plus a comment: on Windows and some file systems `chmod` fails, and that is harmless),
+  `permita38/core/service/calendar/ics.py` (`except (ValueError, OverflowError): pass` becomes
+  `contextlib.suppress(ValueError, OverflowError)` plus a comment that a broken VTIMEZONE rule is skipped). Behaviour
+  does not change.
 
 ### WP-5: unused names (implementer-small, Light)
 - Files: `permita38/core/repository/sql.py` (alerts: remove the unused `_INT_MIN, _INT_MAX`; `schema.py` keeps its
@@ -90,12 +91,12 @@ locations.
     - uses: security-and-quality
   query-filters:
     - exclude:
-        id: py/ineffectual-statement   # `...` bodies of Protocol / abstract methods; ruff covers real ones
-    - exclude:
-        id: py/cyclic-import           # tests import fixtures from each other on purpose
+        id: py/ineffectual-statement   # `...` bodies of Protocol / abstract methods throughout the code
   ```
   Remove `queries: security-and-quality` from the workflow, because the config file now sets the queries.
-  After the first scan on `main`, the 17 + 7 alerts are closed automatically.
+  After the first scan on `main`, the 17 alerts should be closed automatically. If any are still open, dismiss them as
+  `false positive` with the comment "`...` stub body". `py/cyclic-import` is **not** filtered, because a cycle in
+  production code would be a real defect. Its 7 test alerts are dismissed instead (section 4).
 - This can merge before #196, because the workflow is not part of #196.
 
 ## 4. Dismissals (done by Opus after the go-ahead, not by implementers)
@@ -109,13 +110,14 @@ GitHub accepts these reasons: `false positive`, `won't fix`, `used in tests`.
 | 4 | won't fix | 64-bit random codes; the TOTP secret is stored in plain text in the same row; see docs/specs/codeql-cleanup.md §2 |
 | 3 × py/unreachable-statement (test_repository_contract.py) | false positive | `pytest.raises` swallows the exception, so the following lines run |
 | 10 × py/empty-except in tests/ | used in tests | best-effort clean-up in test harnesses and monkey tests |
-| 11 × py/unused-import in tests/web | used in tests | pytest fixtures (`chromium`, `Server`) imported for injection, marked `noqa: F401` |
+| 11 × py/unused-import in tests/web | used in tests | pytest fixtures (`chromium`, `Server`) imported for injection, marked `noqa: F401`. Check each import before dismissing it. An import that is not a fixture or shared harness is removed instead (a one-line fix). |
+| 7 × py/cyclic-import (tests/backend) | used in tests | test modules import fixtures and helpers from each other on purpose |
 | 9 × py/mixed-returns (8 in tests, `cli/main.py:main`) | used in tests / won't fix | `main()` returns `None` or an exit code by design (`sys.exit(main())`) |
 | 5 × py/unused-global-variable in tests | used in tests | module-level settings read by pytest/hypothesis |
 | 3 × py/import-and-import-from (tests) | used in tests | style only |
 | 2 × py/catch-base-exception (numbering tests) | used in tests | the tests catch everything a worker thread raises on purpose |
 
-Total: 47 alerts.
+Total: 54 alerts.
 
 ## 5. Keeping the list empty afterwards
 - Ask the maintainer whether to turn on **code-scanning merge protection** (a repository ruleset that blocks a PR
@@ -126,5 +128,7 @@ Total: 47 alerts.
 
 ## 6. Review tiers and release gate
 - WP-1: Standard (one Sonnet `reviewer` pass covering code and test). WP-2 to WP-6: Light.
+- Every implementer prompt has the `Contract:` / `Files:` / `Stop:` / `Report:` lines. Contract: this file, the
+  section of the package.
 - Release gate for 0.5.0-alpha.1: the open-alert query on `main` returns 0 (or only alerts that came in after this
   plan and have their own issue).
