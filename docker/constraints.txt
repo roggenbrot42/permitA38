@@ -4,9 +4,9 @@ annotated-types==0.8.0
     # via pydantic
 anyio==4.16.0
     # via starlette
-click==8.5.0
+click==8.5.1
     # via uvicorn
-fastapi==0.162.0
+fastapi==0.162.2
     # via permita38 (pyproject.toml)
 h11==0.16.0
     # via uvicorn
@@ -20,7 +20,7 @@ pydantic==2.14.3
     #   fastapi
 pydantic-core==2.50.4
     # via pydantic
-pypdfium2==5.14.0
+pypdfium2==5.15.0
 zxing-cpp==3.1.1
     # via permita38 (pyproject.toml)
 python-multipart==0.0.33
@@ -40,7 +40,7 @@ typing-extensions==4.16.0
     #   pydantic-core
     #   starlette
     #   typing-inspection
-typing-inspection==0.4.4
+typing-inspection==0.4.5
     # via
     #   fastapi
     #   pydantic

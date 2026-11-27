@@ -56,7 +56,7 @@ That's it. Everything else is planning and billing, which you do when you need t
 5. Track your time as usual. When it's time to bill, go to **Offers & Invoices → Invoice tracked time…**, choose the customer – permitA38 groups that customer's unbilled hours by project, task and rate into a draft invoice (one customer per invoice; internal projects are never billed). Or use **→ Invoice** on the offer to copy its items.
 6. **Finalize & number**, send the PDF, and when the money arrives set the status to **Paid**. Only *paid* invoices count as revenue (EÜR).
 
-Don't like the look? **Settings → Document templates** has three starting points you can copy and customise, and you can upload your logo (JPEG).
+Don't like the look? **Settings → Document templates** has three starting points you can copy and customise, and you can upload your logo (PNG, SVG or JPEG; transparency is kept, and the logo is shown in Settings).
 
 ## 6. Plan your capacity
 
@@ -114,7 +114,7 @@ Open the account menu (bottom left) → **Two-factor authentication**. Enter you
 - **"No Impressum was found"** – open the customer's Impressum page in your browser and paste *that* address; sites that load the notice with JavaScript can't be read.
 - **A change from another device is missing** – wait for Syncthing to finish, then reload the page.
 - **⚠ banner about sync-conflict files** – open the named file next to its original, keep the version you want, delete the other.
-- **PDF has no logo** – the logo must be a JPEG (Settings → Your business).
+- **PDF has no logo** – choose the logo again in Settings → Bank and logo (PNG, SVG and JPEG are accepted and converted to a PNG; a logo stored as another type is not printed, and Settings says so).
 
 ## Data export and import
 Boss only: Settings > Data export and import. Download a copy of all your data (optionally with user accounts), or check an archive and import it into an empty instance. The copy is not a GoBD-compliant archive; see the notice on the page. Importing offers, invoices, customers or expenses from another tool is also in Settings (under "Data & sync": "Import documents from another tool").

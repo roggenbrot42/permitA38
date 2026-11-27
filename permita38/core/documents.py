@@ -156,7 +156,7 @@ def render(store, kind, doc):
             p = store.attachment_path(logo)
             if p:
                 with open(p, "rb") as f:
-                    pdf.jpeg(f.read(), right - 45 * MM, 18 * MM, 45 * MM, 18 * MM)
+                    pdf.image(f.read(), right - 45 * MM, 18 * MM, 45 * MM, 18 * MM)
         if first and layout != "modern":
             pdf.text(left, 17 * MM, s.get("company_name", ""), 14, True, accent if layout == "classic" else "#000000")
 

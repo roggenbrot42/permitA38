@@ -306,6 +306,10 @@ PAGES.doc = async (coll, id) => {
     DOC = { coll, ...rec, lines: rec.lines || [] };
   }
   const d = DOC, locked = d.number && d.status !== 'draft', isNew = !d.id;
+  let nextNoHTML = '';
+  if (d.status === 'draft' && !d.number && can('settings', 'write') && scopeOf('settings') === 'all') {
+    try { const pv = await api('GET', 'numbering/preview?type=' + (isInv ? 'invoice' : 'offer')); if (pv?.next?.[0]) nextNoHTML = ` The next number is currently <b>${esc(pv.next[0])}</b> (<a href="#/numbering">change numbering</a>).`; } catch (e) { /* keep the plain banner */ }
+  }
   const frozen = isFrozen(d), fz = frozen ? 'disabled' : '';   // an issued invoice: only the labels, due date, notes, reference change
   let smallYear = false;   // the year's regime sets small_business on a document; it is not chosen (credit-notes-payments.md 5)
   if (isInv && !frozen) {
@@ -319,7 +323,7 @@ PAGES.doc = async (coll, id) => {
     <div class="row tight" style="flex:none">${d.id ? `<button data-a="docPdf">Preview PDF</button>` : ''}<button class="${d.number ? '' : 'primary'}" data-a="docSave">${d.status === 'draft' ? 'Save draft' : 'Save'}</button>
     ${d.id && !d.number ? `<button class="primary" data-a="docFinalize">Finalize & number</button>` : ''}${d.id && !d.number ? `<button class="danger" data-a="docDelete">Delete draft</button>` : ''}${d.id && d.number ? `<select style="width:auto" data-change="docStatus"><option value="">Set status…</option>${opt(statuses, '')}</select>` : ''}
     ${d.id && !isInv && d.number && d.status !== 'accepted' ? `<button data-a="docAccept">✓ Accepted → create project</button>` : ''}${d.id && !isInv ? `<button data-a="docToInvoice">→ Invoice</button>` : ''}</div></div>
-  ${d.status === 'draft' && !d.number ? `<div class="banner info">This is a <b>draft</b>: it has no number yet, is not counted in revenue or planning, and the PDF is marked as a draft. It gets its ${isInv ? 'invoice' : 'offer'} number when you press <b>Finalize &amp; number</b>.</div>` : ''}
+  ${d.status === 'draft' && !d.number ? `<div class="banner info">This is a <b>draft</b>: it has no number yet, is not counted in revenue or planning, and the PDF is marked as a draft. It gets its ${isInv ? 'invoice' : 'offer'} number when you press <b>Finalize &amp; number</b>.${nextNoHTML}</div>` : ''}
   ${frozen ? '<div class="banner info" id="d_frozen">Issued invoices are frozen; issue a credit note to correct one. Only the status label, due date, reference and notes can still be changed.</div>' : ''}
   ${locked && !frozen ? '<div class="banner">This document has a number and was probably sent. Changing it now changes the PDF – only edit for corrections.</div>' : ''}
   <div class="card"><div class="grid g3"><div class="field"><label>Customer</label><select id="d_cust" ${fz}>${opt([['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])], d.customer_id)}</select></div>
@@ -1041,16 +1045,77 @@ A.editUser = el => {
 };
 
 /* ================= SETTINGS ================= */
+const LOGO_W = 900, LOGO_H = 360, LOGO_ERROR = 'This image cannot be used as a logo. Choose a PNG, SVG or JPEG file.';
+let logoPng = null, logoBlobUrl = null;   // the converted file chosen but not saved yet, and its preview URL
+/* An SVG without width/height but with a viewBox rasterises at an unreliable size: give it the viewBox size first.
+   The SVG is only ever drawn through <img> (never inserted into the DOM). */
+async function logoSvgBlob(file) {
+  const doc = new DOMParser().parseFromString(await file.text(), 'image/svg+xml');
+  const root = doc.documentElement;
+  if (doc.getElementsByTagName('parsererror').length || !root || root.localName !== 'svg') throw new Error('svg');
+  const missing = a => { const v = (root.getAttribute(a) || '').trim(); return !v || v.endsWith('%'); };
+  if (missing('width') || missing('height')) {
+    const vb = (root.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+    if (vb.length === 4 && vb.every(Number.isFinite) && vb[2] > 0 && vb[3] > 0) { root.setAttribute('width', String(vb[2])); root.setAttribute('height', String(vb[3])); }
+  }
+  return new Blob([new XMLSerializer().serializeToString(doc)], { type: 'image/svg+xml' });
+}
+/* Normalise the chosen logo into an 8-bit RGBA PNG (transparency kept) that fits 900x360 px (about 500 dpi at 45x18 mm). */
+async function logoAsPng(file) {
+  let bmp, url;
+  try {
+    let src, w, h, fill = false;
+    if (file.type === 'image/svg+xml' || /\.svg$/i.test(file.name || '')) {
+      url = URL.createObjectURL(await logoSvgBlob(file));
+      const img = new Image(); img.src = url; await img.decode();
+      src = img; fill = true;
+      w = img.naturalWidth || LOGO_W; h = img.naturalHeight || LOGO_H;
+      if (!img.naturalWidth || !img.naturalHeight) { w = LOGO_W; h = LOGO_H; }
+    } else {
+      bmp = await createImageBitmap(file); src = bmp; w = bmp.width; h = bmp.height;
+    }
+    const k = Math.min(fill ? Infinity : 1, LOGO_W / w, LOGO_H / h);
+    const cw = Math.max(1, Math.round(w * k)), ch = Math.max(1, Math.round(h * k));
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+    cv.getContext('2d').drawImage(src, 0, 0, cw, ch);
+    const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
+    if (!blob) throw new Error('encode');
+    return new File([blob], 'logo.png', { type: 'image/png' });
+  } catch (e) { throw new Error(LOGO_ERROR); } finally { if (bmp && bmp.close) bmp.close(); if (url) URL.revokeObjectURL(url); }
+}
+let logoSeq = 0, logoRemoved = false;   // choice counter (late conversions are dropped); Remove pressed but not saved yet
+function logoReset() { ++logoSeq; logoRemoved = false; if (logoBlobUrl) URL.revokeObjectURL(logoBlobUrl); logoBlobUrl = null; logoPng = null; }
+/* Restore the logo card to its stored state: stored logo (or none), default note, no pending conversion. */
+function logoShowStored() {
+  const box = $('#logo_box'), note = $('#logo_note'), cur = S.settings && S.settings.logo;
+  if (box) {
+    box.textContent = '';
+    if (cur && !logoRemoved) { const img = document.createElement('img'); img.id = 'logo_preview'; img.alt = 'Current logo'; img.src = api.url('attachments/' + encodeURIComponent(cur)); box.appendChild(img); }
+    box.hidden = !box.firstChild;
+  }
+  if (logoBlobUrl) URL.revokeObjectURL(logoBlobUrl);   // the <img> above no longer uses it
+  logoBlobUrl = null; logoPng = null;
+  if (note) { note.className = 'small muted logo-note'; note.textContent = logoRemoved ? 'Logo will be removed – click Save to apply.' : cur ? 'A logo is set. Choose a new file to replace it.' : ''; }
+}
 PAGES.settings = async () => {
-  S.settings = await api('GET', 'settings'); await loadAll(['templates']);
+  const canNumbering = can('settings', 'write') && scopeOf('settings') === 'all';
+  const nextNo = type => canNumbering ? api('GET', 'numbering/status?type=' + type).catch(() => null) : Promise.resolve(null);
+  const [, numInv, numOff] = await Promise.all([(async () => { S.settings = await api('GET', 'settings'); await loadAll(['templates']); logoReset(); })(), nextNo('invoice'), nextNo('offer')]);
   const s = S.settings;
+  const numLine = (label, st) => `<p>${label}: <b>${esc(st?.next?.[0] ?? '—')}</b>${st?.pattern ? ` <span class="muted small">(pattern ${esc(st.pattern)})</span>` : ''}</p>`;
+  const numberingCard = canNumbering ? `<div class="card" id="card-numbering"><h2>Document numbering</h2>${numLine('Next invoice number', numInv)}${numLine('Next offer number', numOff)}
+    <p><a class="btn" href="#/numbering" id="numbering-link">Change numbering…</a></p><p class="muted small">Pattern, start number, reset (yearly/monthly) and the history of changes.</p></div>` : '';
   const f = (k, l, t = 'text', extra = '') => fieldHTML({ k, l, t, ...extra }, s);
   const tpls = S.d.templates || [];
   const hebesatz = ['gewerbe', 'gmbh'].includes(s.company_type);
   return `<div class="head"><div><h1>Business settings</h1><div class="muted">Your business, documents and data. Personal items (profile, tax profile, calendars, tokens) are under <a href="#/me">My settings</a>.</div></div><button class="primary" data-a="saveSettings">Save settings</button></div>
   <div class="grid g2"><div class="card" id="card-identity"><h2>Business identity</h2>${f('company_name', 'Business name')}${f('owner_name', 'Your name (signature)')}${f('street', 'Street & number')}<div class="row">${f('zip', 'ZIP')}${f('city', 'City')}</div><div class="row">${f('email', 'E-mail')}${f('phone', 'Phone')}</div>${f('website', 'Website')}<div class="row">${f('tax_number', 'Tax number (Steuernr.)')}${f('vat_id', 'VAT ID (USt-IdNr.)')}</div></div>
   <div class="card" id="card-bank"><h2>Bank and logo</h2>${f('bank_name', 'Bank')}<div class="row">${f('iban', 'IBAN')}${f('bic', 'BIC')}</div>
-    <div class="field"><label>Logo for documents (JPEG)</label><input type="file" id="logo_file" accept="image/jpeg">${s.logo ? '<div class="small muted">A logo is set. Choose a new file to replace it.</div>' : ''}</div></div></div>
+    <div class="field"><label for="logo_file">Logo for documents (PNG, SVG or JPEG)</label><input type="file" id="logo_file" data-change="logoChosen" accept="image/png,image/svg+xml,image/jpeg,image/webp,image/gif">
+      <div class="logo-preview logo-checker" id="logo_box" ${s.logo ? '' : 'hidden'}>${s.logo ? `<img id="logo_preview" alt="Current logo" src="${esc(api.url('attachments/' + encodeURIComponent(s.logo)))}">` : ''}</div>
+      <div class="small muted logo-note" id="logo_note">${s.logo ? 'A logo is set. Choose a new file to replace it.' : ''}</div>
+      ${s.logo && !/\.(png|jpe?g)$/i.test(s.logo) ? '<p class="small" id="logo_hint">The stored logo cannot be printed. Choose the file again; it is converted automatically.</p>' : ''}
+      ${s.logo ? '<button class="sm" data-a="removeLogo">Remove logo</button>' : ''}</div></div></div>
   <div class="card" id="card-tax"><h2>Business tax set-up</h2>
     ${fieldHTML({ k: 'company_type', l: 'Company type', t: 'select', o: [['freiberufler', 'Freiberufler (EÜR, no trade tax)'], ['gewerbe', 'Gewerbetreibender / Einzelunternehmen'], ['gmbh', 'UG / GmbH']] }, s).replace('<select ', '<select data-change="settingsCompanyType" ')}
     ${fieldHTML({ k: 'state', l: 'Federal state (public holidays)', t: 'select', o: Object.entries(S.states || {}) }, s)}
@@ -1058,13 +1123,39 @@ PAGES.settings = async () => {
     <div class="row">${fieldHTML({ k: 'vat_rate', l: 'Default VAT %', t: 'select', o: [19, 7, 0] }, s)}<div id="hebesatz_wrap" ${hebesatz ? '' : 'hidden'}>${f('hebesatz', 'Gewerbesteuer Hebesatz %', 'number')}</div></div>
     ${fieldHTML({ k: 'accounting', l: 'Revenue counted…', t: 'select', o: [['eur', 'when paid (EÜR / Ist-Versteuerung)'], ['accrual', 'when invoiced (Soll)']] }, s)}
     <p class="small muted">Tax figures are planning estimates (Einkommensteuer tariff §32a, Soli, Gewerbesteuer incl. §35 credit). Always confirm with your Steuerberater.</p></div>
-  <div class="card" id="card-defaults"><h2>Documents and defaults</h2><div class="row">${fieldHTML({ k: 'default_rate', l: 'Default hourly rate €', t: 'number', m: true }, s)}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div><p class="small">Document numbers: <a href="#/numbering">Numbering</a> (patterns, next number, preview, history).</p>
+  <div class="card" id="card-defaults"><h2>Documents and defaults</h2><div class="row">${fieldHTML({ k: 'default_rate', l: 'Default hourly rate €', t: 'number', m: true }, s)}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div>
     <h3 style="margin-top:12px">Document templates</h3><div class="row" style="align-items:center"><div class="right auto"><button data-a="editTemplate">+ New template</button></div></div><table>${S.templates.map(t => `<tr><td><b>${esc(t.name)}</b> <span class="muted small">${esc(t.layout)} · ${esc(t.language)}</span></td><td><span class="dot" style="background:${esc(t.accent)}"></span></td><td class="right"><button class="sm" data-a="editTemplate" data-id="${t.id}">${tpls.find(x => x.id === t.id) ? 'Edit' : 'Copy & customise'}</button></td></tr>`).join('')}</table></div>
+  ${numberingCard}
   ${teamVisibilityCard()}
   <div class="card" id="card-data"><h2>Data & sync</h2><p>Data folder on this device:<br><code>${esc(S.data_dir || '')}</code></p><p class="muted small">Put this folder inside a Syncthing-shared folder and start permitA38 with <code>permita38 --data &lt;that folder&gt;</code> on each device. See the README for details.</p>
     ${can('settings', 'write') && scopeOf('settings') === 'all' ? `<h3 style="margin-top:12px">Data transfer</h3>
     <p class="small"><a href="#/dataexport">Data export and import</a>: a copy of all your data, or fill a new empty instance.</p>
     <p class="small"><a href="#/import">Import documents from another tool</a>: offers, invoices, customers and expenses.</p>` : ''}</div>`;
+};
+A.logoChosen = async el => {
+  const f = el.files[0], my = ++logoSeq;
+  logoShowStored();
+  if (!f) return;
+  try {
+    const png = await logoAsPng(f);
+    if (my !== logoSeq) return;   // a newer choice (or a re-render) started meanwhile
+    const box = $('#logo_box'), note = $('#logo_note');
+    if (!box || !note) return;    // the page was left
+    logoPng = png; logoRemoved = false; logoShowStored(); logoPng = png;
+    logoBlobUrl = URL.createObjectURL(png);
+    let img = $('#logo_preview'); if (!img) { img = document.createElement('img'); img.id = 'logo_preview'; img.alt = 'Current logo'; box.appendChild(img); }
+    img.src = logoBlobUrl; box.hidden = false; note.className = 'small muted logo-note'; note.textContent = 'Not saved yet – click Save to use this logo.';
+  } catch (e) {
+    if (my !== logoSeq) return;
+    el.value = ''; logoShowStored();
+    const note = $('#logo_note'); if (note) { note.className = 'small logo-note warn'; note.textContent = e.message; }
+  }
+};
+A.removeLogo = () => {
+  ++logoSeq; logoRemoved = true;
+  const fi = $('#logo_file'); if (fi) fi.value = '';
+  const hint = $('#logo_hint'); if (hint) hint.hidden = true;
+  logoShowStored();
 };
 A.settingsCompanyType = el => { const w = $('#hebesatz_wrap'); if (w) w.hidden = !['gewerbe', 'gmbh'].includes(el.value); };
 A.saveSettings = async () => {
@@ -1079,7 +1170,11 @@ A.saveSettings = async () => {
   delete s.personal_tax;
   if ($('#f_tl_employee')) s.team_timeline_visibility = { employee: $('#f_tl_employee').value, accountant: $('#f_tl_accountant').value };
   const lf = $('#logo_file').files[0];
-  if (lf) s.logo = (await api.upload(lf)).name;
+  if (logoRemoved) s.logo = null;
+  else if (lf) {
+    if (!logoPng) { try { logoPng = await logoAsPng(lf); } catch (e) { return toast(e.message, true); } }
+    s.logo = (await api.upload(logoPng)).name;
+  }
   S.settings = await api('PUT', 'settings', s); delete S.settings.sanity_warnings; toast('Settings saved'); render();
 };
 A.editTemplate = el => {
