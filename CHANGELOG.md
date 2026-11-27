@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Company logo on documents** (#202): a PNG logo was silently left off offers and invoices, and greyscale or CMYK
+  JPEGs printed as garbage. PNG, SVG, JPEG, WebP and GIF logos are accepted; transparency is kept in the PDF. The
+  browser turns the chosen file into a print-sized PNG (SVG is rasterised at about 500 dpi), and Settings → Bank and
+  logo shows the stored logo, a preview of a newly chosen one, and a *Remove logo* button.
+
 ## [0.4.0-alpha.7] - 2026-11-24
 
 Bugfix release for alpha.6: manual time entry and the Today card layout, business trip bills, the billable flag of

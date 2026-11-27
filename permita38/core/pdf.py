@@ -1,7 +1,11 @@
-"""Tiny dependency-free PDF writer (A4, Helvetica, optional JPEG logo)."""
+"""Tiny dependency-free PDF writer (A4, Helvetica, optional JPEG/PNG logo)."""
 
+import hashlib
+import math
+import threading
 import unicodedata
 import zlib
+from collections import OrderedDict
 
 # Helvetica / Helvetica-Bold advance widths for ASCII 32..126
 _W = {
@@ -225,13 +229,232 @@ def _rgb(h):
 
 MM = 72 / 25.4
 
+# JPEG start-of-frame markers (C4, C8 and CC are not frames)
+_SOF_MARKERS = frozenset({0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF})
+
+
+_PNG_SIG = b"\x89PNG\r\n\x1a\n"
+_PNG_MAX_SIDE = 4000
+_PNG_MAX_PIXELS = 4_000_000
+_PNG_MAX_IDAT = 15 * 1024 * 1024
+_PNG_CHANNELS = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}
+_PNG_CACHE_MAX = 8
+_PNG_CACHE_LOCK = threading.Lock()
+_PNG_CACHE: "OrderedDict[bytes, dict | None]" = (
+    OrderedDict()
+)  # sha256 digest -> image record (None: unusable), at most _PNG_CACHE_MAX entries
+
+
+def _unpack_table(depth):
+    per = 8 // depth
+    mask = (1 << depth) - 1
+    return [bytes((b >> (8 - depth * (i + 1))) & mask for i in range(per)) for b in range(256)]
+
+
+def _png_unfilter(raw, height, stride, bpp):
+    """Undo the PNG row filters; returns height*stride bytes, or None for an unknown filter byte."""
+    out = bytearray(height * stride)
+    prev: bytes | bytearray = bytes(stride)
+    pos = 0
+    for y in range(height):
+        ft = raw[pos]
+        line = bytearray(raw[pos + 1 : pos + 1 + stride])
+        pos += 1 + stride
+        if ft == 2:
+            line = bytearray((v + b) & 255 for v, b in zip(line, prev))
+        elif ft in (1, 3, 4):
+            for ch in range(bpp):  # each channel is an independent sequence of left neighbours
+                cur = line[ch::bpp]
+                up = prev[ch::bpp]
+                res = bytearray(len(cur))
+                a = c = i = 0
+                if ft == 1:
+                    for v in cur:
+                        a = (a + v) & 255
+                        res[i] = a
+                        i += 1
+                elif ft == 3:
+                    for v, b in zip(cur, up):
+                        a = (v + ((a + b) >> 1)) & 255
+                        res[i] = a
+                        i += 1
+                else:
+                    for v, b in zip(cur, up):
+                        pa = b - c
+                        pb = a - c
+                        pc = pa + pb
+                        if pa < 0:
+                            pa = -pa
+                        if pb < 0:
+                            pb = -pb
+                        if pc < 0:
+                            pc = -pc
+                        a = (v + (a if pa <= pb and pa <= pc else (b if pb <= pc else c))) & 255
+                        res[i] = a
+                        c = b
+                        i += 1
+                line[ch::bpp] = res
+        elif ft != 0:
+            return None
+        out[y * stride : (y + 1) * stride] = line
+        prev = line
+    return out
+
+
+def _png_parse(data):
+    """Read the PNG container; returns (IHDR body, concatenated IDAT, PLTE, tRNS) or None."""
+    n = len(data)
+    if n < 8 or data[:8] != _PNG_SIG:
+        return None
+    pos = 8
+    first = True
+    ihdr = plte = trns = None
+    idat = []
+    idat_len = 0
+    while True:
+        if pos + 12 > n:
+            return None  # data ends before IEND
+        length = int.from_bytes(data[pos : pos + 4], "big")
+        ctype = data[pos + 4 : pos + 8]
+        if pos + 12 + length > n:
+            return None
+        body = data[pos + 8 : pos + 8 + length]
+        pos += 12 + length  # the CRC is not checked
+        if first:
+            if ctype != b"IHDR" or length != 13:
+                return None
+            ihdr = body
+            first = False
+        elif ctype == b"IDAT":
+            idat_len += length
+            if idat_len > _PNG_MAX_IDAT:
+                return None
+            idat.append(body)
+        elif ctype == b"PLTE" and plte is None:
+            plte = body
+        elif ctype == b"tRNS" and trns is None:
+            trns = body
+        elif ctype == b"IEND":
+            break
+    return ihdr, b"".join(idat), plte, trns
+
+
+def _png_decode(data):
+    parsed = _png_parse(data)
+    if parsed is None:
+        return None
+    ihdr, idat, plte, trns = parsed
+    w = int.from_bytes(ihdr[0:4], "big")
+    h = int.from_bytes(ihdr[4:8], "big")
+    depth, ctype, comp, filt, inter = ihdr[8:13]
+    if not (1 <= w <= _PNG_MAX_SIDE and 1 <= h <= _PNG_MAX_SIDE and w * h <= _PNG_MAX_PIXELS):
+        return None
+    if comp or filt or inter or ctype not in _PNG_CHANNELS or not idat:
+        return None
+    if depth != 8 and not (ctype in (0, 3) and depth in (1, 2, 4)):
+        return None
+    ch = _PNG_CHANNELS[ctype]
+    stride = math.ceil(w * ch * depth / 8)
+    expected = h * (1 + stride)
+    d = zlib.decompressobj()
+    raw = d.decompress(idat, expected + 1)  # the cap stops decompression bombs
+    if len(raw) != expected or d.unconsumed_tail:
+        return None
+    pix = _png_unfilter(raw, h, stride, max(1, ch * depth // 8))
+    if pix is None:
+        return None
+    alpha = None
+    idx = b""
+    if ctype in (0, 3):
+        if depth == 8:
+            idx = bytes(pix)
+        else:
+            tab = _unpack_table(depth)
+            idx = b"".join(b"".join(tab[b] for b in pix[y * stride : (y + 1) * stride])[:w] for y in range(h))
+    if ctype == 3:
+        if not plte or len(plte) % 3 or len(plte) > 768:
+            return None
+        if max(idx) >= len(plte) // 3:
+            return None
+        colour = idx
+        space = b"[/Indexed /DeviceRGB %d <%s>]" % (len(plte) // 3 - 1, plte.hex().encode())
+        if trns:
+            t = bytes(trns[:256])
+            alpha = idx.translate(t + b"\xff" * (256 - len(t)))
+    elif ctype == 0:
+        space = b"/DeviceGray"
+        top = (1 << depth) - 1
+        if trns and len(trns) >= 2:
+            gkey = int.from_bytes(trns[:2], "big")  # compared at the sample's own depth, before scaling
+            if gkey <= top:
+                alpha = idx.translate(bytes(0 if i == gkey else 255 for i in range(256)))
+        colour = idx if depth == 8 else idx.translate(bytes(min(i, top) * 255 // top for i in range(256)))
+    elif ctype == 2:
+        colour = bytes(pix)
+        space = b"/DeviceRGB"
+        if trns and len(trns) >= 6:
+            key = [int.from_bytes(trns[i : i + 2], "big") for i in (0, 2, 4)]
+            if all(k < 256 for k in key):
+                m = -1
+                for c in range(3):
+                    tab = bytes(1 if i == key[c] else 0 for i in range(256))
+                    m &= int.from_bytes(colour[c::3].translate(tab), "big")
+                alpha = m.to_bytes(w * h, "big").translate(bytes([255, 0]) + b"\xff" * 254)
+    elif ctype == 4:
+        colour = bytes(pix[0::2])
+        space = b"/DeviceGray"
+        alpha = bytes(pix[1::2])
+    else:
+        rgb = bytearray(w * h * 3)
+        for c in range(3):
+            rgb[c::3] = pix[c::4]
+        colour = bytes(rgb)
+        space = b"/DeviceRGB"
+        alpha = bytes(pix[3::4])
+    smask = None
+    if alpha is not None and alpha.count(255) != len(alpha):
+        smask = zlib.compress(alpha, 6)
+    return {
+        "data": zlib.compress(colour, 6),
+        "w": w,
+        "h": h,
+        "space": space,
+        "filter": b"/FlateDecode",
+        "decode": b"",
+        "smask": smask,
+    }
+
+
+def _png_record(data):
+    """Decoded PNG as an image record, cached by content hash; None if unsupported. Never raises."""
+    try:
+        key = hashlib.sha256(data).digest()
+        with _PNG_CACHE_LOCK:
+            hit = key in _PNG_CACHE
+            if hit:
+                _PNG_CACHE.move_to_end(key)
+                rec = _PNG_CACHE[key]
+        if not hit:
+            try:
+                rec = _png_decode(data)  # decoded outside the lock
+            except Exception:
+                rec = None
+            with _PNG_CACHE_LOCK:
+                _PNG_CACHE[key] = rec
+                _PNG_CACHE.move_to_end(key)
+                while len(_PNG_CACHE) > _PNG_CACHE_MAX:
+                    _PNG_CACHE.popitem(last=False)
+        return dict(rec) if rec else None
+    except Exception:
+        return None
+
 
 class Pdf:
     W, H = 595.28, 841.89
 
     def __init__(self):
         self.pages = []
-        self.images = []  # (data, w, h)
+        self.images = []  # dicts: data, w, h, space, filter, decode, smask (compressed gray stream or None)
         self.new_page()
 
     def new_page(self):
@@ -274,29 +497,85 @@ class Pdf:
             lines.append(cur)
         return lines
 
+    @staticmethod
+    def _jpeg_info(data):
+        """Read (width, height, components, adobe) from the JPEG markers; None if unusable. Never raises."""
+        n = len(data)
+        if n < 4 or data[:2] != b"\xff\xd8":
+            return None
+        adobe = False
+        i = 2
+        while i < n:
+            if data[i] != 0xFF:
+                return None  # garbage between segments
+            while i < n and data[i] == 0xFF:  # fill bytes
+                i += 1
+            if i >= n:
+                return None
+            m = data[i]
+            i += 1
+            if m == 0x01 or m == 0x00 or 0xD0 <= m <= 0xD7:
+                continue  # standalone marker without a length
+            if m in (0xD9, 0xDA):  # EOI / SOS before any SOF
+                return None
+            if i + 2 > n:
+                return None
+            seg = int.from_bytes(data[i : i + 2], "big")
+            if seg < 2 or i + seg > n:
+                return None
+            body = data[i + 2 : i + seg]
+            if m == 0xEE and body[:5] == b"Adobe":
+                adobe = True
+            if m in _SOF_MARKERS:
+                if len(body) < 6 or m not in (0xC0, 0xC1, 0xC2) or body[0] != 8:
+                    return None  # only baseline/extended/progressive Huffman with 8-bit samples fit DCTDecode
+                h = int.from_bytes(body[1:3], "big")
+                w = int.from_bytes(body[3:5], "big")
+                if not w or not h:
+                    return None
+                return w, h, body[5], adobe
+            i += seg
+        return None
+
+    def _place(self, rec, x, y, max_w, max_h):
+        k = min(max_w / rec["w"], max_h / rec["h"])
+        self.images.append(rec)
+        n = len(self.images)
+        self.cur.append(
+            (
+                "q %.2f 0 0 %.2f %.2f %.2f cm /Im%d Do Q"
+                % (rec["w"] * k, rec["h"] * k, x, self.H - y - rec["h"] * k, n)
+            ).encode()
+        )
+        return True
+
     def jpeg(self, data, x, y, max_w, max_h):
         """Place a JPEG; returns False if the data is not a readable JPEG."""
-        w = h = None
-        i = 2
-        try:
-            while i < len(data):
-                if data[i] != 0xFF:
-                    i += 1
-                    continue
-                m = data[i + 1]
-                if m in (0xC0, 0xC1, 0xC2):
-                    h, w = int.from_bytes(data[i + 5 : i + 7], "big"), int.from_bytes(data[i + 7 : i + 9], "big")
-                    break
-                i += 2 + int.from_bytes(data[i + 2 : i + 4], "big")
-        except Exception:
+        info = self._jpeg_info(data)
+        if info is None:
             return False
-        if not w or data[:2] != b"\xff\xd8":
+        w, h, nf, adobe = info
+        space = {1: b"/DeviceGray", 3: b"/DeviceRGB", 4: b"/DeviceCMYK"}.get(nf)
+        if space is None:
             return False
-        k = min(max_w / w, max_h / h)
-        self.images.append((data, w, h))
-        n = len(self.images)
-        self.cur.append(("q %.2f 0 0 %.2f %.2f %.2f cm /Im%d Do Q" % (w * k, h * k, x, self.H - y - h * k, n)).encode())
-        return True
+        decode = b" /Decode [1 0 1 0 1 0 1 0]" if nf == 4 and adobe else b""
+        rec = {"data": data, "w": w, "h": h, "space": space, "filter": b"/DCTDecode", "decode": decode, "smask": None}
+        return self._place(rec, x, y, max_w, max_h)
+
+    def png(self, data, x, y, max_w, max_h):
+        """Place a PNG (transparency becomes a soft mask); False if unsupported. Never raises."""
+        rec = _png_record(data)
+        if rec is None:
+            return False
+        return self._place(rec, x, y, max_w, max_h)
+
+    def image(self, data, x, y, max_w, max_h):
+        """Place a JPEG or PNG logo, chosen by its magic bytes; False for anything else."""
+        if data[:8] == _PNG_SIG:
+            return self.png(data, x, y, max_w, max_h)
+        if data[:2] == b"\xff\xd8":
+            return self.jpeg(data, x, y, max_w, max_h)
+        return False
 
     def output(self):
         objs = []  # list of bytes bodies; object numbers are index+1
@@ -310,13 +589,23 @@ class Pdf:
         f1 = add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>")
         f2 = add(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>")
         img_ids = []
-        for data, w, h in self.images:
+        for rec in self.images:
+            sm = b""
+            if rec["smask"] is not None:
+                sid = add(
+                    b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceGray "
+                    b"/BitsPerComponent 8 /Filter /FlateDecode /Length %d >>\nstream\n"
+                    % (rec["w"], rec["h"], len(rec["smask"]))
+                    + rec["smask"]
+                    + b"\nendstream"
+                )
+                sm = b" /SMask %d 0 R" % sid
             img_ids.append(
                 add(
-                    b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB "
-                    b"/BitsPerComponent 8 /Filter /DCTDecode /Length %d >>\nstream\n"
-                    % (w, h, len(data))
-                    + data
+                    b"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s "
+                    b"/BitsPerComponent 8%s%s /Filter %s /Length %d >>\nstream\n"
+                    % (rec["w"], rec["h"], rec["space"], rec["decode"], sm, rec["filter"], len(rec["data"]))
+                    + rec["data"]
                     + b"\nendstream"
                 )
             )
