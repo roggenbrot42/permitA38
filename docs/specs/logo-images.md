@@ -44,6 +44,9 @@ No new dependency (no Pillow) and no PNG decoder on the server. Two parts:
   - Standalone markers without a length (`D0`–`D7`, `01`) are stepped over.
   - SOF markers are `C0`–`C3`, `C5`–`C7`, `C9`–`CB`, `CD`–`CF`. `C4`, `C8` and `CC` are not SOF.
   - SOF payload: precision (1 byte), height (2), width (2), `Nf` (1, the number of components).
+  - Amendment after review: only `C0`, `C1` and `C2` with precision **8** are embeddable, because `DCTDecode` with
+    `/BitsPerComponent 8` covers nothing else. Any other SOF (`C3`, `C5`–`C7`, `C9`–`CB`, `CD`–`CF`), and precision ≠ 8,
+    returns `False`.
   - Stop with `False` on SOS (`DA`) or EOI (`D9`) before any SOF, on truncation, and on width/height 0.
   - Never raise. Any out-of-range read returns `False`.
 - Colour space from `Nf`: 1 → `/DeviceGray`, 3 → `/DeviceRGB`, 4 → `/DeviceCMYK`, anything else → `False`.
@@ -82,3 +85,16 @@ No new dependency (no Pillow) and no PNG decoder on the server. Two parts:
   - The hint `#logo_hint` is visible when the stored logo is a `.png` attachment (set through the API) and absent
     after the conversion.
   - A non-image file (e.g. text bytes named `logo.png`) shows the error toast and leaves the settings unchanged.
+  - Amendment after review: the produced JPEG is checked in the browser.
+    - Decode it, e.g. by fetching the attachment and drawing it with `createImageBitmap` inside `page.evaluate`.
+    - Its size is 40×20.
+    - A pixel in the formerly transparent half is white (each channel ≥ 245).
+    - A pixel in the opaque half keeps its colour, within ±12 per channel.
+    - A second case: a 1600×100 PNG becomes 1200×75.
+- Amendment after review, backend: add cases for
+  - precision 12 → `False`;
+  - SOF3 and SOF9 → `False`;
+  - `C8` and `CC` not taken for a frame;
+  - RSTn and TEM standalone markers before the SOF accepted;
+  - an APP segment whose length runs past the end → `False`.
+- Amendment after review, web: `logoAsJpeg` closes the `ImageBitmap` in a `finally`.
