@@ -217,6 +217,7 @@ SWEEP_NUMERIC_PAIRS = {
     ("/api/plan", "remaining"): "hours still to staff (also in warning details)",
     ("/api/plan", "shortfall"): "hours missing (also in warning details and weekly_shortfalls)",
     ("POST /api/contracts", "shortfall"): "capacity warning details: hours missing",
+    ("POST /api/offers/{id}/finalize", "shortfall"): "capacity warning details: hours missing",
     ("POST /api/offers/{id}/accept", "shortfall"): "capacity warning details: hours missing",
 }
 # ambiguous names (money in some places, not in others) may NEVER be allowlisted by bare key: only as a (route, key)
