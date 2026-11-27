@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Fixed
+- **Company logo on documents** (#202): a PNG logo was silently left off offers and invoices, and greyscale or CMYK
+  JPEGs printed as garbage. The logo you choose (PNG, JPEG, WebP or GIF) is now converted to JPEG in the browser
+  (transparency on white, at most 1200 px), and JPEGs are embedded with their real colour space. A logo stored
+  before this fix that is not a JPEG shows a hint in Settings → Bank and logo: choose the file again.
+
 ## [0.4.0-alpha.7] - 2026-11-24
 
 Bugfix release for alpha.6: manual time entry and the Today card layout, business trip bills, the billable flag of
