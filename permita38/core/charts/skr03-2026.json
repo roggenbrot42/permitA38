@@ -1,0 +1,1050 @@
+{
+  "chart": "skr03",
+  "year": 2026,
+  "source": "DATEV Kontenrahmen SKR 03 (Art.-Nr. 11174), gültig für 2026; role mapping: architect, to be confirmed by the tax adviser",
+  "status": "to_verify",
+  "roles": {
+    "bank": {
+      "account": "1200",
+      "name": "Bank",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "cash": {
+      "account": "1000",
+      "name": "Kasse",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "receivables": {
+      "account": "1410",
+      "name": "Forderungen aus Lieferungen und Leistungen ohne Kontokorrent",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "payables": {
+      "account": "1610",
+      "name": "Verbindlichkeiten aus Lieferungen und Leistungen ohne Kontokorrent",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "customer_credit": {
+      "account": "1700",
+      "name": "Sonstige Verbindlichkeiten",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "payables_employee": {
+      "account": "1740",
+      "name": "Verbindlichkeiten aus Lohn und Gehalt",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "revenue_s19": {
+      "account": "8400",
+      "name": "Erlöse 19 % USt",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 15 Umsatzsteuerpflichtige Betriebseinnahmen",
+        "deductible": true
+      },
+      "automatic": "S19"
+    },
+    "revenue_s7": {
+      "account": "8300",
+      "name": "Erlöse 7 % USt",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 15 Umsatzsteuerpflichtige Betriebseinnahmen",
+        "deductible": true
+      },
+      "automatic": "S7"
+    },
+    "revenue_sx": {
+      "account": "8200",
+      "name": "Erlöse",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 15 Umsatzsteuerpflichtige Betriebseinnahmen",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "revenue_s0": {
+      "account": "8290",
+      "name": "Erlöse 0 % USt",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 16 Umsatzsteuerfreie, nicht umsatzsteuerbare Betriebseinnahmen, 0 %, § 13b UStG",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "revenue_ku": {
+      "account": "8192",
+      "name": "Steuerfreie Erlöse Kleinunternehmer nach § 19 Abs. 1 UStG",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 12 Betriebseinnahmen als Kleinunternehmer",
+        "deductible": true
+      },
+      "automatic": "KU"
+    },
+    "revenue_eu_svc": {
+      "account": "8336",
+      "name": "Erlöse aus im anderen EU-Land steuerpflichtigen sonstigen Leistungen, für die der Leistungsempfänger die Umsatzsteuer schuldet",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 16 Umsatzsteuerfreie, nicht umsatzsteuerbare Betriebseinnahmen, 0 %, § 13b UStG",
+        "deductible": true
+      },
+      "automatic": "EU_SVC"
+    },
+    "vat_out_s19": {
+      "account": "1776",
+      "name": "Umsatzsteuer 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_out_s7": {
+      "account": "1771",
+      "name": "Umsatzsteuer 7 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_out_sx": {
+      "account": "1770",
+      "name": "Umsatzsteuer",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_not_due_s19": {
+      "account": "1766",
+      "name": "Umsatzsteuer nicht fällig 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_not_due_s7": {
+      "account": "1761",
+      "name": "Umsatzsteuer nicht fällig 7 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_not_due_sx": {
+      "account": "1760",
+      "name": "Umsatzsteuer nicht fällig",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_soll_clearing_s19": {
+      "account": "1371",
+      "name": "Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_soll_clearing_s7": {
+      "account": "1371",
+      "name": "Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_soll_clearing_sx": {
+      "account": "1371",
+      "name": "Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "input_vat_s19": {
+      "account": "1576",
+      "name": "Abziehbare Vorsteuer 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "input_vat_s7": {
+      "account": "1571",
+      "name": "Abziehbare Vorsteuer 7 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "input_vat_sx": {
+      "account": "1570",
+      "name": "Abziehbare Vorsteuer",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "rc_vat_out_eu": {
+      "account": "1787",
+      "name": "Umsatzsteuer nach § 13b UStG 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "rc_vat_out_3c": {
+      "account": "1787",
+      "name": "Umsatzsteuer nach § 13b UStG 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "rc_input_vat": {
+      "account": "1577",
+      "name": "Abziehbare Vorsteuer nach § 13b UStG 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_prepayments": {
+      "account": "1780",
+      "name": "Umsatzsteuer-Vorauszahlungen",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_special_prepayment": {
+      "account": "1781",
+      "name": "Umsatzsteuer-Vorauszahlungen 1/11",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_previous_year": {
+      "account": "1790",
+      "name": "Umsatzsteuerverbindlichkeiten Vorjahr",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "input_vat_clearing": {
+      "account": "1580",
+      "name": "Gegenkonto Vorsteuer § 4 Abs. 3 EStG",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "rc_vat_nondeductible": {
+      "account": "1692",
+      "name": "Neutralisierung aufwandswirksamer Sachverhalte für § 4 Abs. 3 EStG",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "vat_paid_private": {
+      "account": "1693",
+      "name": "Ergebnisneutrale Sachverhalte für § 4 Abs. 3 EStG",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "datev_transfer": {
+      "account": "1792",
+      "name": "Sonstige Verrechnungskonten (Interimskonten)",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "expense_software": {
+      "account": "4806",
+      "name": "Wartungskosten für Hard- und Software",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 51 Laufende EDV-Kosten",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_hardware": {
+      "account": "4855",
+      "name": "Sofortabschreibung geringwertiger Wirtschaftsgüter",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 37 Aufwendungen für geringwertige Wirtschaftsgüter",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_office": {
+      "account": "4210",
+      "name": "Miete (unbewegliche Wirtschaftsgüter)",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 40 Miete/Pacht für Geschäftsräume",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "travel_costs": {
+      "account": "4673",
+      "name": "Reisekosten Unternehmer Fahrtkosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 71 Sonstige tatsächliche Fahrtkosten",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_lodging": {
+      "account": "4676",
+      "name": "Reisekosten Unternehmer Übernachtungsaufwand und Reisenebenkosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 45 Übernachtungs- und Reisenebenkosten bei Geschäftsreisen",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_material": {
+      "account": "3000",
+      "name": "Einkauf Roh-, Hilfs- und Betriebsstoffe",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 29 Waren, Rohstoffe und Hilfsstoffe",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "meals_deductible": {
+      "account": "4650",
+      "name": "Bewirtungskosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 64 Bewirtungsaufwendungen (abziehbar)",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "meals_nondeductible": {
+      "account": "4654",
+      "name": "Nicht abzugsfähige Bewirtungskosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 64 Bewirtungsaufwendungen (nicht abziehbar)",
+        "deductible": false
+      },
+      "automatic": null
+    },
+    "expense_gifts": {
+      "account": "4630",
+      "name": "Geschenke abzugsfähig ohne § 37b EStG",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 63 Geschenke (abziehbar)",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_marketing": {
+      "account": "4600",
+      "name": "Werbekosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 55 Werbekosten",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_insurance": {
+      "account": "4360",
+      "name": "Versicherungen",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 50 Beiträge, Gebühren, Abgaben und Versicherungen",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_phone": {
+      "account": "4920",
+      "name": "Telefon",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 44 Aufwendungen für Telekommunikation",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_training": {
+      "account": "4945",
+      "name": "Fortbildungskosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 46 Fortbildungskosten",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_subcontractors": {
+      "account": "3100",
+      "name": "Fremdleistungen",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 30 Bezogene Fremdleistungen",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_fees": {
+      "account": "4970",
+      "name": "Nebenkosten des Geldverkehrs",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 61 Übrige unbeschränkt abziehbare Betriebsausgaben",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "expense_other": {
+      "account": "4900",
+      "name": "Sonstige betriebliche Aufwendungen",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 61 Übrige unbeschränkt abziehbare Betriebsausgaben",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "bad_debts": {
+      "account": "2400",
+      "name": "Forderungsverluste",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 61 Übrige unbeschränkt abziehbare Betriebsausgaben",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "cash_discount_granted": {
+      "account": "8700",
+      "name": "Erlösschmälerungen",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 15 Umsatzsteuerpflichtige Betriebseinnahmen",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    "trade_tax_expense": {
+      "account": "4320",
+      "name": "Gewerbesteuer",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 68 Gewerbesteuer (nicht abziehbar)",
+        "deductible": false
+      },
+      "automatic": null
+    },
+    "trade_tax_provision": {
+      "account": "0956",
+      "name": "Gewerbesteuerrückstellung nach § 4 Abs. 5b EStG",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "corporate_tax_expense": {
+      "account": "2200",
+      "name": "Körperschaftsteuer",
+      "class": "pl",
+      "eur_line": null,
+      "automatic": null
+    },
+    "corporate_tax_provision": {
+      "account": "0963",
+      "name": "Körperschaftsteuerrückstellung",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "tax_refunds": {
+      "account": "2281",
+      "name": "Gewerbesteuernachzahlungen und Gewerbesteuererstattungen für Vorjahre nach § 4 Abs. 5b EStG",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 68 Gewerbesteuer (nicht abziehbar)",
+        "deductible": false
+      },
+      "automatic": null
+    },
+    "private_withdrawal": {
+      "account": "1800",
+      "name": "Privatentnahmen allgemein",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "private_deposit": {
+      "account": "1890",
+      "name": "Privateinlagen",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "equity": {
+      "account": "0880",
+      "name": "Variables Kapital",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "profit_carryforward": {
+      "account": "0880",
+      "name": "Variables Kapital",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "opening_balance": {
+      "account": "9000",
+      "name": "Saldenvorträge, Sachkonten",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    "closing_balance": {
+      "account": "9000",
+      "name": "Saldenvorträge, Sachkonten",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    }
+  },
+  "categories": {
+    "Software & subscriptions": "expense_software",
+    "Hardware & equipment": "expense_hardware",
+    "Office & coworking": "expense_office",
+    "Travel": "travel_costs",
+    "Transportation": "travel_costs",
+    "Accommodation": "expense_lodging",
+    "Material": "expense_material",
+    "Business meals": "meals_deductible",
+    "Gifts": "expense_gifts",
+    "Marketing": "expense_marketing",
+    "Insurance": "expense_insurance",
+    "Phone & internet": "expense_phone",
+    "Training": "expense_training",
+    "Subcontractors": "expense_subcontractors",
+    "Fees & bank": "expense_fees",
+    "Other": "expense_other"
+  },
+  "shared": [
+    [
+      "vat_soll_clearing_s19",
+      "vat_soll_clearing_s7",
+      "vat_soll_clearing_sx"
+    ],
+    [
+      "rc_vat_out_eu",
+      "rc_vat_out_3c"
+    ],
+    [
+      "equity",
+      "profit_carryforward"
+    ],
+    [
+      "opening_balance",
+      "closing_balance"
+    ]
+  ],
+  "accounts": [
+    {
+      "account": "0880",
+      "name": "Variables Kapital",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "0956",
+      "name": "Gewerbesteuerrückstellung nach § 4 Abs. 5b EStG",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "0963",
+      "name": "Körperschaftsteuerrückstellung",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1000",
+      "name": "Kasse",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1200",
+      "name": "Bank",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1371",
+      "name": "Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1410",
+      "name": "Forderungen aus Lieferungen und Leistungen ohne Kontokorrent",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1570",
+      "name": "Abziehbare Vorsteuer",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1571",
+      "name": "Abziehbare Vorsteuer 7 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1576",
+      "name": "Abziehbare Vorsteuer 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1577",
+      "name": "Abziehbare Vorsteuer nach § 13b UStG 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1580",
+      "name": "Gegenkonto Vorsteuer § 4 Abs. 3 EStG",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1610",
+      "name": "Verbindlichkeiten aus Lieferungen und Leistungen ohne Kontokorrent",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1692",
+      "name": "Neutralisierung aufwandswirksamer Sachverhalte für § 4 Abs. 3 EStG",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1693",
+      "name": "Ergebnisneutrale Sachverhalte für § 4 Abs. 3 EStG",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1700",
+      "name": "Sonstige Verbindlichkeiten",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1740",
+      "name": "Verbindlichkeiten aus Lohn und Gehalt",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1760",
+      "name": "Umsatzsteuer nicht fällig",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1761",
+      "name": "Umsatzsteuer nicht fällig 7 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1766",
+      "name": "Umsatzsteuer nicht fällig 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1770",
+      "name": "Umsatzsteuer",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1771",
+      "name": "Umsatzsteuer 7 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1776",
+      "name": "Umsatzsteuer 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1780",
+      "name": "Umsatzsteuer-Vorauszahlungen",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1781",
+      "name": "Umsatzsteuer-Vorauszahlungen 1/11",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1787",
+      "name": "Umsatzsteuer nach § 13b UStG 19 %",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1790",
+      "name": "Umsatzsteuerverbindlichkeiten Vorjahr",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1792",
+      "name": "Sonstige Verrechnungskonten (Interimskonten)",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1800",
+      "name": "Privatentnahmen allgemein",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "1890",
+      "name": "Privateinlagen",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "2200",
+      "name": "Körperschaftsteuer",
+      "class": "pl",
+      "eur_line": null,
+      "automatic": null
+    },
+    {
+      "account": "2281",
+      "name": "Gewerbesteuernachzahlungen und Gewerbesteuererstattungen für Vorjahre nach § 4 Abs. 5b EStG",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 68 Gewerbesteuer (nicht abziehbar)",
+        "deductible": false
+      },
+      "automatic": null
+    },
+    {
+      "account": "2400",
+      "name": "Forderungsverluste",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 61 Übrige unbeschränkt abziehbare Betriebsausgaben",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "3000",
+      "name": "Einkauf Roh-, Hilfs- und Betriebsstoffe",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 29 Waren, Rohstoffe und Hilfsstoffe",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "3100",
+      "name": "Fremdleistungen",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 30 Bezogene Fremdleistungen",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4210",
+      "name": "Miete (unbewegliche Wirtschaftsgüter)",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 40 Miete/Pacht für Geschäftsräume",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4320",
+      "name": "Gewerbesteuer",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 68 Gewerbesteuer (nicht abziehbar)",
+        "deductible": false
+      },
+      "automatic": null
+    },
+    {
+      "account": "4360",
+      "name": "Versicherungen",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 50 Beiträge, Gebühren, Abgaben und Versicherungen",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4600",
+      "name": "Werbekosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 55 Werbekosten",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4630",
+      "name": "Geschenke abzugsfähig ohne § 37b EStG",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 63 Geschenke (abziehbar)",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4650",
+      "name": "Bewirtungskosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 64 Bewirtungsaufwendungen (abziehbar)",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4654",
+      "name": "Nicht abzugsfähige Bewirtungskosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 64 Bewirtungsaufwendungen (nicht abziehbar)",
+        "deductible": false
+      },
+      "automatic": null
+    },
+    {
+      "account": "4673",
+      "name": "Reisekosten Unternehmer Fahrtkosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 71 Sonstige tatsächliche Fahrtkosten",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4676",
+      "name": "Reisekosten Unternehmer Übernachtungsaufwand und Reisenebenkosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 45 Übernachtungs- und Reisenebenkosten bei Geschäftsreisen",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4806",
+      "name": "Wartungskosten für Hard- und Software",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 51 Laufende EDV-Kosten",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4855",
+      "name": "Sofortabschreibung geringwertiger Wirtschaftsgüter",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 37 Aufwendungen für geringwertige Wirtschaftsgüter",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4900",
+      "name": "Sonstige betriebliche Aufwendungen",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 61 Übrige unbeschränkt abziehbare Betriebsausgaben",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4920",
+      "name": "Telefon",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 44 Aufwendungen für Telekommunikation",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4945",
+      "name": "Fortbildungskosten",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 46 Fortbildungskosten",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "4970",
+      "name": "Nebenkosten des Geldverkehrs",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 61 Übrige unbeschränkt abziehbare Betriebsausgaben",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "8192",
+      "name": "Steuerfreie Erlöse Kleinunternehmer nach § 19 Abs. 1 UStG",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 12 Betriebseinnahmen als Kleinunternehmer",
+        "deductible": true
+      },
+      "automatic": "KU"
+    },
+    {
+      "account": "8200",
+      "name": "Erlöse",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 15 Umsatzsteuerpflichtige Betriebseinnahmen",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "8290",
+      "name": "Erlöse 0 % USt",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 16 Umsatzsteuerfreie, nicht umsatzsteuerbare Betriebseinnahmen, 0 %, § 13b UStG",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "8300",
+      "name": "Erlöse 7 % USt",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 15 Umsatzsteuerpflichtige Betriebseinnahmen",
+        "deductible": true
+      },
+      "automatic": "S7"
+    },
+    {
+      "account": "8336",
+      "name": "Erlöse aus im anderen EU-Land steuerpflichtigen sonstigen Leistungen, für die der Leistungsempfänger die Umsatzsteuer schuldet",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 16 Umsatzsteuerfreie, nicht umsatzsteuerbare Betriebseinnahmen, 0 %, § 13b UStG",
+        "deductible": true
+      },
+      "automatic": "EU_SVC"
+    },
+    {
+      "account": "8400",
+      "name": "Erlöse 19 % USt",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 15 Umsatzsteuerpflichtige Betriebseinnahmen",
+        "deductible": true
+      },
+      "automatic": "S19"
+    },
+    {
+      "account": "8700",
+      "name": "Erlösschmälerungen",
+      "class": "pl",
+      "eur_line": {
+        "line": "Z. 15 Umsatzsteuerpflichtige Betriebseinnahmen",
+        "deductible": true
+      },
+      "automatic": null
+    },
+    {
+      "account": "9000",
+      "name": "Saldenvorträge, Sachkonten",
+      "class": "balance",
+      "eur_line": null,
+      "automatic": null
+    }
+  ]
+}
