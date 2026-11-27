@@ -196,7 +196,26 @@ def test_remove_logo_is_applied_by_save_together_with_other_edits(page, srv):
     s = settings(srv)
     assert s["company_name"] == "Demo Betrieb Neu"
     assert not s.get("logo")
-    assert page.locator('[data-a="removeLogo"]').count() == 0
+    page.wait_for_selector('[data-a="removeLogo"]', state="detached")
+    page.wait_for_selector("#logo_preview", state="detached")
+
+
+def test_remove_then_choose_png_then_save_stores_the_new_png(page, srv):
+    old = store_logo(srv)
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_preview")
+    page.click('[data-a="removeLogo"]')
+    page.wait_for_selector("#logo_preview", state="detached")
+    page.set_input_files("#logo_file", [{"name": "new.png", "mimeType": "image/png", "buffer": make_png(60, 30)}])
+    page.wait_for_selector("#logo_preview[src^='blob:']")
+    save(page)
+    logo = settings(srv)["logo"]
+    assert logo and logo != old and logo.lower().endswith(".png")
+    page.reload()
+    page.wait_for_selector("#logo_preview")
+    assert "attachments/" in page.get_attribute("#logo_preview", "src")
+    assert page.eval_on_selector("#logo_preview", "e => e.complete && e.naturalWidth > 0")
+    assert decode_pixels(page, logo)["w"] == 60
 
 
 def test_cancelled_dialog_restores_stored_state(page, srv):
@@ -254,6 +273,22 @@ def test_svg_with_only_a_viewbox_gets_the_viewbox_size(page, srv):
     page.goto(srv.base + "/#/settings")
     page.wait_for_selector("#logo_file", state="attached")
     page.set_input_files("#logo_file", [{"name": "vb.svg", "mimeType": "image/svg+xml", "buffer": svg}])
+    page.wait_for_selector("#logo_preview")
+    save(page)
+    px = decode_pixels(page, settings(srv)["logo"])
+    assert (px["w"], px["h"]) == (900, 360)
+    assert px["right"][3] <= 10
+    assert px["left"][3] >= 245
+
+
+def test_svg_with_percent_size_and_viewbox_gets_the_viewbox_size(page, srv):
+    svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 200 80">'
+        b'<rect x="0" y="0" width="100" height="80" fill="#2060c0"/></svg>'
+    )
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_file", state="attached")
+    page.set_input_files("#logo_file", [{"name": "pct.svg", "mimeType": "image/svg+xml", "buffer": svg}])
     page.wait_for_selector("#logo_preview")
     save(page)
     px = decode_pixels(page, settings(srv)["logo"])

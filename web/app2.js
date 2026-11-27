@@ -835,7 +835,8 @@ async function logoSvgBlob(file) {
   const doc = new DOMParser().parseFromString(await file.text(), 'image/svg+xml');
   const root = doc.documentElement;
   if (doc.getElementsByTagName('parsererror').length || !root || root.localName !== 'svg') throw new Error('svg');
-  if (!root.getAttribute('width') || !root.getAttribute('height')) {
+  const missing = a => { const v = (root.getAttribute(a) || '').trim(); return !v || v.endsWith('%'); };
+  if (missing('width') || missing('height')) {
     const vb = (root.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
     if (vb.length === 4 && vb.every(Number.isFinite) && vb[2] > 0 && vb[3] > 0) { root.setAttribute('width', String(vb[2])); root.setAttribute('height', String(vb[3])); }
   }
