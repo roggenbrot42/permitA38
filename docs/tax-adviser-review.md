@@ -4,8 +4,10 @@
 user can plan monthly set-asides. It is not tax advice and never replaces the tax assessment; an error of about
 +-100 EUR per year is acceptable. This list holds every rate and rule of the estimate that still needs a professional
 to confirm it. Each item has an ID (TA-nn), what the app does today, the question, and why it matters. Record the
-answer in the last two columns and set the Status to `open`, `confirmed` or `changed`. Sections A to C are for the
-tax adviser (Steuerberater); section D is for the maintainer only.
+answer in the last two columns and set the Status to `open`, `confirmed` or `changed`. Sections A to C and E are for
+the tax adviser (Steuerberater); section D is for the maintainer only. Section E covers the VAT return, the ZM and the
+bookkeeping of release 0.5.0-alpha.1; unlike the estimate, these figures are filed, so they ship behind a "not confirmed by
+a tax adviser" banner until every E item is answered.
 
 References: "spec" is `docs/specs/tax-burden-and-settings.md` (part B, "Algorithm" step N); the rate tables are
 `permita38/core/tax_rules/2026.json` and `2025.json` (key = entry name under `values`); the code is
@@ -59,6 +61,39 @@ Not verified against the official publications. Values, source and valid_from ar
 | TA-24 | Catch-up of owed tax in the current month | Since the 2026-11-03 amendment the current month's `tax_set_aside` carries `owed_now` on top of `monthly` (past year: December). Without it the tax on the profit already booked lands in no month, `take_home` would never subtract it, and before day 60 every month would show a reserve of 0 after a large invoice. The `reserve` block itself is unchanged. It was the architect's choice in the 2026-11-03 amendment, to confirm or revert. | Confirm, or revert (then `take_home` needs another per-month tax term). | open | |
 | TA-25 | GmbH take_home | For `gmbh` the formula subtracts the household tax (on the salary) and the corporate taxes from the GmbH profit, so `take_home` is the company's cash after set-asides, not the owner's. | Keep, or hide `take_home` for `gmbh`. | open | |
 | TA-26 | Recording Vorauszahlungen later | Not recorded (see TA-14); "currently owed" and the reserve ignore them. | Record them in a later version? | open | |
+
+## E. VAT return, ZM and bookkeeping (release 0.5.0-alpha.1)
+
+References: `docs/specs/ustva.md` (U), `zm.md` (Z), `accounting.md` (A), `datev-export.md` (D); rules data
+`permita38/core/vat_rules/<year>.json`, `core/charts/skr03|skr04-<year>.json`, `core/datev/<year>.json`; the worked
+examples are in the specs and in `tests/backend/fixtures/accounting_oracle.json`.
+
+| ID | Topic | What the app does | Question | Why it matters | Status | Answer / date |
+|---|---|---|---|---|---|---|
+| TA-27 | UStVA boxes 2026 | Kz 81, 86, 35/36, 21, 46/47, 84/85 (incl. § 13b Abs. 2 Nr. 1 third-country services), 66, 67, 39, 83, 10 (U "Boxes") | Are the box numbers and meanings right for the 2026 form, and is Kz 83 = 81t + 86t + 36 + 47 + 85 − 66 − 67 − 39? | Wrong box = wrong filing | open | |
+| TA-28 | Whole-euro bases | Bases truncated to whole euros toward zero, also negative; tax of 81/86 computed by the form; 36/47/85 entered with the booked tax in cents | Correct, also for negative totals? Is leaving the cent difference (booked vs. form tax) to the annual return right? | Every return | open | |
+| TA-29 | Soll date | Performance date = `service_to`, else `service_from`, else invoice date | Acceptable proxy for the completion of the service? | Period of the tax | open | |
+| TA-30 | Ist and partial payments | VAT per payment, cumulative pro rata over the rate groups, the last payment takes the remainder (A2, U example 15) | Acceptable allocation? | Ist filers with partial payments | open | |
+| TA-31 | Credit notes | Effective in the period of the credit note (§ 17) for the unpaid part; for an already paid part only when refunded (Soll and Ist, UStAE 17.1 Abs. 2; A4, A11, A12); a payment after a write-off makes the VAT due again (A13); an overpayment above the invoice gross carries no VAT (A8) | Correct? When must a filed period be amended instead? Is an overpayment taxable consideration (BFH V R 11/05)? | Corrections | open | |
+| TA-32 | Write-offs | § 17 Abs. 2: Soll reduces VAT at the write-off date; Ist has no VAT effect for the unpaid rest (A9) | Correct, and which documentation is needed? | Bad debts | open | |
+| TA-33 | Input VAT date | Expense `date` (invoice date) as proxy for the receipt of the invoice, both bases; year-versioned for the change announced for 2028 | Acceptable proxy? Is the 2028 change for invoices of Ist suppliers confirmed? | Period of the deduction | open | |
+| TA-34 | § 13b dates | EU service: period of performance; third-country service: min(invoice date, end of the month after the service) (A5) | Correct? | Reverse charge period | open | |
+| TA-35 | § 13b, non-deductible share | The non-deductible part of the self-assessed VAT is a cost (§ 9b EStG) | Correct? | Cost and Kz 67 | open | |
+| TA-36 | Small business and § 13b | A Kleinunternehmer receiving § 13b services files a return for that calendar quarter (§ 18 Abs. 4a, § 18 Abs. 2 S. 1) with 46/47 or 84/85, no Kz 67 | Correct, quarter or month, current paragraph after the 2025 reform? | Common for software bought abroad | open | |
+| TA-37 | Kleinunternehmer limits | 25,000 € previous year / 100,000 € current year, net, measured on turnover received; founding year | Mechanics in the year of crossing; measure (received vs. agreed)? | Regime switch | open | |
+| TA-38 | Frequency | Hint from the previous year's tax (9,000 / 2,000 €), § 18 Abs. 2a; new-business rule suspended 2021–2026 | Does monthly filing for new businesses return from 2027? | Setting per year | open | |
+| TA-39 | Dauerfrist and Sondervorauszahlung | 1/11 of (Σ Kz 83 of the previous year + previous Kz 39), annualised for a partial year, floored at 0, credited as Kz 39 in December; quarterly filers none (U, example 10) | Rounding of the amount, base with refunds and amended returns, revocation during the year, Kz 39 in whole euros? | Cash and the December return | open | |
+| TA-40 | Deadline shift | § 108 Abs. 3 AO with the holidays of the business's state; three-day payment grace shown as information | Correct state (tax office), grace only for transfers? | Due dates | open | |
+| TA-41 | ZM | Services only, always quarterly, due the 25th; credit notes/discounts reported (negative) in the quarter of the change (§ 18a Abs. 7 with § 17); only a report wrong when filed is corrected in its original quarter (§ 18a Abs. 10); sums in whole euros; no ZM for a small business (Z) | Correct? Storno of an invoice that was wrong from the start: original quarter? Holidays for the BZSt deadline? | EC sales list | open | |
+| TA-42 | Basis switch | A change of income or VAT basis only at a year start; v1 refuses a switch while open items exist (A section 4) | How are open items and VAT not yet due transferred? | Year change | open | |
+| TA-43 | EÜR presentation | Gross form: VAT received as income, VAT paid (input and to the tax office) as expense; non-deductible § 13b tax only as part of the VAT paid with the return, not as a second cost (A14); private shares never in the EÜR; meals 30 % and trade tax on their own lines, not deductible; the private share of non-deductible § 13b tax reduces "VAT paid" at the bill's booking date, which can fall in another year than the return payment (A sections 9.4, 9.7, 14; A17) | Line list of the Anlage EÜR 2026 and this treatment correct? Timing of the private-share correction? | Profit figure | open | |
+| TA-44 | Charts and DATEV | Role → account mapping SKR03/SKR04, automatic accounts, BU keys incl. § 13b, BU 40 for unfolded rows on automatic accounts, the unfolded fallback for partial payments and typed receipts, clearing accounts for EÜR (input VAT before payment, Soll VAT before payment), collective debtor/creditor accounts, one batch per fiscal year (D) | Which accounts and BU keys does the adviser expect; is a DATEV import of the test export clean? | Hand-over to the adviser | open | |
+| TA-45 | GoBD lock | Finalising a VAT return locks its months for good; manual lock; journal append-only with a hash chain | Sufficient as Festschreibung, and is the finalised return snapshot plus its source lines enough documentation? Late documents and year-end entries of an open year are booked on 31 Dec despite a locked December (closing date), their input VAT in the first open month: acceptable? Under EÜR, a payment for the ended year that is entered after the year end keeps its payment date as income date (Zufluss) and changes that year's EÜR: correct? | Audit | open | |
+| TA-46 | DATEV tax accounts and § 13b keys | Chart files SKR03/SKR04 2026 ([`specs/charts-2026.md`](specs/charts-2026.md)): VAT on 1776/1771/1770, input VAT 1576/1571/1570, § 13b on 1787 and 1577 (SKR04 3806/3801/3800, 1406/1401/1400, 3837, 1407); BU keys for § 13b still empty in `datev/2026.json` | Are these the accounts DATEV books for BU 2/3/8/9 and the § 13b keys (Steuerschlüssel-Tabelle 2026)? Which BU keys for § 13b EU and third-country services? | DATEV import | open | |
+| TA-47 | Expense category accounts | Software subscriptions 4806/6495 (EÜR Z. 51); "Office & coworking" as rent 4210/6310 (Z. 40); hardware as GWG 4855/6260 (Z. 37) regardless of amount | Right accounts and lines? Licence account 4964/6837 instead for software? | EÜR lines | open | |
+| TA-48 | Travel | Trips post all items to fares 4673/6673 (Z. 71); hotels belong on Z. 45, per diems on Z. 65 (follow-up C2 splits them) | Split as planned correct? | EÜR lines | open | |
+| TA-49 | Legal form | Owner accounts fit sole traders: capital 0880/2010, private 1800/1890 (2100/2180), profit closed into capital; a GmbH needs subscribed capital and 0860/2970 (follow-up C3) | Correct for Freiberufler/Gewerbe? Which accounts for a GmbH? | Balance sheet | open | |
+| TA-50 | EÜR clearing accounts | Soll VAT under EÜR cleared on 1371/1486, input VAT before payment on 1580/1480 "Gegenkonto Vorsteuer § 4 Abs. 3 EStG", non-deductible § 13b tax on 1692/3612, its private share on 1693/3613 | Accounts you expect in the DATEV import of an EÜR client? | DATEV import | open | |
 
 ## How to update
 
