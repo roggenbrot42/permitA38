@@ -331,6 +331,13 @@ class Monkey:
                 f"webcal://10.0.0.5/{token}.ics",
             ]
         )
+        try:  # the previous step may have changed the route: the old page was still there when we looked for the form
+            self.page.wait_for_selector("#cal_name", timeout=1500)
+            self.page.wait_for_timeout(100)
+            self.page.wait_for_selector("#cal_name", timeout=1500)
+        except Exception:
+            self.say("calendar: the form is gone (the route changed), skipping")
+            return
         self.say(f"calendar: connect a hostile link ({link[:24]}…)")
         self.page.fill("#cal_name", self._plausible("name") if hasattr(self, "_plausible") else "Monkey")
         self.page.fill("#cal_link", link)
