@@ -830,17 +830,17 @@ A.editUser = el => {
 const LOGO_MAX_EDGE = 1200, LOGO_ERROR = 'This image cannot be used as a logo. Choose a PNG or JPEG file.';
 /* Re-encode the chosen logo as a JPEG (the server only embeds JPEG): long edge <= 1200 px, transparency on white. */
 async function logoAsJpeg(file) {
+  let bmp;
   try {
-    const bmp = await createImageBitmap(file);
+    bmp = await createImageBitmap(file);
     const k = Math.min(1, LOGO_MAX_EDGE / Math.max(bmp.width, bmp.height));
     const w = Math.max(1, Math.round(bmp.width * k)), h = Math.max(1, Math.round(bmp.height * k));
     const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
     const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, h); cx.drawImage(bmp, 0, 0, w, h);
-    if (bmp.close) bmp.close();
     const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.92));
     if (!blob) throw new Error('encode');
     return new File([blob], 'logo.jpg', { type: 'image/jpeg' });
-  } catch (e) { throw new Error(LOGO_ERROR); }
+  } catch (e) { throw new Error(LOGO_ERROR); } finally { if (bmp && bmp.close) bmp.close(); }
 }
 PAGES.settings = async () => {
   S.settings = await api('GET', 'settings'); await loadAll(['templates']);

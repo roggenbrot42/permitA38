@@ -13,7 +13,7 @@ from tests.web.test_impressum_prefill import Server  # noqa: E402  (shared harne
 
 
 def make_png(w: int = 40, h: int = 20) -> bytes:
-    """RGBA PNG: opaque red left half, fully transparent right half."""
+    """RGBA PNG: opaque colour (200, 32, 32) left half, fully transparent right half."""
     rows = b""
     for _y in range(h):
         rows += b"\x00" + b"".join(b"\xc8\x20\x20\xff" if x < w // 2 else b"\x00\x00\x00\x00" for x in range(w))
@@ -55,6 +55,24 @@ def settings(srv):
     return httpx.get(srv.base + "/api/settings", headers=headers(srv)).json()
 
 
+def decode_pixels(page, srv, name):
+    """Fetch the stored attachment in the page, decode it and sample one pixel per half."""
+    return page.evaluate(
+        """async name => {
+          const tok = localStorage.getItem('permita38.token');
+          const r = await fetch('/api/attachments/' + name, { headers: { Authorization: 'Bearer ' + tok } });
+          const bmp = await createImageBitmap(await r.blob());
+          const cv = document.createElement('canvas'); cv.width = bmp.width; cv.height = bmp.height;
+          const cx = cv.getContext('2d'); cx.drawImage(bmp, 0, 0);
+          const px = (x, y) => Array.from(cx.getImageData(x, y, 1, 1).data).slice(0, 3);
+          const out = { w: bmp.width, h: bmp.height, left: px(Math.floor(bmp.width / 4), Math.floor(bmp.height / 2)),
+                        right: px(Math.floor(bmp.width * 3 / 4), Math.floor(bmp.height / 2)) };
+          bmp.close(); return out;
+        }""",
+        name,
+    )
+
+
 def test_png_logo_is_converted_to_jpeg_and_printed(page, srv):
     h = headers(srv)
     # a PNG attachment stored as the logo earlier: the hint shows
@@ -79,6 +97,10 @@ def test_png_logo_is_converted_to_jpeg_and_printed(page, srv):
     blob = httpx.get(srv.base + "/api/attachments/" + logo, headers=h)
     assert blob.status_code == 200
     assert blob.content[:2] == b"\xff\xd8"
+    px = decode_pixels(page, srv, logo)
+    assert (px["w"], px["h"]) == (40, 20)
+    assert all(c >= 245 for c in px["right"])  # formerly transparent half is white
+    assert all(abs(c - e) <= 12 for c, e in zip(px["left"], (200, 32, 32)))
 
     cust = httpx.post(srv.base + "/api/customers", headers=h, json={"name": "Demo Kunde GmbH"}).json()
     inv = httpx.post(
@@ -103,3 +125,15 @@ def test_non_image_logo_shows_error_and_changes_nothing(page, srv):
     after = settings(srv)
     assert after.get("logo") == before.get("logo")
     assert after.get("company_name") == before.get("company_name")
+
+
+def test_large_logo_is_scaled_down(page, srv):
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_file", state="attached")
+    page.set_input_files("#logo_file", [{"name": "big.png", "mimeType": "image/png", "buffer": make_png(1600, 100)}])
+    page.click('[data-a="saveSettings"]')
+    page.wait_for_selector("#toast:has-text('Settings saved')")
+    logo = settings(srv)["logo"]
+    assert logo.lower().endswith(".jpg")
+    px = decode_pixels(page, srv, logo)
+    assert (px["w"], px["h"]) == (1200, 75)
