@@ -269,7 +269,7 @@ tr.pp-detail > td { background: var(--bg); padding: 8px 12px; }
 .ov-skipped { margin: 12px 0; }
 
 /* Settings: logo preview on a checkerboard so transparency is visible */
-.warn { color: var(--warn); }
+.logo-note.warn, #logo_hint { color: var(--warn); }
 .logo-preview { margin: 8px 0; max-width: 240px; max-height: 96px; }
 .logo-preview[hidden] { display: none; }
 .logo-preview img { display: block; max-width: 240px; max-height: 96px; object-fit: contain; }

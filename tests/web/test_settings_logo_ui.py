@@ -153,21 +153,124 @@ def test_non_image_logo_shows_error_and_changes_nothing(page, srv):
     assert settings(srv) == before
 
 
-def test_remove_logo_clears_it_and_the_preview(page, srv):
+def store_logo(srv, png=None):
     h = headers(srv)
     name = httpx.post(
-        srv.base + "/api/attachments", headers=h, files={"file": ("old.png", make_png(), "image/png")}
+        srv.base + "/api/attachments", headers=h, files={"file": ("old.png", png or make_png(), "image/png")}
     ).json()["name"]
     s = settings(srv)
     s["logo"] = name
     assert httpx.put(srv.base + "/api/settings", headers=h, json=s).status_code == 200
+    return name
+
+
+def preview_state(page):
+    return page.evaluate(
+        """() => { const i = document.querySelector('#logo_preview');
+          return i ? { src: i.src, ok: i.complete && i.naturalWidth > 0 } : null; }"""
+    )
+
+
+def preview_pixels(page):
+    """Draw the preview <img> to a canvas (blob URLs are same-origin) and sample alpha of both halves."""
+    return page.evaluate(
+        """() => { const i = document.querySelector('#logo_preview');
+          const cv = document.createElement('canvas'); cv.width = i.naturalWidth; cv.height = i.naturalHeight;
+          const cx = cv.getContext('2d'); cx.drawImage(i, 0, 0);
+          const a = x => cx.getImageData(x, Math.floor(cv.height / 2), 1, 1).data[3];
+          return { w: cv.width, left: a(Math.floor(cv.width / 4)), right: a(Math.floor(cv.width * 3 / 4)) }; }"""
+    )
+
+
+def test_remove_logo_is_applied_by_save_together_with_other_edits(page, srv):
+    store_logo(srv)
     page.goto(srv.base + "/#/settings")
     page.wait_for_selector("#logo_preview")
     assert page.locator("#logo_hint").count() == 0  # a stored .png is printable
+    page.fill("#f_company_name", "Demo Betrieb Neu")
     page.click('[data-a="removeLogo"]')
     page.wait_for_selector("#logo_preview", state="detached")
-    assert not settings(srv).get("logo")
+    assert "will be removed" in page.inner_text("#logo_note")
+    assert settings(srv)["logo"]  # nothing saved yet
+    save(page)
+    s = settings(srv)
+    assert s["company_name"] == "Demo Betrieb Neu"
+    assert not s.get("logo")
     assert page.locator('[data-a="removeLogo"]').count() == 0
+
+
+def test_cancelled_dialog_restores_stored_state(page, srv):
+    store_logo(srv)
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_preview")
+    stored = page.get_attribute("#logo_preview", "src")
+    page.set_input_files("#logo_file", [{"name": "logo.png", "mimeType": "image/png", "buffer": make_png()}])
+    page.wait_for_selector("#logo_preview[src^='blob:']")
+    page.set_input_files("#logo_file", [])
+    page.wait_for_selector("#logo_preview:not([src^='blob:'])")
+    assert page.get_attribute("#logo_preview", "src") == stored
+    assert "A logo is set" in page.inner_text("#logo_note")
+
+
+def test_cancelled_dialog_without_stored_logo_shows_no_preview(page, srv):
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_file", state="attached")
+    page.set_input_files("#logo_file", [{"name": "logo.png", "mimeType": "image/png", "buffer": make_png()}])
+    page.wait_for_selector("#logo_preview")
+    page.set_input_files("#logo_file", [])
+    page.wait_for_selector("#logo_preview", state="detached")
+    assert page.is_hidden("#logo_box")
+    assert page.inner_text("#logo_note") == ""
+
+
+def test_bad_file_after_valid_one_shows_stored_logo_not_a_broken_image(page, srv):
+    store_logo(srv)
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_preview")
+    page.set_input_files("#logo_file", [{"name": "logo.png", "mimeType": "image/png", "buffer": make_png()}])
+    page.wait_for_selector("#logo_preview[src^='blob:']")
+    page.set_input_files("#logo_file", [{"name": "bad.png", "mimeType": "image/png", "buffer": b"not an image"}])
+    page.wait_for_selector("#logo_note:has-text('cannot be used as a logo')")
+    st = preview_state(page)
+    assert st is None or (st["ok"] and not st["src"].startswith("blob:"))
+
+
+def test_save_after_bad_file_changes_nothing(page, srv):
+    store_logo(srv)
+    before = settings(srv)
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_preview")
+    page.set_input_files("#logo_file", [{"name": "bad.png", "mimeType": "image/png", "buffer": b"not an image"}])
+    page.wait_for_selector("#logo_note:has-text('cannot be used as a logo')")
+    save(page)
+    assert settings(srv) == before
+
+
+def test_svg_with_only_a_viewbox_gets_the_viewbox_size(page, srv):
+    svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 80">'
+        b'<rect x="0" y="0" width="100" height="80" fill="#2060c0"/></svg>'
+    )
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_file", state="attached")
+    page.set_input_files("#logo_file", [{"name": "vb.svg", "mimeType": "image/svg+xml", "buffer": svg}])
+    page.wait_for_selector("#logo_preview")
+    save(page)
+    px = decode_pixels(page, settings(srv)["logo"])
+    assert (px["w"], px["h"]) == (900, 360)
+    assert px["right"][3] <= 10
+    assert px["left"][3] >= 245
+
+
+def test_preview_blob_is_transparent_before_saving(page, srv):
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_file", state="attached")
+    page.set_input_files("#logo_file", [{"name": "logo.png", "mimeType": "image/png", "buffer": make_png()}])
+    page.wait_for_selector("#logo_preview[src^='blob:']")
+    px = preview_pixels(page)
+    assert px["w"] == 40
+    assert px["right"] <= 10
+    assert px["left"] >= 245
 
 
 def test_hint_for_unprintable_stored_logo(page, srv):

@@ -829,13 +829,25 @@ A.editUser = el => {
 /* ================= SETTINGS ================= */
 const LOGO_W = 900, LOGO_H = 360, LOGO_ERROR = 'This image cannot be used as a logo. Choose a PNG, SVG or JPEG file.';
 let logoPng = null, logoBlobUrl = null;   // the converted file chosen but not saved yet, and its preview URL
+/* An SVG without width/height but with a viewBox rasterises at an unreliable size: give it the viewBox size first.
+   The SVG is only ever drawn through <img> (never inserted into the DOM). */
+async function logoSvgBlob(file) {
+  const doc = new DOMParser().parseFromString(await file.text(), 'image/svg+xml');
+  const root = doc.documentElement;
+  if (doc.getElementsByTagName('parsererror').length || !root || root.localName !== 'svg') throw new Error('svg');
+  if (!root.getAttribute('width') || !root.getAttribute('height')) {
+    const vb = (root.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+    if (vb.length === 4 && vb.every(Number.isFinite) && vb[2] > 0 && vb[3] > 0) { root.setAttribute('width', String(vb[2])); root.setAttribute('height', String(vb[3])); }
+  }
+  return new Blob([new XMLSerializer().serializeToString(doc)], { type: 'image/svg+xml' });
+}
 /* Normalise the chosen logo into an 8-bit RGBA PNG (transparency kept) that fits 900x360 px (about 500 dpi at 45x18 mm). */
 async function logoAsPng(file) {
   let bmp, url;
   try {
     let src, w, h, fill = false;
     if (file.type === 'image/svg+xml' || /\.svg$/i.test(file.name || '')) {
-      url = URL.createObjectURL(file);
+      url = URL.createObjectURL(await logoSvgBlob(file));
       const img = new Image(); img.src = url; await img.decode();
       src = img; fill = true;
       w = img.naturalWidth || LOGO_W; h = img.naturalHeight || LOGO_H;
@@ -852,7 +864,20 @@ async function logoAsPng(file) {
     return new File([blob], 'logo.png', { type: 'image/png' });
   } catch (e) { throw new Error(LOGO_ERROR); } finally { if (bmp && bmp.close) bmp.close(); if (url) URL.revokeObjectURL(url); }
 }
-function logoReset() { if (logoBlobUrl) URL.revokeObjectURL(logoBlobUrl); logoBlobUrl = null; logoPng = null; }
+let logoSeq = 0, logoRemoved = false;   // choice counter (late conversions are dropped); Remove pressed but not saved yet
+function logoReset() { ++logoSeq; logoRemoved = false; if (logoBlobUrl) URL.revokeObjectURL(logoBlobUrl); logoBlobUrl = null; logoPng = null; }
+/* Restore the logo card to its stored state: stored logo (or none), default note, no pending conversion. */
+function logoShowStored() {
+  const box = $('#logo_box'), note = $('#logo_note'), cur = S.settings && S.settings.logo;
+  if (box) {
+    box.textContent = '';
+    if (cur && !logoRemoved) { const img = document.createElement('img'); img.id = 'logo_preview'; img.alt = 'Current logo'; img.src = api.url('attachments/' + encodeURIComponent(cur)); box.appendChild(img); }
+    box.hidden = !box.firstChild;
+  }
+  if (logoBlobUrl) URL.revokeObjectURL(logoBlobUrl);   // the <img> above no longer uses it
+  logoBlobUrl = null; logoPng = null;
+  if (note) { note.className = 'small muted logo-note'; note.textContent = logoRemoved ? 'Logo will be removed – click Save to apply.' : cur ? 'A logo is set. Choose a new file to replace it.' : ''; }
+}
 PAGES.settings = async () => {
   S.settings = await api('GET', 'settings'); await loadAll(['templates']); logoReset();
   const s = S.settings;
@@ -864,8 +889,8 @@ PAGES.settings = async () => {
   <div class="card" id="card-bank"><h2>Bank and logo</h2>${f('bank_name', 'Bank')}<div class="row">${f('iban', 'IBAN')}${f('bic', 'BIC')}</div>
     <div class="field"><label for="logo_file">Logo for documents (PNG, SVG or JPEG)</label><input type="file" id="logo_file" data-change="logoChosen" accept="image/png,image/svg+xml,image/jpeg,image/webp,image/gif">
       <div class="logo-preview logo-checker" id="logo_box" ${s.logo ? '' : 'hidden'}>${s.logo ? `<img id="logo_preview" alt="Current logo" src="${esc(api.url('attachments/' + encodeURIComponent(s.logo)))}">` : ''}</div>
-      <div class="small muted" id="logo_note">${s.logo ? 'A logo is set. Choose a new file to replace it.' : ''}</div>
-      ${s.logo && !/\.(png|jpe?g)$/i.test(s.logo) ? '<p class="small warn" id="logo_hint">The stored logo cannot be printed. Choose the file again; it is converted automatically.</p>' : ''}
+      <div class="small muted logo-note" id="logo_note">${s.logo ? 'A logo is set. Choose a new file to replace it.' : ''}</div>
+      ${s.logo && !/\.(png|jpe?g)$/i.test(s.logo) ? '<p class="small" id="logo_hint">The stored logo cannot be printed. Choose the file again; it is converted automatically.</p>' : ''}
       ${s.logo ? '<button class="sm" data-a="removeLogo">Remove logo</button>' : ''}</div></div></div>
   <div class="card" id="card-tax"><h2>Business tax set-up</h2>
     ${fieldHTML({ k: 'company_type', l: 'Company type', t: 'select', o: [['freiberufler', 'Freiberufler (EÜR, no trade tax)'], ['gewerbe', 'Gewerbetreibender / Einzelunternehmen'], ['gmbh', 'UG / GmbH']] }, s).replace('<select ', '<select data-change="settingsCompanyType" ')}
@@ -883,17 +908,29 @@ PAGES.settings = async () => {
     <p class="small"><a href="#/import">Import documents from another tool</a>: offers, invoices, customers and expenses.</p>` : ''}</div>`;
 };
 A.logoChosen = async el => {
-  const f = el.files[0], note = $('#logo_note'), box = $('#logo_box');
-  logoReset(); if (!f) return;
+  const f = el.files[0], my = ++logoSeq;
+  logoShowStored();
+  if (!f) return;
   try {
-    logoPng = await logoAsPng(f); logoBlobUrl = URL.createObjectURL(logoPng);
+    const png = await logoAsPng(f);
+    if (my !== logoSeq) return;   // a newer choice (or a re-render) started meanwhile
+    const box = $('#logo_box'), note = $('#logo_note');
+    if (!box || !note) return;    // the page was left
+    logoPng = png; logoRemoved = false; logoShowStored(); logoPng = png;
+    logoBlobUrl = URL.createObjectURL(png);
     let img = $('#logo_preview'); if (!img) { img = document.createElement('img'); img.id = 'logo_preview'; img.alt = 'Current logo'; box.appendChild(img); }
-    img.src = logoBlobUrl; box.hidden = false; note.className = 'small muted'; note.textContent = 'Not saved yet – click Save to use this logo.';
-  } catch (e) { el.value = ''; note.className = 'small warn'; note.textContent = e.message; }
+    img.src = logoBlobUrl; box.hidden = false; note.className = 'small muted logo-note'; note.textContent = 'Not saved yet – click Save to use this logo.';
+  } catch (e) {
+    if (my !== logoSeq) return;
+    el.value = ''; logoShowStored();
+    const note = $('#logo_note'); if (note) { note.className = 'small logo-note warn'; note.textContent = e.message; }
+  }
 };
-A.removeLogo = async () => {
-  const s = { ...S.settings, logo: null }; delete s.sanity_warnings;
-  S.settings = await api('PUT', 'settings', s); toast('Logo removed'); render();
+A.removeLogo = () => {
+  ++logoSeq; logoRemoved = true;
+  const fi = $('#logo_file'); if (fi) fi.value = '';
+  const hint = $('#logo_hint'); if (hint) hint.hidden = true;
+  logoShowStored();
 };
 A.settingsCompanyType = el => { const w = $('#hebesatz_wrap'); if (w) w.hidden = !['gewerbe', 'gmbh'].includes(el.value); };
 A.saveSettings = async () => {
@@ -906,7 +943,8 @@ A.saveSettings = async () => {
   delete s.personal_tax;
   if ($('#f_tl_employee')) s.team_timeline_visibility = { employee: $('#f_tl_employee').value, accountant: $('#f_tl_accountant').value };
   const lf = $('#logo_file').files[0];
-  if (lf) {
+  if (logoRemoved) s.logo = null;
+  else if (lf) {
     if (!logoPng) { try { logoPng = await logoAsPng(lf); } catch (e) { return toast(e.message, true); } }
     s.logo = (await api.upload(logoPng)).name;
   }
