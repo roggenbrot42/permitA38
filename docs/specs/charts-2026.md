@@ -66,7 +66,7 @@ a JavaScript-only page). It is needed to confirm the VAT accounts DATEV posts to
 | `vat_not_due_s19` | 1766 | 3816 | Umsatzsteuer nicht fällig 19 % | b | – |
 | `vat_not_due_s7` | 1761 | 3811 | Umsatzsteuer nicht fällig 7 % | b | – |
 | `vat_not_due_sx` | 1760 | 3810 | Umsatzsteuer nicht fällig | b | – |
-| `vat_soll_clearing_s19` | 1371 | 1486 | Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam | b | – |
+| `vat_soll_clearing_s19` | 1371 | 1486 | Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam / Verrechnungskonto für Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam | b | – |
 | `vat_soll_clearing_s7` | 1371 | 1486 | (shared, section 5) | b | – |
 | `vat_soll_clearing_sx` | 1371 | 1486 | (shared, section 5) | b | – |
 | `input_vat_s19` | 1576 | 1406 | Abziehbare Vorsteuer 19 % | b | – |
@@ -98,7 +98,7 @@ a JavaScript-only page). It is needed to confirm the VAT accounts DATEV posts to
 | `expense_subcontractors` | 3100 | 5900 | Fremdleistungen | pl | – |
 | `expense_fees` | 4970 | 6855 | Nebenkosten des Geldverkehrs | pl | – |
 | `expense_other` | 4900 | 6300 | Sonstige betriebliche Aufwendungen | pl | – |
-| `bad_debts` | 2400 | 6930 | Forderungsverluste / Forderungsverluste (übliche Höhe) (as printed) | pl | – |
+| `bad_debts` | 2400 | 6930 | Forderungsverluste (übliche Höhe) | pl | – |
 | `cash_discount_granted` | 8700 | 4700 | Erlösschmälerungen | pl | – |
 | `trade_tax_expense` | 4320 | 7610 | Gewerbesteuer | pl | – |
 | `trade_tax_provision` | 0956 | 3035 | Gewerbesteuerrückstellung nach § 4 Abs. 5b EStG | b | – |
