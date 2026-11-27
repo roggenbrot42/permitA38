@@ -5,11 +5,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.4.0-alpha.8] - 2026-11-27
+
+Bugfix release for alpha.7: company logos on documents, editing custom document templates, and finding the numbering
+settings. No database migration: alpha.7 and alpha.8 open the same data folder.
+
 ### Fixed
+- **Custom document templates** (#206): custom templates looked built-in on the settings page, so *Copy & customise*
+  created yet another copy and the dialog had no *Delete*. They can be edited in place and deleted again.
+- **Numbering settings** (#207): Settings has a *Document numbering* card (boss only) with the next invoice and offer
+  number, the pattern and *Change numbering…*; the draft editor's banner names the next number with a link to change it.
 - **Company logo on documents** (#202): a PNG logo was silently left off offers and invoices, and greyscale or CMYK
   JPEGs printed as garbage. PNG, SVG, JPEG, WebP and GIF logos are accepted; transparency is kept in the PDF. The
   browser turns the chosen file into a print-sized PNG (SVG is rasterised at about 500 dpi), and Settings → Bank and
   logo shows the stored logo, a preview of a newly chosen one, and a *Remove logo* button.
+
+### Changed
+- Dependency updates in the container image: FastAPI 0.162.2, pydantic 2.14.3, click 8.5.1, pypdfium2 5.15.0,
+  typing-inspection 0.4.5.
 
 ## [0.4.0-alpha.7] - 2026-11-24
 
@@ -503,7 +516,8 @@ limitations and what is planned for the next alphas. Not for production bookkeep
 ## [0.1.0]
 - Initial version as *Timely*: time tracking, weekly goal, forecast, offers, invoices, expenses, tax estimates.
 
-[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.7...HEAD
+[Unreleased]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.8...HEAD
+[0.4.0-alpha.8]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.7...v0.4.0-alpha.8
 [0.4.0-alpha.7]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.6...v0.4.0-alpha.7
 [0.4.0-alpha.6]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.5...v0.4.0-alpha.6
 [0.4.0-alpha.5]: https://github.com/roggenbrot42/permitA38/compare/v0.4.0-alpha.4...v0.4.0-alpha.5
