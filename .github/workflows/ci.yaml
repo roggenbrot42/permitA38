@@ -43,7 +43,9 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng
       - run: pip install -e ".[dev]"
-      - run: python -m pytest tests/backend -q
+      # 4 workers: every test migrates a fresh SQLite database, which is slow on Windows (serial: ~42 min there,
+      # ~10 min on Linux); the runners have 4 vCPUs
+      - run: python -m pytest tests/backend -q -n 4 --dist worksteal
       - name: Download the OCR package and read a fake PNG with it (59 MB, once)
         if: runner.os == 'Windows' && matrix.python == '3.13'
         env:
