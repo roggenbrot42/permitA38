@@ -307,8 +307,8 @@ class Pdf:
             if m == 0xEE and body[:5] == b"Adobe":
                 adobe = True
             if m in _SOF_MARKERS:
-                if len(body) < 6:
-                    return None
+                if len(body) < 6 or m not in (0xC0, 0xC1, 0xC2) or body[0] != 8:
+                    return None  # only baseline/extended/progressive Huffman with 8-bit samples fit DCTDecode
                 h = int.from_bytes(body[1:3], "big")
                 w = int.from_bytes(body[3:5], "big")
                 if not w or not h:

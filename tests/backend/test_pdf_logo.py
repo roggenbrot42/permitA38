@@ -79,11 +79,27 @@ def test_dht_marker_is_not_taken_for_a_frame():
         jpeg(sof(3, w=0)),
         jpeg(sof(3, h=0)),
         jpeg(sof(0)),
+        jpeg(seg(0xC0, struct.pack(">BHHBBBB", 12, 20, 40, 1, 1, 0x11, 0))),  # precision 12
+        jpeg(sof(3, marker=0xC3)),  # lossless
+        jpeg(sof(3, marker=0xC9)),  # arithmetic
+        SOI + seg(0xE0, b"JFIF" + b"\x00" * 4)[:-3],  # APP segment runs past the end
     ],
 )
 def test_unusable_data_returns_false_and_adds_no_image(data):
     ok, pdf = place(data)
     assert ok is False and pdf.images == [] and b"/Subtype /Image" not in pdf.output()
+
+
+@pytest.mark.parametrize("marker", [0xC8, 0xCC])
+def test_c8_and_cc_are_not_taken_for_a_frame(marker):
+    ok, pdf = place(jpeg(seg(marker, b"\x00" * 6), sof(1, 7, 9)))
+    assert ok and b"/Width 7 /Height 9" in pdf.output()
+
+
+def test_rst_and_tem_standalone_markers_before_the_frame_are_accepted():
+    data = SOI + b"\xff\xd0\xff\xd7\xff\x01" + sof(3) + SOS + EOI
+    ok, pdf = place(data)
+    assert ok and b"/DeviceRGB" in pdf.output()
 
 
 def test_logo_reaches_the_invoice_pdf(boss_client):
