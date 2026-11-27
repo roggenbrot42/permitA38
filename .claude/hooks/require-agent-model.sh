@@ -7,12 +7,13 @@ deny() {
   exit 0
 }
 model=$(printf '%s' "$input" | jq -r '.tool_input.model // empty')
-[ -n "$model" ] || deny "Set model explicitly when starting an agent: sonnet for implementer and review passes, haiku for implementer-small, opus for specs. See AGENTS.md, Subagents."
+[ -n "$model" ] || deny "Set model explicitly when starting an agent: sonnet for implementer and code/test review passes, opus for the Full-tier logic pass and specs, haiku for implementer-small. See AGENTS.md, Subagents."
 agent=$(printf '%s' "$input" | jq -r '.tool_input.subagent_type // empty')
 case "$agent" in
   implementer) want=sonnet; max=6 ;;
   implementer-small) want=haiku; max=3 ;;
-  reviewer) [ "$model" = sonnet ] || deny "reviewer runs on sonnet; reviews never run on Haiku. See AGENTS.md, Merge gate."; exit 0 ;;
+  reviewer) case "$model" in sonnet|opus) exit 0 ;; esac
+    deny "reviewer runs on sonnet (code/test passes) or opus (Full-tier logic pass); reviews never run on Haiku. See AGENTS.md, Merge gate." ;;
   *) exit 0 ;;
 esac
 prompt=$(printf '%s' "$input" | jq -r '.tool_input.prompt // empty')

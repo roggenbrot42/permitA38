@@ -79,8 +79,8 @@
 - **Implementation** (code, tests, docs) is done by the implementer agents. It executes the specification and does **not**
   make architectural decisions: on ambiguity it picks the simplest option consistent with the spec and lists it under
   "Open design decisions" in its report, so the reviewer can confirm or change it before the merge.
-- **Review** (code, tests, logic) is done by Sonnet 5.5, see "Merge gate".
-- **Subagents.** Implementation (code, tests, docs, lint/CodeQL fixes, rebases) runs on the `implementer` agent (`.claude/agents/implementer.md`, Sonnet). Strictly mechanical edits may run on `implementer-small` (`.claude/agents/implementer-small.md`, Haiku); anything else goes to `implementer`. The `reviewer` agent (`.claude/agents/reviewer.md`, Sonnet) does review passes; specifications and contracts are written by Opus. Quality is protected by the review tiers and by hand-computed oracle numbers. Always set `model` explicitly when starting an agent.
+- **Review** (code, tests) is done by Sonnet 5.5; the logic pass of the Full tier is done by Opus, see "Merge gate".
+- **Subagents.** Implementation (code, tests, docs, lint/CodeQL fixes, rebases) runs on the `implementer` agent (`.claude/agents/implementer.md`, Sonnet). Strictly mechanical edits may run on `implementer-small` (`.claude/agents/implementer-small.md`, Haiku); anything else goes to `implementer`. The `reviewer` agent (`.claude/agents/reviewer.md`, Sonnet; Opus for the Full-tier logic pass) does review passes; specifications and contracts are written by Opus. Quality is protected by the review tiers and by hand-computed oracle numbers. Always set `model` explicitly when starting an agent.
 - **Task size.** One `implementer` per work package: at most 6 files, about 300 changed lines, 80 turns. `implementer-small`: at most 3 files, about 150 changed lines, 40 turns. Every prompt to either agent has these lines, at the start of a line:
 
   ```
@@ -99,10 +99,11 @@
   - **Standard** (schema/migrations, advisory checks, other non-security logic): one Sonnet 5.5 pass covering code and
     tests together.
   - **Full** (money/VAT/numbering, rights, uploads and served files, parsing of outside input, network access): three
-    Sonnet 5.5 passes. (1) **code review** of the diff (correctness, security, edge cases), (2) **test review** (do the
+    passes: two on Sonnet 5.5, one on Opus. (1) **code review** (Sonnet) of the diff (correctness, security, edge cases), (2) **test review** (Sonnet; do the
     tests prove the intent, are assertions meaningful, are cases missing, would they fail if the code were wrong),
-    (3) **logic review** of the domain rules (recompute key numbers by hand or with an independent oracle: capacity,
-    VAT/rounding, numbering, calendar hours, permissions). The logic pass is never done by a smaller model.
+    (3) **logic review** (Opus) of the domain rules (recompute key numbers by hand or with an independent oracle: capacity,
+    VAT/rounding, numbering, calendar hours, permissions). The logic pass always runs on Opus
+    (`subagent_type: reviewer`, `model: opus`), never on a smaller model.
   - The maintainer or architect assigns the tier in the task specification; when in doubt take the higher one.
   - Findings go back to the branch and are fixed first. Only then: merge, regenerate `api/openapi.json`, run
     `make test lint` (affected files only if CI will run the rest), push; merge through a pull request when CI is
