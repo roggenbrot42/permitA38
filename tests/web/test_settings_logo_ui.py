@@ -1,5 +1,5 @@
-"""Settings logo upload in a real browser against the real server: the chosen image is converted to JPEG (fake demo
-data only; the PNG fixture is built with zlib/struct)."""
+"""Settings logo upload in a real browser against the real server: the chosen image becomes a transparent PNG (fake demo
+data only; fixtures are built with zlib/struct)."""
 
 import struct
 import zlib
@@ -55,8 +55,14 @@ def settings(srv):
     return httpx.get(srv.base + "/api/settings", headers=headers(srv)).json()
 
 
-def decode_pixels(page, srv, name):
-    """Fetch the stored attachment in the page, decode it and sample one pixel per half."""
+SVG = (
+    b'<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80">'
+    b'<rect x="0" y="0" width="100" height="80" fill="#2060c0"/></svg>'
+)
+
+
+def decode_pixels(page, name):
+    """Fetch the stored attachment in the page, decode it and sample RGBA of one pixel per half."""
     return page.evaluate(
         """async name => {
           const tok = localStorage.getItem('permita38.token');
@@ -64,7 +70,7 @@ def decode_pixels(page, srv, name):
           const bmp = await createImageBitmap(await r.blob());
           const cv = document.createElement('canvas'); cv.width = bmp.width; cv.height = bmp.height;
           const cx = cv.getContext('2d'); cx.drawImage(bmp, 0, 0);
-          const px = (x, y) => Array.from(cx.getImageData(x, y, 1, 1).data).slice(0, 3);
+          const px = (x, y) => Array.from(cx.getImageData(x, y, 1, 1).data);
           const out = { w: bmp.width, h: bmp.height, left: px(Math.floor(bmp.width / 4), Math.floor(bmp.height / 2)),
                         right: px(Math.floor(bmp.width * 3 / 4), Math.floor(bmp.height / 2)) };
           bmp.close(); return out;
@@ -73,34 +79,33 @@ def decode_pixels(page, srv, name):
     )
 
 
-def test_png_logo_is_converted_to_jpeg_and_printed(page, srv):
-    h = headers(srv)
-    # a PNG attachment stored as the logo earlier: the hint shows
-    name = httpx.post(
-        srv.base + "/api/attachments", headers=h, files={"file": ("old.png", make_png(), "image/png")}
-    ).json()["name"]
-    s = settings(srv)
-    s["logo"] = name
-    assert httpx.put(srv.base + "/api/settings", headers=h, json=s).status_code == 200
+def save(page):
+    page.click('[data-a="saveSettings"]')
+    page.wait_for_selector("#toast:has-text('Settings saved')")
 
+
+def test_png_logo_stays_transparent_and_is_previewed(page, srv):
+    h = headers(srv)
     page.goto(srv.base + "/#/settings")
     page.wait_for_selector("#logo_file", state="attached")
-    assert page.locator("#logo_hint").is_visible()
-    assert "not printed" in page.inner_text("#logo_hint")
-
     page.set_input_files("#logo_file", [{"name": "logo.png", "mimeType": "image/png", "buffer": make_png()}])
-    page.click('[data-a="saveSettings"]')
-    page.wait_for_selector("#logo_hint", state="detached")
+    page.wait_for_selector("#logo_preview")
+    assert page.get_attribute("#logo_preview", "src").startswith("blob:")
+    assert "Not saved yet" in page.inner_text("#logo_note")
+    save(page)
 
     logo = settings(srv)["logo"]
-    assert logo.lower().endswith(".jpg")
-    blob = httpx.get(srv.base + "/api/attachments/" + logo, headers=h)
-    assert blob.status_code == 200
-    assert blob.content[:2] == b"\xff\xd8"
-    px = decode_pixels(page, srv, logo)
+    assert logo.lower().endswith(".png")
+    px = decode_pixels(page, logo)
     assert (px["w"], px["h"]) == (40, 20)
-    assert all(c >= 245 for c in px["right"])  # formerly transparent half is white
-    assert all(abs(c - e) <= 12 for c, e in zip(px["left"], (200, 32, 32)))
+    assert px["right"][3] <= 10  # transparent half stays transparent
+    assert all(abs(c - e) <= 12 for c, e in zip(px["left"][:3], (200, 32, 32)))
+    assert px["left"][3] >= 245
+
+    page.reload()
+    page.wait_for_selector("#logo_preview")
+    assert "attachments/" in page.get_attribute("#logo_preview", "src")
+    assert page.eval_on_selector("#logo_preview", "e => e.complete && e.naturalWidth > 0")
 
     cust = httpx.post(srv.base + "/api/customers", headers=h, json={"name": "Demo Kunde GmbH"}).json()
     inv = httpx.post(
@@ -110,30 +115,71 @@ def test_png_logo_is_converted_to_jpeg_and_printed(page, srv):
     ).json()
     pdf = httpx.get(srv.base + f"/api/invoices/{inv['id']}/pdf", headers=h)
     assert pdf.status_code == 200
-    assert b"/DeviceRGB" in pdf.content
+    assert b"/SMask" in pdf.content  # needs pdf.png
+
+
+def test_svg_logo_becomes_a_transparent_png(page, srv):
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_file", state="attached")
+    page.set_input_files("#logo_file", [{"name": "logo.svg", "mimeType": "image/svg+xml", "buffer": SVG}])
+    page.wait_for_selector("#logo_preview")
+    save(page)
+    logo = settings(srv)["logo"]
+    assert logo.lower().endswith(".png")
+    px = decode_pixels(page, logo)
+    assert (px["w"], px["h"]) == (900, 360)
+    assert px["right"][3] <= 10
+    assert all(abs(c - e) <= 12 for c, e in zip(px["left"][:3], (0x20, 0x60, 0xC0)))
+    assert px["left"][3] >= 245
+
+
+def test_large_logo_is_scaled_down(page, srv):
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_file", state="attached")
+    page.set_input_files("#logo_file", [{"name": "big.png", "mimeType": "image/png", "buffer": make_png(1800, 100)}])
+    page.wait_for_selector("#logo_preview")
+    save(page)
+    px = decode_pixels(page, settings(srv)["logo"])
+    assert (px["w"], px["h"]) == (900, 50)
 
 
 def test_non_image_logo_shows_error_and_changes_nothing(page, srv):
     before = settings(srv)
     page.goto(srv.base + "/#/settings")
     page.wait_for_selector("#logo_file", state="attached")
-    page.fill("#f_company_name", "Changed GmbH")
     page.set_input_files("#logo_file", [{"name": "logo.png", "mimeType": "image/png", "buffer": b"not an image"}])
-    page.click('[data-a="saveSettings"]')
-    page.wait_for_selector("#toast.err")
-    assert "cannot be used as a logo" in page.inner_text("#toast")
-    after = settings(srv)
-    assert after.get("logo") == before.get("logo")
-    assert after.get("company_name") == before.get("company_name")
+    page.wait_for_selector("#logo_note:has-text('cannot be used as a logo')")
+    assert page.locator("#logo_preview").count() == 0
+    assert settings(srv) == before
 
 
-def test_large_logo_is_scaled_down(page, srv):
+def test_remove_logo_clears_it_and_the_preview(page, srv):
+    h = headers(srv)
+    name = httpx.post(
+        srv.base + "/api/attachments", headers=h, files={"file": ("old.png", make_png(), "image/png")}
+    ).json()["name"]
+    s = settings(srv)
+    s["logo"] = name
+    assert httpx.put(srv.base + "/api/settings", headers=h, json=s).status_code == 200
     page.goto(srv.base + "/#/settings")
-    page.wait_for_selector("#logo_file", state="attached")
-    page.set_input_files("#logo_file", [{"name": "big.png", "mimeType": "image/png", "buffer": make_png(1600, 100)}])
-    page.click('[data-a="saveSettings"]')
-    page.wait_for_selector("#toast:has-text('Settings saved')")
-    logo = settings(srv)["logo"]
-    assert logo.lower().endswith(".jpg")
-    px = decode_pixels(page, srv, logo)
-    assert (px["w"], px["h"]) == (1200, 75)
+    page.wait_for_selector("#logo_preview")
+    assert page.locator("#logo_hint").count() == 0  # a stored .png is printable
+    page.click('[data-a="removeLogo"]')
+    page.wait_for_selector("#logo_preview", state="detached")
+    assert not settings(srv).get("logo")
+    assert page.locator('[data-a="removeLogo"]').count() == 0
+
+
+def test_hint_for_unprintable_stored_logo(page, srv):
+    h = headers(srv)
+    gif = b"GIF89a\x01\x00\x01\x00\x00\x00\x00;"
+    name = httpx.post(srv.base + "/api/attachments", headers=h, files={"file": ("old.gif", gif, "image/gif")}).json()[
+        "name"
+    ]
+    assert name.lower().endswith(".gif")
+    s = settings(srv)
+    s["logo"] = name
+    assert httpx.put(srv.base + "/api/settings", headers=h, json=s).status_code == 200
+    page.goto(srv.base + "/#/settings")
+    page.wait_for_selector("#logo_hint")
+    assert "cannot be printed" in page.inner_text("#logo_hint")

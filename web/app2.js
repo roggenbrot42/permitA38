@@ -827,23 +827,34 @@ A.editUser = el => {
 };
 
 /* ================= SETTINGS ================= */
-const LOGO_MAX_EDGE = 1200, LOGO_ERROR = 'This image cannot be used as a logo. Choose a PNG or JPEG file.';
-/* Re-encode the chosen logo as a JPEG (the server only embeds JPEG): long edge <= 1200 px, transparency on white. */
-async function logoAsJpeg(file) {
-  let bmp;
+const LOGO_W = 900, LOGO_H = 360, LOGO_ERROR = 'This image cannot be used as a logo. Choose a PNG, SVG or JPEG file.';
+let logoPng = null, logoBlobUrl = null;   // the converted file chosen but not saved yet, and its preview URL
+/* Normalise the chosen logo into an 8-bit RGBA PNG (transparency kept) that fits 900x360 px (about 500 dpi at 45x18 mm). */
+async function logoAsPng(file) {
+  let bmp, url;
   try {
-    bmp = await createImageBitmap(file);
-    const k = Math.min(1, LOGO_MAX_EDGE / Math.max(bmp.width, bmp.height));
-    const w = Math.max(1, Math.round(bmp.width * k)), h = Math.max(1, Math.round(bmp.height * k));
-    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-    const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, w, h); cx.drawImage(bmp, 0, 0, w, h);
-    const blob = await new Promise(res => cv.toBlob(res, 'image/jpeg', 0.92));
+    let src, w, h, fill = false;
+    if (file.type === 'image/svg+xml' || /\.svg$/i.test(file.name || '')) {
+      url = URL.createObjectURL(file);
+      const img = new Image(); img.src = url; await img.decode();
+      src = img; fill = true;
+      w = img.naturalWidth || LOGO_W; h = img.naturalHeight || LOGO_H;
+      if (!img.naturalWidth || !img.naturalHeight) { w = LOGO_W; h = LOGO_H; }
+    } else {
+      bmp = await createImageBitmap(file); src = bmp; w = bmp.width; h = bmp.height;
+    }
+    const k = Math.min(fill ? Infinity : 1, LOGO_W / w, LOGO_H / h);
+    const cw = Math.max(1, Math.round(w * k)), ch = Math.max(1, Math.round(h * k));
+    const cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+    cv.getContext('2d').drawImage(src, 0, 0, cw, ch);
+    const blob = await new Promise(res => cv.toBlob(res, 'image/png'));
     if (!blob) throw new Error('encode');
-    return new File([blob], 'logo.jpg', { type: 'image/jpeg' });
-  } catch (e) { throw new Error(LOGO_ERROR); } finally { if (bmp && bmp.close) bmp.close(); }
+    return new File([blob], 'logo.png', { type: 'image/png' });
+  } catch (e) { throw new Error(LOGO_ERROR); } finally { if (bmp && bmp.close) bmp.close(); if (url) URL.revokeObjectURL(url); }
 }
+function logoReset() { if (logoBlobUrl) URL.revokeObjectURL(logoBlobUrl); logoBlobUrl = null; logoPng = null; }
 PAGES.settings = async () => {
-  S.settings = await api('GET', 'settings'); await loadAll(['templates']);
+  S.settings = await api('GET', 'settings'); await loadAll(['templates']); logoReset();
   const s = S.settings;
   const f = (k, l, t = 'text', extra = '') => fieldHTML({ k, l, t, ...extra }, s);
   const tpls = S.d.templates || [];
@@ -851,7 +862,11 @@ PAGES.settings = async () => {
   return `<div class="head"><div><h1>Business settings</h1><div class="muted">Your business, documents and data. Personal items (profile, tax profile, calendars, tokens) are under <a href="#/me">My settings</a>.</div></div><button class="primary" data-a="saveSettings">Save settings</button></div>
   <div class="grid g2"><div class="card" id="card-identity"><h2>Business identity</h2>${f('company_name', 'Business name')}${f('owner_name', 'Your name (signature)')}${f('street', 'Street & number')}<div class="row">${f('zip', 'ZIP')}${f('city', 'City')}</div><div class="row">${f('email', 'E-mail')}${f('phone', 'Phone')}</div>${f('website', 'Website')}<div class="row">${f('tax_number', 'Tax number (Steuernr.)')}${f('vat_id', 'VAT ID (USt-IdNr.)')}</div></div>
   <div class="card" id="card-bank"><h2>Bank and logo</h2>${f('bank_name', 'Bank')}<div class="row">${f('iban', 'IBAN')}${f('bic', 'BIC')}</div>
-    <div class="field"><label>Logo for documents (PNG or JPEG)</label><input type="file" id="logo_file" accept="image/png,image/jpeg,image/webp,image/gif">${!s.logo ? '' : /\.jpe?g$/i.test(s.logo) ? '<div class="small muted">A logo is set. Choose a new file to replace it.</div>' : '<p class="small warn" id="logo_hint" style="color:var(--warn)">The stored logo is not a JPEG and is not printed on documents. Choose the file again; it is converted automatically.</p>'}</div></div></div>
+    <div class="field"><label for="logo_file">Logo for documents (PNG, SVG or JPEG)</label><input type="file" id="logo_file" data-change="logoChosen" accept="image/png,image/svg+xml,image/jpeg,image/webp,image/gif">
+      <div class="logo-preview logo-checker" id="logo_box" ${s.logo ? '' : 'hidden'}>${s.logo ? `<img id="logo_preview" alt="Current logo" src="${esc(api.url('attachments/' + encodeURIComponent(s.logo)))}">` : ''}</div>
+      <div class="small muted" id="logo_note">${s.logo ? 'A logo is set. Choose a new file to replace it.' : ''}</div>
+      ${s.logo && !/\.(png|jpe?g)$/i.test(s.logo) ? '<p class="small warn" id="logo_hint">The stored logo cannot be printed. Choose the file again; it is converted automatically.</p>' : ''}
+      ${s.logo ? '<button class="sm" data-a="removeLogo">Remove logo</button>' : ''}</div></div></div>
   <div class="card" id="card-tax"><h2>Business tax set-up</h2>
     ${fieldHTML({ k: 'company_type', l: 'Company type', t: 'select', o: [['freiberufler', 'Freiberufler (EÜR, no trade tax)'], ['gewerbe', 'Gewerbetreibender / Einzelunternehmen'], ['gmbh', 'UG / GmbH']] }, s).replace('<select ', '<select data-change="settingsCompanyType" ')}
     ${fieldHTML({ k: 'state', l: 'Federal state (public holidays)', t: 'select', o: Object.entries(S.states || {}) }, s)}
@@ -867,6 +882,19 @@ PAGES.settings = async () => {
     <p class="small"><a href="#/dataexport">Data export and import</a>: a copy of all your data, or fill a new empty instance.</p>
     <p class="small"><a href="#/import">Import documents from another tool</a>: offers, invoices, customers and expenses.</p>` : ''}</div>`;
 };
+A.logoChosen = async el => {
+  const f = el.files[0], note = $('#logo_note'), box = $('#logo_box');
+  logoReset(); if (!f) return;
+  try {
+    logoPng = await logoAsPng(f); logoBlobUrl = URL.createObjectURL(logoPng);
+    let img = $('#logo_preview'); if (!img) { img = document.createElement('img'); img.id = 'logo_preview'; img.alt = 'Current logo'; box.appendChild(img); }
+    img.src = logoBlobUrl; box.hidden = false; note.className = 'small muted'; note.textContent = 'Not saved yet – click Save to use this logo.';
+  } catch (e) { el.value = ''; note.className = 'small warn'; note.textContent = e.message; }
+};
+A.removeLogo = async () => {
+  const s = { ...S.settings, logo: null }; delete s.sanity_warnings;
+  S.settings = await api('PUT', 'settings', s); toast('Logo removed'); render();
+};
 A.settingsCompanyType = el => { const w = $('#hebesatz_wrap'); if (w) w.hidden = !['gewerbe', 'gmbh'].includes(el.value); };
 A.saveSettings = async () => {
   const s = { ...S.settings };
@@ -879,9 +907,8 @@ A.saveSettings = async () => {
   if ($('#f_tl_employee')) s.team_timeline_visibility = { employee: $('#f_tl_employee').value, accountant: $('#f_tl_accountant').value };
   const lf = $('#logo_file').files[0];
   if (lf) {
-    let jpg;
-    try { jpg = await logoAsJpeg(lf); } catch (e) { return toast(e.message, true); }
-    s.logo = (await api.upload(jpg)).name;
+    if (!logoPng) { try { logoPng = await logoAsPng(lf); } catch (e) { return toast(e.message, true); } }
+    s.logo = (await api.upload(logoPng)).name;
   }
   S.settings = await api('PUT', 'settings', s); delete S.settings.sanity_warnings; toast('Settings saved'); render();
 };
