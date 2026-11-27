@@ -80,6 +80,73 @@ ROLES: list[tuple[str, str, str, str | None]] = [
     ("closing_balance", "9000", "9000", None),
 ]
 
+# Printed names, literal from spec section 3 (SKR03 name, SKR04 name)
+NAMES: dict[str, tuple[str, str]] = {  # role -> (SKR03 name, SKR04 name)
+    "bank": ("Bank", "Bank"),
+    "cash": ("Kasse", "Kasse"),
+    "receivables": ("Forderungen aus Lieferungen und Leistungen ohne Kontokorrent", "Forderungen aus Lieferungen und Leistungen ohne Kontokorrent"),
+    "payables": ("Verbindlichkeiten aus Lieferungen und Leistungen ohne Kontokorrent", "Verbindlichkeiten aus Lieferungen und Leistungen ohne Kontokorrent"),
+    "customer_credit": ("Sonstige Verbindlichkeiten", "Sonstige Verbindlichkeiten"),
+    "payables_employee": ("Verbindlichkeiten aus Lohn und Gehalt", "Verbindlichkeiten aus Lohn und Gehalt"),
+    "revenue_s19": ("Erlöse 19 % USt", "Erlöse 19 % USt"),
+    "revenue_s7": ("Erlöse 7 % USt", "Erlöse 7 % USt"),
+    "revenue_sx": ("Erlöse", "Erlöse"),
+    "revenue_s0": ("Erlöse 0 % USt", "Erlöse 0 % USt"),
+    "revenue_ku": ("Steuerfreie Erlöse Kleinunternehmer nach § 19 Abs. 1 UStG", "Steuerfreie Erlöse Kleinunternehmer nach § 19 Abs. 1 UStG"),
+    "revenue_eu_svc": ("Erlöse aus im anderen EU-Land steuerpflichtigen sonstigen Leistungen, für die der Leistungsempfänger die Umsatzsteuer schuldet", "Erlöse aus im anderen EU-Land steuerpflichtigen sonstigen Leistungen, für die der Leistungsempfänger die Umsatzsteuer schuldet"),
+    "vat_out_s19": ("Umsatzsteuer 19 %", "Umsatzsteuer 19 %"),
+    "vat_out_s7": ("Umsatzsteuer 7 %", "Umsatzsteuer 7 %"),
+    "vat_out_sx": ("Umsatzsteuer", "Umsatzsteuer"),
+    "vat_not_due_s19": ("Umsatzsteuer nicht fällig 19 %", "Umsatzsteuer nicht fällig 19 %"),
+    "vat_not_due_s7": ("Umsatzsteuer nicht fällig 7 %", "Umsatzsteuer nicht fällig 7 %"),
+    "vat_not_due_sx": ("Umsatzsteuer nicht fällig", "Umsatzsteuer nicht fällig"),
+    "vat_soll_clearing_s19": ("Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam", "Verrechnungskonto für Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam"),
+    "vat_soll_clearing_s7": ("Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam", "Verrechnungskonto für Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam"),
+    "vat_soll_clearing_sx": ("Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam", "Verrechnungskonto für Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam"),
+    "input_vat_s19": ("Abziehbare Vorsteuer 19 %", "Abziehbare Vorsteuer 19 %"),
+    "input_vat_s7": ("Abziehbare Vorsteuer 7 %", "Abziehbare Vorsteuer 7 %"),
+    "input_vat_sx": ("Abziehbare Vorsteuer", "Abziehbare Vorsteuer"),
+    "rc_vat_out_eu": ("Umsatzsteuer nach § 13b UStG 19 %", "Umsatzsteuer nach § 13b UStG 19 %"),
+    "rc_vat_out_3c": ("Umsatzsteuer nach § 13b UStG 19 %", "Umsatzsteuer nach § 13b UStG 19 %"),
+    "rc_input_vat": ("Abziehbare Vorsteuer nach § 13b UStG 19 %", "Abziehbare Vorsteuer nach § 13b UStG 19 %"),
+    "vat_prepayments": ("Umsatzsteuer-Vorauszahlungen", "Umsatzsteuer-Vorauszahlungen"),
+    "vat_special_prepayment": ("Umsatzsteuer-Vorauszahlungen 1/11", "Umsatzsteuer-Vorauszahlungen 1/11"),
+    "vat_previous_year": ("Umsatzsteuerverbindlichkeiten Vorjahr", "Umsatzsteuerverbindlichkeiten Vorjahr"),
+    "input_vat_clearing": ("Gegenkonto Vorsteuer § 4 Abs. 3 EStG", "Gegenkonto Vorsteuer § 4 Abs. 3 EStG"),
+    "rc_vat_nondeductible": ("Neutralisierung aufwandswirksamer Sachverhalte für § 4 Abs. 3 EStG", "Neutralisierung aufwandswirksamer Sachverhalte für § 4 Abs. 3 EStG"),
+    "vat_paid_private": ("Ergebnisneutrale Sachverhalte für § 4 Abs. 3 EStG", "Ergebnisneutrale Sachverhalte für § 4 Abs. 3 EStG"),
+    "datev_transfer": ("Sonstige Verrechnungskonten (Interimskonten)", "Sonstige Verrechnungskonten (Interimskonto)"),
+    "expense_software": ("Wartungskosten für Hard- und Software", "Wartungskosten für Hard- und Software"),
+    "expense_hardware": ("Sofortabschreibung geringwertiger Wirtschaftsgüter", "Sofortabschreibungen geringwertiger Wirtschaftsgüter"),
+    "expense_office": ("Miete (unbewegliche Wirtschaftsgüter)", "Miete (unbewegliche Wirtschaftsgüter)"),
+    "travel_costs": ("Reisekosten Unternehmer Fahrtkosten", "Reisekosten Unternehmer Fahrtkosten"),
+    "expense_lodging": ("Reisekosten Unternehmer Übernachtungsaufwand und Reisenebenkosten", "Reisekosten Unternehmer Übernachtungsaufwand und Reisenebenkosten"),
+    "expense_material": ("Einkauf Roh-, Hilfs- und Betriebsstoffe", "Einkauf Roh-, Hilfs- und Betriebsstoffe"),
+    "meals_deductible": ("Bewirtungskosten", "Bewirtungskosten"),
+    "meals_nondeductible": ("Nicht abzugsfähige Bewirtungskosten", "Nicht abzugsfähige Bewirtungskosten"),
+    "expense_gifts": ("Geschenke abzugsfähig ohne § 37b EStG", "Geschenke abzugsfähig ohne § 37b EStG"),
+    "expense_marketing": ("Werbekosten", "Werbekosten"),
+    "expense_insurance": ("Versicherungen", "Versicherungen"),
+    "expense_phone": ("Telefon", "Telefon"),
+    "expense_training": ("Fortbildungskosten", "Fortbildungskosten"),
+    "expense_subcontractors": ("Fremdleistungen", "Fremdleistungen"),
+    "expense_fees": ("Nebenkosten des Geldverkehrs", "Nebenkosten des Geldverkehrs"),
+    "expense_other": ("Sonstige betriebliche Aufwendungen", "Sonstige betriebliche Aufwendungen"),
+    "bad_debts": ("Forderungsverluste (übliche Höhe)", "Forderungsverluste (übliche Höhe)"),
+    "cash_discount_granted": ("Erlösschmälerungen", "Erlösschmälerungen"),
+    "trade_tax_expense": ("Gewerbesteuer", "Gewerbesteuer"),
+    "trade_tax_provision": ("Gewerbesteuerrückstellung nach § 4 Abs. 5b EStG", "Gewerbesteuerrückstellung nach § 4 Abs. 5b EStG"),
+    "corporate_tax_expense": ("Körperschaftsteuer", "Körperschaftsteuer"),
+    "corporate_tax_provision": ("Körperschaftsteuerrückstellung", "Körperschaftsteuerrückstellung"),
+    "tax_refunds": ("Gewerbesteuernachzahlungen und Gewerbesteuererstattungen für Vorjahre nach § 4 Abs. 5b EStG", "Gewerbesteuernachzahlungen und Gewerbesteuererstattungen für Vorjahre nach § 4 Abs. 5b EStG"),
+    "private_withdrawal": ("Privatentnahmen allgemein", "Privatentnahmen allgemein"),
+    "private_deposit": ("Privateinlagen", "Privateinlagen"),
+    "equity": ("Variables Kapital", "Variables Kapital"),
+    "profit_carryforward": ("Variables Kapital", "Variables Kapital"),
+    "opening_balance": ("Saldenvorträge, Sachkonten", "Saldenvorträge, Sachkonten"),
+    "closing_balance": ("Saldenvorträge, Sachkonten", "Saldenvorträge, Sachkonten"),
+}
+
 PL_ROLES = {
     "revenue_s19", "revenue_s7", "revenue_sx", "revenue_s0", "revenue_ku", "revenue_eu_svc",
     "expense_software", "expense_hardware", "expense_office", "travel_costs", "expense_lodging", "expense_material",
@@ -233,3 +300,41 @@ def test_account_names_are_clean(chart):
 def test_automatic_accounts_carry_only_matching_keys(chart):
     c = chart_for(chart, 2026)  # type: ignore[arg-type]
     assert {a.account: a.automatic for a in c.accounts if a.automatic} == {_no(chart, r): r[3] for r in ROLES if r[3]}
+
+
+@pytest.mark.parametrize("chart", CHARTS)
+def test_role_names_match_the_spec_exactly(chart):
+    idx = 0 if chart == "skr03" else 1
+    c = chart_for(chart, 2026)  # type: ignore[arg-type]
+    assert {role: acc.name for role, acc in c.roles} == {role: names[idx] for role, names in NAMES.items()}
+
+
+@pytest.mark.parametrize("chart", CHARTS)
+def test_categories_equal_the_web_expense_categories(chart):
+    js = (Path(__file__).resolve().parents[2] / "web" / "app2.js").read_text(encoding="utf-8")
+    m = re.search(r"^const EXP_CATS = \[(.*?)\];", js, re.M)
+    assert m
+    exp_cats = re.findall(r"'([^']*)'", m.group(1))
+    assert exp_cats
+    assert [k for k, _ in chart_for(chart, 2026).categories] == exp_cats  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("chart", CHARTS)
+def test_real_chart_datev_simulation_equals_the_journal(chart):
+    from permita38.core.accounting.datev import batch_rows, entry_rows, journal_balances, simulate
+    from permita38.core.datev import datev_rules_for
+    from tests.backend import test_datev_rows as t
+
+    c = chart_for(chart, 2026)  # type: ignore[arg-type]
+    rules = datev_rules_for(2026)
+    cases = t._journal_cases()
+    assert len(cases) >= 30
+    transfer: set[str] = set()
+    for case in cases:
+        entries = t.oracle_entries(case)
+        rows = batch_rows(entries, c, rules, t.RATES)
+        assert simulate(rows, c, rules, t.RATES) == journal_balances(entries, c), case["id"]
+        for e in entries:
+            if any(r.note == "transfer" for r in entry_rows(e, c, rules, t.RATES)):
+                transfer.add(e.event_key)
+    assert transfer == {"A18-credit-moves-cash-eur-soll:2"}

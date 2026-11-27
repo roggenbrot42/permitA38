@@ -150,21 +150,21 @@
     },
     "vat_soll_clearing_s19": {
       "account": "1486",
-      "name": "Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
+      "name": "Verrechnungskonto für Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
       "class": "balance",
       "eur_line": null,
       "automatic": null
     },
     "vat_soll_clearing_s7": {
       "account": "1486",
-      "name": "Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
+      "name": "Verrechnungskonto für Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
       "class": "balance",
       "eur_line": null,
       "automatic": null
     },
     "vat_soll_clearing_sx": {
       "account": "1486",
-      "name": "Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
+      "name": "Verrechnungskonto für Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
       "class": "balance",
       "eur_line": null,
       "automatic": null
@@ -606,7 +606,7 @@
     },
     {
       "account": "1486",
-      "name": "Verrechnungskonto Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
+      "name": "Verrechnungskonto für Gewinnermittlung § 4 Abs. 3 EStG, nicht ergebniswirksam",
       "class": "balance",
       "eur_line": null,
       "automatic": null

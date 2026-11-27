@@ -422,7 +422,7 @@
     },
     "bad_debts": {
       "account": "2400",
-      "name": "Forderungsverluste",
+      "name": "Forderungsverluste (übliche Höhe)",
       "class": "pl",
       "eur_line": {
         "line": "Z. 61 Übrige unbeschränkt abziehbare Betriebsausgaben",
@@ -791,7 +791,7 @@
     },
     {
       "account": "2400",
-      "name": "Forderungsverluste",
+      "name": "Forderungsverluste (übliche Höhe)",
       "class": "pl",
       "eur_line": {
         "line": "Z. 61 Übrige unbeschränkt abziehbare Betriebsausgaben",
