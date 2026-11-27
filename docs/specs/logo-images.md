@@ -159,3 +159,69 @@ No new dependency.
   - **Bad file.** Text bytes named `logo.png` show the error, and the settings stay unchanged.
   - **Remove logo.** The button clears `logo`, and the preview disappears.
   - **Hint.** It is shown for a stored `.gif` attachment, set through the API.
+
+## Revision 2.1 – review findings (all to fix)
+
+### Server (`pdf.py`, `test_pdf_logo.py`)
+- **Grey PNGs below 8 bit.** Type 0 at bit depth 1, 2 and 4 is now supported:
+  - Unpack the samples MSB first, with row padding.
+  - Scale each sample to 8 bit as `v * 255 // (2**d - 1)`.
+  - A `tRNS` grey key is compared at the sample's own depth, before scaling.
+- **Cache lock.** Guard the module cache with a `threading.Lock`. Do the decode outside the lock, and the lookup and
+  insert inside it.
+- **Tests that must kill the surviving mutants from the review:**
+  - **Bomb guard.** Monkeypatch `zlib.decompressobj` with a wrapper, and assert that every `decompress` call passes a
+    `max_length` that is at most `expected + 1`. A plain `d.decompress(idat)` must fail this test.
+  - **Paeth ties.** Add hand-computed rows where `pa == pb` (a is chosen) and where `pb == pc < pa` (b is chosen).
+    Give literal expected bytes.
+  - **Sub-byte filtering.** A 2-bit palette and a 1-bit grey image, each filtered with Sub on one row and Paeth on
+    another, with literal expected bytes (bpp 1).
+  - **Size limits.**
+    - A valid 4000×1 image is accepted, and 4001×1 is refused.
+    - A valid, correctly compressed 2001×2000 image is refused on the pixel count alone.
+    - A valid 2000×2000 image is accepted. A one-colour image compresses small. The test may take up to about 3 s;
+      mark it `slow` if a marker exists.
+    - Height 0 is refused.
+  - **IHDR first.** The first chunk is 13 bytes long but not `IHDR` → refused.
+  - **Palette bounds.**
+    - An index equal to the palette size → refused, and an index of size − 1 → accepted.
+    - A `PLTE` longer than 768 bytes → refused.
+    - The total `IDAT` length above `_PNG_MAX_IDAT` → refused. Patch the constant down in the test.
+  - **Timing.** Every timing assert gets at least 10× headroom for slow CI runners (Windows), or is removed when a
+    correctness test already covers the case.
+
+### Web (`app2.js`, `style.css`, `test_settings_logo_ui.py`)
+- **Preview state.** One function, `logoShowStored()`, restores the card to its stored state: the stored logo `<img>`,
+  or no preview, and the default note. It is called on:
+  - a cancelled file dialog (empty `files`);
+  - a decode error, after the error text is shown in the note, with the stored logo still visible;
+  - and before every new choice.
+  - The blob URL is revoked only after the `<img>` no longer uses it.
+- **Races.** A sequence number (`++logoSeq`) is taken per choice. A conversion that finishes after a newer one has
+  started is dropped, and its blob URL is never created. Every DOM access after an `await` is null-guarded; the user
+  may have navigated away.
+- **Remove logo** no longer saves by itself.
+  - It sets a pending flag, hides the preview, clears the file input, and shows the note
+    `Logo will be removed – click Save to apply.`
+  - `saveSettings` reads the form as usual and sets `logo = null` when the flag is set.
+  - The flag and the pending PNG are reset after a successful save and on re-render of the page.
+- **SVG without a size.**
+  - Before rasterising, parse the SVG text with `DOMParser` (`image/svg+xml`).
+  - If the root `<svg>` lacks `width` or `height` but has a `viewBox`, set `width` and `height` from the viewBox and
+    serialise it back with `XMLSerializer` into the blob.
+  - A parse error (a `parsererror` element) is the logo error.
+  - The SVG is still only drawn through `<img>`: never inserted into the DOM, never `innerHTML`.
+- **CSS.** The global `.warn` rule is removed. The colour is scoped to `.logo-note.warn` / `#logo_hint` and must not
+  change any other element.
+- **Tests:**
+  - **Bad file.** After the error, click Save. Assert that the settings, including `logo`, are unchanged and that no
+    new attachment was uploaded (compare `GET /api/attachments` if such a list exists, else the `logo` value).
+  - **Cancel and recover.**
+    - Choose a valid PNG, then set the file input to empty (cancel). The preview shows the stored logo again, or none
+      when nothing is stored, and the default note.
+    - Choose a valid PNG, then a bad file. The error is shown, and the preview is the stored state, not a broken
+      image: `naturalWidth > 0`, or no `<img>`.
+  - **Remove plus another edit.** Change company name, click Remove, then Save. Both the new company name and
+    `logo == null` are stored.
+  - **viewBox-only SVG.** An SVG with only `viewBox="0 0 200 80"` becomes 900×360.
+  - **Preview pixels.** Check the preview blob's pixels before saving: the transparent half has alpha ≤ 10.
