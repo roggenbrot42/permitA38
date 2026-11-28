@@ -220,6 +220,7 @@ SWEEP_NUMERIC_PAIRS = {
     ("POST /api/offers/{id}/finalize", "shortfall"): "capacity warning details: hours missing",
     ("POST /api/offers/{id}/accept", "shortfall"): "capacity warning details: hours missing",
 }
+DATE_DEPENDENT_PAIRS = frozenset({("POST /api/offers/{id}/finalize", "shortfall")})  # capacity warnings depend on today's date
 # ambiguous names (money in some places, not in others) may NEVER be allowlisted by bare key: only as a (route, key)
 # pair above, with a reason, so that a new money field with such a name is caught.
 AMBIGUOUS_KEYS = frozenset(
@@ -690,7 +691,7 @@ def test_sweep_allowlists_have_no_stale_entries(app, boss_client):
     seen_keys = {key for _route, key in seen}
     routes = {p for _m, _r, p in _routes(app)}
     stale = [k for k in SWEEP_NUMERIC_KEYS if k not in SCHEMA_NUMERIC_ALLOWLIST and k not in seen_keys]
-    stale_pairs = [pair for pair in SWEEP_NUMERIC_PAIRS if pair not in seen]
+    stale_pairs = [pair for pair in SWEEP_NUMERIC_PAIRS if pair not in seen and pair not in DATE_DEPENDENT_PAIRS]
     stale_routes = [p for p in SWEEP_ROUTE_ALL_NUMERIC if p not in routes]
     stale_known = [pair for pair in KNOWN_MONEY_NUMBERS if pair not in seen]
     assert not (stale or stale_pairs or stale_routes or stale_known), (
