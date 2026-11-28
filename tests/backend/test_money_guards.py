@@ -220,7 +220,9 @@ SWEEP_NUMERIC_PAIRS = {
     ("POST /api/offers/{id}/finalize", "shortfall"): "capacity warning details: hours missing",
     ("POST /api/offers/{id}/accept", "shortfall"): "capacity warning details: hours missing",
 }
-DATE_DEPENDENT_PAIRS = frozenset({("POST /api/offers/{id}/finalize", "shortfall")})  # capacity warnings depend on today's date
+DATE_DEPENDENT_PAIRS = frozenset(
+    {("POST /api/offers/{id}/finalize", "shortfall")}
+)  # capacity warnings depend on today's date
 # ambiguous names (money in some places, not in others) may NEVER be allowlisted by bare key: only as a (route, key)
 # pair above, with a reason, so that a new money field with such a name is caught.
 AMBIGUOUS_KEYS = frozenset(
