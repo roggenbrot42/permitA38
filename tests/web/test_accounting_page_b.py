@@ -71,9 +71,12 @@ def test_template_entry_free_entry_and_client_side_refusal(browser, accrual):
 
     # free entry on two accounts
     pg.goto(accrual.base + "/#/accounting/entry")
+    # the toast shows before the page re-renders the cleared form: wait for the new, empty form
+    expect(pg.locator("#acc_etext")).to_have_value("")
     expect(pg.locator("#acc_tpl")).to_be_visible()
     pick_account(pg, 0, "9039")
     pick_account(pg, 1, "9001")
+    assert pg.input_value("#acc_l0_acct") == "9039" and pg.input_value("#acc_l1_acct") == "9001"
     pg.fill("#acc_l0_d", "12,50")
     pg.fill("#acc_l1_c", "12,50")
     pg.fill("#acc_etext", "Free entry demo")
@@ -84,9 +87,12 @@ def test_template_entry_free_entry_and_client_side_refusal(browser, accrual):
 
     # unbalanced: refused in the browser, nothing is sent
     pg.goto(accrual.base + "/#/accounting/entry")
+    # the toast shows before the page re-renders the cleared form: wait for the new, empty form
+    expect(pg.locator("#acc_etext")).to_have_value("")
     expect(pg.locator("#acc_tpl")).to_be_visible()
     pick_account(pg, 0, "9039")
     pick_account(pg, 1, "9001")
+    assert pg.input_value("#acc_l0_acct") == "9039" and pg.input_value("#acc_l1_acct") == "9001"
     pg.fill("#acc_l0_d", "10,00")
     pg.fill("#acc_l1_c", "9,99")
     pg.fill("#acc_etext", "Unbalanced")
