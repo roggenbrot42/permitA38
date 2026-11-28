@@ -192,3 +192,17 @@ def unguarded():
         return saved
 
     return plant
+
+
+# TEMPORARY CI experiment (ci/backend-xdist): measure the cost of fsync on Windows runners
+if os.environ.get("PERMITA38_TEST_NOSYNC") == "1":
+    from permita38.core.repository import sqlite as _sqlite_repo
+
+    _orig_open = _sqlite_repo.SQLiteRepository._open
+
+    def _open_nosync(self):
+        _orig_open(self)
+        self._conn.execute("PRAGMA synchronous = OFF")
+        self._conn.execute("PRAGMA journal_mode = MEMORY")
+
+    _sqlite_repo.SQLiteRepository._open = _open_nosync

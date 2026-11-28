@@ -52,6 +52,26 @@ jobs:
           PERMITA38_OCR_DOWNLOAD: "1"
         run: python -m pytest tests/backend/test_receipt_ocr_download.py -q
 
+  win-exp:
+    # TEMPORARY experiment: which change speeds up the Windows backend run?
+    strategy:
+      fail-fast: false
+      matrix:
+        exp: [defender-off, nosync]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Defender real-time scanning off
+        if: matrix.exp == 'defender-off'
+        run: Set-MpPreference -DisableRealtimeMonitoring $true; Get-MpPreference | Select-Object DisableRealtimeMonitoring
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest tests/backend -q -n 4 --dist worksteal
+        env:
+          PERMITA38_TEST_NOSYNC: ${{ matrix.exp == 'nosync' && '1' || '0' }}
+
   random:
     # randomized API tests (hypothesis state machine + schema fuzzer), deterministic "ci" profile
     runs-on: ubuntu-latest
