@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Breaking
+- **Money amounts in API responses are decimal strings** with two to six decimals (`"1190.00"`), no longer JSON
+  numbers. Requests accept a decimal string or a number. Quantities, hours, percentages and VAT rates stay numbers.
+  Web money inputs accept a comma or a dot as the decimal separator. See `docs/validation.md`. The OpenAPI contract
+  changes accordingly.
+
+### Changed
+- Tighter input validation for money: booleans and non-decimal strings are refused.
+
 ## [0.4.0-alpha.8] - 2026-11-27
 
 Bugfix release for alpha.7: company logos on documents, editing custom document templates, and finding the numbering

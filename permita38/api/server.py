@@ -19,6 +19,7 @@ from permita38.core.service.calendar.service import ResourceFetcher
 
 from .deps import AUDIT_SCOPE_KEY, Services, is_session_only, startup_services
 from .routers import (
+    accounting,
     allocations,
     auth,
     calendars,
@@ -43,6 +44,7 @@ from .routers import (
     totp,
     trips,
     users,
+    vat,
 )
 
 log = logging.getLogger(__name__)
@@ -82,6 +84,8 @@ def all_routers() -> list:
         tokens,
         receipts,
         document_scans,
+        accounting,
+        vat,
     )
     return [router for module in modules for router in module.routers]
 

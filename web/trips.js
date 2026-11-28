@@ -62,13 +62,13 @@ const destinationOf = t => {
   return [...new Set(names)].join(' → ');
 };
 /* exact cents (BigInt) of a money value, and the euro amount of cents */
-const tripCents = x => { const p = Money.parse(x ?? 0); return Money.roundDiv(p.n * 100n, 10n ** BigInt(p.s)); };
-const eurC = c => eur(Money.toNumber(c));
+const tripCents = x => Money.cents(x ?? 0);
+const eurC = c => eur(Money.fromCents(c));
 const billCents = b => tripCents(b.net || 0) + tripCents(b.vat || 0);
 /** Private car: km x rate, exact cents, half up. The rate comes from the server (preview). */
 /** The cost of a mileage row is rounded per row; the trip total is computed on the sum of the km (it may differ by a cent). */
 const APPROX_TIP = 'Rounded per row. The trip total is computed from all rows and can differ by a cent.';
-const kmCost = (km, rate) => { const a = Money.parse(km), b = Money.parse(rate); return Money.toNumber(Money.roundDiv(a.n * b.n * 100n, 10n ** BigInt(a.s + b.s))); };
+const kmCost = (km, rate) => { const a = Money.parse(km), b = Money.parse(rate); return Money.fromCents(Money.roundDiv(a.n * b.n * 100n, 10n ** BigInt(a.s + b.s))); };
 /** A trip write waits for the writes already started: a Back, Next or inline edit is queued, never dropped. */
 const tripWrite = fn => { const run = TRIP_QUEUE.then(fn); TRIP_QUEUE = run.catch(() => {}); return run; };
 /** A button that starts a write: a second click while its own write is queued or running is ignored. */
@@ -476,7 +476,7 @@ function itemRowHTML(i, bills, ro, canBill) {
   const outside = itemOutsidePeriod(i, TRIP_PAGE.trip) ? ' <span class="pill warn">Outside the trip period</span>' : '';
   const actual = bills.length ? eurC(bills.reduce((a, b) => a + billCents(b), 0n)) : '';
   const expVal = i.expected ?? '';
-  const exp = ro ? `<span>${eur(i.expected || 0)}</span>` : `<input type="number" step="0.01" min="0" inputmode="decimal" value="${esc(expVal)}" data-item-exp="${esc(i.id)}" data-change="tripExpected" aria-label="Expected for ${esc(label)} on ${esc(fmtDate(i.date))}">`;
+  const exp = ro ? `<span>${eur(i.expected || 0)}</span>` : `<input type="text" autocomplete="off" inputmode="decimal" value="${esc(expVal)}" data-item-exp="${esc(i.id)}" data-change="tripExpected" aria-label="Expected for ${esc(label)} on ${esc(fmtDate(i.date))}">`;
   const acts = ro ? '' : [
     canBill ? `<button type="button" class="ghost sm" data-a="editExpense" data-trip="${esc(TRIP_PAGE.trip.id)}" data-project="${esc(TRIP_PAGE.trip.project_id || '')}" data-category="${esc(TRIP_ITEM_CATEGORY[i.category] || 'Other')}" data-item="${esc(i.id)}" aria-label="Add bill for ${esc(label)}">Add bill</button>` : '',
     `<button type="button" class="ghost sm" data-a="tripItemEdit" data-id="${esc(i.id)}" aria-label="Edit ${esc(label)} ${esc(fmtDate(i.date))}">Edit</button>`,
@@ -518,13 +518,13 @@ A.tripItemDel = once(async el => {
 });
 // inline edits go through the write queue (no once): a second edit on another row is queued, not dropped
 A.tripExpected = el => {
-  const id = el.dataset.itemExp, raw = el.value.trim();
-  if (raw !== '' && (Number(raw) < 0 || Number.isNaN(Number(raw)) || Money.parse(raw).s > 2)) return tripError('Expected: enter an amount of at least 0 with at most two decimals');
+  const id = el.dataset.itemExp, pi = Money.parseInput(el.value.trim()), raw = pi.ok ? pi.value : null;
+  if (!pi.ok || (raw !== null && (Money.isNeg(raw) || Money.parse(raw).s > 2))) return tripError('Expected: enter an amount of at least 0 with at most two decimals');
   return tripWrite(async () => {   // the items are read when the write runs: the answer of the write before is in
     const items = (TRIP_PAGE.trip.items || []).map(i => {
       if (i.id !== id) return i;
       const { expected, ...rest } = i;
-      return raw === '' ? rest : { ...rest, expected: Number(raw) };
+      return raw === null ? rest : { ...rest, expected: raw };
     });
     const t = await tripPutPartial({ items });
     // a local update: the footer from the server's answer, no page render (the focus and the other rows stay)
@@ -547,7 +547,7 @@ function tripItemDialog(type, item) {
     taxi: [{ k: 'from', l: 'From', row: 1 }, { k: 'to', l: 'To', row: 1 }, { k: 'date', l: 'Date', t: 'date' }],
     other: [{ k: 'text', l: 'Description' }, { k: 'date', l: 'Date', t: 'date' }],
   }[type] || [{ k: 'text', l: type === 'gift' ? 'Recipient and occasion' : 'Description', ...(type === 'gift' ? { h: 'Deductible only up to 50 € net per recipient and year (§ 4 Abs. 5 Nr. 1 EStG); above that none of it is. Note recipient and occasion.' } : {}) }, { k: 'date', l: 'Date', t: 'date' }];
-  fields.push({ k: 'expected', l: 'Expected € (planning figure)', t: 'number', h: 'Not part of the statement, the allowance or VAT.' });
+  fields.push({ k: 'expected', l: 'Expected € (planning figure)', m: true, h: 'Not part of the statement, the allowance or VAT.' });
   openForm({
     title: `${item ? 'Edit' : 'Add'} ${TRIP_ITEM_LABEL[type] || type}`, fields, vals: v,
     del: item ? async () => { await tripWrite(() => tripPutPartial({ items: (TRIP_PAGE.trip.items || []).filter(i => i.id !== item.id) })); render(); } : undefined,
@@ -575,10 +575,10 @@ function tripItemFrom(type, o, item) {
     it.from = String(o.from || '').trim(); it.to = String(o.to || '').trim();
     if (!it.text) it.text = [it.from, it.to].filter(Boolean).join(' – ');
   }
-  const exp = String(o.expected ?? '').trim();
-  if (exp !== '') {
-    if (Number(exp) < 0 || Number.isNaN(Number(exp)) || Money.parse(exp).s > 2) throw new Error('Expected: enter an amount of at least 0 with at most two decimals');
-    it.expected = Number(exp);
+  const exp = o.expected;   // a decimal string from the money field, or null when empty
+  if (exp !== null && exp !== undefined) {
+    if (Money.isNeg(exp) || Money.parse(exp).s > 2) throw new Error('Expected: enter an amount of at least 0 with at most two decimals');
+    it.expected = exp;
   }
   return it;
 }

@@ -13,7 +13,7 @@ import string
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 
 import httpx
 import pytest
@@ -21,8 +21,12 @@ import pytest
 from .conftest import PASSWORD, Api
 from .helpers import (
     company,
+    MONEY_KEYS,
+    dec,
     env_int,
     money,
+    money_eq,
+    money_in,
     pick_weighted,
     report_failure,
     seeds_from_env,
@@ -48,7 +52,16 @@ def make_token(sub: str, secret: str = SECRET, exp_in: int = 3600, alg: str = "H
     return f"{head}.{body}.{sig if alg != 'none' else ''}"
 
 
-def same(a, b) -> bool:
+def _as_float(v):
+    try:
+        return float(v)
+    except ValueError:
+        return v  # junk text that a fuzz payload stored; the date/number checks do not apply
+
+
+def same(a, b, key: str = "") -> bool:
+    if key in MONEY_KEYS:  # responses carry money as decimal strings; the model keeps what was sent
+        return money_eq(a, b)
     if isinstance(a, float) or isinstance(b, float):
         return a is not None and b is not None and abs(float(a) - float(b)) < 1e-9
     return a == b
@@ -62,6 +75,7 @@ class ApiSim:
         self.model: dict[str, dict[str, dict]] = {c: {} for c in COLLS}
         self.docs: dict[str, dict[str, dict]] = {"offers": {}, "invoices": {}}
         self.numbers = {"offers": 0, "invoices": 0}
+        self.credit_notes = 0  # numbered credit notes (storno, partial); they are documents in /invoices too
         self.timer_running = False
         self.log: list[str] = []
         self.n = 0
@@ -81,7 +95,7 @@ class ApiSim:
             b = {
                 "name": company(r, self.n),
                 "city": r.choice(["Köln", "Bonn", None]),
-                "rate": r.choice([None, 60.5, 100]),
+                "rate": money_in(r, r.choice([None, 60.5, 100])),
             }
         elif coll == "projects":
             cid = r.choice(self.ids("customers") or [None])
@@ -89,14 +103,14 @@ class ApiSim:
                 "name": f"Projekt {self.n}",
                 "customer_id": cid,
                 "kind": "customer" if cid else "internal",
-                "rate": r.choice([None, 75, 99.5]),
+                "rate": money_in(r, r.choice([None, 75, 99.5])),
                 "budget_hours": r.choice([None, 20, 100.5]),
             }
         elif coll == "tasks":
             b = {
                 "project_id": r.choice(self.ids("projects")),
                 "name": f"Aufgabe {self.n}",
-                "rate": r.choice([None, 150]),
+                "rate": money_in(r, r.choice([None, 150])),
             }
         elif coll == "entries":
             d = week_start(self.today) - timedelta(days=r.randint(0, 6))
@@ -115,8 +129,8 @@ class ApiSim:
         elif coll == "expenses":
             b = {
                 "date": self.today.isoformat(),
-                "net": r.randint(1, 900) / 4,
-                "vat": r.choice([0, 1.9]),
+                "net": money_in(r, r.randint(1, 900) / 4),
+                "vat": money_in(r, r.choice([0, 1.9])),
                 "vendor": f"V{self.n}",
                 "category": r.choice(["Other", "Travel"]),
                 "deductible": r.choice([100, 70]),
@@ -225,7 +239,7 @@ class ApiSim:
         for rid, exp in self.model[coll].items():
             rec = listing[rid]
             for k, v in exp.items():
-                assert same(rec.get(k), v), (coll, rid, k, rec.get(k), v)
+                assert same(rec.get(k), v, k), (coll, rid, k, rec.get(k), v)
         if listing:  # single GET agrees with the listing
             rid = self.rng.choice(list(listing))
             assert self.boss.get(f"/{coll}/{rid}") == listing[rid]
@@ -239,11 +253,14 @@ class ApiSim:
                 "description": f"Pos {i}",
                 "qty": r.choice([1, 2, 2.5, 7.25]),
                 "unit": "h",
-                "price": r.choice([20, 33.33, 99.99, 150]),
+                "price": money_in(r, r.choice([20, 33.33, 99.99, 150])),
             }
             for i in range(r.randint(1, 4))
         ]
-        return {"customer_id": cid, "title": f"{kind} {self.n}", "lines": lines, "status": "paid", "number": "HACK-1"}
+        body = {"customer_id": cid, "title": f"{kind} {self.n}", "lines": lines, "status": "paid", "number": "HACK-1"}
+        if kind == "invoices" and r.random() < 0.5:
+            body["tax_treatment"] = "standard"  # the select on a draft; the reserved treatments are refused (below)
+        return body
 
     def op_doc_create(self):
         kind = self.rng.choice(["offers", "invoices"])
@@ -257,7 +274,8 @@ class ApiSim:
         assert d["date"] in days and d["template_id"] == "classic"
         for src, dst in zip(b["lines"], d["lines"], strict=True):
             exact = money(Decimal(str(src["qty"])) * Decimal(str(src["price"])))
-            assert abs(money(dst["amount"]) - exact) <= Decimal("0.01"), (src, dst)  # float rounding tolerance
+            assert dst["amount"] == exact, (src, dst)
+            assert money_eq(dst["price"], src["price"]), (src, dst)
         self.docs[kind][d["id"]] = {
             "lines": b["lines"],
             "status": "draft",
@@ -285,23 +303,107 @@ class ApiSim:
         self.docs[kind][rid].update(status="sent", number=d["number"])
         pdf = self.boss.http.get(f"/{kind}/{rid}/pdf")
         assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF") and "pdf" in pdf.headers["content-type"]
-        # editing never changes the number; the client cannot rewrite it
         number = d["number"]
-        d["number"], d["title"] = "HACK-2", "geändert"
-        r = self.boss.http.put(f"/{kind}/{rid}", json=d)
-        assert r.status_code == 200 and r.json()["number"] == number
+        if kind == "offers":
+            # editing never changes the number; the client cannot rewrite it
+            d["number"], d["title"] = "HACK-2", "geändert"
+            r = self.boss.http.put(f"/{kind}/{rid}", json=d)
+            assert r.status_code == 200 and r.json()["number"] == number
+        else:
+            self.check_frozen_invoice(rid, d)
         self.say(f"{kind} finalize {rid} -> {number}")
 
+    def check_frozen_invoice(self, rid, d):
+        """An issued invoice is frozen (credit-notes-payments.md 2.1): frozen fields and delete are 409, the allowed
+        fields (due date, notes, reference, status label) still change, a whole-record PUT of unchanged values is fine."""
+        number = d["number"]
+        r = self.boss.http.put(f"/invoices/{rid}", json={**d, "number": "HACK-2", "title": "geändert"})
+        assert r.status_code == 409, ("frozen title", r.status_code, r.text)
+        r = self.boss.http.put(f"/invoices/{rid}", json={**d, "status": "cancelled"})
+        assert r.status_code == 409, ("cancelled is derived", r.status_code, r.text)
+        assert self.boss.http.delete(f"/invoices/{rid}").status_code == 409, "an issued invoice cannot be deleted"
+        r = self.boss.http.put(f"/invoices/{rid}", json=d)
+        assert r.status_code == 200 and r.json()["number"] == number, (r.status_code, r.text)
+        r = self.boss.http.put(f"/invoices/{rid}", json={**d, "notes": f"Notiz {self.n}", "reference": f"PO-{self.n}"})
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["number"] == number and got["notes"] == f"Notiz {self.n}" and got["title"] == d["title"], got
+        self.n += 1
+        for k in ("paid_amount", "open_amount"):
+            assert isinstance(got[k], str), (k, got[k])  # money as decimal strings
+
     def op_doc_pay(self):
+        """Paid comes from recording payments (credit-notes-payments.md 3), never from a status select."""
         sent = [i for i, d in self.docs["invoices"].items() if d["status"] == "sent"]
         if not sent:
             return
         rid = self.rng.choice(sent)
         inv = self.boss.get(f"/invoices/{rid}")
-        inv["status"], inv["paid_date"] = "paid", self.today.isoformat()
-        assert self.boss.http.put(f"/invoices/{rid}", json=inv).status_code == 200
+        open_amt = Decimal(inv["open_amount"])
+        assert inv["status"] == "sent" and open_amt > 0 and inv["paid_amount"] == "0.00", inv
+        today = self.today.isoformat()
+        if open_amt >= Decimal("0.02") and self.rng.random() < 0.3:  # a part first: the invoice stays open
+            part = (open_amt / 2).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            r = self.boss.http.post(f"/invoices/{rid}/payments", json={"date": today, "amount": str(part)})
+            assert r.status_code == 201, r.text
+            mid = self.boss.get(f"/invoices/{rid}")
+            assert mid["status"] == "sent" and mid["paid_amount"] == money(part), mid
+            assert Decimal(mid["open_amount"]) == open_amt - part, mid
+            open_amt -= part
+        r = self.boss.http.post(
+            f"/invoices/{rid}/payments", json={"date": today, "amount": money_in(self.rng, str(open_amt))}
+        )
+        assert r.status_code == 201, r.text
+        done = self.boss.get(f"/invoices/{rid}")
+        assert done["status"] == "paid" and done["open_amount"] == "0.00" and done["paid_date"] == today, done
+        assert self.boss.http.delete(f"/invoices/{rid}").status_code == 409
         self.docs["invoices"][rid]["status"] = "paid"
-        self.say(f"invoice {rid} paid")
+        self.say(f"invoice {rid} paid by payment")
+        self.check_finance()
+
+    def op_doc_credit(self):
+        """Credit notes on an unpaid issued invoice: storno, partial or write-off (credit-notes-payments.md 4)."""
+        sent = [i for i, d in self.docs["invoices"].items() if d["status"] == "sent"]
+        if not sent:
+            return
+        rid = self.rng.choice(sent)
+        inv = self.boss.get(f"/invoices/{rid}")
+        today = self.today.isoformat()
+        url = f"/invoices/{rid}/credit-notes"
+        # Finance note: /api/finance (calc.py) nets every credit note against revenue on its date, so a partial credit
+        # (or write-off) of a still unpaid invoice shows negative revenue under the default cash (EÜR) basis. Reported
+        # as an open question; here a partial credit is followed by the payment of the rest in the same step, and
+        # write-offs are not exercised.
+        kind = self.rng.choice(["storno", "partial"])
+        if kind == "partial":
+            rate, grp = next(iter(inv["issued"]["rates"].items()))
+            half = (Decimal(grp["net"]) / 2).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+            if half <= 0:
+                return
+            body = {"credit_kind": "partial", "date": today, "reason": "Teilgutschrift", "amounts": {rate: str(half)}}
+            too_much = {**body, "amounts": {rate: money(Decimal(grp["net"]) * 2)}}
+            assert self.boss.http.post(url, json=too_much).status_code == 422, "credit above the remaining net"
+        else:
+            body = {"credit_kind": kind, "date": today, "reason": "Kulanz"}
+        assert self.boss.http.post(url, json={**body, "reason": ""}).status_code == 422, "reason is required"
+        r = self.boss.http.post(url, json=body)
+        assert r.status_code == 201, (kind, r.status_code, r.text)
+        after = self.boss.get(f"/invoices/{rid}")
+        assert isinstance(after["credited_amount"], str) and Decimal(after["credited_amount"]) > 0, after
+        if kind == "storno":
+            assert after["status"] == "cancelled" and after["open_amount"] == "0.00", after
+            assert self.boss.http.post(url, json=body).status_code in (409, 422), "nothing left to credit"
+            self.docs["invoices"][rid]["status"] = "cancelled"
+        else:  # the invoice stays open with less to pay; the rest is paid right away (see the note on finance above)
+            assert after["status"] == "sent", after
+            r = self.boss.http.post(f"/invoices/{rid}/payments", json={"date": today, "amount": after["open_amount"]})
+            assert r.status_code == 201, r.text
+            done = self.boss.get(f"/invoices/{rid}")
+            assert done["status"] == "paid" and done["open_amount"] == "0.00", done
+            self.docs["invoices"][rid]["status"] = "paid"
+            self.docs["invoices"][rid]["credited_net"] = half
+        self.credit_notes += 1
+        self.say(f"invoice {rid} credit {kind}")
         self.check_finance()
 
     def op_doc_negative(self):
@@ -312,6 +414,9 @@ class ApiSim:
         assert self.boss.http.post(f"/{kind}/{nocust['id']}/finalize").status_code == 400, "no customer"
         for rid in (empty["id"], nocust["id"]):
             assert self.boss.http.delete(f"/{kind}/{rid}").status_code == 204
+        for tt in ("export_exempt", "reverse_charge_domestic"):  # reserved treatments are refused
+            body = {"customer_id": self.rng.choice(self.ids("customers")), "tax_treatment": tt, "lines": []}
+            assert self.boss.http.post("/invoices", json=body).status_code == 422, tt
         self.say("finalize without lines / customer rejected")
 
     def check_finance(self):
@@ -320,12 +425,12 @@ class ApiSim:
         groups = 0
         for rid, d in self.docs["invoices"].items():
             if d["status"] == "paid":
-                rev += sum(
-                    (money(Decimal(str(ln["qty"])) * Decimal(str(ln["price"]))) for ln in d["lines"]), Decimal(0)
-                )
+                rev += sum((dec(Decimal(str(ln["qty"])) * Decimal(str(ln["price"]))) for ln in d["lines"]), Decimal(0))
+                rev -= d.get("credited_net", Decimal(0))
                 groups += len(d["lines"])
-        tol = Decimal("0.01") * max(groups, 1)
-        assert abs(money(fin["revenue"]) - rev) <= tol, (fin["revenue"], rev)
+        assert fin["revenue"] == money(rev), (fin["revenue"], rev, groups)
+        cns = [x for x in self.boss.get("/invoices") if x.get("kind") == "credit_note"]
+        assert len(cns) == self.credit_notes, (len(cns), self.credit_notes)
         net = sum(
             (
                 Decimal(str(x["net"])) * Decimal(str(x.get("deductible", 100))) / 100
@@ -333,7 +438,10 @@ class ApiSim:
             ),
             Decimal(0),
         )
-        assert abs(money(fin["expenses"]) - net) <= Decimal("0.01") * max(len(self.model["expenses"]), 1)
+        assert abs(Decimal(fin["expenses"]) - net) <= Decimal("0.01") * max(len(self.model["expenses"]), 1), (
+            fin["expenses"],
+            net,
+        )
 
     # ---------------------------------------------------------------- invoice from tracked time
     def op_from_time(self):
@@ -341,14 +449,16 @@ class ApiSim:
         if self.free_minutes(self.today.isoformat()) < 700:
             self.say("skip from-time scenario: not enough free time today")
             return
-        cust = self.boss.post("/customers", {"name": f"Zeitkunde {self.n}", "rate": r.choice([None, 90])})
+        cust = self.boss.post("/customers", {"name": f"Zeitkunde {self.n}", "rate": money_in(r, r.choice([None, 90]))})
         self.n += 1
         proj = self.boss.post(
-            "/projects", {"name": f"ZP {self.n}", "customer_id": cust["id"], "rate": r.choice([None, 120])}
+            "/projects", {"name": f"ZP {self.n}", "customer_id": cust["id"], "rate": money_in(r, r.choice([None, 120]))}
         )
-        task = self.boss.post("/tasks", {"project_id": proj["id"], "name": "Spezial", "rate": r.choice([None, 175])})
+        task = self.boss.post(
+            "/tasks", {"project_id": proj["id"], "name": "Spezial", "rate": money_in(r, r.choice([None, 175]))}
+        )
         personal = self.boss.post("/projects", {"name": f"Intern {self.n}"})
-        expect: dict[str, tuple[int, float]] = {}
+        expect: dict[str, tuple[int, str]] = {}
         for _ in range(r.randint(2, 6)):
             use_task = r.random() < 0.4
             minutes = r.randint(5, 80)
@@ -363,8 +473,8 @@ class ApiSim:
                     "billable": True,
                 },
             )
-            rate = (task.get("rate") if use_task else None) or proj.get("rate") or cust.get("rate") or 80
-            key = proj["name"] + (" – " + task["name"] if use_task else "") + f"@{float(rate)}"
+            rate = money((task.get("rate") if use_task else None) or proj.get("rate") or cust.get("rate") or 80)
+            key = proj["name"] + (" – " + task["name"] if use_task else "") + f"@{rate}"
             m, _ = expect.get(key, (0, rate))
             expect[key] = (m + minutes, rate)
         self.boss.post(
@@ -382,10 +492,10 @@ class ApiSim:
             },
         )  # non-billable: never billed
         inv = self.boss.post("/invoices/from-time", {"customer_id": cust["id"]})
-        got = {ln["description"] + f"@{float(ln['price'])}": (ln["qty"], ln["price"]) for ln in inv["lines"]}
+        got = {ln["description"] + f"@{money(ln['price'])}": (ln["qty"], ln["price"]) for ln in inv["lines"]}
         assert set(got) == set(expect), (got, expect)
         for key, (minutes, rate) in expect.items():
-            assert abs(got[key][0] - round(minutes / 60, 2)) < 1e-9 and got[key][1] == rate, (key, got[key])
+            assert abs(got[key][0] - round(minutes / 60, 2)) < 1e-9 and money_eq(got[key][1], rate), (key, got[key])
         billed = [e for e in self.boss.get("/entries") if e.get("invoice_id") == inv["id"]]
         assert sum(e["minutes"] for e in billed) == sum(m for m, _ in expect.values())
         again = self.boss.http.post("/invoices/from-time", json={"customer_id": cust["id"]})
@@ -600,6 +710,8 @@ class ApiSim:
                             bad = True
                 for k in self.NUM_FIELDS:
                     v = rec.get(k)
+                    if k in MONEY_KEYS and isinstance(v, str):
+                        v = _as_float(v)  # money comes back as a decimal string
                     if isinstance(v, (int, float)) and abs(v) > 1e7:
                         bad = True
                 lines = rec.get("lines")
@@ -609,6 +721,8 @@ class ApiSim:
                             continue
                         for k in ("qty", "price"):
                             v = ln.get(k)
+                            if k == "price" and isinstance(v, str):
+                                v = _as_float(v)
                             if isinstance(v, (int, float)) and abs(v) > 1e7:
                                 bad = True
                 if bad:
@@ -677,6 +791,7 @@ class ApiSim:
         ("doc_create", 5),
         ("doc_finalize", 5),
         ("doc_pay", 4),
+        ("doc_credit", 2),
         ("doc_negative", 1),
         ("from_time", 2),
         ("timer", 2),

@@ -43,7 +43,9 @@ def test_draft_is_marked_everywhere_until_finalized(browser, srv):
     pg.wait_for_selector("[data-a=docFinalize]")
     pg.click("[data-a=docFinalize]")
     pg.wait_for_selector("[data-change=docStatus]")
-    assert pg.locator(".banner.info").count() == 0
+    # the draft banner is gone; an issued invoice shows the freeze banner instead (accounting.md 9: issued = frozen)
+    assert pg.locator(".banner.info", has_text="draft").count() == 0
+    assert pg.locator("#d_frozen").count() == 1
     assert pg.inner_text("[data-a=docSave]") == "Save"
     ctx.close()
 

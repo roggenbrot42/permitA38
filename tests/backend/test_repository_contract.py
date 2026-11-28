@@ -13,6 +13,7 @@ from permita38.core.repository import (
     DatabaseRevisionError,
     Repository,
 )
+from permita38.core.repository.base import JournalConflict
 from permita38.core.repository.schema import GUARDS, Table
 
 from .repository_registry import REGISTRY, integrity_error, registry_params
@@ -48,6 +49,12 @@ def sample(table: Table, i: int = 0) -> dict:
     for g in GUARDS:  # the database refuses dates in another format
         if g.table == table.name and g.kind == "date":
             rec[g.columns[0]] = "2026-01-05"
+        if (
+            g.table == table.name and g.kind == "range"
+        ):  # a number inside its bounds (the sample 40 / 41 may be outside)
+            col = g.columns[0]
+            if (g.lo is not None and rec[col] < g.lo) or (g.hi is not None and rec[col] > g.hi):
+                rec[col] = g.lo if g.lo is not None else g.hi
     if table.name == "allocations":
         rec.pop("supplier_id")  # a row has exactly one owner (the allocations_one_owner check)
         # the guards of migration project_planning: one hour field, a known status, no cancel date while active,
@@ -61,6 +68,28 @@ def sample(table: Table, i: int = 0) -> dict:
     elif table.name == "projects":
         rec.pop("customer_id")  # an internal project has no customer
         rec.update(kind="internal", status="active")
+    elif table.name == "fiscal_years":  # the guards of migration accounting_journal
+        rec.update(chart="skr03", income_basis="eur", vat_basis="soll", vat_frequency="month")
+    elif table.name == "journal_entries":
+        rec.pop("reverses_id")
+        rec.update(origin="auto")
+    elif table.name == "journal_lines":
+        rec.update(tax_kind="tax", tax_key="S19")
+    elif table.name == "payments":
+        rec.pop("reverses_id")
+        rec.update(method="bank", kind="payment")
+    elif table.name == "period_locks":
+        rec.update(month=5, reason="manual")
+    elif table.name == "invoices":  # the guards of migration accounting_documents
+        rec.update(
+            kind="credit_note", credit_kind="storno", tax_treatment="standard"
+        )  # a credit kind needs a credit note
+    elif table.name == "expenses":
+        rec.update(tax_treatment="standard")
+    elif table.name in ("vat_returns", "zm_reports"):
+        rec.update(status="draft", amends_key=rec["amends_id"])  # amends_key = COALESCE(amends_id, '')
+        if table.name == "vat_returns":
+            rec.update(period_kind="month", basis="soll", frequency="month")
     return rec
 
 
@@ -91,6 +120,10 @@ def seed_references(repo, table: Table, rec: dict) -> None:
         if g.table == table.name and g.kind == "reference" and rec.get(g.columns[0]) is not None:
             if repo.get(g.target, rec[g.columns[0]]) is None:
                 target = {"id": rec[g.columns[0]], "name": "Demo"}
+                if g.target in ("journal_entries", "payments", "vat_returns", "zm_reports"):  # required fields
+                    target = {**sample(TABLES[g.target]), "id": rec[g.columns[0]]}
+                    if g.target in ("vat_returns", "zm_reports"):  # the referenced return amends nothing itself
+                        target.update(amends_id=None, replaced_by=None, amends_key="")
                 if g.target == "projects":
                     target.update(kind="internal", status="active")  # an internal project needs no customer
                 repo.save(g.target, target)
@@ -589,3 +622,150 @@ def test_guards_are_back_after_an_exception_and_a_rollback(repo):
         with pytest.raises(ConstraintViolation):
             repo.save("entries", {"date": "5.3.2026"})
     assert _trigger_names(repo) == before
+
+
+def _fiscal_year(year: int) -> dict:
+    return {
+        "year": year, "chart": "skr03", "income_basis": "eur", "vat_basis": "soll", "vat_frequency": "month",
+        "dauerfrist": False, "small_business": True, "vat_regular_from": f"{year}-07-01", "rules_version": "r1",
+        "opened_at": 1, "opened_by": "u1x000",
+    }  # fmt: skip
+
+
+def test_fiscal_years_get_list_find_and_unique_year(repo):
+    a = repo.save("fiscal_years", _fiscal_year(2027))
+    b = repo.save("fiscal_years", _fiscal_year(2026))
+    assert repo.get("fiscal_years", a["id"]) == a
+    assert a["dauerfrist"] is False and a["small_business"] is True and a["year"] == 2027
+    assert {r["year"] for r in repo.list("fiscal_years")} == {2026, 2027}
+    assert repo.find("fiscal_years", year=2026) == [b]
+    assert repo.find("fiscal_years", year=2030) == []
+    with pytest.raises(integrity_error(repo)):  # unique index idx_fiscal_years_year
+        repo.save("fiscal_years", _fiscal_year(2026))
+    assert repo.save("fiscal_years", {**b, "vat_regular_from": None})["id"] == b["id"]  # update by id keeps the row
+    assert len(repo.list("fiscal_years")) == 2
+
+
+# ---- accounting journal (docs/specs/accounting.md 7): insert-only, event keys, hash lookups, paged reads
+def _entry(year: int, no: int, key: str, booking: str, hash_: str | None = None) -> dict:
+    return {
+        "fiscal_year": year, "entry_no": no, "document_date": booking, "booking_date": booking, "event": "issue",
+        "event_key": key, "text": f"entry {key}", "origin": "auto", "created_at": 1, "created_by": "u1x000",
+        "prev_hash": "0" * 64, "hash": hash_ or f"{no:064d}",
+    }  # fmt: skip
+
+
+def _lines(*amounts: int) -> list[dict]:
+    return [{"line_no": i, "account": "1200", "amount_cents": a} for i, a in enumerate(amounts, start=1)]
+
+
+def test_insert_journal_entry_returns_entry_with_ordered_lines_and_finds_it_by_event_key(repo):
+    stored = repo.insert_journal_entry(_entry(2026, 1, "k:1", "2026-01-05"), _lines(500, -500))
+    assert stored["id"] and [ln["entry_id"] for ln in stored["lines"]] == [stored["id"]] * 2
+    assert [(ln["line_no"], ln["amount_cents"]) for ln in stored["lines"]] == [(1, 500), (2, -500)]
+    again = repo.get_journal_entry_by_event_key("k:1")
+    assert again is not None and again["id"] == stored["id"] and again["lines"] == stored["lines"]
+    assert repo.get_journal_entry_by_event_key("nope") is None
+
+
+def test_insert_journal_entry_is_a_plain_insert_and_all_or_nothing(repo):
+    repo.insert_journal_entry(_entry(2026, 1, "k:1", "2026-01-05"), _lines(5, -5))
+    with pytest.raises(JournalConflict) as err:  # same event_key
+        repo.insert_journal_entry(_entry(2026, 2, "k:1", "2026-01-06"), _lines(1, -1))
+    assert err.value.field == "event_key"
+    with pytest.raises(JournalConflict) as err:  # same (fiscal_year, entry_no)
+        repo.insert_journal_entry(_entry(2026, 1, "k:2", "2026-01-06"), _lines(1, -1))
+    assert err.value.field == "entry_no"
+    with pytest.raises(integrity_error(repo)):  # a duplicate line_no: the whole entry rolls back
+        repo.insert_journal_entry(_entry(2026, 2, "k:3", "2026-01-06"), [*_lines(1, -1), *_lines(1)])
+    assert [e["event_key"] for e in repo.list("journal_entries")] == ["k:1"]
+    assert len(repo.list("journal_lines")) == 2
+
+
+def test_next_number_counts_per_doc_type_and_period_and_rolls_back_with_the_transaction(repo):
+    assert [repo.next_number("journal", "2026") for _ in range(3)] == [1, 2, 3]
+    assert repo.next_number("journal", "2025") == 1 and repo.next_number("invoice", "2026") == 1
+    with pytest.raises(RuntimeError):
+        with repo.transaction():
+            assert repo.next_number("journal", "2026") == 4
+            raise RuntimeError("abort")
+    assert repo.next_number("journal", "2026") == 4  # the counter rolled back with the record it numbers
+
+
+def test_journal_entries_and_lines_refuse_update_and_delete(repo):
+    stored = repo.insert_journal_entry(_entry(2026, 1, "k:1", "2026-01-05"), _lines(5, -5))
+    row = {k: v for k, v in stored.items() if k != "lines"}
+    with pytest.raises(ConstraintViolation) as err:
+        repo.save("journal_entries", {**row, "text": "changed"})
+    assert err.value.code == "state.append_only"
+    with pytest.raises(ConstraintViolation):
+        repo.delete("journal_lines", stored["lines"][0]["id"])
+
+
+def test_last_journal_hash_is_per_year(repo):
+    assert repo.last_journal_hash(2026) is None
+    repo.insert_journal_entry(_entry(2025, 1, "a", "2025-12-01", "a" * 64), _lines(1, -1))
+    repo.insert_journal_entry(_entry(2025, 2, "b", "2025-12-02", "b" * 64), _lines(1, -1))
+    assert repo.last_journal_hash(2025) == "b" * 64
+    assert repo.last_journal_hash(2026) is None  # no entry in 2026 yet: no fallback to 2025
+    assert repo.last_journal_hash(2024) is None
+    repo.insert_journal_entry(_entry(2026, 1, "c", "2026-01-02", "c" * 64), _lines(1, -1))
+    assert repo.last_journal_hash(2026) == "c" * 64 and repo.last_journal_hash(2025) == "b" * 64
+
+
+def test_list_journal_entries_pages_filters_and_orders(repo):
+    for year, no, day in (
+        (2026, 2, "2026-02-01"),
+        (2025, 1, "2025-12-30"),
+        (2026, 1, "2026-01-10"),
+        (2026, 3, "2026-03-01"),
+    ):
+        repo.insert_journal_entry(_entry(year, no, f"k{year}-{no}", day), _lines(no, -no))
+
+    def keys(rows):
+        return [r["event_key"] for r in rows]
+
+    assert keys(repo.list_journal_entries()) == ["k2025-1", "k2026-1", "k2026-2", "k2026-3"]
+    assert keys(repo.list_journal_entries(year=2026)) == ["k2026-1", "k2026-2", "k2026-3"]
+    assert keys(repo.list_journal_entries(year=2026, limit=2)) == ["k2026-1", "k2026-2"]
+    assert keys(repo.list_journal_entries(year=2026, limit=2, offset=2)) == ["k2026-3"]
+    assert keys(repo.list_journal_entries(date_from="2026-01-10", date_to="2026-02-01")) == ["k2026-1", "k2026-2"]
+    assert keys(repo.list_journal_entries(date_from="2026-03-02")) == []
+    first = repo.list_journal_entries(year=2026, limit=1)[0]
+    assert [ln["amount_cents"] for ln in first["lines"]] == [1, -1]
+
+
+def test_next_number_counts_per_key_and_rolls_back_with_the_transaction(repo):
+    assert [repo.next_number("journal", "2026") for _ in range(3)] == [1, 2, 3]
+    assert repo.next_number("journal", "2027") == 1
+    assert repo.next_number("other", "2026") == 1
+    with pytest.raises(RuntimeError):
+        with repo.transaction():
+            assert repo.next_number("journal", "2026") == 4
+            raise RuntimeError("boom")
+    assert repo.next_number("journal", "2026") == 4  # the failed attempt left no gap
+
+
+def _vat_line(no: int, vat_date: str | None) -> dict:
+    ln: dict = {"line_no": no, "account": "1200", "amount_cents": 100 if no == 1 else -100}
+    if vat_date:
+        ln.update(
+            role="revenue_s19", tax_key="S19", tax_kind="tax", tax_rate="19", tax_base_cents=500, vat_date=vat_date
+        )
+    return ln
+
+
+def test_journal_lines_by_vat_date_selects_by_period_with_entry_fields(repo):
+    repo.insert_journal_entry(_entry(2026, 1, "k:1", "2026-03-05"), [_vat_line(1, None), _vat_line(2, "2026-02-20")])
+    e2 = repo.insert_journal_entry(
+        _entry(2026, 2, "k:2", "2026-02-05"), [_vat_line(1, "2026-02-28"), _vat_line(2, "2026-03-01")]
+    )
+    repo.insert_journal_entry(_entry(2026, 3, "k:3", "2026-02-06"), [_vat_line(1, None), _vat_line(2, None)])
+    got = repo.journal_lines_by_vat_date("2026-02-01", "2026-02-28")  # inclusive bounds
+    assert [(ln["entry_no"], ln["line_no"], ln["vat_date"]) for ln in got] == [
+        (1, 2, "2026-02-20"),
+        (2, 1, "2026-02-28"),
+    ]
+    assert got[0]["booking_date"] == "2026-03-05"  # the vat_date differs from the entry's booking date
+    assert got[1]["entry_id"] == e2["id"] and got[1]["entry_created_at"] == 1 and got[1]["fiscal_year"] == 2026
+    assert repo.journal_lines_by_vat_date("2027-01-01", "2027-12-31") == []

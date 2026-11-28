@@ -10,10 +10,23 @@ import math
 import re
 from collections.abc import Mapping
 from datetime import date, datetime
-from typing import Annotated, Any, Callable
+from decimal import Decimal, InvalidOperation
+from typing import Annotated, Any, Callable, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    StringConstraints,
+    WithJsonSchema,
+    model_validator,
+)
+
+from permita38.core import money
 
 DATE_MIN = date(2000, 1, 1)
 DATE_MAX = date(2100, 12, 31)
@@ -169,11 +182,40 @@ Desc = Annotated[str, StringConstraints(max_length=2000)]
 Note = Annotated[str, StringConstraints(max_length=5000)]
 Keyword = Annotated[str, StringConstraints(max_length=100), AfterValidator(_keyword)]
 
-Amount = Annotated[float, Field(ge=-MAX_MONEY, le=MAX_MONEY, allow_inf_nan=False)]
-NonNegAmount = Annotated[float, Field(ge=0, le=MAX_MONEY, allow_inf_nan=False)]
-MonthlyAmount = Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False)]
+
+# ---- money input: a JSON number (as before) or a decimal string "12.50" (docs/specs/decimal-money-api.md rule 2) ----
+MONEY_STR_PATTERN = r"^-?[0-9]{1,10}(\.[0-9]{1,6})?$"  # matched with fullmatch: no trailing newline either
+_MONEY_STR_RE = re.compile(MONEY_STR_PATTERN)
+
+
+def _money_input(value: Any) -> Any:
+    """Number or decimal string -> float (the value keeps today's Python type). Bools and every other string form
+    (comma, exponent, spaces, thousands separators) are refused."""
+    if isinstance(value, bool):
+        raise ValueError("must be a number or a decimal string like 12.50")
+    if isinstance(value, str):
+        if not _MONEY_STR_RE.fullmatch(value):
+            raise ValueError("must be a number or a decimal string like 12.50 (dot as decimal separator)")
+        try:
+            return float(Decimal(value))
+        except InvalidOperation:  # pragma: no cover - the pattern guarantees a valid number
+            raise ValueError("must be a number or a decimal string like 12.50") from None
+    return value
+
+
+def _money_in(ge: float, le: float) -> Any:
+    number: dict[str, Any] = {"type": "number", "minimum": ge, "maximum": le}
+    schema = {"anyOf": [number, {"type": "string", "pattern": MONEY_STR_PATTERN}]}
+    return Annotated[
+        float, Field(ge=ge, le=le, allow_inf_nan=False), BeforeValidator(_money_input), WithJsonSchema(schema)
+    ]
+
+
+Amount = _money_in(-MAX_MONEY, MAX_MONEY)
+NonNegAmount = _money_in(0, MAX_MONEY)
+MonthlyAmount = _money_in(0, 100_000)
 Qty = Annotated[float, Field(ge=-MAX_QTY, le=MAX_QTY, allow_inf_nan=False)]
-Rate = Annotated[float, Field(ge=0, le=MAX_RATE, allow_inf_nan=False)]
+Rate = _money_in(0, MAX_RATE)
 Hours = Annotated[float, Field(ge=0, le=168, allow_inf_nan=False)]
 TotalHours = Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False)]
 # hours per week of one allocation (docs/contracts/planner-per-project.md); stored as sent, no rounding
@@ -221,15 +263,174 @@ def _real_int(value: Any) -> Any:
 
 _NUM = BeforeValidator(_real_number)
 _INT = BeforeValidator(_real_int)
-StrictNonNegAmount = Annotated[float, Field(ge=0, le=MAX_MONEY, allow_inf_nan=False), _NUM]
-StrictMonthlyAmount = Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False), _NUM]
-StrictAmount100k = Annotated[float, Field(ge=0, le=100_000, allow_inf_nan=False), _NUM]
-StrictAmount10k = Annotated[float, Field(ge=0, le=10_000, allow_inf_nan=False), _NUM]
+StrictNonNegAmount = _money_in(0, MAX_MONEY)
+StrictMonthlyAmount = _money_in(0, 100_000)
+StrictAmount100k = _money_in(0, 100_000)
+StrictAmount10k = _money_in(0, 10_000)
 StrictPercent10 = Annotated[float, Field(ge=0, le=10, allow_inf_nan=False), _NUM]
 StrictPercent15 = Annotated[float, Field(ge=0, le=15, allow_inf_nan=False), _NUM]
 StrictCount15 = Annotated[int, Field(ge=0, le=15), _INT]
 StrictTaxClass = Annotated[int, Field(ge=1, le=6), _INT]
 Minutes = Annotated[int, Field(ge=1, le=1440)]
+
+
+class DecimalOutput:
+    """Marker in the metadata of ``Money`` / ``UnitPrice``: ``api.responses.present`` converts such fields."""
+
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+
+    def __repr__(self) -> str:
+        return f"DecimalOutput({self.kind!r})"
+
+
+def _lenient_money(value: Any) -> Any:
+    """Stored float, int or decimal string -> float (the Python value keeps its stored type). Anything else is left
+    for the float validation to judge."""
+    if isinstance(value, str) and _MONEY_STR_RE.fullmatch(value):
+        return float(Decimal(value))
+    return value
+
+
+def _decimal_out(value: Any) -> Any:
+    """Decimal string for JSON; a NaN/inf value (damaged row) is returned unchanged instead of raising."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return value
+    return money.to_decimal_str(value)
+
+
+_MONEY_OUT_SCHEMA = {"type": "string", "format": "decimal", "pattern": r"^-?[0-9]+\.[0-9]{2,6}$"}
+
+
+def _money_out(kind: str) -> Any:
+    return Annotated[
+        float,
+        BeforeValidator(_lenient_money),
+        PlainSerializer(_decimal_out, return_type=Any, when_used="json"),
+        WithJsonSchema(_MONEY_OUT_SCHEMA),
+        DecimalOutput(kind),
+    ]
+
+
+# response amounts (net, VAT, gross, totals) and unit prices (EUR/h, EUR/km, price per unit): a decimal string in JSON
+Money = _money_out("money")
+UnitPrice = _money_out("unit_price")
+
+
+# ---- Decimal-yielding money input of the accounting models (docs/specs/accounting.md 7a) ----
+CENT_STEP = Decimal("0.01")
+
+
+def _decimal_money(value: Any) -> Any:
+    """Number or decimal string -> exact Decimal (floats via ``repr``, never float arithmetic). Bools, NaN/inf and every
+    other string form are refused."""
+    if isinstance(value, bool):
+        raise ValueError("must be a number or a decimal string like 12.50")
+    if isinstance(value, str):
+        if not _MONEY_STR_RE.fullmatch(value):
+            raise ValueError("must be a number or a decimal string like 12.50 (dot as decimal separator)")
+        return Decimal(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("must be a finite number")
+        return Decimal(repr(value))
+    if isinstance(value, int):
+        return Decimal(value)
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError("must be a finite number")
+        return value
+    raise ValueError("must be a number or a decimal string like 12.50")
+
+
+def money_in(lo: str, hi: str, *, exclusive_min: bool = False) -> Any:
+    """A strict money input yielding ``Decimal`` in whole cents within ``[lo, hi]`` (``(lo, hi]`` when
+    ``exclusive_min``). Accepts a JSON number or a decimal string; more than two decimals are refused."""
+    low, high = Decimal(lo), Decimal(hi)
+
+    def check(value: Decimal) -> Decimal:
+        if value != value.quantize(CENT_STEP):
+            raise ValueError("must be a whole number of cents (at most two decimals)")
+        if (value <= low) if exclusive_min else (value < low):
+            raise ValueError(f"must be greater than {lo}" if exclusive_min else f"must be at least {lo}")
+        if value > high:
+            raise ValueError(f"must be at most {hi}")
+        return value.quantize(CENT_STEP)
+
+    number: dict[str, Any] = {"type": "number", "maximum": float(high)}
+    number["exclusiveMinimum" if exclusive_min else "minimum"] = float(low)
+    schema = {"anyOf": [number, {"type": "string", "pattern": MONEY_STR_PATTERN}]}
+    return Annotated[Decimal, BeforeValidator(_decimal_money), AfterValidator(check), WithJsonSchema(schema)]
+
+
+MoneyIn = money_in("-1000000000", "1000000000")
+PositiveMoneyIn = money_in("0", "1000000000", exclusive_min=True)
+PaymentAmountIn = money_in("0", "10000000", exclusive_min=True)  # one payment: > 0 and <= 10,000,000.00
+
+# tax treatments (docs/specs/credit-notes-payments.md 5). Values reserved for later releases are refused with 422.
+RESERVED_SALES_TREATMENTS = (
+    "reverse_charge_domestic",
+    "eu_b2b_goods_exempt",
+    "export_exempt",
+    "non_taxable_other",
+    "exempt_with_deduction",
+    "exempt_no_deduction",
+)
+RESERVED_EXPENSE_TREATMENTS = ("reverse_charge_domestic", "import_vat")
+
+
+def _refuse_reserved(reserved: tuple[str, ...]) -> Callable[[Any], Any]:
+    def check(value: Any) -> Any:
+        if isinstance(value, str) and value in reserved:
+            raise ValueError("not supported in this release")
+        return value
+
+    return check
+
+
+SalesTreatment = Annotated[
+    Literal["standard", "small_business", "eu_b2b_service"],
+    BeforeValidator(_refuse_reserved(RESERVED_SALES_TREATMENTS)),
+]
+ExpenseTreatment = Annotated[
+    Literal["standard", "no_input_vat", "reverse_charge_eu_service", "reverse_charge_third_country"],
+    BeforeValidator(_refuse_reserved(RESERVED_EXPENSE_TREATMENTS)),
+]
+CreditKind = Literal["storno", "partial", "discount", "write_off", "write_off_reversal"]  # stored kinds
+CreditNoteKindIn = Literal["storno", "partial", "write_off"]  # the kinds a client may request
+PaymentKindIn = Literal["payment", "refund"]
+PaymentMethod = Literal["bank", "cash"]
+_RATE_KEY_RE = re.compile(r"[0-9]{1,2}(\.[0-9]{1,2})?")
+
+
+def _rate_key(value: Any) -> Any:
+    """A VAT rate as a map key, in its canonical form ("19.00" -> "19", "10.70" -> "10.7")."""
+    if not isinstance(value, str) or not _RATE_KEY_RE.fullmatch(value):
+        raise ValueError("must be a VAT rate such as 19 or 10.7")
+    return format(Decimal(value).normalize(), "f")
+
+
+RateKey = Annotated[
+    str,
+    BeforeValidator(_rate_key),
+    WithJsonSchema({"type": "string", "pattern": r"^[0-9]{1,2}(\.[0-9]{1,2})?$"}),
+]  # the service checks the rate against the invoice
+MAX_CREDIT_RATES = 20
+
+
+def _unique_rate_keys(value: Any) -> Any:
+    """Refuse two keys that name one rate after normalisation (so "19" and "19.00" cannot both be sent)."""
+    if not isinstance(value, dict):
+        return value
+    seen: set[Any] = set()
+    for key in value:
+        canonical = key
+        if isinstance(key, str) and _RATE_KEY_RE.fullmatch(key):
+            canonical = _rate_key(key)
+        if canonical in seen:
+            raise ValueError(f"the rate {canonical} is given twice")
+        seen.add(canonical)
+    return value
 
 
 def _check_value(value: Any, depth: int = 0) -> None:
@@ -304,3 +505,34 @@ def check_period(start: str | None, end: str | None, what: str = "end") -> None:
     """Both are already valid ISO dates (or None)."""
     if start and end and end < start:
         raise ValueError(f"{what} must not be before the start date")
+
+
+# ---- accounting journal primitives (docs/specs/accounting.md 4, 8.1, 9.8, 11) ----
+AccountNo = Annotated[str, StringConstraints(pattern=r"^[0-9A-Za-z_.-]{1,20}$")]  # a chart account number
+RoleName = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,59}$")]  # a stable role name of the chart
+
+
+def _known_tax_key(value: str) -> str:
+    from permita38.core.vat_rules import TAX_KEYS
+
+    if value not in TAX_KEYS:
+        raise ValueError(f"unknown tax key; use one of {sorted(TAX_KEYS)}")
+    return value
+
+
+# S19, VST, EU_SVC, RC_EU_SVC, NONE ... (the keys of docs/specs/accounting.md 6)
+TaxKeyName = Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]{0,29}$"), AfterValidator(_known_tax_key)]
+TaxKind = Literal["tax", "input", "base_only"]
+TaxRateText = Annotated[str, StringConstraints(pattern=r"^[0-9]{1,2}(\.[0-9]{1,2})?$")]
+EntryText = Annotated[str, StringConstraints(min_length=1, max_length=200), AfterValidator(_not_blank)]
+FiscalYearNo = Annotated[int, Field(ge=2000, le=2100, strict=True)]
+MonthNo = Annotated[int, Field(ge=1, le=12, strict=True)]
+QuarterNo = Annotated[int, Field(ge=1, le=4, strict=True)]
+Chart = Literal["skr03", "skr04"]
+IncomeBasis = Literal["eur", "accrual"]
+VatBasis = Literal["soll", "ist"]
+VatFrequency = Literal["month", "quarter", "none"]
+VatPeriodKind = Literal["month", "quarter"]
+Reference = Annotated[str, StringConstraints(max_length=100)]
+LongNote = Annotated[str, StringConstraints(max_length=500)]
+NonNegMoneyIn = money_in("0", "1000000000")

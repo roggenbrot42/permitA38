@@ -2,23 +2,27 @@
 other devices survive a round-trip through this version."""
 
 import json
-from datetime import datetime
+from datetime import date as _date
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     StrictBool,
     StrictInt,
     StringConstraints,
+    ValidationError,
     field_validator,
     model_serializer,
     model_validator,
 )
 
+from . import money
 from . import validation as v
 from .holidays import STATES
 from .numbering import PatternError, parse_pattern
@@ -44,7 +48,7 @@ class Customer(Record):
     email: str | None = None
     phone: str | None = None
     notes: str | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     external_id: str | None = None
     import_batch: str | None = None
 
@@ -53,7 +57,7 @@ class Project(Record):
     name: str
     customer_id: str | None = None
     kind: str = "customer"
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     budget_hours: float | None = None
     status: str = "active"
     color: str | None = None
@@ -67,7 +71,7 @@ class Project(Record):
 class Task(Record):
     project_id: str
     name: str
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
 
 
 class Entry(Record):
@@ -81,7 +85,7 @@ class Entry(Record):
     end: str | None = None
     billable: bool = True
     invoice_id: str | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
 
 
 class Contract(Record):
@@ -92,7 +96,7 @@ class Contract(Record):
     end: str
     hours_per_week: float | None = None
     total_hours: float | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     status: str = "confirmed"
     user_ids: list[str] = []
     offer_id: str | None = None
@@ -111,10 +115,10 @@ class ExpenseLine(BaseModel):
 
     model_config = ConfigDict(extra="allow")
     description: str = ""
-    gross: float | None = None
+    gross: v.Money | None = None
     vat_rate: float | None = None
-    net: float | None = None
-    vat: float | None = None
+    net: v.Money | None = None
+    vat: v.Money | None = None
     deductible: float = 100
     vat_deductible: float | None = None
     category: str | None = None
@@ -122,8 +126,8 @@ class ExpenseLine(BaseModel):
 
 class Expense(Record):
     date: str
-    net: float
-    vat: float = 0
+    net: v.Money
+    vat: v.Money = 0
     vat_rate: float | None = None
     vendor: str | None = None
     description: str | None = None
@@ -142,6 +146,10 @@ class Expense(Record):
     reverse_charge: bool | None = None  # stored as sent; the VAT figures are not changed (open decision 6)
     paid_on: str | None = None  # docs/specs/receipt-scan.md: null = not given, counts as paid on the bill date `date`
     invoice_no: str | None = None  # the invoice number printed on the bill
+    tax_treatment: str | None = None  # docs/specs/accounting.md 8.2; null reads as derived (section 16)
+    service_date: str | None = None  # performance date (§ 13b); null reads as `date`
+    bill_rev: int | None = None  # revision of the posted bill entry (server-owned; accounting.md 7, 9.4)
+    pay_rev: int | None = None  # revision of the posted payment entry (server-owned)
 
 
 class Line(BaseModel):
@@ -149,9 +157,9 @@ class Line(BaseModel):
     description: str = ""
     qty: float = 0
     unit: str | None = None
-    price: float = 0
+    price: v.UnitPrice = 0
     vat: float | None = None
-    amount: float | None = None
+    amount: v.Money | None = None
 
 
 class Plan(BaseModel):
@@ -161,8 +169,77 @@ class Plan(BaseModel):
     hours_per_week: float | None = None
     total_hours: float | None = None
     user_ids: list[str] = []
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     win_probability: float | None = None
+
+
+class Payment(BaseModel):
+    """One payment, refund or reversal of an invoice (docs/specs/credit-notes-payments.md 2.3 and 3). ``amount`` is
+    signed: positive = money received, negative = money paid back. ``id`` is null for a legacy virtual payment."""
+
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    document_id: str | None = None
+    date: str | None = None
+    amount: v.Money = 0
+    kind: str = "payment"  # payment | refund | reversal
+    method: str = "bank"
+    note: str | None = None
+    reverses_id: str | None = None
+    created: int | None = None
+
+    @field_validator("date", "amount", "created", mode="wrap")
+    @classmethod
+    def _lenient(cls, value: Any, handler: Any, info: Any) -> Any:
+        """A stored malformed value must never fail a read: it reads as empty (date, created) or 0 (amount)."""
+        try:
+            return handler(value)
+        except ValidationError:
+            return 0.0 if info.field_name == "amount" else None
+
+
+class CreditNoteSummary(BaseModel):
+    """A credit note as listed on its invoice (``credit_notes`` of the invoice response)."""
+
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    number: str | None = None  # null for write-offs (internal vouchers)
+    date: str | None = None
+    credit_kind: str | None = None
+    gross: v.Money = 0
+    reason: str | None = None
+
+
+class IssuedRate(BaseModel):
+    """One rate group of the issued snapshot (cent values are decimal strings in responses)."""
+
+    model_config = ConfigDict(extra="allow")
+    net: v.Money = 0
+    vat: v.Money = 0
+    gross: v.Money = 0
+
+
+class IssuedCustomer(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    name: str | None = None
+    vat_id: str | None = None
+    country: str | None = None
+
+
+class IssuedSnapshot(BaseModel):
+    """The snapshot taken when an invoice is issued (accounting spec 9.1). Stored in integer cents and epoch seconds;
+    responses show decimal strings and an ISO 8601 ``issued_at``. Never changed by a client."""
+
+    model_config = ConfigDict(extra="allow")
+    regime: str | None = None
+    treatment: str | None = None
+    rates: dict[str, IssuedRate] | None = None  # key = the rate in percent
+    gross: v.Money | None = None
+    perf: str | None = None
+    customer: IssuedCustomer | None = None
+    issued_at: str | None = None
+    rules_version: str | None = None
 
 
 class Document(Record):
@@ -196,6 +273,18 @@ class Document(Record):
     import_batch: str | None = None
     totals_unverified: bool | None = None
     original_pdf: str | None = None
+    # docs/specs/credit-notes-payments.md 2.3: stored by the accounting services, derived on output
+    kind: str | None = None  # invoice | credit_note
+    credit_kind: str | None = None
+    corrects_id: str | None = None
+    tax_treatment: str | None = None  # null reads as `standard`
+    issued: IssuedSnapshot | None = None  # the snapshot taken when the invoice is issued
+    paid_amount: v.Money | None = None
+    credited_amount: v.Money | None = None
+    open_amount: v.Money | None = None  # gross - credited - paid; negative = customer credit
+    payments: list[Payment] | None = None
+    credit_notes: list[CreditNoteSummary] | None = None
+    creditable: dict[str, v.Money] | None = None  # per rate: the net still creditable
 
 
 class Template(Record):
@@ -231,8 +320,8 @@ class UserOut(Record):
     role: str | None = None
     weekly_hours: float | None = None
     workdays: list[int] | None = None
-    default_rate: float | None = None
-    cost_rate: float | None = None
+    default_rate: v.UnitPrice | None = None
+    cost_rate: v.UnitPrice | None = None
     color: str | None = None
     tracking_start: str | None = None
     active: bool | None = None
@@ -338,20 +427,27 @@ class Settings(BaseModel):
     vat_rate: float = 19
     state: str = ""
     hebesatz: float = 400
-    default_rate: float = 80
+    default_rate: v.UnitPrice = 80
     payment_days: int = 14
     offer_valid_days: int = 30
     default_template: str = "classic"
     invoice_pattern: str = "RE-{year}-{n:04d}"
     offer_pattern: str = "AN-{year}-{n:04d}"
+    credit_note_pattern: str = "RK-{year}-{n:04d}"
+    credit_note_reset: str = "yearly"
     invoice_reset: str = "yearly"  # never | yearly | monthly (see core/numbering.py)
     offer_reset: str = "yearly"
     numbering_shared: bool = False  # invoices and offers share one sequence
-    planning_min_rate: float = 0
+    planning_min_rate: v.UnitPrice = 0
     planning_default_win_probability: float = 100
     subcontractor_hint_hours_per_week: float = 30
     subcontractor_hint_weeks: int = 12
     customer_dominance_percent: float = 83
+    # DATEV export (docs/specs/datev-export.md); lenient: a stored legacy string must not break the response
+    datev_consultant_no: int | str | None = None
+    datev_client_no: int | str | None = None
+    datev_account_length: int | str = 4
+    datev_label: str = ""
 
 
 class TimelineAbsence(BaseModel):
@@ -560,6 +656,30 @@ class ExpenseLineIn(v.StrictRecord):
         return value
 
 
+# Fields the server owns: a client (also one that sends a whole record back) cannot set them. They are dropped
+# silently before validation, so a round-tripped response is accepted and the stored value is never overwritten.
+INTERNAL_EXPENSE_FIELDS = ("bill_rev", "pay_rev")
+INTERNAL_TRIP_FIELDS = ("post_rev",)
+INTERNAL_DOCUMENT_FIELDS = (
+    "issued",
+    "kind",
+    "credit_kind",
+    "corrects_id",
+    "paid_amount",
+    "credited_amount",
+    "open_amount",
+    "payments",
+    "credit_notes",
+    "creditable",
+)
+
+
+def _without(data: Any, names: tuple[str, ...]) -> Any:
+    if isinstance(data, dict) and any(name in data for name in names):
+        return {k: val for k, val in data.items() if k not in names}
+    return data
+
+
 class ExpenseIn(v.StrictRecord):
     date: v.ISODate
     net: v.NonNegAmount | None = None  # required without lines; with lines it is derived by the server
@@ -580,11 +700,22 @@ class ExpenseIn(v.StrictRecord):
     reverse_charge: bool = False
     paid_on: v.OptDate = None  # null/empty = same as the bill date
     invoice_no: Annotated[str, StringConstraints(max_length=60)] | None = None
+    tax_treatment: v.ExpenseTreatment | None = None  # docs/specs/accounting.md 8.2; null = derived by the server
+    service_date: v.OptDate = None  # performance date for § 13b; null = same as the bill date
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        return _without(data, INTERNAL_EXPENSE_FIELDS)
 
     @model_validator(mode="after")
     def _net_or_lines(self):
         if not self.lines and self.net is None:
             raise ValueError("net is required for a bill without lines")
+        if self.service_date and _date.fromisoformat(self.service_date) > _date.fromisoformat(self.date) + timedelta(
+            days=366
+        ):
+            raise ValueError("service_date must not be more than 366 days after the bill date")
         return self
 
 
@@ -729,9 +860,73 @@ class DocumentIn(v.StrictRecord):
     plan: PlanIn | None = None
     offer_id: v.OptId = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        # an offer never has a tax treatment (InvoiceIn overrides this to keep it)
+        return _without(data, (*INTERNAL_DOCUMENT_FIELDS, "tax_treatment"))
+
     @model_validator(mode="after")
     def _period(self):
         v.check_period(self.service_from, self.service_to, "service period end")
+        return self
+
+
+class InvoiceIn(DocumentIn):
+    """The invoice body: an offer has no tax treatment (docs/specs/accounting.md 8, the column is on ``invoices`` only)."""
+
+    tax_treatment: v.SalesTreatment | None = None  # null reads as `standard`; reserved values are refused
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        return _without(data, INTERNAL_DOCUMENT_FIELDS)
+
+
+class PaymentIn(v.CheckedBody):
+    """A payment or refund on an issued invoice (docs/specs/credit-notes-payments.md 3). The amount is positive; a
+    refund is stored negative by the service."""
+
+    date: v.ISODate
+    amount: v.PaymentAmountIn
+    kind: v.PaymentKindIn = "payment"
+    method: v.PaymentMethod = "bank"
+    note: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+class PaymentReverseIn(v.CheckedBody):
+    """Reverse a payment entered by mistake; the date defaults to the payment date (service)."""
+
+    date: v.OptDate = None
+    note: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+class SettleDiscountIn(v.CheckedBody):
+    """Settle an invoice with a cash discount: a discount credit note for the rest, then the payment."""
+
+    date: v.ISODate
+    amount_paid: v.PaymentAmountIn
+    note: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+RateAmounts = Annotated[
+    dict[v.RateKey, v.PositiveMoneyIn], BeforeValidator(v._unique_rate_keys), Field(max_length=v.MAX_CREDIT_RATES)
+]
+
+
+class CreditNoteIn(v.CheckedBody):
+    """Issue a credit note on an invoice (docs/specs/credit-notes-payments.md 4). ``amounts`` maps a VAT rate to the
+    net amount credited; it is required for ``partial`` and ignored by the service for the other kinds."""
+
+    credit_kind: v.CreditNoteKindIn
+    date: v.ISODate
+    reason: Annotated[str, StringConstraints(min_length=1, max_length=500), AfterValidator(v._not_blank)]
+    amounts: RateAmounts | None = None
+
+    @model_validator(mode="after")
+    def _amounts_for_partial(self):
+        if self.credit_kind == "partial" and not self.amounts:
+            raise ValueError("amounts is required for a partial credit note")
         return self
 
 
@@ -835,16 +1030,16 @@ class PersonalTaxHealth(BaseModel):
     mode: str = "gkv"
     krankengeld: bool = True
     zusatzbeitrag_percent: float | None = None
-    pkv_monthly: float = 0
-    pkv_basis_monthly: float = 0
-    pkv_care_monthly: float = 0
-    pkv_employer_subsidy_monthly: float = 0
+    pkv_monthly: v.Money = 0
+    pkv_basis_monthly: v.Money = 0
+    pkv_care_monthly: v.Money = 0
+    pkv_employer_subsidy_monthly: v.Money = 0
 
 
 class PersonalTaxPension(BaseModel):
     model_config = ConfigDict(extra="allow")
     mode: str = "none"
-    fixed_monthly: float = 0
+    fixed_monthly: v.Money = 0
 
 
 class PersonalTaxUnemployment(BaseModel):
@@ -854,14 +1049,14 @@ class PersonalTaxUnemployment(BaseModel):
 
 class PersonalTaxEmployment(BaseModel):
     model_config = ConfigDict(extra="allow")
-    gross_year: float = 0
+    gross_year: v.Money = 0
     sv_liable: bool = True
     steuerklasse: int | None = None
-    bav_employee_year: float = 0
-    bav_employer_year: float = 0
-    vwl_employer_year: float = 0
-    werbungskosten_year: float = 0
-    withheld_year: float | None = None
+    bav_employee_year: v.Money = 0
+    bav_employer_year: v.Money = 0
+    vwl_employer_year: v.Money = 0
+    werbungskosten_year: v.Money = 0
+    withheld_year: v.Money | None = None
 
 
 class PersonalTax(BaseModel):
@@ -870,9 +1065,9 @@ class PersonalTax(BaseModel):
     model_config = ConfigDict(extra="allow")
     assessment: str = "single"
     church_tax_percent: float = 0
-    other_income_year: float = 0
-    other_deductions_year: float = 0
-    other_insurance_year: float = 0
+    other_income_year: v.Money = 0
+    other_deductions_year: v.Money = 0
+    other_insurance_year: v.Money = 0
     children: PersonalTaxChildren = Field(default_factory=PersonalTaxChildren)
     health: PersonalTaxHealth = Field(default_factory=PersonalTaxHealth)
     pension: PersonalTaxPension = Field(default_factory=PersonalTaxPension)
@@ -911,6 +1106,8 @@ class SettingsIn(v.StrictRecord):
     default_template: v.Id = "classic"
     invoice_pattern: Annotated[str, StringConstraints(max_length=100)] = "RE-{year}-{n:04d}"
     offer_pattern: Annotated[str, StringConstraints(max_length=100)] = "AN-{year}-{n:04d}"
+    credit_note_pattern: Annotated[str, StringConstraints(max_length=100)] = "RK-{year}-{n:04d}"
+    credit_note_reset: Literal["never", "yearly", "monthly"] = "yearly"
     invoice_reset: Literal["never", "yearly", "monthly"] = "yearly"
     offer_reset: Literal["never", "yearly", "monthly"] = "yearly"
     numbering_shared: bool = False
@@ -919,6 +1116,10 @@ class SettingsIn(v.StrictRecord):
     subcontractor_hint_hours_per_week: Annotated[float, Field(ge=1, le=168, allow_inf_nan=False)] = 30
     subcontractor_hint_weeks: Annotated[int, Field(ge=1, le=104)] = 12
     customer_dominance_percent: Annotated[float, Field(ge=1, le=100, allow_inf_nan=False)] = 83
+    datev_consultant_no: Annotated[int, Field(ge=1001, le=9999999)] | None = None
+    datev_client_no: Annotated[int, Field(ge=1, le=99999)] | None = None
+    datev_account_length: Annotated[int, Field(ge=4, le=8)] = 4
+    datev_label: Annotated[str, StringConstraints(max_length=30)] = ""
     team_timeline_visibility: TeamTimelineVisibilityIn = TeamTimelineVisibilityIn()
 
     @model_validator(mode="before")
@@ -939,7 +1140,7 @@ class SettingsIn(v.StrictRecord):
             raise ValueError("is not a German federal state code")
         return value
 
-    @field_validator("invoice_pattern", "offer_pattern")
+    @field_validator("invoice_pattern", "offer_pattern", "credit_note_pattern")
     @classmethod
     def _numbering_pattern(cls, value: str) -> str:
         try:
@@ -1160,7 +1361,7 @@ class Allocation(BaseModel):
     end: str
     hours_per_week: float | None = None
     total_hours: float | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     status: str = "active"
     cancelled_from: str | None = None
     cancel_reason: str | None = None
@@ -1173,9 +1374,9 @@ class Allocation(BaseModel):
     planned_hours: float | None = None
     planning_warnings: list[dict] | None = None  # only in POST/PUT answers
     # external allocations only (docs/contracts/subcontractors.md)
-    planned_net: float | None = None
-    invoiced_net: float | None = None
-    open_net: float | None = None
+    planned_net: v.Money | None = None
+    invoiced_net: v.Money | None = None
+    open_net: v.Money | None = None
     offer_reference: str | None = None
     days: list[dict] | None = None  # GET /api/allocations/{allocation_id}
 
@@ -1301,13 +1502,13 @@ class TripItem(BaseModel):
     from_: str | None = Field(None, alias="from")
     to: str | None = None
     text: str | None = None
-    expected: float | None = None
+    expected: v.Money | None = None
 
 
 class TripReduction(BaseModel):
     model_config = ConfigDict(extra="allow")
     meal: Literal["breakfast", "lunch", "dinner"]
-    amount: float
+    amount: v.Money
 
 
 class TripDay(BaseModel):
@@ -1318,9 +1519,9 @@ class TripDay(BaseModel):
     country: str  # the country whose rate row was used (LU after fallback)
     city: str | None = None  # omitted when the place has no city
     absence_hours: float
-    base: float
+    base: v.Money
     reductions: list[TripReduction] = []
-    amount: float
+    amount: v.Money
     note: str = ""
 
 
@@ -1328,8 +1529,8 @@ class TripBills(BaseModel):
     """The linked bills (expenses with this trip_id): count and sums of their net and VAT."""
 
     count: int = 0
-    net: float = 0
-    vat: float = 0
+    net: v.Money = 0
+    vat: v.Money = 0
 
 
 class TripChecklistItem(BaseModel):
@@ -1339,7 +1540,7 @@ class TripChecklistItem(BaseModel):
     hint: str
     state: Literal["added", "open", "not_needed"]
     count: int = 0
-    sum: float = 0
+    sum: v.Money = 0
 
 
 class TripFigures(BaseModel):
@@ -1347,10 +1548,10 @@ class TripFigures(BaseModel):
 
     model_config = ConfigDict(extra="allow")
     days: list[TripDay] = []
-    allowance_total: float = 0
+    allowance_total: v.Money = 0
     mileage_km: float = 0
-    mileage_rate: float | None = None
-    mileage_total: float = 0
+    mileage_rate: v.UnitPrice | None = None
+    mileage_total: v.Money = 0
     rules_version: str | None = None
 
 
@@ -1373,15 +1574,17 @@ class Trip(Record):
     not_needed: list[str] = []
     cost_centre: Literal["project", "general"] | None = None
     status: Literal["draft", "final"] = "draft"
-    allowance_total: float | None = None
+    allowance_total: v.Money | None = None
     mileage_km: float | None = None
-    mileage_total: float | None = None
+    mileage_total: v.Money | None = None
+    mileage_rate: v.UnitPrice | None = None
     rules_version: str | None = None
     days: list[TripDay] = []
     bills: TripBills | None = None  # response-only, computed on every read
     checklist: list[TripChecklistItem] | None = None  # response-only, computed on every read
-    items_expected_total: float | None = None  # response-only: sum of the items' expected (planning only)
-    items_actual_total: float | None = None  # response-only: gross of all linked bills (planned and unplanned)
+    items_expected_total: v.Money | None = None  # response-only: sum of the items' expected (planning only)
+    items_actual_total: v.Money | None = None  # response-only: gross of all linked bills (planned and unplanned)
+    post_rev: int | None = None  # server-owned: the highest journal revision posted (docs/specs/accounting.md 9.5)
 
 
 class TripPlaceIn(v.StrictRecord):
@@ -1458,6 +1661,11 @@ class TripIn(v.StrictRecord):
     not_needed: Annotated[list[v.Short], Field(max_length=20)] = []
     cost_centre: Literal["project", "general"] | None = None
     status: Literal["draft", "final"] = "draft"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_internal(cls, data: Any) -> Any:
+        return _without(data, INTERNAL_TRIP_FIELDS)
 
     @model_validator(mode="after")
     def _period(self):
@@ -1665,7 +1873,7 @@ class Supplier(Record):
     tags: list[str] = []
     weekly_hours: float | None = None
     workdays: list[int] | None = None
-    rate: float | None = None
+    rate: v.UnitPrice | None = None
     unavailable: list[dict] | None = None
     login_user_id: str | None = None
     external_id: str | None = None
@@ -1744,10 +1952,10 @@ class IncomingOffer(Record):
     valid_until: str | None = None
     lines: list[dict] = []
     hours: float = 0.0
-    net_total: float | None = None
+    net_total: v.Money | None = None
     vat_rate: float | None = None
-    vat: float | None = None
-    gross_total: float | None = None
+    vat: v.Money | None = None
+    gross_total: v.Money | None = None
     vat_mode: str | None = None
     plan: dict | None = None
     project_id: str | None = None
@@ -1808,6 +2016,509 @@ class AdoptVendorsIn(v.CheckedBody):
     items: Annotated[list[AdoptVendorItemIn], Field(min_length=1, max_length=200)]
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Accounting journal, fiscal years, VAT returns and ZM (docs/specs/accounting.md 4, 7a, 8.1, 9.8, 11, 16, 18;
+# ustva.md "Data model" and "API"; zm.md "Records" and "API"). Models only; the services follow.
+# Sign convention of every journal amount: DEBIT POSITIVE, CREDIT NEGATIVE (like ``amount_cents``), so an entry balances
+# when its amounts sum to 0. Responses carry money as decimal strings; the stored ``*_cents`` integers are converted.
+# ---------------------------------------------------------------------------------------------------------------------
+
+
+def _cents_to_money(cents: Any) -> Decimal | None:
+    """A stored cents value (int, numeric string, float-like) as exact euros; only an unparseable value gives None."""
+    if isinstance(cents, bool) or cents is None:
+        return None
+    try:
+        return money.dec(cents, default=None).scaleb(-2)
+    except ValueError:
+        return None
+
+
+def _from_cents(data: Any, pairs: dict[str, str]) -> Any:
+    """Stored ``<name>_cents`` (int) -> ``<name>`` (Money). A value already given under the new name is kept."""
+    if not isinstance(data, dict) or not any(k in data for k in pairs):
+        return data
+    out = dict(data)
+    for old, new in pairs.items():
+        if old in out:
+            cents = out.pop(old)
+            if new not in out:
+                out[new] = _cents_to_money(cents)
+    return out
+
+
+class FiscalYearIn(v.CheckedBody):
+    """Open a fiscal year (accounting.md 4). Rules that need the company type (GmbH must use accrual) and 'a change only
+    before the first entry' are service rules."""
+
+    year: v.FiscalYearNo
+    chart: v.Chart
+    income_basis: v.IncomeBasis
+    vat_basis: v.VatBasis = "soll"
+    vat_frequency: v.VatFrequency = "month"
+    dauerfrist: StrictBool = False
+    small_business: StrictBool = False
+    vat_regular_from: v.OptDate = None
+
+    @model_validator(mode="after")
+    def _regular_from(self):
+        if self.vat_regular_from:
+            if not self.small_business:
+                raise ValueError("vat_regular_from needs small_business")
+            if int(self.vat_regular_from[:4]) != self.year:
+                raise ValueError("vat_regular_from must lie in the fiscal year")
+        return self
+
+
+class FiscalYear(Record):
+    year: int
+    chart: str | None = None
+    income_basis: str | None = None
+    vat_basis: str | None = None
+    vat_frequency: str | None = None
+    dauerfrist: bool | None = None
+    small_business: bool | None = None
+    vat_regular_from: str | None = None
+    rules_version: str | None = None
+    opened_at: int | None = None
+    opened_by: str | None = None
+    closed_at: int | None = None
+    closed_by: str | None = None
+    closing_hash: str | None = None
+    closing_entry_no: int | None = None
+
+
+class JournalLine(BaseModel):
+    """One debit (positive) or credit (negative) of an entry. ``amount_cents`` / ``tax_base_cents`` are accepted from
+    storage and answered as decimal strings ``amount`` / ``tax_base``."""
+
+    model_config = ConfigDict(extra="allow")
+    id: str | None = None
+    entry_id: str | None = None
+    line_no: int | None = None
+    role: str | None = None
+    account: str
+    amount: v.Money = 0
+    tax_key: str | None = None
+    tax_kind: str | None = None
+    tax_rate: str | None = None
+    tax_base: v.Money | None = None
+    vat_date: str | None = None
+    income_date: str | None = None
+    open_item_id: str | None = None
+    treatment: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _cents(cls, data: Any) -> Any:
+        return _from_cents(data, {"amount_cents": "amount", "tax_base_cents": "tax_base"})
+
+
+class JournalEntry(Record):
+    fiscal_year: int | None = None
+    entry_no: int | None = None
+    document_date: str | None = None
+    booking_date: str | None = None
+    event: str | None = None
+    event_key: str | None = None
+    source_coll: str | None = None
+    source_id: str | None = None
+    source_number: str | None = None
+    reverses_id: str | None = None
+    reversed_by: str | None = None  # id of the reversal of this entry (computed in the journal listing, not stored)
+    counterparty_id: str | None = None
+    cp_vat_id: str | None = None
+    cp_country: str | None = None
+    text: str | None = None
+    origin: str | None = None  # auto | manual | opening
+    created_at: int | None = None
+    created_by: str | None = None
+    prev_hash: str | None = None
+    hash: str | None = None
+    warnings: list[str] = []  # VAT drift warnings (not hashed)
+    lines: list[JournalLine] = []
+
+
+class ManualLineIn(v.StrictRecord):
+    """One line of a manual entry. ``amount`` is signed: debit positive, credit negative; a zero amount is only allowed
+    on a ``base_only`` line (statistical). Exactly one of ``account`` and ``role``."""
+
+    account: v.AccountNo | None = None
+    role: v.RoleName | None = None
+    amount: v.MoneyIn
+    tax_key: v.TaxKeyName | None = None
+    tax_kind: v.TaxKind | None = None
+    tax_rate: v.TaxRateText | None = None
+    tax_base: v.MoneyIn | None = None  # in the sign of the VAT effect (accounting.md 6)
+    vat_date: v.OptDate = None
+    income_date: v.OptDate = None
+
+    @model_validator(mode="after")
+    def _rules(self):
+        if bool(self.account) == bool(self.role):
+            raise ValueError("give exactly one of account and role")
+        taxed = self.tax_key is not None and self.tax_key != "NONE"
+        if not taxed and (self.tax_kind or self.tax_base is not None or self.tax_rate or self.vat_date):
+            raise ValueError("tax_kind, tax_rate, tax_base and vat_date need a tax_key other than NONE")
+        if taxed:
+            if self.tax_kind is None:
+                raise ValueError("a line with a tax_key needs tax_kind")
+            if not self.vat_date:
+                raise ValueError("a line with a tax_key needs vat_date")
+            if self.tax_kind in ("tax", "base_only") and self.tax_base is None:
+                raise ValueError("a tax or base_only line needs tax_base")
+        if self.amount == 0 and self.tax_kind != "base_only":
+            raise ValueError("amount must not be 0 (except on a base_only line)")
+        return self
+
+
+class ManualEntryIn(v.CheckedBody):
+    """A free, balanced entry (accounting.md 9.8): at least two lines, amounts sum to 0, text required."""
+
+    date: v.ISODate  # document date; the service books it on max(date, first open day)
+    text: v.EntryText
+    lines: Annotated[list[ManualLineIn], Field(min_length=2, max_length=200)]
+
+    @model_validator(mode="after")
+    def _balanced(self):
+        if sum((line.amount for line in self.lines), Decimal(0)) != 0:
+            raise ValueError("the entry is not balanced: the amounts must sum to 0 (debit positive, credit negative)")
+        return self
+
+
+class EntryReverseIn(v.CheckedBody):
+    date: v.OptDate = None
+    text: Annotated[str, StringConstraints(max_length=200)] | None = None
+
+
+class PeriodLockIn(v.CheckedBody):
+    """Lock a month (and, by the service's order rule, every earlier one)."""
+
+    year: v.FiscalYearNo
+    month: v.MonthNo
+
+
+class YearCloseProvisionIn(v.CheckedBody):
+    """A tax provision the user confirms for the year closing (accounting.md 9.7, 13): ``amount`` is the estimate
+    already net of the prepayments expensed in the year."""
+
+    kind: Literal["trade_tax", "corporate_tax"]
+    amount: v.PositiveMoneyIn
+
+
+class YearCloseIn(v.CheckedBody):
+    """Close a fiscal year (accounting.md 13). Accrual: the provisions the user confirms are posted first; EÜR takes
+    none. At most one provision per kind."""
+
+    provisions: Annotated[list[YearCloseProvisionIn], Field(max_length=2)] = []
+
+    @model_validator(mode="after")
+    def _one_per_kind(self):
+        kinds = [p.kind for p in self.provisions]
+        if len(set(kinds)) != len(kinds):
+            raise ValueError("at most one provision per kind")
+        return self
+
+
+class PeriodLock(Record):
+    year: int
+    month: int
+    locked_at: int | None = None
+    locked_by: str | None = None
+    reason: str | None = None
+
+
+class VatReturnCreateIn(v.CheckedBody):
+    year: v.FiscalYearNo
+    kind: v.VatPeriodKind
+    no: Annotated[int, Field(ge=1, le=12, strict=True)]
+    amends_id: v.OptId = None
+
+    @model_validator(mode="after")
+    def _no_in_range(self):
+        if self.kind == "quarter" and self.no > 4:
+            raise ValueError("no must be 1..4 for a quarter")
+        return self
+
+
+class VatReturnFiledIn(v.CheckedBody):
+    filed_on: v.ISODate
+    reference: v.Reference | None = None
+    note: v.LongNote | None = None
+
+
+class VatReturnPaymentIn(v.CheckedBody):
+    """Payment (to the tax office) or refund (from it) of Kz 83; the amount is positive, the kind gives the direction."""
+
+    date: v.ISODate
+    amount: v.PositiveMoneyIn
+    kind: Literal["payment", "refund"]
+
+
+class SpecialPrepaymentIn(v.CheckedBody):
+    year: v.FiscalYearNo
+    amount: v.NonNegMoneyIn
+    paid_on: v.OptDate = None
+
+
+class VatBox(BaseModel):
+    """One Kennzahl: base/tax (with booked figures) or a single amount, all decimal strings."""
+
+    model_config = ConfigDict(extra="allow")
+    base: v.Money | None = None
+    tax: v.Money | None = None
+    booked_base: v.Money | None = None
+    booked_tax: v.Money | None = None
+    amount: v.Money | None = None
+    flag: int | None = None  # Kz 10 (amended return): the marker 1
+
+
+class VatPayment(BaseModel):
+    """One payment or refund of Kz 83 read from the journal (accounting.md 9.6); reversed ones are listed, flagged."""
+
+    model_config = ConfigDict(extra="allow")
+    entry_id: str | None = None
+    event_key: str | None = None
+    date: str | None = None
+    kind: Literal["payment", "refund"] = "payment"
+    amount: v.Money = 0
+    reversed: bool = False
+
+
+class SpecialPrepaymentPayment(BaseModel):
+    """The booked payment of a Sondervorauszahlung."""
+
+    model_config = ConfigDict(extra="allow")
+    entry_key: str | None = None
+    paid_on: str | None = None
+    amount: v.Money | None = None
+    reversed: bool = False
+
+
+class SpecialPrepaymentOut(BaseModel):
+    """Sondervorauszahlung of a year: proposal, entered amount and the booked payment (docs/specs/ustva.md)."""
+
+    model_config = ConfigDict(extra="allow")
+    year: int
+    dauerfrist: bool = False
+    applies: bool = False
+    proposal: v.Money = 0
+    months: int | None = None
+    previous_kz83: v.Money = 0
+    previous_kz39: v.Money = 0
+    amount: v.Money | None = None
+    due_date: str | None = None
+    payment: SpecialPrepaymentPayment | None = None
+
+
+class VatReturn(Record):
+    year: int
+    period_kind: str | None = None
+    period_no: int | None = None
+    from_date: str | None = None
+    to_date: str | None = None
+    due_date: str | None = None
+    status: str = "draft"
+    basis: str | None = None
+    frequency: str | None = None
+    dauerfrist: bool | None = None
+    small_business: bool | None = None
+    rules_version: str | None = None
+    boxes: dict[str, VatBox] = {}
+    source_lines: list[str] | None = None
+    result: v.Money | None = None  # Kz 83
+    special_prepayment_credit: v.Money | None = None  # Kz 39
+    rounding_difference: v.Money | None = None
+    filed_on: str | None = None
+    reference: str | None = None
+    note: str | None = None
+    amends_id: str | None = None
+    amends_key: str | None = None
+    replaced_by: str | None = None
+    external: bool | None = None
+    finalised_at: int | None = None
+    finalised_by: str | None = None
+    payments: list[VatPayment] | None = None
+    paid: v.Money | None = None  # net paid so far (payments minus refunds, reversed ones excluded)
+    open: v.Money | None = None  # Kz 83 minus paid
+    payment_state: Literal["none", "open", "paid", "overpaid"] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _cents(cls, data: Any) -> Any:
+        if isinstance(data, dict) and isinstance(data.get("boxes"), dict):
+            data = {**data, "boxes": {k: b for k, b in data["boxes"].items() if isinstance(b, dict)}}
+        return _from_cents(
+            data,
+            {
+                "result_cents": "result",
+                "special_prepayment_credit_cents": "special_prepayment_credit",
+                "rounding_difference_cents": "rounding_difference",
+            },
+        )
+
+
+class ZmCreateIn(v.CheckedBody):
+    year: v.FiscalYearNo
+    quarter: v.QuarterNo
+    amends_id: v.OptId = None
+
+
+class ZmFiledIn(v.CheckedBody):
+    filed_on: v.ISODate
+    reference: v.Reference | None = None
+    note: v.LongNote | None = None
+
+
+class ZmLine(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    vat_id: str
+    country: str
+    amount: v.Money = 0
+    kind: str = "S"
+
+
+class ZmDriftLine(BaseModel):
+    """A late ``EU_SVC`` line of a final report (zm.md "Drift"); the base is a decimal string."""
+
+    model_config = ConfigDict(extra="allow")
+    line_id: str
+    entry_id: str | None = None
+    entry_no: int | None = None
+    booking_date: str | None = None
+    document: str | None = None
+    vat_id: str = ""
+    vat_date: str | None = None
+    base: v.Money = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _cents(cls, data: Any) -> Any:
+        return _from_cents(data, {"base_cents": "base"})
+
+
+class ZmDrift(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    entries: int = 0
+    lines: list[ZmDriftLine] = []
+
+
+class ZmReport(Record):
+    year: int
+    quarter: int
+    status: str = "draft"
+    due_date: str | None = None
+    lines: list[ZmLine] = []
+    source_lines: list[str] | None = None
+    rules_version: str | None = None
+    filed_on: str | None = None
+    reference: str | None = None
+    note: str | None = None
+    amends_id: str | None = None
+    amends_key: str | None = None
+    replaced_by: str | None = None
+    finalised_at: int | None = None
+    finalised_by: str | None = None
+    drift: ZmDrift | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _skip_bad_lines(cls, data: Any) -> Any:
+        if isinstance(data, dict) and isinstance(data.get("lines"), list):
+            # the stored exact ``cents`` of a line stay in storage; a response carries money as decimal strings only
+            data = {
+                **data,
+                "lines": [{k: x[k] for k in x if k != "cents"} for x in data["lines"] if isinstance(x, dict)],
+            }
+        return data
+
+
+class OpeningBalanceIn(v.CheckedBody):
+    """One opening balance of an accrual start; ``amount`` signed like a journal line (debit positive)."""
+
+    account: v.AccountNo | None = None
+    role: v.RoleName | None = None
+    amount: v.MoneyIn
+
+    @model_validator(mode="after")
+    def _one_of(self):
+        if bool(self.account) == bool(self.role):
+            raise ValueError("give exactly one of account and role")
+        return self
+
+
+class ReviewResolutionIn(v.CheckedBody):
+    """The user's answer to one row of the initialisation review list (accounting.md 16 step 9)."""
+
+    key: Annotated[str, StringConstraints(min_length=1, max_length=200)]
+    action: Literal["treatment", "confirm", "credit_note", "date"]
+    treatment: v.ExpenseTreatment | None = None
+    date: v.OptDate = None
+
+    @model_validator(mode="after")
+    def _arguments(self):
+        if (self.action == "treatment") != (self.treatment is not None):
+            raise ValueError("treatment is required for, and only for, the action treatment")
+        if (self.action == "date") != (self.date is not None):
+            raise ValueError("date is required for, and only for, the action date")
+        return self
+
+
+_Kz39In: Any = v.money_in("0", "1000000000")
+
+
+class ExternalReturnIn(v.CheckedBody):
+    """A VAT return of a period on/after the accounting start that was filed outside the app (accounting.md 16 step
+    5b): the filed Kz 83 (and Kz 39) and the filing date; or ``none_filed`` (nothing was filed for the period)."""
+
+    year: Annotated[int, Field(ge=2000, le=2100)]
+    kind: Literal["month", "quarter"]
+    no: Annotated[int, Field(ge=1, le=12)]
+    none_filed: StrictBool = False
+    kz83: v.MoneyIn | None = None
+    kz39: _Kz39In = Decimal(0)  # type: ignore[valid-type]
+    filed_on: v.OptDate = None
+
+    @model_validator(mode="after")
+    def _figures(self):
+        if self.none_filed:
+            if self.kz83 is not None or self.filed_on is not None or self.kz39 != 0:
+                raise ValueError("none_filed excludes kz83, kz39 and filed_on")
+        elif self.kz83 is None or self.filed_on is None:
+            raise ValueError("kz83 and filed_on are required unless none_filed")
+        if self.kind == "quarter" and self.no > 4:
+            raise ValueError("a quarter is 1..4")
+        return self
+
+
+class AccountingInitIn(v.CheckedBody):
+    """Initialisation request (accounting.md 16 step 1 and 9)."""
+
+    chart: v.Chart
+    income_basis: v.IncomeBasis
+    vat_basis: v.VatBasis = "soll"
+    frequency: v.VatFrequency = "month"
+    dauerfrist: StrictBool = False
+    small_business: StrictBool = False
+    accounting_start: v.OptDate = None  # null = 1 January of the current year (service)
+    opening_balances: Annotated[list[OpeningBalanceIn], Field(max_length=200)] = []
+    review_resolutions: Annotated[list[ReviewResolutionIn], Field(max_length=5000)] = []
+    external_returns: Annotated[list[ExternalReturnIn], Field(max_length=200)] = []
+
+    @model_validator(mode="after")
+    def _no_duplicates(self):
+        periods = [(r.year, r.kind, r.no) for r in self.external_returns]
+        if len(periods) != len(set(periods)):
+            raise ValueError("external_returns: duplicate period")
+        keys = [r.key for r in self.review_resolutions]
+        if len(keys) != len(set(keys)):
+            raise ValueError("review_resolutions: duplicate key")
+        targets = [("account", b.account) if b.account else ("role", b.role) for b in self.opening_balances]
+        if len(targets) != len(set(targets)):
+            raise ValueError("opening_balances: duplicate account or role")
+        return self
+
+
 # collection -> (response model: lenient, request model: strict) of the typed CRUD collections
 RECORD_MODELS: dict[str, tuple[type[Record], type[BaseModel]]] = {
     "customers": (Customer, CustomerIn),
@@ -1817,7 +2528,7 @@ RECORD_MODELS: dict[str, tuple[type[Record], type[BaseModel]]] = {
     "contracts": (Contract, ContractIn),
     "absences": (Absence, AbsenceIn),
     "offers": (Document, DocumentIn),
-    "invoices": (Document, DocumentIn),
+    "invoices": (Document, InvoiceIn),
     "expenses": (Expense, ExpenseIn),
     "templates": (Template, TemplateIn),
 }

@@ -4,10 +4,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Query
 from pydantic import Field
 
+from permita38.api import money_out
 from permita38.api.deps import CurrentUser, Needs, ServicesDep
+from permita38.api.responses import present
 from permita38.core import validation as v
 from permita38.core.errors import ServiceError
-from permita38.core.models import DocumentIn, PlanIn, ScenarioChanges, ScenarioIn
+from permita38.core.models import DocumentIn, PlanIn, Project, ScenarioChanges, ScenarioIn
 
 OPT_ID_PATTERN = r"^(?:[0-9a-z]{6,32})?$"  # an empty value means "no filter"
 router = APIRouter(tags=["planning"])
@@ -69,19 +71,24 @@ def plan(
     ] = None,
     user_id: Annotated[str | None, Query(pattern=OPT_ID_PATTERN)] = None,
 ) -> dict[str, Any]:
-    return services.planner.plan(weeks, user_id or None, project_id or None)
+    return money_out.plan_response(services.planner.plan(weeks, user_id or None, project_id or None))
 
 
 @router.post("/plan/simulate", summary="what-if: recompute the weeks for a change set (writes nothing)")
 def simulate(body: SimulateIn, _: Annotated[dict, Needs("planning")], services: ServicesDep) -> dict[str, Any]:
-    return services.planner.simulate(body.changes.model_dump(), body.weeks, body.user_id, body.project_id)
+    return money_out.plan_response(
+        services.planner.simulate(body.changes.model_dump(), body.weeks, body.user_id, body.project_id)
+    )
 
 
 @router.post("/plan/check-offer", summary="feasibility and consistency warnings for an offer draft")
 def check_offer(
     body: DocumentIn, _: Annotated[dict, Needs("planning")], services: ServicesDep, offer_id: v.OptId = None
 ) -> list[dict]:
-    return services.planner.check_offer(body.model_dump(exclude_none=True), offer_id)
+    warnings = money_out.money_strings(
+        services.planner.check_offer(body.model_dump(exclude_none=True), offer_id), money_out.PLAN_KEYS
+    )
+    return money_out.warning_list(warnings)
 
 
 @router.post("/plan/what-must-move", summary="smallest moves or trims that make a plan fit")
@@ -119,7 +126,7 @@ def vacation(
 @router.post("/plan/apply", summary="write a change set (needs confirm: true)")
 def apply(body: ApplyIn, _: Annotated[dict, Needs("planning", "write")], services: ServicesDep) -> dict[str, Any]:
     _need_confirm(body.confirm)
-    return services.planner.apply(body.changes.model_dump())
+    return money_out.convert_warnings(services.planner.apply(body.changes.model_dump()))
 
 
 @router.get("/plan/scenarios", summary="your saved what-if scenarios")
@@ -149,7 +156,7 @@ def apply_scenario(
     rid: str, body: ConfirmIn, user: Annotated[dict, Needs("planning", "write")], services: ServicesDep
 ) -> dict[str, Any]:
     _need_confirm(body.confirm)
-    return services.planner.apply_scenario(user, rid)
+    return money_out.convert_warnings(services.planner.apply_scenario(user, rid))
 
 
 @router.post("/projects/{rid}/extend", summary="extend the end of a project period")
@@ -157,12 +164,16 @@ def extend_project(
     rid: str, body: ExtendIn, user: Annotated[dict, Needs("planning", "write")], services: ServicesDep
 ) -> dict[str, Any]:
     proj = services.planner.extend_project(rid, body.new_end, body.reason, user)
-    return {"project": proj, "planning_warnings": services.planner.warnings_for("projects", proj)}
+    return money_out.convert_warnings(
+        {"project": present(Project, proj), "planning_warnings": services.planner.warnings_for("projects", proj)}
+    )
 
 
 @router.get("/projects/{rid}/planning", summary="project timeline, extensions and period warnings")
 def project_planning(rid: str, _: Annotated[dict, Needs("planning")], services: ServicesDep) -> dict[str, Any]:
-    return services.planner.project_timeline(rid)
+    out = services.planner.project_timeline(rid)
+    out["project"] = present(Project, out["project"])
+    return money_out.convert_warnings(out)
 
 
 @router.get("/holidays", summary="public holidays of the configured federal state")

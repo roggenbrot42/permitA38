@@ -4,9 +4,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Response
 from pydantic import Field
 
+from permita38.api import money_out
 from permita38.api.deps import Needs, ServicesDep
+from permita38.api.responses import present, stored
 from permita38.core import validation as v
-from permita38.core.models import Document
+from permita38.core.models import Contract, Document, Project
+from permita38.core.service import invoice_state
 
 router = APIRouter(tags=["sales"])
 routers = [router]
@@ -20,11 +23,15 @@ class DocumentResult(Document):
 
 
 def _doc(services, coll: str, doc: dict, finalize: bool = False) -> dict:
-    return {
-        **doc,
-        "planning_warnings": services.planner.warnings_for(coll, doc),
-        "sanity_warnings": services.sanity.check(coll, doc, None, finalize=finalize),
-    }
+    if coll == "invoices" and isinstance(doc.get("issued"), dict):
+        doc = {**doc, "issued": invoice_state.present_snapshot(doc["issued"])}
+    return money_out.convert_warnings(
+        {
+            **doc,
+            "planning_warnings": services.planner.warnings_for(coll, doc),
+            "sanity_warnings": services.sanity.check(coll, doc, None, finalize=finalize),
+        }
+    )
 
 
 class FromTime(v.CheckedBody):
@@ -52,8 +59,11 @@ def invoice_from_time(body: FromTime, _: Annotated[dict, Needs("invoices", "writ
 
 
 @router.post("/invoices/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
-def finalize_invoice(rid: str, _: Annotated[dict, Needs("invoices", "write")], services: ServicesDep):
-    return _doc(services, "invoices", services.sales.finalize("invoices", rid), finalize=True)
+def finalize_invoice(rid: str, user: Annotated[dict, Needs("invoices", "write")], services: ServicesDep):
+    """Issue the invoice. The answer carries the derived payment fields; ``paid_date`` is always present (null while
+    unpaid), so the response is sent without the ``exclude_none`` filter."""
+    doc = services.sales.invoice_view(services.sales.finalize("invoices", rid, user))
+    return stored(DocumentResult, _doc(services, "invoices", doc, finalize=True))
 
 
 @router.get("/invoices/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})
@@ -62,8 +72,8 @@ def invoice_pdf(rid: str, _: Annotated[dict, Needs("invoices")], services: Servi
 
 
 @router.post("/offers/{rid}/finalize", response_model=DocumentResult, response_model_exclude_none=True)
-def finalize_offer(rid: str, _: Annotated[dict, Needs("offers", "write")], services: ServicesDep):
-    return _doc(services, "offers", services.sales.finalize("offers", rid), finalize=True)
+def finalize_offer(rid: str, user: Annotated[dict, Needs("offers", "write")], services: ServicesDep):
+    return _doc(services, "offers", services.sales.finalize("offers", rid, user), finalize=True)
 
 
 @router.get("/offers/{rid}/pdf", response_class=Response, responses={200: {"content": {"application/pdf": {}}}})
@@ -77,7 +87,11 @@ def accept_offer(rid: str, _: Annotated[dict, Needs("offers", "write")], service
     out["planning_warnings"] = services.planner.warnings_for("projects", out["project"])
     if out.get("contract"):
         out["planning_warnings"] += services.planner.warnings_for("contracts", out["contract"])
-    return out
+    out["offer"] = present(Document, out["offer"])
+    out["project"] = present(Project, out["project"])
+    if out.get("contract"):
+        out["contract"] = present(Contract, out["contract"])
+    return money_out.convert_warnings(out)
 
 
 @router.post("/offers/{rid}/to-invoice", response_model=DocumentResult, response_model_exclude_none=True)

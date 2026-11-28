@@ -154,13 +154,13 @@ def test_api_invoice_totals_and_finance_use_exact_cents(boss_client):
         "/api/invoices",
         json={"customer_id": cust["id"], "date": "2026-03-01", "vat_rate": 19, "lines": [{"qty": 1, "price": 621.5}]},
     ).json()
-    assert inv["lines"][0]["amount"] == 621.5
+    assert inv["lines"][0]["amount"] == "621.50"
     done = c.post(f"/api/invoices/{inv['id']}/finalize").json()
     done.update(status="paid", paid_date="2026-03-02")
     assert c.put(f"/api/invoices/{inv['id']}", json=done).status_code == 200
     fin = c.get("/api/finance", params={"year": 2026}).json()
-    assert fin["totals"]["revenue"] == 621.5
-    assert fin["totals"]["vat_out"] == 118.09  # the bug: 118.08
+    assert fin["totals"]["revenue"] == "621.50"
+    assert fin["totals"]["vat_out"] == "118.09"  # the bug: 118.08
 
 
 def test_api_from_time_quantity_is_half_up(boss_client):
@@ -170,7 +170,7 @@ def test_api_from_time_quantity_is_half_up(boss_client):
     me = c.get("/api/auth/me").json()
     c.post("/api/entries", json={"user_id": me["id"], "date": "2026-03-02", "minutes": 100, "project_id": proj["id"]})
     inv = c.post("/api/invoices/from-time", json={"customer_id": cust["id"]}).json()
-    assert inv["lines"][0]["qty"] == 1.67 and inv["lines"][0]["amount"] == 167.0
+    assert inv["lines"][0]["qty"] == 1.67 and inv["lines"][0]["amount"] == "167.00"
 
 
 # ------------------------------------------------------------------ split_gross (largest remainder, itemised bills)

@@ -51,6 +51,8 @@ AREAS: dict[str, str] = {
     "attachments": "Uploaded files (bills, logo)",
     "team": "Users, passwords and two-factor resets",
     "team_timeline": "Team timeline (who is away, who works on what); the level is set in the settings",
+    "accounting": "Accounting: journal, reports, manual entries, period locks, fiscal years, DATEV; payments and credit notes",
+    "vat": "VAT returns (UStVA) and recapitulative statements (ZM)",
 }
 
 N, L, A = Scope.NONE, Scope.LIMITED, Scope.ALL
@@ -79,6 +81,8 @@ MATRIX: dict[str, dict[str, tuple[Scope, Scope]]] = {
         "attachments": (N, N),
         "team": (L, N),
         "team_timeline": (L, N),
+        "accounting": (N, N),
+        "vat": (N, N),
     },
     ACCOUNTANT: {
         "timer": (N, N),
@@ -100,8 +104,13 @@ MATRIX: dict[str, dict[str, tuple[Scope, Scope]]] = {
         "attachments": (A, A),
         "team": (L, N),
         "team_timeline": (L, N),
+        "accounting": (A, A),
+        "vat": (A, A),
     },
 }
+
+# Payments and credit notes are allowed with write access on any of these areas (docs/specs/credit-notes-payments.md 3)
+PAYMENT_WRITE_AREAS: tuple[str, ...] = ("invoices", "accounting")
 
 # generic CRUD collection -> area
 COLLECTION_AREA = {

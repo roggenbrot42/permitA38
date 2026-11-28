@@ -1,6 +1,8 @@
 """Generic CRUD with role-based permissions (the scopes come from `core/rights.py`)."""
 
+from collections.abc import Iterable, Mapping
 from decimal import Decimal
+from typing import Any
 
 from permita38.core import calc, rights
 from permita38.core.errors import ServiceError
@@ -12,6 +14,7 @@ from permita38.core.settings import effective_settings
 from permita38.core.validation import ALLOWED_VAT_RATES, MAX_MONEY
 
 from .auth import public_user
+from .expense_postings import WARNINGS_KEY, ExpensePostingService
 from .planning_warnings import warning
 from .project_customer import (
     PROJECT_CUSTOMER_COLLECTIONS,
@@ -25,7 +28,7 @@ OWN_COLLECTIONS = {"entries", "absences"}
 VIEW_COLLECTIONS = {"projects", "tasks"}
 
 #: fields that only exist in responses
-RESPONSE_ONLY = ("sanity_warnings", "planning_warnings")
+RESPONSE_ONLY = ("sanity_warnings", "planning_warnings", WARNINGS_KEY)
 
 
 LAW_WEEKLY_HOURS = 48
@@ -58,12 +61,23 @@ _IMPORT_FIELDS = (
 class RecordService:
     def __init__(self, store: Repository):
         self.store = store
+        #: the sales service registers itself here: the ``invoices`` collection is frozen once issued and carries
+        #: derived payment fields (docs/specs/credit-notes-payments.md 2); the generic routes reach that through it
+        self.invoice_hook: Any = None
+        #: expenses post to the journal on every write (docs/specs/accounting.md 9.4, 10); idle before initialisation
+        self.expense_hook = ExpensePostingService(store)
 
     def _check(self, coll: str):
         if coll not in COLLECTIONS or coll == "users":
             raise ServiceError(404, "Unknown collection")
 
     def list_records(self, me: dict, coll: str) -> list[dict]:
+        rows = self.list_stored(me, coll)
+        if coll == "invoices" and self.invoice_hook:
+            return self.invoice_hook.invoice_views(rows)
+        return rows
+
+    def list_stored(self, me: dict, coll: str) -> list[dict]:
         self._check(coll)
         sc = _scope(me, coll, "read")
         rows = self.store.list(coll)
@@ -82,6 +96,12 @@ class RecordService:
         return rows
 
     def get(self, me: dict, coll: str, rid: str) -> dict:
+        rec = self.get_stored(me, coll, rid)
+        if coll == "invoices" and self.invoice_hook:
+            return self.invoice_hook.invoice_view(rec)
+        return rec
+
+    def get_stored(self, me: dict, coll: str, rid: str) -> dict:
         self._check(coll)
         rec = self.store.get(coll, rid) if _valid_id(rid) else None
         if not rec:
@@ -105,7 +125,21 @@ class RecordService:
         data = {k: v for k, v in data.items() if k not in ("id", "created", "updated")}
         return self._write(me, coll, data, None)
 
-    def update(self, me: dict, coll: str, rid: str, data: dict) -> dict:
+    def update(
+        self,
+        me: dict,
+        coll: str,
+        rid: str,
+        data: dict,
+        given: Mapping[str, Any] | None = None,
+        nulls: Iterable[str] = (),
+    ) -> dict:
+        """``given`` / ``nulls``: the keys the client sent / sent as null (only an issued invoice needs them)."""
+        if coll == "invoices" and self.invoice_hook:
+            return self.invoice_hook.update_invoice(me, rid, data, given, nulls)
+        return self.update_stored(me, coll, rid, data)
+
+    def update_stored(self, me: dict, coll: str, rid: str, data: dict) -> dict:
         self._check(coll)
         old = self.store.get(coll, rid) if _valid_id(rid) else None
         if not old:
@@ -148,6 +182,7 @@ class RecordService:
             # time always belongs to a person: without one it would count for the project and as unbilled work but
             # appear in nobody's timesheet, Today list or weekly hours (an update without user_id keeps the owner)
             data["user_id"] = (old or {}).get("user_id") or me["id"]
+        expense_warnings: list[dict[str, Any]] = []  # only an expense collects any
         if coll in _PROJECT_REF_COLLECTIONS:
             self._check_project_exists(data, old)
         if coll in PROJECT_CUSTOMER_COLLECTIONS:
@@ -187,6 +222,7 @@ class RecordService:
             else:
                 data.pop("lines", None)
                 self._check_vat_rates(data.get("vat_rate"))
+            expense_warnings = self.expense_hook.prepare(data, old)
         elif coll == "contracts":
             data.pop("user_ids", None)  # contracts are not assigned to people; the project carries the team
         elif coll == "projects":
@@ -213,8 +249,12 @@ class RecordService:
             self._check_day_total(data, old)
         if data.get("created") is None:
             data.pop("created", None)
-        saved = self.store.save(coll, data)
-        return _expense_view(saved) if coll == "expenses" else saved
+        if coll == "expenses":
+            with self.store.transaction():  # a refused repost (locked period) leaves the record unchanged
+                saved = self.expense_hook.sync(self.store.save(coll, data), old, me)
+            view = _expense_view(saved)
+            return {**view, WARNINGS_KEY: expense_warnings} if expense_warnings else view
+        return self.store.save(coll, data)
 
     def _resolve_project_kind(self, data: dict, old: dict | None) -> None:
         """``kind`` is derived from the customer only on create; an update that omits it keeps the stored kind."""
@@ -362,6 +402,11 @@ class RecordService:
             raise ServiceError(409, f"This project is still used by {names}; archive it instead.")
 
     def delete(self, me: dict, coll: str, rid: str):
+        if coll == "invoices" and self.invoice_hook:
+            return self.invoice_hook.delete_invoice(me, rid)
+        return self.delete_stored(me, coll, rid)
+
+    def delete_stored(self, me: dict, coll: str, rid: str):
         self._check(coll)
         old = self.store.get(coll, rid) if _valid_id(rid) else None
         if not old:
@@ -393,6 +438,7 @@ class RecordService:
                         e.pop("invoice_id", None)
                         self.store.save("entries", e)
             if coll == "expenses":  # the scan row of a booked receipt goes with its expense (a re-upload works again)
+                self.expense_hook.unpost(old, me)  # reversals only; 409 when a bill entry lies in a locked month
                 self.store.delete_where("receipt_scans", expense_id=rid)
             self.store.delete(coll, rid)
 

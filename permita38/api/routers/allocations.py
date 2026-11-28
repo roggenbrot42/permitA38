@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 
 from permita38.api.deps import Needs, ServicesDep
-from permita38.api.responses import StoredJSON, stored
+from permita38.api.responses import StoredJSON, present, stored, with_defaults
 from permita38.core import models, rights
 from permita38.core import validation as v
 
@@ -55,7 +55,10 @@ def create_allocation(
     body: models.AllocationIn, user: Annotated[dict, Needs("planning", "write")], services: ServicesDep
 ):
     _need_write(user, bool(body.supplier_id))
-    return StoredJSON(services.allocations.create(body.model_dump()), status_code=201)
+    return StoredJSON(
+        present(models.Allocation, with_defaults(models.Allocation, services.allocations.create(body.model_dump()))),
+        status_code=201,
+    )
 
 
 @router.put(

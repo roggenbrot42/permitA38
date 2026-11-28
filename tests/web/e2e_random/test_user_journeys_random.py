@@ -19,10 +19,12 @@ import pytest
 from .conftest import PASSWORD, Api
 from .helpers import (
     company,
+    dec,
     env_int,
     eur,
     hm,
     money,
+    money_eq,
     norm,
     parse_duration,
     pick_weighted,
@@ -107,8 +109,8 @@ class MDoc:
             net += amt
             r = 19 if vat is None else vat
             by_rate[r] = by_rate.get(r, Decimal(0)) + amt
-        vat = {r: money(a * r / 100) for r, a in by_rate.items() if r}
-        return money(net), vat, money(net + sum(vat.values(), Decimal(0)))
+        vat = {r: dec(a * r / 100) for r, a in by_rate.items() if r}
+        return dec(net), vat, dec(net + sum(vat.values(), Decimal(0)))
 
 
 @dataclass
@@ -119,7 +121,7 @@ class MExpense:
 
     @property
     def gross(self) -> Decimal:
-        return money(Decimal(self.net) * (100 + self.rate) / 100)
+        return dec(Decimal(self.net) * (100 + self.rate) / 100)
 
     @property
     def vat(self) -> Decimal:
@@ -139,6 +141,7 @@ class Model:
     absences: list[tuple[date, date]] = field(default_factory=list)
     contracts: int = 0
     allocs: list[tuple[str, float, str, str]] = field(default_factory=list)  # (project id, h/week, start, end)
+    credit_notes: int = 0  # numbered credit notes issued through the UI; they are documents in /api/invoices too
     counters: dict = field(default_factory=lambda: {"tag": 0, "name": 0, "offers": 0, "invoices": 0})
 
     def absent_days(self) -> set[date]:
@@ -208,6 +211,11 @@ class Journey:
         if render_after:
             self.wait_render()
 
+    def typed(self, value) -> str:
+        """A money amount as a user types it into a text field: decimal point or German decimal comma."""
+        text = str(value)
+        return text.replace(".", ",") if self.rng.random() < 0.5 else text
+
     def fill_form(self, values: dict):
         for key, val in values.items():
             sel = f"#f_{key}"
@@ -215,6 +223,8 @@ class Journey:
                 self.page.set_checked(sel, val)
             elif key.endswith("_id") or key in ("vat_rate", "kind", "category"):
                 self.page.select_option(sel, str(val))
+            elif key in ("rate", "gross"):
+                self.page.fill(sel, self.typed(val))
             else:
                 self.page.fill(sel, str(val))
 
@@ -484,7 +494,7 @@ class Journey:
     def _fill_line(self, i: int, line):
         desc, qty, unit, price, vat = line
         for k, v in (("description", desc), ("qty", qty), ("unit", unit), ("price", price)):
-            self.page.fill(f'[data-l="{i}"][data-k="{k}"]', str(v))
+            self.page.fill(f'[data-l="{i}"][data-k="{k}"]', self.typed(v) if k == "price" else str(v))
         if vat is not None:
             self.page.fill(f'[data-l="{i}"][data-k="vat"]', str(vat))
 
@@ -557,11 +567,16 @@ class Journey:
         doc.id = self.hash_id()
         assert self.page.evaluate("() => location.hash").startswith("#/doc/invoices/")
         # expected totals computed from the entries' minutes and the rate rule
-        net = money(sum(Decimal(str(q)) * Decimal(p) for _, q, _, p, _ in lines))
+        net = dec(sum(Decimal(str(q)) * Decimal(p) for _, q, _, p, _ in lines))
         _, _, gross = doc.totals()
         box = norm(self.page.inner_text("#d_totals"))
         assert f"Net {eur(net)}" in box and f"Total {eur(gross)}" in box, (box, eur(net), eur(gross))
         assert self.page.locator("input[data-k=description]").count() == len(lines)
+        tt = self.page.locator("#d_tt")  # tax treatment select of a draft (fixed when the year is small business)
+        if tt.count() and tt.is_enabled() and self.rng.random() < 0.5:
+            assert tt.input_value() == "standard"
+            self.page.select_option("#d_tt", "standard")
+            self.click_render("[data-a=docSave]")
         for e in picked:
             e.invoiced = True
         self.m.docs.append(doc)
@@ -571,17 +586,34 @@ class Journey:
         self._finalize(self.rng.choice([d for d in self.m.docs if d.kind == "invoices" and d.status == "draft"]))
 
     def a_mark_paid(self):
+        """Paid comes from recording a payment in the payments panel (the status menu has no "paid" any more)."""
         doc = self.rng.choice([d for d in self.m.docs if d.kind == "invoices" and d.status == "sent"])
         self._open_doc(doc)
-        # The user enters the "Paid on" date first: choosing "Paid" in the status menu alone leaves the date empty
-        # (see test_regressions.py::test_mark_paid_sets_paid_date).
-        self.page.fill("#d_paid", self.today.isoformat())
-        self.mark_old()
-        self.page.select_option("select[data-change=docStatus]", "paid")
-        self.wait_render()
+        assert self.page.locator("#d_frozen").count() == 1, "an issued invoice is shown frozen"
+        assert self.page.locator("select[data-change=docStatus] option[value=paid]").count() == 0
+        self.page.click("[data-a=payRecord]")
+        # the dialog is prefilled with today and the open amount; the user only confirms
+        assert self.page.input_value("#f_date") == self.today.isoformat()
+        assert self.page.input_value("#f_amount") not in ("", "0", "0,00", "0.00")
+        self.submit_modal()
         doc.status = "paid"
-        self.say(f"mark {doc.number} paid")
+        self.say(f"record payment for {doc.number}")
         assert "paid" in norm(self.page.inner_text("main h1"))
+        assert norm(self.page.inner_text("#pay_open")).startswith("0,00"), self.page.inner_text("#pay_open")
+
+    def a_storno_invoice(self):
+        """Cancel an unpaid issued invoice with a storno credit note (creditPanel, cnStorno)."""
+        doc = self.rng.choice([d for d in self.m.docs if d.kind == "invoices" and d.status == "sent"])
+        self._open_doc(doc)
+        self.page.click("[data-a=cnStorno]")
+        self.page.fill("#f_reason", "Auftrag storniert")
+        self.submit_modal()
+        doc.status = "cancelled"
+        self.m.credit_notes += 1
+        self.say(f"storno {doc.number}")
+        assert "cancelled" in norm(self.page.inner_text("main h1"))
+        assert self.page.locator("#cn_list").count() == 1
+        assert self.page.locator("[data-a=payRecord]").count() == 1  # still listed, but nothing is open any more
 
     # -- expenses, time off
     def a_add_expense(self):
@@ -590,7 +622,7 @@ class Journey:
         self.nav("#/expenses")
         self.page.click("[data-a=editExpense]")
         self.page.fill("#f_vendor", exp.vendor)
-        self.page.fill("#f_gross", str(exp.gross))
+        self.page.fill("#f_gross", self.typed(exp.gross))
         self.page.select_option("#f_vat_rate", str(exp.rate))
         self.submit_modal()
         self.m.expenses.append(exp)
@@ -720,12 +752,16 @@ class Journey:
         customers = {c["name"]: c for c in api.get("/customers")}
         assert set(customers) == {c.name for c in m.customers}, (set(customers), [c.name for c in m.customers])
         for c in m.customers:
-            assert customers[c.name].get("rate") == c.rate and customers[c.name]["id"] == c.id
+            assert money_eq(customers[c.name].get("rate"), c.rate) and customers[c.name]["id"] == c.id
         projects = {p["name"]: p for p in api.get("/projects")}
         assert set(projects) == {p.name for p in m.projects}
         for p in m.projects:
             rec = projects[p.name]
-            assert rec["id"] == p.id and rec.get("rate") == p.rate and (rec.get("kind") == "internal") == p.internal
+            assert (
+                rec["id"] == p.id
+                and money_eq(rec.get("rate"), p.rate)
+                and (rec.get("kind") == "internal") == p.internal
+            )
             assert rec.get("customer_id") == (p.customer.id if p.customer else None), rec
         entries = {(e.get("note") or "").split()[0]: e for e in api.get("/entries")}
         assert set(entries) == {e.tag for e in m.entries}, (set(entries), [e.tag for e in m.entries])
@@ -737,29 +773,28 @@ class Journey:
         for kind in ("offers", "invoices"):
             recs = {d["id"]: d for d in api.get(f"/{kind}")}
             mine = [d for d in m.docs if d.kind == kind]
-            assert set(recs) == {d.id for d in mine}
+            extra = {i for i in recs if i not in {d.id for d in mine}}
+            if kind == "invoices":  # credit notes are documents of their own
+                assert {i for i in extra if recs[i].get("kind") == "credit_note"} == extra, extra
+                assert len(extra) == m.credit_notes, (len(extra), m.credit_notes)
+            else:
+                assert not extra
+            assert {d.id for d in mine} <= set(recs)
             for d in mine:
                 rec = recs[d.id]
                 assert rec["status"] == d.status and rec.get("number") == d.number, (d, rec)
                 assert rec["customer_id"] == d.customer.id
                 net, vat, gross = d.totals()
-                amounts = sum(
-                    (money(Decimal(str(ln["qty"])) * Decimal(str(ln["price"]))) for ln in rec["lines"]), Decimal(0)
-                )
-                assert money(amounts) == net, (d, rec["lines"])
-                assert all(
-                    money(ln["amount"]) == money(Decimal(str(ln["qty"])) * Decimal(str(ln["price"])))
-                    for ln in rec["lines"]
-                )
+                amounts = sum((dec(Decimal(str(ln["qty"])) * Decimal(ln["price"])) for ln in rec["lines"]), Decimal(0))
+                assert amounts == net, (d, rec["lines"])
+                assert all(ln["amount"] == money(Decimal(str(ln["qty"])) * Decimal(ln["price"])) for ln in rec["lines"])
                 if d.number:
                     pdf = api.http.get(f"/{kind}/{d.id}/pdf")
                     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF"), pdf.status_code
         exps = {x["vendor"]: x for x in api.get("/expenses")}
         assert set(exps) == {e.vendor for e in m.expenses}
         for e in m.expenses:
-            assert money(exps[e.vendor]["net"]) == money(e.net) and money(exps[e.vendor]["vat"]) == e.vat, exps[
-                e.vendor
-            ]
+            assert exps[e.vendor]["net"] == money(e.net) and exps[e.vendor]["vat"] == money(e.vat), exps[e.vendor]
         assert len(api.get("/absences")) == len(m.absences)
         assert len(api.get("/contracts")) == m.contracts
         if m.allocs:
@@ -773,13 +808,12 @@ class Journey:
         revenue = sum((d.totals()[0] for d in m.paid_invoices()), Decimal(0))
         vat_out = sum((sum(d.totals()[1].values(), Decimal(0)) for d in m.paid_invoices()), Decimal(0))
         expenses = sum((Decimal(e.net) for e in m.expenses), Decimal(0))
-        # VAT on a half-cent tie (e.g. 19% of 621.50) is rounded differently by the backend (binary floats) than by
-        # the editor/Decimal half-up: allow one cent per VAT group (see test_regressions.py::test_vat_rounding...).
-        groups = sum(len(d.totals()[1]) for d in m.paid_invoices())
-        assert money(fin["revenue"]) == revenue, (fin, revenue)
-        assert abs(money(fin["vat_out"]) - vat_out) <= Decimal("0.01") * groups, (fin, vat_out)
-        assert money(fin["expenses"]) == expenses and money(fin["profit"]) == revenue - expenses
-        assert money(fin["vat_in"]) == sum((e.vat for e in m.expenses), Decimal(0))
+        # exact: MDoc.totals() rounds the VAT of each rate group half-up like the server (lines are whole euros x whole
+        # units, so the line amounts need no rounding), and every expense here is a single classic record at 100 %.
+        assert fin["revenue"] == money(revenue), (fin, revenue)
+        assert fin["vat_out"] == money(vat_out), (fin, vat_out)
+        assert fin["expenses"] == money(expenses) and fin["profit"] == money(revenue - expenses)
+        assert fin["vat_in"] == money(sum((e.vat for e in m.expenses), Decimal(0)))
         fc = api.get("/plan", weeks=2)["weeks"][1]  # the plan counts only days after today: use the next week
         target = week_target_minutes(self.today + timedelta(days=7), m.weekly_hours, m.absent_days())
         assert round(fc["capacity"] * 60) == pytest.approx(target, abs=4), (fc, target)
@@ -813,6 +847,7 @@ class Journey:
             acts.append(("finalize_invoice", 5))
         if any(d.kind == "invoices" and d.status == "sent" for d in m.docs):
             acts.append(("mark_paid", 5))
+            acts.append(("storno_invoice", 1))
         return acts
 
     def step(self):

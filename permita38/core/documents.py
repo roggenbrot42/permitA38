@@ -104,6 +104,19 @@ def qty_fmt(q, lang):
     return s.replace(".", ",") if lang == "de" else s
 
 
+def _small_business_note(store, doc, settings) -> bool:
+    """Print the section 19 note. An issued invoice answers from its frozen snapshot, never from today's settings;
+    a draft or an offer from the settings or the fiscal year of its date."""
+    issued = doc.get("issued")
+    if isinstance(issued, dict) and issued.get("regime"):
+        return issued.get("regime") == "small_business" or issued.get("treatment") == "small_business"
+    if settings.get("kleinunternehmer"):
+        return True
+    day = str(doc.get("date") or "")[:4]
+    rows = store.find("fiscal_years", year=int(day)) if day.isdigit() else []
+    return bool(rows and rows[0].get("small_business"))
+
+
 def render(store, kind, doc):
     """kind: 'offer' | 'invoice'. Returns PDF bytes."""
     s = store.settings()
@@ -284,7 +297,7 @@ def render(store, kind, doc):
     pdf.text(tx, y, L["total"], 11, True)
     pdf.text(right - 2, y, money(totals["gross"], lang), 11, True, "#000000", "r")
     y += 26
-    if s.get("kleinunternehmer"):
+    if _small_business_note(store, doc, s):
         for ln in pdf.wrap(L["klein"], right - left, 8.5):
             pdf.text(left, y, ln, 8.5, False, "#444444")
             y += 11

@@ -37,7 +37,9 @@ window.DS = (() => {
   const flagText = f => FLAG_TEXT[f.code] || f.message || f.code;
   const el = (tag, text, cls) => { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; };
   const val = id => ($('#' + id)?.value ?? '').trim();
-  const numOrNull = x => { const t = String(x ?? '').trim().replace(',', '.'); return t === '' || Number.isNaN(Number(t)) ? null : Number(t); };
+  const numOrNull = x => { const t = String(x ?? '').trim().replace(',', '.'); return t === '' || Number.isNaN(Number(t)) ? null : Number(t); };   // quantities and the VAT rate only, never money
+  /** A money value from the API (decimal string) or null when absent or not a number; never a float. */
+  const dec = x => { if (x === null || x === undefined || x === '') return null; const r = Money.parseInput(x); return r.ok ? r.value : null; };
 
   /* ---------- rights and the list of scans that need a check ---------- */
   D.canUpload = () => can('invoices', 'write') && can('offers', 'write') && can('customers', 'write') && can('attachments', 'write');
@@ -87,8 +89,10 @@ window.DS = (() => {
     updatePanel();
     if (!running) run();
   };
+  let pruneTimer = null;
   async function run() {
     running = true;
+    clearTimeout(pruneTimer);  // a timer of an earlier run must not drop the rows of this one
     try {
       for (;;) {
         const row = D.rows.find(r => r.file && r.state === 'scanning');
@@ -122,7 +126,7 @@ window.DS = (() => {
         if (/^#\/sales/.test(location.hash) && !$('#modal-root').firstChild) await render();
       }
     } finally { running = false; }
-    setTimeout(() => { D.rows = D.rows.filter(r => r.state === 'scanning' || r.state === 'duplicate' || r.state === 'error'); updatePanel(); }, 8000);
+    pruneTimer = setTimeout(() => { D.rows = D.rows.filter(r => r.state === 'scanning' || r.state === 'duplicate' || r.state === 'error'); updatePanel(); }, 8000);
   }
 
   /* ---------- drop target (the whole page) ---------- */
@@ -146,24 +150,23 @@ window.DS = (() => {
   });
 
   /* ---------- totals: computed from the lines (exact, money.js) against the printed ones ---------- */
-  const cents = x => Math.round(Number(x) * 100);
   function computed() {
     const rate = numOrNull(val('ds_vat')) ?? 19;
-    const lines = D.lines.map(l => ({ qty: numOrNull(l.quantity) ?? 0, price: numOrNull(l.price) ?? 0 }));
+    const lines = D.lines.map(l => ({ qty: numOrNull(l.quantity) ?? 0, price: dec(l.price) ?? '0' }));
     const t = Money.totals({ lines, vat_rate: rate }, {});
-    return { net: Number(t.net) / 100, vat: Number(t.vatTotal) / 100, gross: Number(t.gross) / 100 };
+    return { net: Money.fromCents(t.net), vat: Money.fromCents(t.vatTotal), gross: Money.fromCents(t.gross) };
   }
   function printed(scan) {
     const d = scan.doc || {};
-    const p = k => (d[k] === null || d[k] === undefined || d[k] === '' || Number.isNaN(Number(d[k]))) ? null : Number(d[k]);
+    const p = k => dec(d[k]);
     return { net: p('printed_net'), vat: p('printed_vat'), gross: p('printed_total') };
   }
-  const differs = scan => { const p = printed(scan); return p.gross !== null && cents(p.gross) !== cents(computed().gross); };
+  const differs = scan => { const p = printed(scan); return p.gross !== null && Money.cents(p.gross) !== Money.cents(computed().gross); };
   function paintTotals() {
     const scan = D.scan, c = computed(), p = printed(scan), t = $('#ds_totals');
     if (!t) return;
     const cell = v => v === null ? '–' : eur(v);
-    const diff = p.gross === null ? null : (cents(c.gross) - cents(p.gross)) / 100;
+    const diff = p.gross === null ? null : Money.fromCents(Money.cents(c.gross) - Money.cents(p.gross));
     t.innerHTML = `<thead><tr><th scope="col"></th><th scope="col" class="num">Computed from the lines</th><th scope="col" class="num">Printed</th></tr></thead><tbody>
       <tr><th scope="row">Net</th><td class="num" id="ds_c_net">${cell(c.net)}</td><td class="num" id="ds_p_net">${cell(p.net)}</td></tr>
       <tr><th scope="row">VAT</th><td class="num" id="ds_c_vat">${cell(c.vat)}</td><td class="num" id="ds_p_vat">${cell(p.vat)}</td></tr>
@@ -180,7 +183,7 @@ window.DS = (() => {
       <td><input data-f="description" value="${esc(l.description)}" maxlength="2000" aria-label="Line ${i + 1}: description"></td>
       <td><input data-f="quantity" type="number" step="any" inputmode="decimal" value="${esc(l.quantity)}" aria-label="Line ${i + 1}: quantity"></td>
       <td><input data-f="unit" value="${esc(l.unit)}" maxlength="30" aria-label="Line ${i + 1}: unit"></td>
-      <td><input data-f="price" type="number" step="any" inputmode="decimal" value="${esc(l.price)}" aria-label="Line ${i + 1}: unit price, net"></td>
+      <td><input data-f="price" type="text" autocomplete="off" inputmode="decimal" value="${esc(l.price)}" aria-label="Line ${i + 1}: unit price, net"></td>
       <td><button type="button" class="ghost sm" data-a="dsRemoveLine" data-i="${i}" aria-label="Remove line ${i + 1}" ${D.lines.length < 2 ? 'disabled' : ''}>✕</button></td></tr>`).join('');
     $('#ds_addline').disabled = D.lines.length >= 200;
     paintTotals();
@@ -196,7 +199,7 @@ window.DS = (() => {
     const d = scan.draft || {}, doc = scan.doc || {};
     const v = { number: d.number, date: d.date, due_date: d.due_date, valid_until: d.valid_until, customer: d.customer?.name, net: doc.printed_net, vat: doc.printed_vat, gross: doc.printed_total, kind: KIND_LABEL[d.kind], service: [d.service_from, d.service_to].filter(Boolean).join(' – ') }[b.field];
     if (v === undefined || v === null || v === '') return '';
-    return ['net', 'vat', 'gross'].includes(b.field) && !Number.isNaN(Number(v)) ? eur(Number(v)) : String(v);
+    return ['net', 'vat', 'gross'].includes(b.field) && dec(v) !== null ? eur(dec(v)) : String(v);
   };
   const KIND_LABEL = { invoice: 'Invoice', offer: 'Offer' };
   function checkDialog(scan) {
@@ -290,8 +293,9 @@ window.DS = (() => {
     if (!val('ds_cust')) return 'Pick a customer or type the name of a new one.';
     const lines = [];
     for (const [i, l] of D.lines.entries()) {
-      const q = numOrNull(l.quantity), p = numOrNull(l.price);
+      const q = numOrNull(l.quantity), pr = Money.parseInput(l.price), p = pr.ok ? pr.value : null;
       if (!String(l.description).trim()) return `Line ${i + 1}: enter a description.`;
+      if (!pr.ok) return `Line ${i + 1}: unit price: ${pr.error}`;
       if (q === null || p === null) return `Line ${i + 1}: enter a quantity and a price.`;
       lines.push({ description: String(l.description).trim(), quantity: q, unit: String(l.unit || '').trim() || null, price: p });
     }

@@ -17,6 +17,7 @@ from permita38.core import holidays as holidays_module
 from permita38.core.errors import ServiceError
 from permita38.core.money import dec, q2
 from permita38.core.repository import Repository
+from permita38.core.service import invoice_state
 from permita38.core.service.busy import BusyTimeProvider
 from permita38.core.service.planner.model import (
     Assignment,
@@ -482,7 +483,12 @@ def _invoiced(store: Repository, settings: dict, contracts: list[Item]) -> dict[
     out: dict[str, Decimal] = {}
     if not by_project:
         return out
-    for inv in store.list("invoices"):
+    rows = store.list("invoices")
+    notes = invoice_state.group_by(invoice_state.credit_notes_of(rows), "corrects_id")
+    target_of: dict[str, str] = {}  # counted invoice id -> contract id
+    for inv in rows:
+        if inv.get("kind") == "credit_note":
+            continue  # netted below against the invoice it corrects (like finance())
         if inv.get("status") in NOT_INVOICED or inv.get("project_id") not in by_project:
             continue
         day = calc.d(inv.get("date"))
@@ -491,8 +497,18 @@ def _invoiced(store: Repository, settings: dict, contracts: list[Item]) -> dict[
         target = next((c for c in by_project[inv["project_id"]] if c.start <= day <= c.end), None)
         if target is None:
             continue
-        net = q2(dec(calc.invoice_amounts(inv, settings)["net"]))
-        out[target.id] = out.get(target.id, Decimal(0)) + net
+        totals = calc.invoice_amounts(inv, settings)
+        state = invoice_state.derive(inv, int(dec(totals["gross"]) * 100), [], notes.get(inv["id"], []))
+        if state.status == "cancelled":
+            continue  # a storno'd invoice and its credit note count 0
+        target_of[inv["id"]] = target.id
+        out[target.id] = out.get(target.id, Decimal(0)) + q2(dec(totals["net"]))
+    for note in rows:
+        if note.get("kind") != "credit_note" or note.get("corrects_id") not in target_of:
+            continue
+        net = q2(dec(calc.invoice_amounts(note, settings)["net"]))
+        tid = target_of[note["corrects_id"]]
+        out[tid] = out[tid] - net
     return out
 
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import builtins
 import contextlib
+import hashlib
 import os
 import re
 import secrets
@@ -27,6 +28,7 @@ from .base import (
     ID_RE,
     ConstraintViolation,
     DatabaseRevisionError,
+    JournalConflict,
     Record,
     RecordList,
     Repository,
@@ -72,6 +74,11 @@ class SQLRepository(Repository):
     def _guard_triggers(self) -> set[str]:
         """Names of the guard triggers the database currently has."""
         raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
+
+    @property
+    def can_suspend_guards(self) -> bool:
+        """Whether ``guards_suspended`` works (trigger based guards: SQLite only)."""
+        return type(self)._guard_triggers is not SQLRepository._guard_triggers
 
     def _drop_guard(self, name: str) -> None:
         raise NotImplementedError("guards_suspended() is only implemented for trigger based guards (SQLite)")
@@ -276,11 +283,13 @@ class SQLRepository(Repository):
                 self._commit()
 
     @contextmanager
-    def guards_suspended(self, kinds: set[str]) -> Iterator[None]:
+    def guards_suspended(self, kinds: set[str], *, restore: bool = False) -> Iterator[None]:
         kinds = set(kinds)
         unknown = kinds - set(GUARD_KINDS)
         if unknown or "unique" in kinds:
             raise ValueError(f"guards of kind {sorted(unknown | (kinds & {'unique'}))} cannot be suspended")
+        if "append_only" in kinds and not restore:
+            raise ValueError("guards of kind 'append_only' cannot be suspended (only the transfer importer may)")
         with self.lock:
             self._ensure()
             if not self._depth:
@@ -510,6 +519,166 @@ class SQLRepository(Repository):
         msg = str(e)
         if type(e).__name__ == "IntegrityError" and msg.startswith(_GUARD_PREFIX):
             raise ConstraintViolation(msg[len(_GUARD_PREFIX) :].strip(), coll) from e
+
+    # ------------------------------------------------------------------ accounting journal
+    def _insert(self, coll: str, obj: Record, now: int) -> Record:
+        table = self._table(coll)
+        obj = dict(obj)
+        rid = obj.get("id") or new_id()
+        if not isinstance(rid, str) or not ID_RE.match(rid):
+            raise ValueError("bad id")
+        obj.update(id=rid, created=now, updated=now)
+        values = self._encode(table, obj)
+        names = self.dialect.all_columns(table)
+        row = [values.get(c) for c in names]
+        try:
+            self._exec(self.dialect.insert(table, names), row)
+        except Exception as e:
+            self._reraise_guard(e, coll)
+            raise
+        return self._decode(table, row)
+
+    def insert_journal_entry(self, entry: Record, lines: RecordList) -> Record:
+        now = int(time.time())
+        try:
+            with self.transaction():
+                stored = self._insert("journal_entries", {k: v for k, v in entry.items() if k != "lines"}, now)
+                stored["lines"] = [
+                    self._insert("journal_lines", {**ln, "id": None, "entry_id": stored["id"]}, now) for ln in lines
+                ]
+                stored["lines"].sort(key=lambda r: r["line_no"])
+        except Exception as e:
+            # driver-neutral: sqlite3, psycopg and pymysql all name their class IntegrityError (psycopg also has
+            # UniqueViolation); the message names the column (SQLite) or the index (PostgreSQL / MariaDB)
+            msg = str(e)
+            if type(e).__name__ in ("IntegrityError", "UniqueViolation"):
+                if "event_key" in msg:
+                    raise JournalConflict("event_key") from e
+                if "entry_no" in msg or "year_no" in msg:
+                    raise JournalConflict("entry_no") from e
+            raise
+        return stored
+
+    def next_number(self, doc_type: str, period: str) -> int:
+        row_id = "n" + hashlib.sha256(f"{doc_type}|{period}".encode()).hexdigest()[:20]
+        with self.transaction():
+            table = self._table("number_sequences")
+            rows = self._rows(self.dialect.select_one_for_update(table), [row_id])  # locks the counter row
+            old = self._decode(table, rows[0]) if rows else {}
+            value = int(old.get("last_value") or 0) + 1
+            self.save("number_sequences", {"id": row_id, "doc_type": doc_type, "period": period, "last_value": value})
+        return value
+
+    def _with_lines(self, entries: RecordList) -> RecordList:
+        if not entries:
+            return entries
+        q, ph = self.dialect.quote, self.dialect.placeholder
+        table = self._table("journal_lines")
+        by_entry: dict[str, RecordList] = {e["id"]: [] for e in entries}
+        ids = builtins.list(by_entry)
+        for i in range(0, len(ids), 200):  # stay below the parameter limit of every driver
+            chunk = ids[i : i + 200]
+            sql = self.dialect.select_all(table) + f" WHERE {q('entry_id')} IN ({', '.join([ph] * len(chunk))})"
+            for r in self._rows(sql, chunk):
+                line = self._decode(table, r)
+                by_entry[line["entry_id"]].append(line)
+        for e in entries:
+            e["lines"] = sorted(by_entry[e["id"]], key=lambda r: r["line_no"])
+        return entries
+
+    def get_journal_entry_by_event_key(self, event_key: str) -> Record | None:
+        with self.lock:
+            self._ensure()
+            rows = self.find("journal_entries", event_key=event_key)
+            return self._with_lines(rows)[0] if rows else None
+
+    def last_journal_hash(self, year: int) -> str | None:
+        q, ph = self.dialect.quote, self.dialect.placeholder
+        with self.lock:
+            self._ensure()
+            rows = self._rows(
+                f"SELECT {q('hash')} FROM {q('journal_entries')} WHERE {q('fiscal_year')} = {ph} "
+                f"ORDER BY {q('fiscal_year')} DESC, {q('entry_no')} DESC LIMIT 1",
+                [year],
+            )
+        return str(rows[0][0]) if rows and rows[0][0] is not None else None
+
+    def list_journal_entries(
+        self,
+        year: int | None = None,
+        date_from: str | None = None,
+        date_to: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> RecordList:
+        q, ph = self.dialect.quote, self.dialect.placeholder
+        conds: builtins.list[str] = []
+        params: builtins.list[Any] = []
+        for col, op, value in (
+            ("fiscal_year", "=", year),
+            ("booking_date", ">=", date_from),
+            ("booking_date", "<=", date_to),
+        ):
+            if value is not None:
+                conds.append(f"{q(col)} {op} {ph}")
+                params.append(value)
+        with self.lock:
+            self._ensure()
+            table = self._table("journal_entries")
+            sql = self.dialect.select_all(table) + (" WHERE " + " AND ".join(conds) if conds else "")
+            sql += f" ORDER BY {q('fiscal_year')}, {q('entry_no')} LIMIT {int(limit)} OFFSET {int(offset)}"
+            entries = [self._decode(table, r) for r in self._rows(sql, params)]
+            return self._with_lines(entries)
+
+    def journal_lines_by_vat_date(self, date_from: str, date_to: str) -> RecordList:
+        return self._journal_lines_by_date("vat_date", date_from, date_to)
+
+    def journal_lines_by_income_date(self, date_from: str, date_to: str) -> RecordList:
+        return self._journal_lines_by_date("income_date", date_from, date_to)
+
+    def journal_account_balance(self, account: str, before: str) -> int:
+        q, ph = self.dialect.quote, self.dialect.placeholder
+        with self.lock:
+            self._ensure()
+            rows = self._rows(
+                f"SELECT SUM(l.{q('amount_cents')}) FROM {q('journal_lines')} l "
+                f"JOIN {q('journal_entries')} e ON e.{q('id')} = l.{q('entry_id')} "
+                f"WHERE l.{q('account')} = {ph} AND e.{q('booking_date')} < {ph}",
+                [account, before],
+            )
+        return int(rows[0][0] or 0) if rows else 0
+
+    def _journal_lines_by_date(self, column: str, date_from: str, date_to: str) -> RecordList:
+        q, ph = self.dialect.quote, self.dialect.placeholder
+        with self.lock:
+            self._ensure()
+            lines_t = self._table("journal_lines")
+            sql = self.dialect.select_all(lines_t) + f" WHERE {q(column)} >= {ph} AND {q(column)} <= {ph}"
+            lines = [self._decode(lines_t, r) for r in self._rows(sql, [date_from, date_to])]
+            entries_t = self._table("journal_entries")
+            ids = builtins.list(dict.fromkeys(str(ln["entry_id"]) for ln in lines))
+            entries: dict[str, Record] = {}
+            for i in range(0, len(ids), 200):  # stay below the parameter limit of every driver
+                chunk = ids[i : i + 200]
+                esql = self.dialect.select_all(entries_t) + f" WHERE {q('id')} IN ({', '.join([ph] * len(chunk))})"
+                for r in self._rows(esql, chunk):
+                    e = self._decode(entries_t, r)
+                    entries[str(e["id"])] = e
+        out: RecordList = []
+        for ln in lines:
+            e = entries[str(ln["entry_id"])]
+            out.append(
+                {
+                    **ln,
+                    "fiscal_year": e.get("fiscal_year"),
+                    "entry_no": e.get("entry_no"),
+                    "booking_date": e.get("booking_date"),
+                    "source_number": e.get("source_number"),
+                    "entry_created_at": e.get("created_at"),
+                }
+            )
+        out.sort(key=lambda r: (int(r["fiscal_year"] or 0), int(r["entry_no"] or 0), int(r.get("line_no") or 0)))
+        return out
 
     # ------------------------------------------------------------------ settings
     def settings(self) -> Record:

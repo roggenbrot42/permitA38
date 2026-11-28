@@ -84,10 +84,10 @@ def test_w1_offer_figures_and_accept_creates_the_external_allocation(boss_client
     offer = post_offer(boss_client, offer_w1(s["id"], project["id"]))
     assert (offer["hours"], offer["net_total"], offer["vat_rate"], offer["vat"], offer["gross_total"]) == (
         80.0,
-        6400.0,
+        "6400.00",
         19.0,
-        1216.0,
-        7616.0,
+        "1216.00",
+        "7616.00",
     )
     assert offer["vat_mode"] == "domestic" and offer["status"] == "received"
 
@@ -98,12 +98,12 @@ def test_w1_offer_figures_and_accept_creates_the_external_allocation(boss_client
     assert body["offer"]["status"] == "accepted" and body["offer"]["allocation_id"] == alloc["id"]
     assert body["offer"]["status_changed_at"] == "2026-03-02"
     assert body["commitment"] is None
-    assert alloc["kind"] == "external" and alloc["status"] == "active" and alloc["rate"] == 80.0
+    assert alloc["kind"] == "external" and alloc["status"] == "active" and alloc["rate"] == "80.00"
     assert (alloc["planned_hours"], alloc["planned_net"], alloc["invoiced_net"], alloc["open_net"]) == (
         80.0,
-        6400.0,
-        0.0,
-        6400.0,
+        "6400.00",
+        "0.00",
+        "6400.00",
     )
     # the hand list of W1: 16 days of 5 h, Monday to Thursday of the four weeks
     days = boss_client.get(f"/api/allocations/{alloc['id']}").json()["days"]
@@ -167,7 +167,7 @@ def test_w3_total_hours_with_an_unavailable_window(boss_client, project):
     )
     body = accept(boss_client, offer["id"]).json()
     alloc = body["allocation"]
-    assert (alloc["planned_hours"], alloc["planned_net"]) == (100.0, 7500.0)
+    assert (alloc["planned_hours"], alloc["planned_net"]) == (100.0, "7500.00")
     outside = [w for w in body["planning_warnings"] if w["code"] == "allocation.outside_availability"]
     assert len(outside) == 1
     assert outside[0]["details"]["dropped_hours"] == 25.0
@@ -204,10 +204,10 @@ def test_w7_rounding_half_up_and_domestic_vat(boss_client):
         },
     )
     assert (offer["net_total"], offer["vat_rate"], offer["vat"], offer["gross_total"], offer["vat_mode"]) == (
-        3091.88,
+        "3091.88",
         19.0,
-        587.46,
-        3679.34,
+        "587.46",
+        "3679.34",
         "domestic",
     )
     assert offer["hours"] == 37.5
@@ -226,10 +226,10 @@ def test_w8_reverse_charge_from_an_austrian_supplier_has_no_vat(boss_client):
         },
     )
     assert (offer["net_total"], offer["vat_rate"], offer["vat"], offer["gross_total"], offer["vat_mode"]) == (
-        3091.88,
+        "3091.88",
         0.0,
-        0.0,
-        3091.88,
+        "0.00",
+        "3091.88",
         "eu_reverse_charge",
     )
 
@@ -251,7 +251,7 @@ def test_w9_cancel_keeps_the_days_before_the_cut_and_w10_floors_the_open_net(bos
     cancelled = r.json()
     assert cancelled["status"] == "cancelled" and cancelled["cancelled_from"] == "2026-03-13"
     assert cancelled["cancel_reason"] == "project paused"
-    assert (cancelled["planned_hours"], cancelled["planned_net"]) == (40.0, 3200.0)
+    assert (cancelled["planned_hours"], cancelled["planned_net"]) == (40.0, "3200.00")
 
     e = boss_client.post(
         "/api/expenses",
@@ -266,12 +266,12 @@ def test_w9_cancel_keeps_the_days_before_the_cut_and_w10_floors_the_open_net(bos
     assert e.status_code == 200, e.text  # expenses answer 200 on create, as before
     assert e.json()["sanity_warnings"] == []  # 1600 is within the 3200 planned
     after = boss_client.get(f"/api/allocations/{alloc['id']}").json()
-    assert (after["invoiced_net"], after["open_net"]) == (1600.0, 1600.0)
+    assert (after["invoiced_net"], after["open_net"]) == ("1600.00", "1600.00")
 
     com = boss_client.get("/api/finance/commitments").json()
     assert len(com["items"]) == 1
     assert com["items"][0]["allocation_id"] == alloc["id"]
-    assert com["totals"] == {"planned_net": 3200.0, "invoiced_net": 1600.0, "open_net": 1600.0}
+    assert com["totals"] == {"planned_net": "3200.00", "invoiced_net": "1600.00", "open_net": "1600.00"}
 
     over = boss_client.post(
         "/api/expenses",
@@ -288,12 +288,12 @@ def test_w9_cancel_keeps_the_days_before_the_cut_and_w10_floors_the_open_net(bos
     assert len(warn) == 1
     assert warn[0]["details"] == {
         "allocation_id": alloc["id"],
-        "planned_net": 3200.0,
-        "invoiced_net": 3300.0,
-        "excess": 100.0,
+        "planned_net": "3200.00",
+        "invoiced_net": "3300.00",
+        "excess": "100.00",
     }
     final = boss_client.get(f"/api/allocations/{alloc['id']}").json()
-    assert (final["invoiced_net"], final["open_net"]) == (3300.0, 0.0)
+    assert (final["invoiced_net"], final["open_net"]) == ("3300.00", "0.00")
 
 
 def test_cancel_errors(boss_client, project):
@@ -532,13 +532,19 @@ def test_flat_commitment_of_an_accepted_plain_supplier_offer(boss_client, projec
     r = accept(boss_client, offer["id"])
     assert r.status_code == 200
     assert r.json()["allocation"] is None
-    assert r.json()["commitment"] == {"kind": "flat", "planned_net": 3091.88, "open_net": 3091.88}
+    assert r.json()["commitment"] == {"kind": "flat", "planned_net": "3091.88", "open_net": "3091.88"}
     com = boss_client.get("/api/finance/commitments").json()
     flat = [i for i in com["items"] if i["kind"] == "flat"]
-    assert len(flat) == 1 and flat[0]["planned_net"] == 3091.88 and flat[0]["invoiced_net"] is None
-    assert com["totals"] == {"planned_net": 3091.88, "invoiced_net": 0.0, "open_net": 3091.88}
+    assert len(flat) == 1 and flat[0]["planned_net"] == "3091.88" and flat[0]["invoiced_net"] is None
+    assert com["totals"] == {"planned_net": "3091.88", "invoiced_net": "0.00", "open_net": "3091.88"}
     assert com["by_project"] == [
-        {"project_id": None, "name": "No project", "planned_net": 3091.88, "invoiced_net": None, "open_net": 3091.88}
+        {
+            "project_id": None,
+            "name": "No project",
+            "planned_net": "3091.88",
+            "invoiced_net": None,
+            "open_net": "3091.88",
+        }
     ]
 
 

@@ -95,10 +95,10 @@ def test_vendor_suggestions_group_by_normalised_name(boss_client):
     body = boss_client.get("/api/suppliers/vendor-suggestions").json()
     assert body["unlinked_expenses"] == 3
     first, second = body["groups"]
-    assert first["key"] == "demo print shop" and first["count"] == 2 and first["net_total"] == 30.0
+    assert first["key"] == "demo print shop" and first["count"] == 2 and first["net_total"] == "30.00"
     assert first["variants"] == ["Demo Print Shop GmbH", "demo print shop"]
     assert first["supplier"] == {"id": s["id"], "name": "Demo Print Shop GmbH"}
-    assert second["key"] == "example hosting" and second["supplier"] is None and second["net_total"] == 9.9
+    assert second["key"] == "example hosting" and second["supplier"] is None and second["net_total"] == "9.90"
 
 
 def test_adopt_vendors_dry_run_equals_real_run_and_is_idempotent(boss_client):

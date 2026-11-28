@@ -13,6 +13,9 @@ datas = [
     (str(root / "permita38" / "core" / "templates"), "permita38/core/templates"),
     (str(root / "permita38" / "core" / "trip_rates"), "permita38/core/trip_rates"),
     (str(root / "permita38" / "core" / "tax_rules"), "permita38/core/tax_rules"),
+    (str(root / "permita38" / "core" / "charts"), "permita38/core/charts"),
+    (str(root / "permita38" / "core" / "vat_rules"), "permita38/core/vat_rules"),
+    (str(root / "permita38" / "core" / "datev"), "permita38/core/datev"),
     (str(root / "permita38" / "core" / "schema" / "migrations"), "permita38/core/schema/migrations"),
 ]
 

@@ -1,0 +1,23 @@
+{
+  "year": 2026,
+  "source": "architect, to be confirmed by a DATEV test import with the tax adviser",
+  "status": "to_verify",
+  "header": {
+    "extf_version": 700,
+    "category": 21,
+    "category_name": "Buchungsstapel",
+    "format_version": 13
+  },
+  "cancel_automatic_key": "40",
+  "bu_keys": {
+    "S19": "3",
+    "S7": "2",
+    "SX": null,
+    "KU": null,
+    "EU_SVC": null,
+    "VST": {"19": "9", "7": "8"},
+    "RC_EU_SVC": null,
+    "RC_3C_SVC": null,
+    "NONE": null
+  }
+}

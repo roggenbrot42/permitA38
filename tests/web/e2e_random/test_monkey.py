@@ -191,13 +191,19 @@ def seed_dataset(api: Api, rng: random.Random) -> dict:
         {
             "customer_id": c1["id"],
             "title": "Rechnung Geheim",
-            "lines": [{"description": "Design", "qty": 7, "unit": "h", "price": 123}],
+            "lines": [{"description": "Design", "qty": 7, "unit": "h", "price": "123.00"}],
         },
     )
     inv = api.post(f"/invoices/{inv['id']}/finalize")
     api.post(
         "/expenses",
-        {"date": date.today().isoformat(), "net": 421.0, "vat": 80.0, "vendor": "Geheimlieferant", "category": "Other"},
+        {
+            "date": date.today().isoformat(),
+            "net": "421.00",
+            "vat": "80.00",
+            "vendor": "Geheimlieferant",
+            "category": "Other",
+        },
     )
     return {
         "secrets": [

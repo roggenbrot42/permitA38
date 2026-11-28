@@ -20,6 +20,7 @@ from permita38.core.money import ZERO, dec, q2
 from permita38.core.repository import ID_RE, Repository
 from permita38.core.rights import Scope
 
+from . import invoice_state
 from . import planning_warnings as pw
 from .planner import load as planner_load
 from .planner import spread as sp
@@ -933,12 +934,25 @@ class ProcurementService:
         projects = {p["id"]: p for p in self.store.list("projects")}
         totals: dict[str, Decimal] = defaultdict(lambda: ZERO)
         total = ZERO
-        for inv in self.store.list("invoices"):
-            if inv.get("status") in ("draft", "cancelled"):
+        invoices = self.store.list("invoices")
+        pay_rows = invoice_state.group_by(self.store.list("payments"), "document_id")
+        notes = invoice_state.group_by(invoice_state.credit_notes_of(invoices), "corrects_id")
+        counted: set[str] = set()
+        for inv in invoices:
+            if inv.get("status") in ("draft", "cancelled") or inv.get("kind") == "credit_note":
                 continue
-            if not accrual and inv.get("status") != "paid":
+            derived = invoice_state.derive(  # paid state is derived from the payment rows (spec 2.3)
+                inv,
+                int(dec(calc.doc_totals(dict(inv), settings)["gross"]) * 100),
+                pay_rows.get(inv["id"], []),
+                notes.get(inv["id"], []),
+            )
+            if derived.status == "cancelled":
                 continue
-            when = calc.d(inv.get("date")) if accrual else calc.d(inv.get("paid_date"))
+            counted.add(inv["id"])
+            if not accrual and derived.status != "paid":
+                continue
+            when = calc.d(inv.get("date")) if accrual else calc.d(derived.paid_date)
             if not when or not (start <= when <= today):
                 continue
             net = calc.doc_totals(dict(inv), settings)["net"]
@@ -946,6 +960,22 @@ class ProcurementService:
             total += dec(net)
             if customer:
                 totals[customer] += dec(net)
+        for note in invoices:  # credit notes net the customer's revenue on their own date, in both bases
+            if note.get("kind") != "credit_note" or note.get("corrects_id") not in counted:
+                continue
+            when = calc.d(note.get("date"))
+            if not when or not (start <= when <= today):
+                continue
+            net = dec(calc.doc_totals(dict(note), settings)["net"])
+            parent = self.store.get("invoices", note["corrects_id"]) or {}
+            customer = (
+                note.get("customer_id")
+                or parent.get("customer_id")
+                or (projects.get(parent.get("project_id") or "") or {}).get("customer_id")
+            )
+            total -= net
+            if customer:
+                totals[customer] -= net
         if total > 0 and totals:
             top, amount = max(totals.items(), key=lambda kv: kv[1])
             if 100 * amount >= pct * total:

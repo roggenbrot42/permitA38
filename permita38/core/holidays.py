@@ -23,7 +23,7 @@ STATES = {
 }
 
 
-def easter(y):
+def easter(y: int) -> date:
     a, b, c = y % 19, y // 100, y % 100
     d, e = b // 4, b % 4
     f = (b + 8) // 25
@@ -37,9 +37,9 @@ def easter(y):
     return date(y, month, day)
 
 
-def holidays(year, state=""):
+def holidays(year: int, state: str = "") -> dict[date, str]:
     e = easter(year)
-    h = {
+    h: dict[date, str] = {
         date(year, 1, 1): "Neujahr",
         e - timedelta(days=2): "Karfreitag",
         e + timedelta(days=1): "Ostermontag",
@@ -70,3 +70,10 @@ def holidays(year, state=""):
             d -= timedelta(days=1)
         h[d] = "Buß- und Bettag"
     return h
+
+
+def next_working_day(d: date, state: str = "") -> date:
+    """`d` itself if it is a weekday and no public holiday of `state`, else the next such day."""
+    while d.weekday() >= 5 or d in holidays(d.year, state):
+        d += timedelta(days=1)
+    return d

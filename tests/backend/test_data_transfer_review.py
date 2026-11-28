@@ -375,10 +375,52 @@ def _row_in(table):
                 "hours_per_week": 10,
                 "status": "confirmed",
             }
+        elif table in ACCOUNTING_ROWS:
+            # rows of the accounting tables must satisfy the required/reference guards (rows predating the
+            # accounting tables needed no such fields); the supporting rows are made first
+            user = store.list("users")[0]["id"]
+            row = _accounting_row(store, table, user)
         store.save(table, row)
         return f"{table}: 1"
 
     return fill
+
+
+ACCOUNTING_ROWS = (
+    "fiscal_years", "journal_entries", "journal_lines", "payments", "period_locks", "vat_returns", "zm_reports",
+)  # fmt: skip
+
+
+def _accounting_row(store, table, user):
+    entry = {
+        "fiscal_year": 2026, "entry_no": 1, "document_date": "2026-03-02", "booking_date": "2026-03-02",
+        "event": "manual", "event_key": "k1", "text": "x", "origin": "manual", "created_at": 1,
+        "created_by": user, "prev_hash": "0" * 64, "hash": "1" * 64,
+    }  # fmt: skip
+    if table == "fiscal_years":
+        return {
+            "year": 2026, "chart": "skr03", "income_basis": "eur", "vat_basis": "soll", "vat_frequency": "quarter",
+            "dauerfrist": False, "small_business": False, "rules_version": "1", "opened_at": 1, "opened_by": user,
+        }  # fmt: skip
+    if table == "journal_entries":
+        return entry
+    if table == "journal_lines":
+        saved = store.save("journal_entries", entry)
+        return {"entry_id": saved["id"], "line_no": 1, "account": "1200", "amount_cents": 100}
+    if table == "payments":
+        invoice = store.save("invoices", {"number": "R-1"})
+        return {
+            "document_id": invoice["id"], "date": "2026-03-02", "amount_cents": 100, "method": "bank",
+            "kind": "payment", "created_at": 1, "created_by": user,
+        }  # fmt: skip
+    if table == "period_locks":
+        return {"year": 2026, "month": 1, "locked_at": 1, "locked_by": user, "reason": "manual"}
+    if table == "vat_returns":
+        return {
+            "year": 2026, "period_kind": "quarter", "period_no": 1, "from_date": "2026-01-01",
+            "to_date": "2026-03-31", "due_date": "2026-04-10", "status": "draft", "amends_key": "",
+        }  # fmt: skip
+    return {"year": 2026, "quarter": 1, "status": "draft", "due_date": "2026-04-25", "amends_key": ""}
 
 
 FILLERS = [
@@ -851,6 +893,13 @@ def test_exported_collections_and_excluded_tables_are_pinned():
         "allocations",
         "receipt_scans",
         "document_scans",
+        "fiscal_years",
+        "journal_entries",
+        "journal_lines",
+        "payments",
+        "period_locks",
+        "vat_returns",
+        "zm_reports",
     ]
     assert sorted(manifest.EXCLUDED_TABLES) == ["api_tokens", "audit_log", "calendar_events", "settings", "timers"]
     assert all(manifest.EXCLUDED_TABLES.values())  # every exclusion has a reason

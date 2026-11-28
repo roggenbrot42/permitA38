@@ -1,17 +1,21 @@
 /* permitA38 – boss pages: customers, projects, offers/invoices, expenses, money, team, settings. */
 
+/* Money helpers (decimal strings, see web/money.js): "0.00" is truthy and strings compare as text, so test with these. */
+const mPos = v => Money.cmp(v, 0) > 0, mNeg = v => Money.isNeg(v), mZero = v => v == null || Money.isZero(v);
+const mNegate = v => Money.fromCents(-Money.cents(v));
+
 /* ================= CUSTOMERS ================= */
 PAGES.customers = async () => {
   await loadAll(['customers', 'projects', 'invoices', 'offers']);
   const cs = S.d.customers.sort((a, b) => a.name.localeCompare(b.name));
   return `<div class="head"><div><h1>Customers</h1><div class="muted">Business info, contacts and everything you did for them.</div></div><button class="primary" data-a="editCustomer">+ New customer</button></div>
   <div class="card">${cs.length ? `<table><tr><th>Name</th><th>Contact</th><th>City</th><th class="num">Rate</th><th class="num">Open</th></tr>${cs.map(c => {
-    const open = S.d.invoices.filter(i => i.customer_id === c.id && i.status === 'sent').reduce((a, i) => a + docTotal(i), 0);
-    return `<tr class="click" data-href="#/customer/${c.id}"><td><b>${esc(c.name)}</b></td><td>${esc(c.contact || '')}<div class="small muted">${esc(c.email || '')}</div></td><td>${esc(c.city || '')}</td><td class="num">${c.rate ? eur(c.rate) + '/h' : ''}</td><td class="num">${open ? eur(open) : ''}</td></tr>`;
+    const open = Money.sum(S.d.invoices.filter(i => i.customer_id === c.id).map(invOpenDue));
+    return `<tr class="click" data-href="#/customer/${c.id}"><td><b>${esc(c.name)}</b></td><td>${esc(c.contact || '')}<div class="small muted">${esc(c.email || '')}</div></td><td>${esc(c.city || '')}</td><td class="num">${mZero(c.rate) ? '' : eur(c.rate) + '/h'}</td><td class="num">${mZero(open) ? '' : eur(open)}</td></tr>`;
   }).join('')}</table>` : '<div class="empty">No customers yet. Add your first one – you need one before you can send an offer.</div>'}</div>`;
 };
 const CUSTOMER_FIELDS = [
-  { k: 'name', l: 'Company / name' }, { k: 'customer_no', l: 'Customer no.', row: 1 }, { k: 'rate', l: 'Default hourly rate (€)', t: 'number', row: 1 },
+  { k: 'name', l: 'Company / name' }, { k: 'customer_no', l: 'Customer no.', row: 1 }, { k: 'rate', l: 'Default hourly rate (€)', t: 'number', m: true, row: 1 },
   { k: 'street', l: 'Street & number' }, { k: 'zip', l: 'ZIP', row: 2 }, { k: 'city', l: 'City', row: 2 }, { k: 'country', l: 'Country', row: 2, ph: 'Germany' },
   { k: 'tax_number', l: 'Tax number (Steuernr.)', row: 3 }, { k: 'vat_id', l: 'VAT ID (USt-IdNr.)', row: 3 },
   { k: 'contact', l: 'Point of contact' }, { k: 'email', l: 'E-mail', row: 4 }, { k: 'phone', l: 'Phone', row: 4 },
@@ -114,12 +118,25 @@ PAGES.customer = async id => {
 };
 function docTable(rows) {
   if (!rows.length) return '<div class="empty">Nothing here yet.</div>';
-  return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${d.number ? esc(d.number) : '<span class="muted">No number yet</span>'}</b>${d.imported ? ' <span class="pill">imported</span>' : ''}<div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${eur(docTotal(d))}</td><td>${statusPill(coll, d)}</td></tr>`).join('')}</table>`;
+  return `<table><tr><th>No.</th><th>Type</th><th>Customer</th><th>Date</th><th class="num">Total</th><th>Status</th></tr>${rows.sort((a, b) => (b[1].date || '') < (a[1].date || '') ? -1 : 1).map(([coll, d]) => `<tr class="click" data-href="#/doc/${coll}/${d.id}"><td><b>${d.number ? esc(d.number) : d.kind === 'credit_note' ? '<span class="muted">write-off</span>' : '<span class="muted">No number yet</span>'}</b>${d.imported ? ' <span class="pill">imported</span>' : ''}<div class="small muted">${esc(d.title || '')}</div></td><td>${coll === 'offers' ? 'Offer' : d.kind === 'credit_note' ? `<span class="pill warn" data-cn-kind="${esc(d.credit_kind || '')}">${esc(cnKindLabel(d.credit_kind))}</span>` : 'Invoice'}</td><td>${esc(nameOf('customers', d.customer_id))}</td><td>${fmtDate(d.date)}</td><td class="num">${d.kind === 'credit_note' ? eur(cnSigned(d)) : eur(docTotal(d))}</td><td>${d.kind === 'credit_note' ? '' : statusPill(coll, d)}</td></tr>`).join('')}</table>`;
+}
+/** Credit notes (credit-notes-payments.md 4): the kind label, the gross as the issued snapshot says, shown negative in lists. */
+const CN_KINDS = { storno: 'Cancellation', partial: 'Credit note', discount: 'Discount', write_off: 'Write-off', write_off_reversal: 'Write-off reversal' };
+const cnKindLabel = k => CN_KINDS[k] || 'Credit note';
+const negMoney = v => { const x = Money.str(v); return Money.isZero(x) ? x : Money.isNeg(x) ? Money.abs(x) : '-' + x; };
+const cnSigned = d => negMoney(d.issued && d.issued.gross != null ? d.issued.gross : docTotal(d));
+/** Derived in JS: the net write-off (write-offs minus reversals; the server returns reversals negative) is > 0, nothing is open
+ * any more and the derived server status is neither paid nor cancelled (those win). */
+function isWrittenOff(d) {
+  const open = d && invOpenAmount(d);
+  if (!d || d.kind === 'credit_note' || open === null || Money.cmp(open, 0) > 0 || d.status === 'cancelled' || d.status === 'paid') return false;
+  const wo = (d.credit_notes || []).filter(n => n.credit_kind === 'write_off' || n.credit_kind === 'write_off_reversal').map(n => Money.str(n.gross));
+  return wo.length > 0 && Money.cmp(Money.sum(wo), 0) > 0;
 }
 function statusPill(coll, d) {
-  const late = coll === 'invoices' && d.status === 'sent' && d.due_date && d.due_date < todayISO();
-  const cls = late ? 'bad' : { paid: 'good', accepted: 'good', sent: 'blue', rejected: 'bad', cancelled: 'bad', draft: 'warn' }[d.status] || '';
-  return `<span class="pill ${cls}">${late ? 'overdue' : esc(d.status)}</span>`;
+  const late = coll === 'invoices' && isOverdue(d), wo = coll === 'invoices' && isWrittenOff(d);
+  const cls = late ? 'bad' : wo ? '' : { paid: 'good', accepted: 'good', sent: 'blue', rejected: 'bad', cancelled: 'bad', draft: 'warn' }[d.status] || '';
+  return `<span class="pill ${cls}">${late ? 'overdue' : wo ? 'written off' : esc(d.status)}</span>`;
 }
 
 /* ================= PROJECTS ================= */
@@ -133,7 +150,7 @@ PAGES.projects = async () => {
     const r = rep[p.id] || {}, pct = p.budget_hours ? Math.min(100, r.hours / p.budget_hours * 100) : 0;
     return `<tr class="click" data-href="#/project/${p.id}"><td><span class="dot" style="background:${esc(p.color || '#888')}"></span><b>${esc(p.name)}</b>${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? ' <span class="pill">internal</span>' : ''}</td><td>${esc(nameOf('customers', p.customer_id))}</td><td class="num">${hm(r.hours || 0)}</td>
     <td style="min-width:110px">${p.budget_hours ? `<div class="bar ${pct > 100 ? '' : ''}"><div style="width:${pct}%;${r.hours > p.budget_hours ? 'background:var(--bad)' : ''}"></div></div><span class="small muted">${num(r.hours, 0)} / ${p.budget_hours} h</span>` : '<span class="muted small">–</span>'}</td>
-    <td class="num">${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? '' : eur(r.revenue)}</td><td class="num">${r.unbilled_revenue ? eur(r.unbilled_revenue) : ''}</td><td class="num ${r.margin < 0 ? 'free-bad' : ''}">${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? '' : eur(r.margin)}</td></tr>`;
+    <td class="num">${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? '' : eur(r.revenue)}</td><td class="num">${mZero(r.unbilled_revenue) ? '' : eur(r.unbilled_revenue)}</td><td class="num ${mNeg(r.margin) ? 'free-bad' : ''}">${(p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? '' : eur(r.margin)}</td></tr>`;
   }).join('')}</table>` : '<div class="empty">No projects yet. Create one to start tracking time.</div>'}</div>`;
 };
 A.editProject = el => {
@@ -144,7 +161,7 @@ A.editProject = el => {
     title: p.id ? 'Edit project' : 'New project', vals: p,
     fields: [{ k: 'name', l: 'Project name' }, { k: 'kind', l: 'Kind', t: 'select', o: [['customer', 'Customer project'], ['internal', 'Internal project (no customer, never billed)']] },
       { k: 'customer_id', l: 'Customer', t: 'select', o: [['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])] },
-      { k: 'rate', l: 'Hourly rate (€)', t: 'number', row: 1, h: 'Overrides the customer rate' }, { k: 'budget_hours', l: 'Budget (hours)', t: 'number', row: 1 },
+      { k: 'rate', l: 'Hourly rate (€)', t: 'number', m: true, row: 1, h: 'Overrides the customer rate' }, { k: 'budget_hours', l: 'Budget (hours)', t: 'number', row: 1 },
       { k: 'start', l: 'Start (period)', t: 'date', row: 3, h: 'Required for customer projects' }, { k: 'end', l: 'End (period)', t: 'date', row: 3 },
       { k: 'status', l: 'Status', t: 'select', o: ['active', 'paused', 'done', 'archived'], row: 2 }, { k: 'color', l: 'Colour', t: 'color', row: 2 },
       { k: 'notes', l: 'Notes', t: 'area' }],
@@ -168,10 +185,10 @@ PAGES.project = async id => {
   return `<div class="head"><div><a href="#/projects" class="small">← Projects</a><h1><span class="dot" style="background:${esc(p.color || '#888')}"></span>${esc(p.name)}</h1><div class="muted">${esc(nameOf('customers', p.customer_id) || ((p.kind || (p.customer_id ? 'customer' : 'internal')) === 'internal' ? 'Internal project' : ''))}</div></div><span>${can('planning') ? `<button data-a="allocations" data-project="${esc(id)}">Allocations</button> ` : ''}<button data-a="editProject" data-id="${id}">Edit</button></span></div>
   <div class="grid g4"><div class="card kpi"><div class="l">Hours</div><div class="v">${hm(r.hours || 0)}</div></div><div class="card kpi"><div class="l">Revenue (at rates)</div><div class="v">${eur(r.revenue)}</div></div><div class="card kpi"><div class="l">Costs</div><div class="v">${eur((r.cost || 0) + (r.expenses || 0))}</div><span class="small muted">team ${eur(r.cost)} · expenses ${eur(r.expenses)}</span></div><div class="card kpi ${r.margin < 0 ? 'bad' : 'good'}"><div class="l">Margin</div><div class="v">${eur(r.margin)}</div></div></div>
   ${can('contracts') ? `<div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Contracts</h2><div class="right auto">${writeC ? `<button class="primary" data-a="editContract" data-proj="${esc(id)}">+ New contract</button>` : ''}</div></div>
-  ${mine.length ? `<table><tr><th>Contract</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${mine.map(c => `<tr data-id="${c.id}"${writeC ? ' class="click" data-a="editContract"' : ''}><td><b>${esc(c.title)}</b></td><td class="nowrap">${contractPeriod(c)}</td><td class="num">${contractHours(c)}</td><td class="num">${c.rate ? eur(c.rate) : ''}</td><td>${contractPill(c)}</td></tr>`).join('')}</table>` : '<div class="empty">No contracts for this project yet.</div>'}
+  ${mine.length ? `<table><tr><th>Contract</th><th>Period</th><th class="num">Hours</th><th class="num">Rate</th><th>Status</th></tr>${mine.map(c => `<tr data-id="${c.id}"${writeC ? ' class="click" data-a="editContract"' : ''}><td><b>${esc(c.title)}</b></td><td class="nowrap">${contractPeriod(c)}</td><td class="num">${contractHours(c)}</td><td class="num">${mZero(c.rate) ? '' : eur(c.rate)}</td><td>${contractPill(c)}</td></tr>`).join('')}</table>` : '<div class="empty">No contracts for this project yet.</div>'}
   ${others ? `<div class="small muted" style="margin-top:10px">${others} more ${others === 1 ? 'contract' : 'contracts'} of ${esc(nameOf('customers', p.customer_id))} without a project${can('planning') ? ' – <a href="#/plan/contracts">show in Planning</a>' : ''}</div>` : ''}</div>` : ''}
   <div class="card"><div class="row" style="align-items:center"><h2 style="margin:0">Tasks & task rates</h2><div class="right auto"><button data-a="editTask" data-proj="${id}">+ Task</button></div></div>
-  ${tasks.length ? `<table><tr><th>Task</th><th class="num">Hours</th><th class="num">Rate</th></tr>${tasks.map(t => `<tr class="click" data-a="editTask" data-id="${t.id}" data-proj="${id}"><td>${esc(t.name)}</td><td class="num">${hm(th(t))}</td><td class="num">${t.rate ? eur(t.rate) : '<span class="muted">project rate</span>'}</td></tr>`).join('')}</table>` : '<div class="empty">No tasks. Tasks are optional – use them when different work has a different rate (e.g. "Consulting" vs "Development").</div>'}</div>
+  ${tasks.length ? `<table><tr><th>Task</th><th class="num">Hours</th><th class="num">Rate</th></tr>${tasks.map(t => `<tr class="click" data-a="editTask" data-id="${t.id}" data-proj="${id}"><td>${esc(t.name)}</td><td class="num">${hm(th(t))}</td><td class="num">${mZero(t.rate) ? '<span class="muted">project rate</span>' : eur(t.rate)}</td></tr>`).join('')}</table>` : '<div class="empty">No tasks. Tasks are optional – use them when different work has a different rate (e.g. "Consulting" vs "Development").</div>'}</div>
   ${can('time') ? await timesheetCard(id) : ''}
   ${ex.length ? `<div class="card"><h2>Expenses on this project</h2><table>${ex.map(e => `<tr><td>${fmtDate(e.date)}</td><td>${esc(e.vendor || '')}</td><td class="num">${eur(e.net)}</td></tr>`).join('')}</table></div>` : ''}`;
 };
@@ -205,7 +222,7 @@ A.tsCsv = () => {
 };
 A.editTask = el => {
   const t = el.dataset.id ? S.d.tasks.find(x => x.id === el.dataset.id) : { project_id: el.dataset.proj };
-  openForm({ title: t.id ? 'Edit task' : 'New task', vals: t, fields: [{ k: 'name', l: 'Task name' }, { k: 'rate', l: 'Hourly rate (€) – optional', t: 'number', h: 'Overrides project and customer rate' }],
+  openForm({ title: t.id ? 'Edit task' : 'New task', vals: t, fields: [{ k: 'name', l: 'Task name' }, { k: 'rate', l: 'Hourly rate (€) – optional', t: 'number', m: true, h: 'Overrides project and customer rate' }],
     save: async v => { if (!v.name) throw new Error('Name required'); await save('tasks', v); render(); },
     del: t.id ? async () => { await api('DELETE', 'tasks/' + t.id); await loadAll(['tasks']); render(); } : null });
 };
@@ -214,11 +231,12 @@ A.editTask = el => {
 PAGES.sales = async (tab = 'invoices') => {
   await loadAll(['offers', 'invoices', 'customers', 'projects', 'entries']);
   await DS.load();   // document scan: the scans that wait for a check (docscan.js)
-  const rep = await api('GET', 'project-report'), unbilled = Object.values(rep).reduce((a, r) => a + r.unbilled_revenue, 0);
+  const rep = await api('GET', 'project-report'), unbilled = Money.sum(Object.values(rep).map(r => r.unbilled_revenue));
   const rows = S.d[tab].map(d => [tab, d]);
-  const sum = (f) => S.d.invoices.filter(f).reduce((a, i) => a + docTotal(i), 0);
+  const sum = (f) => Money.sum(S.d.invoices.filter(f).map(docTotal));
+  const sumOpen = (f) => Money.sum(S.d.invoices.filter(f).map(i => invOpenAmount(i) ?? docTotal(i)));   // what is still owed
   return `<div class="head"><div><h1>Offers & Invoices</h1><div class="muted">Offer → accepted → project → invoice.</div></div><div class="row tight" style="flex:none">${DS.uploadButton()}<button data-a="newDoc" data-coll="offers">+ Offer</button><button class="primary" data-a="newDoc" data-coll="invoices">+ Invoice</button></div></div>
-  ${DS.pageTop()}${DS.flaggedSection()}<div class="grid g3"><div class="card kpi warn"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a data-a="billTime" class="small">Invoice tracked time →</a></div><div class="card kpi"><div class="l">Outstanding</div><div class="v">${eur(sum(i => i.status === 'sent'))}</div></div><div class="card kpi bad"><div class="l">Overdue</div><div class="v">${eur(sum(i => i.status === 'sent' && i.due_date && i.due_date < todayISO()))}</div></div></div>
+  ${DS.pageTop()}${DS.flaggedSection()}<div class="grid g3"><div class="card kpi warn"><div class="l">Unbilled work</div><div class="v">${eur(unbilled)}</div><a data-a="billTime" class="small">Invoice tracked time →</a></div><div class="card kpi"><div class="l">Outstanding</div><div class="v">${eur(Money.sum(S.d.invoices.map(invOpenDue)))}</div></div><div class="card kpi bad"><div class="l">Overdue</div><div class="v">${eur(sumOpen(i => isOverdue(i)))}</div></div></div>
   <div class="tabs"><a href="#/sales/invoices" class="${tab === 'invoices' ? 'on' : ''}">Invoices</a><a href="#/sales/offers" class="${tab === 'offers' ? 'on' : ''}">Offers</a></div><div class="card">${docTable(rows)}</div>`;
 };
 A.newDoc = el => { location.hash = `#/doc/${el.dataset.coll}/new${el.dataset.cust ? '-' + el.dataset.cust : ''}`; };
@@ -232,13 +250,54 @@ A.billTime = el => {
 };
 
 let DOC = null;
+/** An issued invoice (numbered, not a draft) is frozen (credit-notes-payments.md 2.1). */
+const isFrozen = d => !!d && d.coll === 'invoices' && !!d.id && (d.kind === 'credit_note' || (!!d.number && d.status !== 'draft'));
+/** Tax treatment of an invoice (spec 5): standard or eu_b2b_service; small_business is set by the year and shown fixed. */
+function taxField(d, frozen, smallYear) {
+  const cur = d.tax_treatment || 'standard', fixed = smallYear || cur === 'small_business';
+  const names = { standard: 'Standard (with VAT)', eu_b2b_service: 'EU B2B service (reverse charge, 0 % VAT)', small_business: 'Small business (§ 19 UStG)' };
+  if (fixed || frozen) return `<div class="field"><label>Tax treatment</label><select id="d_tt" disabled><option>${esc(names[fixed ? 'small_business' : cur] || cur)}</option></select>${fixed && !frozen ? '<div class="small muted">Set by the year: small business.</div>' : ''}</div>`;
+  return `<div class="field"><label>Tax treatment</label><select id="d_tt">${['standard', 'eu_b2b_service'].map(v => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(names[v])}</option>`).join('')}</select>${cur === 'eu_b2b_service' ? '<div class="small muted">Needs an EU VAT id (not DE) at the customer.</div>' : ''}</div>`;
+}
+let PAY_WARN = { id: null, list: [] };   // warnings of the last payment action (overpayment, vat_drift), for this invoice
+/** Payments panel of an issued invoice: derived amounts, the payment list, record / reverse. Money is only formatted and summed with Money. */
+function paymentsPanel(d) {
+  const m = v => (v === null || v === undefined ? null : Money.str(v)), amt = v => (v === null ? '—' : eur(v));   // a credit note has no open amount
+  const paid = m(d.paid_amount), credited = m(d.credited_amount), open = m(d.open_amount), isCn = d.kind === 'credit_note';
+  const pays = d.payments || [], reversed = new Set(pays.filter(p => p.reverses_id).map(p => p.reverses_id));
+  const warns = PAY_WARN.id === d.id ? PAY_WARN.list : [];
+  const rows = pays.map(p => `<tr data-pay="${esc(p.id || 'legacy')}"><td class="nowrap">${fmtDate(p.date)}</td><td class="num">${eur(p.amount)}</td><td>${esc(p.kind || '')}</td><td>${esc(p.method || '')}</td><td class="small muted">${esc(p.note || '')}</td><td>${['payment', 'refund'].includes(p.kind) && !reversed.has(p.id) ? `<button class="sm" data-a="payReverse" data-id="${esc(p.id || '')}">Reverse</button>` : ''}</td></tr>`).join('');
+  return `<div class="card" id="pay_panel"><h2>Payments</h2>
+    ${warns.map(w => `<div class="banner" data-warn="${esc(w.code)}">${esc(w.message)}</div>`).join('')}
+    <div class="grid g4"><div class="kpi"><div class="l">Total</div><div class="v small" id="pay_total">${[open, paid, credited].includes(null) ? '—' : eur(Money.sum([open, paid, credited]))}</div></div><div class="kpi"><div class="l">Paid</div><div class="v small" id="pay_paid">${amt(paid)}</div></div><div class="kpi"><div class="l">Credited</div><div class="v small" id="pay_credited">${amt(credited)}</div></div><div class="kpi ${open !== null && Money.cmp(open, 0) > 0 ? 'warn' : ''}"><div class="l">Open</div><div class="v small" id="pay_open">${amt(open)}</div></div></div>
+    <div class="small muted" style="margin:6px 0">Status: <b id="pay_status">${esc(d.status)}</b>${d.paid_date ? ' · paid on ' + fmtDate(d.paid_date) : ''}</div>
+    ${rows ? `<table id="pay_list"><tr><th>Date</th><th class="num">Amount</th><th>Kind</th><th>Method</th><th>Note</th><th></th></tr>${rows}</table>` : '<div class="empty">No payments yet.</div>'}
+    ${isCn ? '' : '<button class="sm primary" data-a="payRecord" style="margin-top:8px">Record payment</button>'}</div>${isCn ? '' : creditPanel(d)}`;
+}
+/** Credit notes of an issued invoice and the actions that issue them (credit-notes-payments.md 3, 4). */
+function creditPanel(d) {
+  const open = invOpenAmount(d), cns = d.credit_notes || [];
+  const canCredit = d.status !== 'cancelled' && Money.cmp(remainingGross(d), 0) > 0, canOpen = open !== null && Money.cmp(open, 0) > 0;
+  const rows = cns.map(n => `<tr data-cn="${esc(n.id || '')}"><td>${n.number ? `<a href="${esc(api.url('invoices/' + n.id + '/pdf'))}" target="_blank" class="cn-pdf">${esc(n.number)}</a>` : '<span class="muted">write-off</span>'}</td><td class="nowrap">${fmtDate(n.date)}</td><td>${esc(cnKindLabel(n.credit_kind))}</td><td class="cn-reason">${esc(n.reason || '')}</td><td class="num">${eur(n.gross)}</td></tr>`).join('');
+  return `<div class="card" id="cn_panel"><h2>Credit notes</h2>
+    ${isWrittenOff(d) ? '<div class="small muted" style="margin-bottom:6px">This invoice is <span class="pill">written off</span>: nothing is open any more.</div>' : ''}
+    ${rows ? `<table id="cn_list"><tr><th>No.</th><th>Date</th><th>Kind</th><th>Reason</th><th class="num">Gross</th></tr>${rows}</table>` : '<div class="empty">No credit notes yet.</div>'}
+    <div class="row tight" style="margin-top:8px;flex-wrap:wrap">
+      ${canCredit ? '<button class="sm" data-a="cnStorno">Cancel (storno)</button><button class="sm" data-a="cnPartial">Partial credit</button>' : ''}
+      ${canOpen ? '<button class="sm" data-a="cnWriteOff">Write off</button><button class="sm" data-a="cnSettle">Settle with discount</button>' : ''}</div></div>`;
+}
+/** Gross still creditable: invoice gross minus what was credited. */
+function remainingGross(d) {
+  const gross = Money.str(d.issued && d.issued.gross != null ? d.issued.gross : docTotal(d)), cr = d.credited_amount == null ? '0.00' : Money.str(d.credited_amount);
+  return Money.sum([gross, negMoney(cr)]);
+}
 PAGES.doc = async (coll, id) => {
   await loadAll(['customers', 'projects', 'users', 'offers', 'invoices']);
   const s = S.settings, isInv = coll === 'invoices';
   const route = coll + '/' + id;
   if (id.startsWith('new')) {
     if (!DOC || DOC.__route !== route) {   // keep the in-progress draft across re-renders (add/delete line)
-      DOC = { __route: route, coll, customer_id: id.slice(4) || '', date: todayISO(), status: 'draft', lines: [{ description: '', qty: 1, unit: 'h', price: s.default_rate || 0 }], template_id: s.default_template, vat_rate: s.vat_rate };
+      DOC = { __route: route, coll, customer_id: id.slice(4) || '', date: todayISO(), status: 'draft', lines: [{ description: '', qty: 1, unit: 'h', price: s.default_rate ?? '0' }], template_id: s.default_template, vat_rate: s.vat_rate };
       SUGGESTED_RATE = suggestedRate(DOC.customer_id, null); DOC.lines[0].price = SUGGESTED_RATE; AUTO_PRICED.add(DOC.lines[0]);
     }
   } else if (!DOC || DOC.id !== id || DOC.coll !== coll) {
@@ -251,31 +310,38 @@ PAGES.doc = async (coll, id) => {
   if (d.status === 'draft' && !d.number && can('settings', 'write') && scopeOf('settings') === 'all') {
     try { const pv = await api('GET', 'numbering/preview?type=' + (isInv ? 'invoice' : 'offer')); if (pv?.next?.[0]) nextNoHTML = ` The next number is currently <b>${esc(pv.next[0])}</b> (<a href="#/numbering">change numbering</a>).`; } catch (e) { /* keep the plain banner */ }
   }
+  const frozen = isFrozen(d), fz = frozen ? 'disabled' : '';   // an issued invoice: only the labels, due date, notes, reference change
+  let smallYear = false;   // the year's regime sets small_business on a document; it is not chosen (credit-notes-payments.md 5)
+  if (isInv && !frozen) {
+    try { const ys = await api('GET', 'accounting/years'), y = ys.find(r => String(r.year) === String(d.date || '').slice(0, 4)); smallYear = y ? !!y.small_business : !!s.kleinunternehmer; } catch { smallYear = !!s.kleinunternehmer; }
+  }
   const opt = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('');
   const klein = s.kleinunternehmer;
-  const statuses = isInv ? [['sent', 'Sent'], ['paid', 'Paid'], ['cancelled', 'Cancelled']] : [['sent', 'Sent'], ['accepted', 'Accepted'], ['rejected', 'Rejected']];
+  const statuses = isInv ? [['sent', 'Sent'], ['accepted', 'Accepted'], ['rejected', 'Rejected']] : [['sent', 'Sent'], ['accepted', 'Accepted'], ['rejected', 'Rejected']];
   const plan = d.plan || {};
   return `<div class="head"><div><a href="#/sales/${coll}" class="small">← ${isInv ? 'Invoices' : 'Offers'}</a><h1>${isInv ? 'Invoice' : 'Offer'} ${esc(d.number || '')} ${d.id ? statusPill(coll, d) : '<span class="pill warn">draft – not saved yet</span>'}</h1></div>
     <div class="row tight" style="flex:none">${d.id ? `<button data-a="docPdf">Preview PDF</button>` : ''}<button class="${d.number ? '' : 'primary'}" data-a="docSave">${d.status === 'draft' ? 'Save draft' : 'Save'}</button>
     ${d.id && !d.number ? `<button class="primary" data-a="docFinalize">Finalize & number</button>` : ''}${d.id && !d.number ? `<button class="danger" data-a="docDelete">Delete draft</button>` : ''}${d.id && d.number ? `<select style="width:auto" data-change="docStatus"><option value="">Set status…</option>${opt(statuses, '')}</select>` : ''}
     ${d.id && !isInv && d.number && d.status !== 'accepted' ? `<button data-a="docAccept">✓ Accepted → create project</button>` : ''}${d.id && !isInv ? `<button data-a="docToInvoice">→ Invoice</button>` : ''}</div></div>
   ${d.status === 'draft' && !d.number ? `<div class="banner info">This is a <b>draft</b>: it has no number yet, is not counted in revenue or planning, and the PDF is marked as a draft. It gets its ${isInv ? 'invoice' : 'offer'} number when you press <b>Finalize &amp; number</b>.${nextNoHTML}</div>` : ''}
-  ${locked ? '<div class="banner">This document has a number and was probably sent. Changing it now changes the PDF – only edit for corrections.</div>' : ''}
-  <div class="card"><div class="grid g3"><div class="field"><label>Customer</label><select id="d_cust">${opt([['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])], d.customer_id)}</select></div>
-    <div class="field"><label>Project</label><select id="d_proj">${opt(projectOptions(true, d.customer_id || '', d.project_id, true), d.project_id || '')}</select></div><div class="field"><label>Title / subject</label><input id="d_title" value="${esc(d.title || '')}"></div>
-    <div class="field"><label>Date</label><input type="date" id="d_date" value="${esc(d.date || '')}"></div>
-    ${isInv ? `<div class="field"><label>Due date</label><input type="date" id="d_due" value="${esc(d.due_date || '')}"></div><div class="field"><label>Paid on</label><input type="date" id="d_paid" value="${esc(d.paid_date || '')}"></div>` : `<div class="field"><label>Valid until</label><input type="date" id="d_valid" value="${esc(d.valid_until || '')}"></div>`}
-    <div class="field"><label>Service period from</label><input type="date" id="d_sf" value="${esc(d.service_from || '')}"></div><div class="field"><label>to</label><input type="date" id="d_st" value="${esc(d.service_to || '')}"></div>
+  ${frozen ? '<div class="banner info" id="d_frozen">Issued invoices are frozen; issue a credit note to correct one. Only the status label, due date, reference and notes can still be changed.</div>' : ''}
+  ${locked && !frozen ? '<div class="banner">This document has a number and was probably sent. Changing it now changes the PDF – only edit for corrections.</div>' : ''}
+  <div class="card"><div class="grid g3"><div class="field"><label>Customer</label><select id="d_cust" ${fz}>${opt([['', '— choose —'], ...S.d.customers.map(c => [c.id, c.name])], d.customer_id)}</select></div>
+    <div class="field"><label>Project</label><select id="d_proj" ${fz}>${opt(projectOptions(true, d.customer_id || '', d.project_id, true), d.project_id || '')}</select></div><div class="field"><label>Title / subject</label><input id="d_title" ${fz} value="${esc(d.title || '')}"></div>
+    <div class="field"><label>Date</label><input type="date" id="d_date" ${fz} value="${esc(d.date || '')}"></div>
+    ${isInv ? `<div class="field"><label>Due date</label><input type="date" id="d_due" value="${esc(d.due_date || '')}"></div>${taxField(d, frozen, smallYear)}` : `<div class="field"><label>Valid until</label><input type="date" id="d_valid" value="${esc(d.valid_until || '')}"></div>`}
+    <div class="field"><label>Service period from</label><input type="date" id="d_sf" ${fz} value="${esc(d.service_from || '')}"></div><div class="field"><label>to</label><input type="date" id="d_st" ${fz} value="${esc(d.service_to || '')}"></div>
     <div class="field"><label>Your reference / PO number</label><input id="d_ref" value="${esc(d.reference || '')}"></div>
-    <div class="field"><label>Template</label><select id="d_tpl">${opt(S.templates.map(t => [t.id, t.name]), d.template_id)}</select></div>
-    <div class="field"><label>Language</label><select id="d_lang">${opt([['', 'Template default'], ['de', 'Deutsch'], ['en', 'English']], d.language || '')}</select></div>
-    ${klein ? '' : `<div class="field"><label>Default VAT %</label><input type="number" id="d_vat" value="${esc(d.vat_rate ?? s.vat_rate)}"></div>`}</div></div>
+    <div class="field"><label>Template</label><select id="d_tpl" ${fz}>${opt(S.templates.map(t => [t.id, t.name]), d.template_id)}</select></div>
+    <div class="field"><label>Language</label><select id="d_lang" ${fz}>${opt([['', 'Template default'], ['de', 'Deutsch'], ['en', 'English']], d.language || '')}</select></div>
+    ${klein ? '' : `<div class="field"><label>Default VAT %</label><input type="number" id="d_vat" ${fz} value="${esc(d.vat_rate ?? s.vat_rate)}"></div>`}</div></div>
   <div class="card"><h2>Items</h2><table class="lines"><tr><th>Description</th><th style="width:80px">Qty</th><th style="width:70px">Unit</th><th style="width:110px">Unit price €</th>${klein ? '' : '<th style="width:70px">VAT %</th>'}<th class="num" style="width:110px">Amount</th><th></th></tr>
-    ${d.lines.map((l, i) => `<tr><td><input data-l="${i}" data-k="description" value="${esc(l.description)}" placeholder="What did you deliver?"></td><td><input data-l="${i}" data-k="qty" type="number" step="any" value="${esc(l.qty)}"></td><td><input data-l="${i}" data-k="unit" value="${esc(l.unit)}"></td><td><input data-l="${i}" data-k="price" type="number" step="any" value="${esc(l.price)}"></td>${klein ? '' : `<td><input data-l="${i}" data-k="vat" type="number" value="${esc(l.vat ?? '')}" placeholder="${esc(d.vat_rate ?? s.vat_rate)}"></td>`}<td class="num" id="amt${i}">${eur(l.qty * l.price)}</td><td><button class="ghost sm" data-a="delLine" data-i="${i}">✕</button></td></tr>`).join('')}</table>
-    <button class="sm" data-a="addLine" style="margin-top:8px">+ Add line</button>${isInv ? ' <button class="sm" data-a="billTimeInto">+ Add unbilled time…</button>' : ''}
+    ${d.lines.map((l, i) => `<tr><td><input data-l="${i}" data-k="description" ${fz} value="${esc(l.description)}" placeholder="What did you deliver?"></td><td><input data-l="${i}" data-k="qty" type="number" step="any" ${fz} value="${esc(l.qty)}"></td><td><input data-l="${i}" data-k="unit" ${fz} value="${esc(l.unit)}"></td><td><input data-l="${i}" data-k="price" type="text" inputmode="decimal" ${fz} value="${esc(l.price)}"></td>${klein ? '' : `<td><input data-l="${i}" data-k="vat" type="number" ${fz} value="${esc(l.vat ?? '')}" placeholder="${esc(d.vat_rate ?? s.vat_rate)}"></td>`}<td class="num" id="amt${i}">${eur(Money.fromCents(Money.lineCents(l.qty, l.price)))}</td><td>${frozen ? '' : `<button class="ghost sm" data-a="delLine" data-i="${i}">✕</button>`}</td></tr>`).join('')}</table>
+    ${frozen ? '' : `<button class="sm" data-a="addLine" style="margin-top:8px">+ Add line</button>${isInv ? ' <button class="sm" data-a="billTimeInto">+ Add unbilled time…</button>' : ''}`}
     <div class="right" id="d_totals" style="margin-top:12px"></div></div>
-  <div class="card"><div class="grid g2"><div class="field"><label>Intro text (empty = from template)</label><textarea id="d_intro" rows="4">${esc(d.intro || '')}</textarea></div><div class="field"><label>Closing text (empty = from template)</label><textarea id="d_outro" rows="4">${esc(d.outro || '')}</textarea></div></div>
+  <div class="card"><div class="grid g2"><div class="field"><label>Intro text (empty = from template)</label><textarea id="d_intro" rows="4" ${fz}>${esc(d.intro || '')}</textarea></div><div class="field"><label>Closing text (empty = from template)</label><textarea id="d_outro" rows="4" ${fz}>${esc(d.outro || '')}</textarea></div></div>
     <div class="field"><label>Internal notes (not printed)</label><textarea id="d_notes" rows="2">${esc(d.notes || '')}</textarea></div></div>
+  ${frozen ? paymentsPanel(d) : ''}
   ${isInv ? '' : `<div class="card"><h2>Planning (optional)</h2><div class="muted small" style="margin-bottom:8px">When should this work happen? Enter hours per week or total hours, not both; without hours, the offer's hour lines are booked on acceptance. While the offer is open, it shows up in the planning Overview as possible work; once accepted it becomes a contract.</div><div class="row"><div><label>Start</label><input type="date" id="p_s" value="${esc(plan.start || '')}"></div><div><label>End</label><input type="date" id="p_e" value="${esc(plan.end || '')}"></div><div><label>Hours per week</label><input type="number" min="0" step="any" id="p_hpw" value="${esc(plan.hours_per_week ?? '')}"></div><div><label>or total hours</label><input type="number" min="0" step="any" id="p_tot" value="${esc(plan.total_hours ?? '')}"></div></div></div>`}`;
 };
 // Hourly rate for a new document: project > customer > your default (the same order the time entries use).
@@ -283,11 +349,11 @@ const AUTO_PRICED = new WeakSet();   // lines whose price was set by us, not typ
 let SUGGESTED_RATE = null;   // set only while editing a new, unsaved document; saved documents are never repriced
 /* Effective hourly rate: project, then customer, then the user's rate, then the user's default, then the settings default. null when none is set. */
 function effectiveRate(customerId, projectId) {
-  const pick = x => (x === null || x === undefined || x === '' ? null : +x);
+  const pick = x => (x === null || x === undefined || x === '' ? null : Money.str(x));   // a decimal string, never a float
   return pick(S.d.projects.find(p => p.id === projectId)?.rate) ?? pick(S.d.customers.find(c => c.id === customerId)?.rate)
     ?? pick(S.me?.rate) ?? pick(S.me?.default_rate) ?? pick(S.settings.default_rate);
 }
-function suggestedRate(customerId, projectId) { return effectiveRate(customerId, projectId) ?? 0; }
+function suggestedRate(customerId, projectId) { return effectiveRate(customerId, projectId) ?? '0'; }
 function repriceNewDoc() {
   if (!DOC || DOC.id || SUGGESTED_RATE === null) return;
   syncDoc();
@@ -310,20 +376,24 @@ PAGES.doc = async (...a) => {
   };
   return h;
 };
+/** A typed unit price as the decimal string the API takes; text that is not a valid amount is kept as typed (the totals
+ *  count it as 0) and refused when the document is saved. */
+const docPrice = text => { const r = Money.parseInput(text); return r.ok ? (r.value ?? '0') : String(text); };
 function syncDoc() {
   if (!DOC || !$('#d_cust')) return;
   const g = i => $('#' + i)?.value, d = DOC;
+  if (isFrozen(d)) { Object.assign(d, { due_date: g('d_due') || null, reference: g('d_ref'), notes: g('d_notes') }); return; }   // frozen: nothing else is read back
   Object.assign(d, { customer_id: g('d_cust'), project_id: g('d_proj') || null, title: g('d_title'), date: g('d_date'), service_from: g('d_sf') || null, service_to: g('d_st') || null, reference: g('d_ref'), template_id: g('d_tpl'), language: g('d_lang'), intro: g('d_intro'), outro: g('d_outro'), notes: g('d_notes') });
-  if (d.coll === 'invoices') Object.assign(d, { due_date: g('d_due') || null, paid_date: g('d_paid') || null }); else Object.assign(d, { valid_until: g('d_valid') || null, plan: g('p_s') && g('p_e') ? { start: g('p_s'), end: g('p_e'), hours_per_week: +g('p_hpw') > 0 ? +g('p_hpw') : null, total_hours: +g('p_hpw') > 0 ? null : +g('p_tot') > 0 ? +g('p_tot') : null } : null });
+  if (d.coll === 'invoices') Object.assign(d, { due_date: g('d_due') || null, ...($('#d_tt') && !$('#d_tt').disabled ? { tax_treatment: g('d_tt') } : {}) }); else Object.assign(d, { valid_until: g('d_valid') || null, plan: g('p_s') && g('p_e') ? { start: g('p_s'), end: g('p_e'), hours_per_week: +g('p_hpw') > 0 ? +g('p_hpw') : null, total_hours: +g('p_hpw') > 0 ? null : +g('p_tot') > 0 ? +g('p_tot') : null } : null });
   if ($('#d_vat')) d.vat_rate = +g('d_vat');
-  document.querySelectorAll('[data-l]').forEach(inp => { const l = d.lines[+inp.dataset.l], k = inp.dataset.k; l[k] = ['qty', 'price', 'vat'].includes(k) ? (inp.value === '' ? (k === 'vat' ? null : 0) : parseFloat(inp.value)) : inp.value; });
+  document.querySelectorAll('[data-l]').forEach(inp => { const l = d.lines[+inp.dataset.l], k = inp.dataset.k; l[k] = k === 'price' ? docPrice(inp.value) : ['qty', 'vat'].includes(k) ? (inp.value === '' ? (k === 'vat' ? null : 0) : parseFloat(inp.value)) : inp.value; });
 }
 function recalcDoc() {
   syncDoc(); const d = DOC; if (!d || !$('#d_totals')) return;
   const klein = S.settings.kleinunternehmer, t = Money.totals(d, S.settings);   // exact cents, half-up VAT per rate
-  t.lines.forEach((c, i) => { const el = $('#amt' + i); if (el) el.textContent = eur(Money.toNumber(c)); });
+  t.lines.forEach((c, i) => { const el = $('#amt' + i); if (el) el.textContent = eur(Money.fromCents(c)); });
   const vat = Object.entries(t.vat).filter(([r]) => +r);
-  $('#d_totals').innerHTML = `Net <b>${eur(Money.toNumber(t.net))}</b>${vat.map(([r, c]) => ` · VAT ${r}% ${eur(Money.toNumber(c))}`).join('')} · <span style="font-size:20px">Total <b>${eur(Money.toNumber(t.gross))}</b></span>${klein ? '<div class="small muted">Kleinunternehmer (§19 UStG): no VAT charged.</div>' : ''}`;
+  $('#d_totals').innerHTML = `Net <b>${eur(Money.fromCents(t.net))}</b>${vat.map(([r, c]) => ` · VAT ${r}% ${eur(Money.fromCents(c))}`).join('')} · <span style="font-size:20px">Total <b>${eur(Money.fromCents(t.gross))}</b></span>${klein ? '<div class="small muted">Kleinunternehmer (§19 UStG): no VAT charged.</div>' : ''}`;
 }
 document.addEventListener('input', e => {
   if (!e.target.closest('[data-l],#d_vat')) return;
@@ -332,17 +402,27 @@ document.addEventListener('input', e => {
 });
 A.addLine = () => {
   syncDoc();
-  const line = { description: '', qty: 1, unit: 'h', price: DOC.id ? S.settings.default_rate || 0 : suggestedRate(DOC.customer_id, DOC.project_id) };
+  const line = { description: '', qty: 1, unit: 'h', price: DOC.id ? S.settings.default_rate ?? '0' : suggestedRate(DOC.customer_id, DOC.project_id) };
   if (!DOC.id) AUTO_PRICED.add(line);
   DOC.lines.push(line); render();
 };
 A.delLine = el => { syncDoc(); DOC.lines.splice(+el.dataset.i, 1); render(); };
 /** Warnings are response-only; never echo them back into a PUT body. */
 function stripWarnings(o) { delete o.sanity_warnings; delete o.planning_warnings; return o; }
-async function persistDoc() {
+/** Fields the server derives (credit-notes-payments.md 2.3): never sent back. */
+const DERIVED_INVOICE = ['paid_amount', 'credited_amount', 'open_amount', 'payments', 'credit_notes', 'creditable'];
+async function persistDoc(setStatus) {
   syncDoc(); const d = DOC;
   if (!d.customer_id) throw new Error('Choose a customer first');
-  const { coll, __route, ...body } = d; stripWarnings(body);
+  d.lines.forEach((l, i) => { const r = Money.parseInput(l.price); if (!r.ok) throw new Error(`Line ${i + 1}, unit price: ${r.error}`); });
+  let body;
+  if (isFrozen(d)) { body = { id: d.id, due_date: d.due_date || null, reference: d.reference || '', notes: d.notes || '' }; if (setStatus) body.status = setStatus; }   // frozen: never the whole record
+  else {
+    const { coll: _c, __route, ...rest } = d; body = stripWarnings(rest);
+    if (setStatus) body.status = setStatus;
+    if (d.coll === 'invoices') DERIVED_INVOICE.forEach(k => delete body[k]);
+  }
+  const coll = d.coll;
   const r = await api.upsert(coll, body); DOC = { coll, ...stripWarnings({ ...r }) };
   await loadAll([coll]); return r;
 }
@@ -358,12 +438,84 @@ A.docDelete = async () => {
 A.docPdf = async () => { await persistDoc(); window.open(api.url(`${DOC.coll}/${DOC.id}/pdf`), '_blank'); };
 A.docStatus = async el => {
   if (!el.value) return;
-  syncDoc(); DOC.status = el.value;
-  if (el.value === 'paid' && !DOC.paid_date) { DOC.paid_date = todayISO(); const pd = $('#d_paid'); if (pd) pd.value = DOC.paid_date; }  // before persistDoc() re-reads the form
-  await persistDoc(); toast('Status: ' + el.value); render();
+  syncDoc();
+  await persistDoc(el.value); toast('Status: ' + el.value); render();
 };
 A.docAccept = async () => { await persistDoc(); const r = await api('POST', `offers/${DOC.id}/accept`); await loadAll(['offers', 'projects', 'contracts']); DOC = null; toast('Accepted – project' + (r.contract ? ' and contract' : '') + ' created'); location.hash = '#/project/' + r.project.id; };
 A.docToInvoice = async () => { await persistDoc(); const r = await api('POST', `offers/${DOC.id}/to-invoice`); DOC = null; await loadAll(['invoices']); location.hash = '#/doc/invoices/' + r.id; };
+/** Record a payment or refund (POST invoices/{id}/payments); the amount is parsed with Money, the server does the maths. */
+A.payRecord = () => {
+  const d = DOC, open = d.open_amount == null ? null : Money.str(d.open_amount);
+  openForm({
+    title: 'Record payment', saveLabel: 'Record', vals: { date: todayISO(), amount: open !== null && Money.cmp(open, 0) > 0 ? open : '', kind: 'payment', method: 'bank', note: '' },
+    fields: [{ k: 'date', l: 'Date', t: 'date', row: 1 }, { k: 'amount', l: 'Amount €', m: true, row: 1 }, { k: 'kind', l: 'Kind', t: 'select', o: [['payment', 'Payment'], ['refund', 'Refund']], row: 2 }, { k: 'method', l: 'Method', t: 'select', o: [['bank', 'Bank'], ['cash', 'Cash']], row: 2 }, { k: 'note', l: 'Note' }],
+    save: async v => {
+      const a = Money.parseInput(v.amount);
+      if (!a.ok || a.value === null) throw new Error(a.ok ? 'Enter the amount' : a.error);
+      if (!v.date) throw new Error('Enter the date');
+      await payResult(await api('POST', `invoices/${d.id}/payments`, { date: v.date, amount: a.value, kind: v.kind, method: v.method, note: (v.note || '').trim() || null }), 'Payment recorded');
+    }
+  });
+};
+/** A credit-note action: the dialog is the confirmation (it states what will happen); API errors show as a message (toast). */
+function cnDialog({ title, saveLabel, note, fields, vals, save }) {
+  openForm({ title, saveLabel, vals, fields, note: `<p class="small" id="cn_confirm">${note}</p>`, save });
+}
+const cnReason = [{ k: 'reason', l: 'Reason', t: 'area', rows: 2 }];
+const needReason = v => { if (!(v.reason || '').trim()) throw new Error('Enter a reason'); if (!v.date) throw new Error('Enter the date'); };
+async function cnResult(msg) {
+  const inv = await api('GET', `invoices/${DOC.id}`);
+  DOC = { coll: 'invoices', ...stripWarnings({ ...inv }) };
+  PAY_WARN = { id: DOC.id, list: [] };
+  await loadAll(['invoices']); toast(msg); render();
+}
+A.cnStorno = () => {
+  const d = DOC, rest = remainingGross(d);
+  cnDialog({ title: 'Cancel invoice (storno)', saveLabel: 'Issue cancellation', note: `This issues a cancellation credit note for the remaining <b>${esc(eur(rest))}</b> and cancels the invoice. It cannot be undone.`,
+    vals: { date: todayISO(), reason: '' }, fields: [{ k: 'date', l: 'Date', t: 'date' }, ...cnReason],
+    save: async v => { needReason(v); await api('POST', `invoices/${d.id}/credit-notes`, { credit_kind: 'storno', date: v.date, reason: v.reason.trim() }); await cnResult('Invoice cancelled'); } });
+};
+A.cnPartial = () => {
+  const d = DOC, rates = Object.entries((d.issued && d.issued.rates) || {}).sort((a, b) => Number(a[0]) - Number(b[0]));
+  if (!rates.length) { toast('This invoice has no VAT rate groups', true); return; }
+  const cr = d.creditable || {};   // the server's net still creditable per rate (decimal strings)
+  const fields = [{ k: 'date', l: 'Date', t: 'date' }, ...rates.map(([r, g], i) => ({ k: 'amt' + i, l: `Net to credit at ${r} % VAT € (invoice net ${eur(g.net)}, still creditable ${eur(cr[r] != null ? cr[r] : g.net)})`, m: true })), ...cnReason];
+  cnDialog({ title: 'Partial credit note', saveLabel: 'Issue credit note', note: 'This issues a credit note for the net amounts you enter per VAT rate; the server adds the VAT. It cannot be undone.',
+    vals: { date: todayISO(), reason: '', ...Object.fromEntries(rates.map(([r], i) => [`amt${i}`, cr[r] != null && Money.cmp(cr[r], 0) > 0 ? Money.str(cr[r]).replace('.', ',') : ''])) }, fields,
+    save: async v => {
+      needReason(v);
+      const amounts = {};
+      rates.forEach(([r], i) => { const a = v['amt' + i]; if (a !== null && a !== undefined && a !== '') amounts[r] = a; });
+      if (!Object.keys(amounts).length) throw new Error('Enter an amount for at least one VAT rate');
+      await api('POST', `invoices/${d.id}/credit-notes`, { credit_kind: 'partial', date: v.date, reason: v.reason.trim(), amounts }); await cnResult('Credit note issued');
+    } });
+};
+A.cnWriteOff = () => {
+  const d = DOC, open = invOpenAmount(d);
+  cnDialog({ title: 'Write off', saveLabel: 'Write off', note: `This writes off the open amount of <b>${esc(eur(open))}</b> (an internal voucher: no number, no PDF). It cannot be undone.`,
+    vals: { date: todayISO(), reason: '' }, fields: [{ k: 'date', l: 'Date', t: 'date' }, ...cnReason],
+    save: async v => { needReason(v); await api('POST', `invoices/${d.id}/credit-notes`, { credit_kind: 'write_off', date: v.date, reason: v.reason.trim() }); await cnResult('Written off'); } });
+};
+A.cnSettle = () => {
+  const d = DOC, open = invOpenAmount(d);
+  cnDialog({ title: 'Settle with discount', saveLabel: 'Settle', note: `Open: <b>${esc(eur(open))}</b>. This records the payment you enter and a discount credit note for the rest, so the invoice is settled exactly (open 0,00 €).`,
+    vals: { date: todayISO(), amount_paid: '', note: '' }, fields: [{ k: 'date', l: 'Date', t: 'date', row: 1 }, { k: 'amount_paid', l: 'Amount paid €', m: true, row: 1 }, { k: 'note', l: 'Note' }],
+    save: async v => {
+      if (v.amount_paid === null || v.amount_paid === undefined || v.amount_paid === '') throw new Error('Enter the amount paid');
+      if (!v.date) throw new Error('Enter the date');
+      await api('POST', `invoices/${d.id}/settle-discount`, { date: v.date, amount_paid: v.amount_paid, note: (v.note || '').trim() || null }); await cnResult('Settled with discount');
+    } });
+};
+A.payReverse = async el => {
+  if (!window.confirm('Reverse this payment? Use this only for an entry made by mistake; a returned transfer is a refund.')) return;
+  const path = el.dataset.id ? `payments/${el.dataset.id}/reverse` : `invoices/${DOC.id}/payments/legacy/reverse`;
+  await payResult(await api('POST', path, {}), 'Payment reversed');
+};
+async function payResult(r, msg) {
+  DOC = { coll: 'invoices', ...stripWarnings({ ...r.invoice }) };
+  PAY_WARN = { id: DOC.id, list: r.warnings || [] };
+  await loadAll(['invoices']); toast(msg); render();
+}
 A.billTimeInto = () => A.billTime({ dataset: { cust: DOC.customer_id } });
 
 /* ================= EXPENSES ================= */
@@ -371,7 +523,6 @@ const EXP_CATS = ['Software & subscriptions', 'Hardware & equipment', 'Office & 
 // The two tiles on the Expenses page, as /api/finance counts them (core/calc.py `finance`): the cost on the paid date under
 // `eur` (empty = bill date) and on the bill date under `accrual`, the input VAT always on the bill date; a business meal
 // counts its own deductible shares line by line; a Kleinunternehmer's cost is the gross and has no input VAT.
-const cents = v => Math.round((v + Number.EPSILON) * 100) / 100;
 const isoDay = v => {   // a real calendar day as YYYY-MM-DD, else ''  (the backend's d(): a damaged date is no date)
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v ?? ''));
   if (!m) return '';
@@ -379,19 +530,43 @@ const isoDay = v => {   // a real calendar day as YYYY-MM-DD, else ''  (the back
   return t.getUTCFullYear() === +m[1] && t.getUTCMonth() === +m[2] - 1 && t.getUTCDate() === +m[3] ? m[0] : '';
 };
 // Bills only: the trip amounts that calc.finance adds to the expenses are not part of this tile.
+/* Tax treatment of a bill (docs/specs/credit-notes-payments.md section 5, accounting.md 9.4). '' = automatic: the server derives it. */
+const EXP_TREATMENTS = [
+  ['', 'Automatic (the server decides)'], ['standard', 'Standard: input VAT as on the bill'], ['no_input_vat', 'No input VAT'],
+  ['reverse_charge_eu_service', 'Reverse charge § 13b: service from the EU'], ['reverse_charge_third_country', 'Reverse charge § 13b: service from a third country']];
+const EXP_TREATMENT_HELP = {
+  '': 'Automatic: the server derives the treatment from the supplier and the reverse-charge flag.',
+  standard: 'Domestic bill with VAT: the input VAT is reclaimed.',
+  no_input_vat: 'The bill shows no VAT you may reclaim (e.g. a small-business supplier): the gross is the cost.',
+  reverse_charge_eu_service: 'Service from an EU supplier without VAT: you owe the VAT yourself and reclaim it (§ 13b), dated by the service date.',
+  reverse_charge_third_country: 'Service from a supplier outside the EU: you owe the VAT yourself and reclaim it (§ 13b).' };
+const EXP_RC_TREATMENTS = ['reverse_charge_eu_service', 'reverse_charge_third_country'];
+const EXP_TREATMENT_TAG = { no_input_vat: 'no input VAT', reverse_charge_eu_service: '§ 13b EU', reverse_charge_third_country: '§ 13b third country' };
+/** Short tag of the treatment in the list; a standard bill gets none; an old bill with only the reverse-charge flag keeps its tag. */
+function treatmentTag(e) {
+  const t = EXP_TREATMENT_TAG[e.tax_treatment] || (e.reverse_charge && !e.tax_treatment ? 'reverse charge' : '');
+  return t ? ` <span class="pill warn" data-treatment="${esc(e.tax_treatment || 'reverse_charge')}">${esc(t)}</span>` : '';
+}
+/** Warnings of a saved bill (accounting_warnings, never stored): shown longer than a normal toast. */
+function showAccountingWarnings(list) {
+  const msgs = (Array.isArray(list) ? list : []).map(w => w && w.message).filter(Boolean);
+  if (!msgs.length) return;
+  toast('Saved. ' + msgs.join(' '), true);
+  clearTimeout(toast.t); toast.t = setTimeout(() => { $('#toast').className = ''; }, 9000);
+}
 function expenseTiles(list, y) {
   const accrual = S.settings.accounting === 'accrual', klein = !!S.settings.kleinunternehmer, year = String(y);
-  let cost = 0, vat = 0;
+  let cost = 0n, vat = 0n;   // whole cents (BigInt)
   for (const e of list) {
     const bill = isoDay(e.date), paid = accrual ? bill : (isoDay(e.paid_on) || bill);
     for (const ln of (e.lines && e.lines.length ? e.lines : [e])) {
       if (!ln) continue;
-      const pct = (ln.deductible ?? 100) / 100, vatPct = (ln.vat_deductible ?? ln.deductible ?? 100) / 100;
-      if (paid.startsWith(year)) cost += cents(((ln.net || 0) + (klein ? (ln.vat || 0) : 0)) * pct);
-      if (!klein && bill.startsWith(year)) vat += cents((ln.vat || 0) * vatPct);
+      const pct = ln.deductible ?? 100, vatPct = ln.vat_deductible ?? ln.deductible ?? 100;   // percents
+      if (paid.startsWith(year)) cost += Money.pct(klein ? Money.sum([ln.net, ln.vat]) : ln.net, pct);
+      if (!klein && bill.startsWith(year)) vat += Money.pct(ln.vat, vatPct);
     }
   }
-  return { cost: cents(cost), vat: cents(vat) };
+  return { cost: Money.fromCents(cost), vat: Money.fromCents(vat) };
 }
 PAGES.expenses = async () => {
   await loadAll(['expenses', 'projects', 'trips']);   // trips: the bill dialog's trip select
@@ -400,7 +575,7 @@ PAGES.expenses = async () => {
   const y = new Date().getFullYear(), list = S.d.expenses.sort((a, b) => a.date < b.date ? 1 : -1), tiles = expenseTiles(list, y);
   return `<div class="head"><div><h1>Expenses</h1><div class="muted">Bills you pay – general or tied to a project.</div></div><div class="rcpt-actions">${RCPT.uploadButton()}<button class="primary" data-a="editExpense">+ Add bill</button></div></div>
   ${RCPT.pageTop()}<div class="grid g3"><div class="card kpi"><div class="l">${y} ${S.settings.kleinunternehmer ? 'bills (gross)' : 'net bills'}</div><div class="v">${eur(tiles.cost)}</div></div><div class="card kpi"><div class="l">Input VAT ${y}</div><div class="v">${S.settings.kleinunternehmer ? '–' : eur(tiles.vat)}</div></div></div>
-  ${RCPT.flaggedSection()}<div class="card">${list.length ? `<table><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Project</th><th class="num">Net</th><th class="num">VAT</th><th></th></tr>${list.map(e => `<tr class="click" data-a="editExpense" data-id="${e.id}"><td class="nowrap">${fmtDate(e.date)}</td><td><b>${esc(e.vendor || '')}</b>${e.supplier_id ? ` <a href="#/suppliers/${esc(e.supplier_id)}" class="pill sup-tag" data-stop>supplier</a>` : ''}${e.reverse_charge ? ' <span class="pill warn">reverse charge</span>' : ''}${RCPT.pills(e)}<div class="small muted">${esc(e.description || '')}</div>${e.lines?.length ? `<div class="small muted">${e.lines.length === 1 ? '1 item' : e.lines.length + ' items'}</div>` : ''}</td><td>${esc(e.category || '')}</td><td>${esc(nameOf('projects', e.project_id) || 'General')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td><td>${e.attachment ? `<a href="${api.url('attachments/' + e.attachment)}" target="_blank" data-stop>📎</a>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses yet.</div>'}</div>`;
+  ${RCPT.flaggedSection()}<div class="card">${list.length ? `<table><tr><th>Date</th><th>Vendor</th><th>Category</th><th>Project</th><th class="num">Net</th><th class="num">VAT</th><th></th></tr>${list.map(e => `<tr class="click" data-a="editExpense" data-id="${e.id}"><td class="nowrap">${fmtDate(e.date)}</td><td><b>${esc(e.vendor || '')}</b>${e.supplier_id ? ` <a href="#/suppliers/${esc(e.supplier_id)}" class="pill sup-tag" data-stop>supplier</a>` : ''}${treatmentTag(e)}${RCPT.pills(e)}<div class="small muted">${esc(e.description || '')}</div>${e.lines?.length ? `<div class="small muted">${e.lines.length === 1 ? '1 item' : e.lines.length + ' items'}</div>` : ''}</td><td>${esc(e.category || '')}</td><td>${esc(nameOf('projects', e.project_id) || 'General')}</td><td class="num">${eur(e.net)}</td><td class="num">${eur(e.vat)}</td><td>${e.attachment ? `<a href="${api.url('attachments/' + e.attachment)}" target="_blank" data-stop>📎</a>` : ''}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses yet.</div>'}</div>`;
 };
 /* ----- itemised bills: lines table, live totals, bill preview (docs/specs/itemised-expenses.md) ----- */
 const LINE_RATES = [19, 7, 0], MAX_LINES = 50;
@@ -413,13 +588,14 @@ const kindOf = name => { const ext = String(name).split('.').pop().toLowerCase()
 /** MIME type of a previewable file, from its extension (the same rule as kindOf); '' for other files. */
 const MIME_BY_EXT = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' };
 const mimeFor = name => MIME_BY_EXT[String(name).split('.').pop().toLowerCase()] || '';
+/** A percent or other plain number typed into a field (never money: see Money.parseInput). */
 const toNum = x => { const t = String(x ?? '').trim().replace(',', '.'); return t === '' ? NaN : Number(t); };
 const lineHTML = (l, i) => {
   // a stored rate outside LINE_RATES (e.g. 5.5 or 16 from the API) is offered too, so the select shows what the totals use
   const rates = LINE_RATES.map(String).includes(String(l.vat_rate)) ? LINE_RATES : [...LINE_RATES, l.vat_rate];
   return `<tr data-line="${i}">
   <td><input data-f="description" value="${esc(l.description)}" maxlength="200" aria-label="Line ${i + 1}: description"></td>
-  <td><input data-f="gross" type="number" step="0.01" min="0" inputmode="decimal" value="${esc(l.gross)}" aria-label="Line ${i + 1}: amount on the bill, gross EUR"></td>
+  <td><input data-f="gross" type="text" inputmode="decimal" value="${esc(l.gross)}" aria-label="Line ${i + 1}: amount on the bill, gross EUR"></td>
   <td><select data-f="vat_rate" aria-label="Line ${i + 1}: VAT rate">${rates.map(r => `<option value="${esc(r)}" ${String(r) === String(l.vat_rate) ? 'selected' : ''}>${esc(r)} %</option>`).join('')}</select></td>
   <td><input data-f="deductible" type="number" step="any" min="0" max="100" inputmode="decimal" value="${esc(l.deductible)}" aria-label="Line ${i + 1}: deductible %"></td>
   <td><button type="button" class="ghost sm" data-a="removeLine" data-i="${i}" aria-label="Remove line ${i + 1}" ${LN.length < 2 ? 'disabled' : ''}>✕</button></td></tr>`;
@@ -604,9 +780,10 @@ function bindExpenseDialog(modalEl) {
   });
 }
 function lineError(l, i) {
-  const n = i + 1, g = toNum(l.gross), d = toNum(l.deductible);
-  if (Number.isNaN(g)) return `Line ${n}: enter the amount on the bill`;
-  if (g < 0) return `Line ${n}: the amount must not be negative (book refunds as a credit-note invoice)`;
+  const n = i + 1, g = Money.parseInput(l.gross), d = toNum(l.deductible);
+  if (!g.ok) return `Line ${n}: ${g.error}`;
+  if (g.value === null) return `Line ${n}: enter the amount on the bill`;
+  if (Money.isNeg(g.value)) return `Line ${n}: the amount must not be negative (book refunds as a credit-note invoice)`;
   if (Number.isNaN(d) || d < 0 || d > 100) return `Line ${n}: the deductible share must be between 0 and 100 %`;
   return null;
 }
@@ -616,6 +793,29 @@ A.editExpense = el => {
   const e = el?.dataset?.id ? S.d.expenses.find(x => x.id === el.dataset.id) : { date: todayISO(), deductible: 100, vat_rate: 19, category: el?.dataset?.category || EXP_CATS[0], project_id: el?.dataset?.project || '', trip_id: el?.dataset?.trip || '', trip_item_id: el?.dataset?.item || '' };
   expenseDialog(e, null, !!el?.dataset?.trip);
 };
+/** A refused save stays in the dialog as an alert (the locked-period 409 included); the toast shows it too. */
+function showSaveError(msg) {
+  let box = $('#e_save_err');
+  if (!box) { box = document.createElement('div'); box.id = 'e_save_err'; box.className = 'small'; box.setAttribute('role', 'alert'); box.style.color = 'var(--bad, #c0392b)'; $('#modal-root .modal-scroll')?.appendChild(box); }
+  box.textContent = msg;
+}
+/** Help text of the treatment, the bound of the service date, and the read-only VAT for the reverse-charge treatments. */
+function bindTreatment(hasSup) {
+  const sel = $('#f_tax_treatment'), sd = $('#f_service_date'), dt = $('#f_date'); if (!sel || !sd || !dt) return;
+  sel.closest('.field').insertAdjacentHTML('beforeend', '<div class="muted small" id="e_tt_help"></div><div class="small" id="e_rc_note" hidden>VAT: calculated by the server from the net amount and the VAT %.</div>');
+  sd.closest('.field').insertAdjacentHTML('beforeend', '<div class="muted small" id="e_sd_help"></div>');
+  const sync = () => {
+    const rc = EXP_RC_TREATMENTS.includes(sel.value);
+    $('#e_tt_help').textContent = EXP_TREATMENT_HELP[sel.value] || '';
+    $('#e_rc_note').hidden = !rc;
+    const rv = $('#f_rc_vat');   // the typed value is kept while the field is read-only and restored on "automatic"
+    if (rv) { if (rc && !rv.readOnly) { rv.dataset.typed = rv.value; rv.value = ''; } else if (!rc && rv.readOnly) rv.value = rv.dataset.typed ?? rv.value; rv.readOnly = rc; }
+    const cb = $('#f_reverse_charge'); if (cb) cb.disabled = !!sel.value;
+    const last = /^\d{4}-\d{2}-\d{2}$/.test(dt.value) ? addDays(dt.value, 366) : '';
+    $('#e_sd_help').textContent = 'Empty = the bill date. At most 366 days after the bill date' + (last ? ' (latest ' + last + ')' : '') + '.';
+  };
+  sel.addEventListener('change', sync); dt.addEventListener('input', sync); dt.addEventListener('change', sync); sync();
+}
 /** The bill dialog. scan: a flagged receipt ("Check receipt", draft filled in, Save confirms it) or null (a manual or booked bill). */
 function expenseDialog(e, scan, fromTrip = false) {
   const cats = e.category && !EXP_CATS.includes(e.category) ? [...EXP_CATS, e.category] : EXP_CATS;   // keep a category entered elsewhere
@@ -625,17 +825,18 @@ function expenseDialog(e, scan, fromTrip = false) {
     const { description, gross, vat_rate, deductible, vat_deductible, net, vat, ...extra } = l;
     return { description: description ?? '', gross: String(gross ?? ''), vat_rate: String(vat_rate ?? 19), deductible: String(deductible ?? 100), vat_deductible: vat_deductible ?? null, extra };
   });
-  const v0 = { ...e, gross: e.net != null && !stored.length ? Math.round((e.net + (e.reverse_charge ? 0 : e.vat || 0)) * 100) / 100 : (e.gross ?? ''), vat_rate: e.vat_rate ?? 19, itemise: stored.length > 0, rc_vat: e.reverse_charge ? e.vat : '' };
+  const v0 = { ...e, gross: e.net != null && !stored.length ? Money.sum([e.net, e.reverse_charge ? 0 : e.vat]) : (e.gross ?? ''), vat_rate: e.reverse_charge && !+e.vat_rate ? 19 : (e.vat_rate ?? 19), itemise: stored.length > 0, rc_vat: e.reverse_charge ? e.vat : '', tax_treatment: e.tax_treatment || '', service_date: e.service_date || '' };
   const hasSup = !!window.SUP && can('suppliers');   // supplier, allocation and reverse-charge fields (docs/contracts/subcontractors.md)
   const supFields = hasSup ? [{ k: 'supplier_id', l: 'Supplier', t: 'select', o: [['', '— none (free-text vendor) —'], ...SUP.options(e.supplier_id)] },
     { k: 'allocation_id', l: 'Subcontractor allocation', t: 'select', o: [['', '— none —']] },
     { k: 'reverse_charge', l: 'Reverse charge: the VAT is owed by me, not charged on the bill (verify with your tax adviser)', t: 'check' },
-    { k: 'rc_vat', l: 'Self-assessed VAT €', t: 'number', h: 'Enter the amount on the bill above; this is the VAT you owe yourself. Not used for itemised bills.' }] : [];
+    { k: 'rc_vat', l: 'Self-assessed VAT €', t: 'number', m: true, h: 'Enter the amount on the bill above; this is the VAT you owe yourself. Not used for itemised bills.' }] : [];
   openForm({
     title: scan ? 'Check receipt' : e.id ? 'Edit bill' : 'Add bill', vals: v0, wide: true, note: scan ? RCPT.dialogTop(scan) : '',
     fields: [{ k: 'date', l: 'Bill date', t: 'date', row: 1 }, { k: 'paid_on', l: 'Paid on', t: 'date', h: 'Empty = same as the bill date.', row: 1 }, { k: 'invoice_no', l: 'Invoice number', row: 1 }, { k: 'vendor', l: 'Vendor' }, { k: 'description', l: 'Description' }, ...supFields,
       { k: 'itemise', l: 'Itemise this bill (several lines, e.g. a hotel invoice with different VAT rates)', t: 'check' },
-      { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: e.vat_rate != null && !LINE_RATES.includes(+e.vat_rate) ? [...LINE_RATES, e.vat_rate] : LINE_RATES, row: 2 },
+      { k: 'gross', l: 'Amount on the bill (gross) €', t: 'number', m: true, row: 2 }, { k: 'vat_rate', l: 'VAT %', t: 'select', o: e.vat_rate != null && !LINE_RATES.includes(+e.vat_rate) ? [...LINE_RATES, e.vat_rate] : LINE_RATES, row: 2 },
+      { k: 'tax_treatment', l: 'Tax treatment', t: 'select', o: EXP_TREATMENTS, row: 5 }, { k: 'service_date', l: 'Service date (optional)', t: 'date', row: 5 },
       { k: 'category', l: 'Category', t: 'select', o: cats, row: 3 }, { k: 'project_id', l: 'Project', t: 'select', o: [['', 'General expense'], ...projectOptions(false)], row: 3 },
       { k: 'trip_id', l: 'Business trip', t: 'select', o: [['', '— no trip —'], ...tripOptions(e.trip_id)], row: 4 },
       { k: 'trip_item_id', l: 'Planned item of the trip', t: 'select', o: [['', '— not planned —'], ...tripItemOptions(e.trip_id)], row: 4 },
@@ -668,28 +869,39 @@ function expenseDialog(e, scan, fromTrip = false) {
       // a planned item belongs to the trip it was listed under: switching the trip drops the item
       v.trip_item_id = v.trip_id && v.trip_id === (e.trip_id || null) ? (v.trip_item_id || null) : null;
       const rcVat = v.rc_vat; delete v.rc_vat;
+      v.tax_treatment = v.tax_treatment || null;   // null = automatic: the server decides
+      v.service_date = v.service_date || null;
+      const rcExplicit = EXP_RC_TREATMENTS.includes(v.tax_treatment);
       if (hasSup) { v.supplier_id = v.supplier_id || null; v.allocation_id = v.supplier_id ? (v.allocation_id || null) : null; v.reverse_charge = !!(v.supplier_id && v.reverse_charge); }
+      if (v.tax_treatment) v.reverse_charge = rcExplicit;   // an explicit treatment wins over the old checkbox
+      const rc = rcExplicit || (!v.tax_treatment && !!v.reverse_charge);
       v.vat_deductible = bmeal ? 100 : null;   // the 30 % that is not deductible does not touch the input VAT
       if (itemised) {
         if (!LN.length) throw new Error('Add at least one line');
         const bad = LN.map(lineError).find(Boolean); if (bad) throw new Error(bad);
         if (!v.date) throw new Error('Pick the bill date');
-        v.lines = LN.map(l => ({ ...l.extra, description: l.description, gross: toNum(l.gross), vat_rate: Number(l.vat_rate),
+        v.lines = LN.map(l => ({ ...l.extra, description: l.description, gross: Money.parseInput(l.gross).value, vat_rate: Number(l.vat_rate),
           deductible: toNum(l.deductible), vat_deductible: l.vat_deductible ?? (bmeal ? 100 : null) }));
         delete v.net; delete v.vat; delete v.vat_rate;   // derived by the server from the lines
       } else {
         delete v.lines;
-        if (!gross) throw new Error('Enter the amount');
+        if (gross === null || gross === undefined || Money.isZero(gross)) throw new Error('Enter the amount');
         const r = +v.vat_rate || 0;
-        if (gross < 0) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
+        if (Money.isNeg(gross)) throw new Error('The amount must not be negative (book refunds as a credit-note invoice)');
         if (!v.date) throw new Error('Pick the bill date');
-        Object.assign(v, Money.splitGross(gross, v.reverse_charge ? 0 : r)); v.vat_rate = v.reverse_charge ? 0 : r;
-        if (v.reverse_charge) v.vat = Number.isFinite(rcVat) && rcVat > 0 ? rcVat : 0;   // the self-assessed VAT, as typed
+        const noInput = v.tax_treatment === 'no_input_vat';   // the gross is the cost: net = gross, vat 0
+        Object.assign(v, Money.splitGrossStr(gross, rc || noInput ? 0 : r)); v.vat_rate = r;   // the selected rate is always sent
+        if (rcExplicit || noInput) v.vat = '0';   // reverse charge: computed by the server from the net amount and the VAT %   // computed by the server from the net amount and the VAT %
+        else if (rc) v.vat = rcVat != null && mPos(rcVat) ? rcVat : '0';   // the self-assessed VAT, as typed
       }
       if (scan) return RCPT.confirm(scan, v);   // POST /api/receipts/{id}/confirm; the server sets attachment and external_id
       const f = $('#e_file').files[0];
       if (f) v.attachment = (await api.upload(f)).name;
-      await save('expenses', v); render();
+      let r;
+      try { r = await api.upsert('expenses', v); }   // not through save(): a refused save keeps the dialog and the input
+      catch (err) { showSaveError(err.message); throw err; }
+      toast('Saved'); await loadAll(['expenses']); render();
+      showAccountingWarnings(r && r.accounting_warnings);
     },
     del: e.id && !scan ? async () => { await api('DELETE', 'expenses/' + e.id); await loadAll(['expenses']); render(); } : null
   });
@@ -698,6 +910,7 @@ function expenseDialog(e, scan, fromTrip = false) {
     if (ts) { ts.value = e.trip_id; ts.disabled = true; ts.title = 'Opened from this trip; move the bill to another trip on the Expenses page'; }
   }
   if (hasSup) SUP.bindExpense(e);
+  bindTreatment(hasSup);
   const modalEl = $('#modal-root .modal');
   closeModal.onClose = () => { PV_GEN++; pvRelease(); LN = []; RCPT.closeDialog(); };
   bindExpenseDialog(modalEl);
@@ -745,11 +958,11 @@ const TAXNOTE = 'Estimate only – not tax advice.';
 function reserveLine(f, year, cur) {
   const r = f.reserve, thisYear = new Date().getFullYear();
   if (year < thisYear) return 'Year closed';
-  if (!r.monthly) {
-    if (!r.due_year) return 'No further reserve needed';
+  if (mZero(r.monthly)) {
+    if (mZero(r.due_year)) return 'No further reserve needed';
     return `Set aside ${eur(cur ? cur.tax_set_aside : r.owed_now)} now` + (year === thisYear && !f.extrapolated ? '; the monthly reserve starts once 60 days of the year have passed' : '');
   }
-  return `Set aside <b>${eur(r.monthly)}</b> per month for the remaining ${r.months_left} months (${eur(r.remaining)} of ${eur(r.due_year)} still to reserve)` + (r.owed_now > 0 ? `, plus <b>${eur(r.owed_now)}</b> now` : '');
+  return `Set aside <b>${eur(r.monthly)}</b> per month for the remaining ${r.months_left} months (${eur(r.remaining)} of ${eur(r.due_year)} still to reserve)` + (mPos(r.owed_now) ? `, plus <b>${eur(r.owed_now)}</b> now` : '');
 }
 function taxBurdenCards(f, year, cur, s) {
   const tp = f.tax_projected, o = f.tax_owed, ins = tp.insurance || {}, gmbh = f.company_type === 'gmbh';
@@ -757,21 +970,21 @@ function taxBurdenCards(f, year, cur, s) {
   const vp = tp.vorsorge || {};
   const burden = `<div class="card" id="card-tax-burden"><h2>Tax burden ${year}</h2><table>
     ${gmbh ? row('Körperschaftsteuer (15 %)', tp.kst) + row('Solidaritätszuschlag on Körperschaftsteuer', tp.kst_soli)
-      : row('Einkommensteuer' + (tp.kg_added > 0 ? ' (incl. Kindergeld added back)' : ''), tp.est) + row('Solidaritätszuschlag', tp.soli) + (tp.church ? row('Kirchensteuer', tp.church) : '')}
-    ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)${tp.gewst_credit ? `<div class="small muted">incl. ${eur(tp.gewst_credit)} credited against income tax (§35 EStG)</div>` : ''}</td><td class="num" data-k="gewst">${eur(tp.gewst)}</td></tr>` : ''}
+      : row('Einkommensteuer' + (mPos(tp.kg_added) ? ' (incl. Kindergeld added back)' : ''), tp.est) + row('Solidaritätszuschlag', tp.soli) + (mZero(tp.church) ? '' : row('Kirchensteuer', tp.church))}
+    ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)${mZero(tp.gewst_credit) ? '' : `<div class="small muted">incl. ${eur(tp.gewst_credit)} credited against income tax (§35 EStG)</div>`}</td><td class="num" data-k="gewst">${eur(tp.gewst)}</td></tr>` : ''}
     <tr><td><b>Total taxes (full year)</b></td><td class="num" data-k="tax_due"><b>${eur(tp.tax_due)}</b></td></tr>
-    ${tp.withheld > 0 ? row('Already withheld', tp.withheld) : ''}
+    ${mPos(tp.withheld) ? row('Already withheld', tp.withheld) : ''}
     ${tp.balance != null ? row('Expected back payment / refund', tp.balance) : ''}
     <tr><td colspan="2"><b>Social insurance</b> (self-paid, full year)</td></tr>
-    ${row('Health insurance', ins.kv)}${row('Care insurance', ins.pv)}${row('Pension insurance', ins.rv)}${row('Unemployment insurance', ins.alv)}${ins.subsidy > 0 ? row('Employer subsidy', -ins.subsidy) : ''}
-    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(f.totals.vat_due)}</td></tr>
-    <tr><td><b>What stays with you</b> (months begun)</td><td class="num"><b class="${f.take_home != null && f.take_home >= 0 ? 'free-good' : 'free-bad'}" data-k="take_home">${eur(f.take_home)}</b></td></tr></table>
+    ${row('Health insurance', ins.kv)}${row('Care insurance', ins.pv)}${row('Pension insurance', ins.rv)}${row('Unemployment insurance', ins.alv)}${mPos(ins.subsidy) ? row('Employer subsidy', mNegate(ins.subsidy)) : ''}
+    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer && mZero(f.totals.vat_due) ? '–' : eur(f.totals.vat_due)}</td></tr>
+    <tr><td><b>What stays with you</b> (months begun)</td><td class="num"><b class="${f.take_home != null && !mNeg(f.take_home) ? 'free-good' : 'free-bad'}" data-k="take_home">${eur(f.take_home)}</b></td></tr></table>
     <details><summary class="small">How this was computed</summary><ul class="small">
       <li>Taxable income (zvE): ${eur(tp.zve)}</li><li>Pension provision deduction: ${eur(vp.dA)}</li><li>Other provision deduction: ${eur(vp.dBO)}</li><li>Projected full-year profit: ${eur(f.projected_profit)}</li></ul></details>
     <p class="small muted">Projected full-year profit: ${eur(f.projected_profit)} → tax rate ${num(f.effective_rate * 100, 1)} %. ${TAXNOTE} <a href="#/me/tax">Edit personal tax profile</a></p></div>`;
   const owed = o ? `<div class="card" id="card-tax-owed"><h2>Owed on the profit booked so far (as of ${esc(fmtDate(o.as_of))})</h2><table>
-    ${row('Profit booked so far', o.profit_ytd)}${row('Taxes on it', o.tax_due)}${o.withheld > 0 ? row('Already withheld', o.withheld) : ''}
-    <tr><td><b>${o.owed < 0 ? 'Refund so far' : 'Owed'}</b></td><td class="num" data-k="owed"><b>${eur(Math.abs(o.owed))}</b></td></tr></table>
+    ${row('Profit booked so far', o.profit_ytd)}${row('Taxes on it', o.tax_due)}${mPos(o.withheld) ? row('Already withheld', o.withheld) : ''}
+    <tr><td><b>${mNeg(o.owed) ? 'Refund so far' : 'Owed'}</b></td><td class="num" data-k="owed"><b>${eur(Money.abs(o.owed))}</b></td></tr></table>
     <p class="small muted">Advance payments (Vorauszahlungen) are not taken into account.</p></div>` : '';
   const reserve = `<div class="card" id="card-reserve"><h2>Monthly reserve</h2><p id="reserve-line">${reserveLine(f, year, cur)}</p></div>`;
   return burden + `<div>${owed}${reserve}</div>`;
@@ -783,26 +996,27 @@ PAGES.money = async (year) => {
   const T = f.totals, ta = f.tax_actual, tp = f.tax_projected;
   const red = !!f.redacted, th = v => v == null ? '–' : eur(v);   // non-boss: business figures only; null take-home = "–"
   const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const mx = Math.max(100, ...f.months.map(x => Math.max(x.revenue, x.expenses, 0))), H = 170, bw = 900 / 12;
+  const px = v => Money.decNum(Money.parse(v));   // pixel geometry only, never shown as money
+  const mx = Math.max(100, ...f.months.map(x => Math.max(px(x.revenue), px(x.expenses), 0))), H = 170, bw = 900 / 12;
   const chart = `<svg class="chart" viewBox="0 0 940 ${H + 28}"><g transform="translate(36,6)">${[0, .5, 1].map(k => `<line x1="0" x2="900" y1="${H - H * k}" y2="${H - H * k}" stroke="var(--line)"/><text x="-6" y="${H - H * k + 4}" text-anchor="end">${num(mx * k, 0)}</text>`).join('')}
-    ${f.months.map((x, i) => `<g><title>${MN[i]}: revenue ${eur(x.revenue)}, expenses ${eur(x.expenses)}, profit ${eur(x.profit)}</title><rect x="${i * bw + 8}" y="${H - Math.max(0, x.revenue) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, x.revenue) / mx * H}" fill="var(--accent)" rx="2"/><rect x="${i * bw + bw / 2}" y="${H - Math.max(0, x.expenses) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, x.expenses) / mx * H}" fill="var(--warn)" rx="2"/><text x="${i * bw + bw / 2}" y="${H + 16}" text-anchor="middle">${MN[i]}</text></g>`).join('')}</g></svg>`;
+    ${f.months.map((x, i) => `<g><title>${MN[i]}: revenue ${eur(x.revenue)}, expenses ${eur(x.expenses)}, profit ${eur(x.profit)}</title><rect x="${i * bw + 8}" y="${H - Math.max(0, px(x.revenue)) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, px(x.revenue)) / mx * H}" fill="var(--accent)" rx="2"/><rect x="${i * bw + bw / 2}" y="${H - Math.max(0, px(x.expenses)) / mx * H}" width="${bw / 2 - 9}" height="${Math.max(0, px(x.expenses)) / mx * H}" fill="var(--warn)" rx="2"/><text x="${i * bw + bw / 2}" y="${H + 16}" text-anchor="middle">${MN[i]}</text></g>`).join('')}</g></svg>`;
   const typeName = { freiberufler: 'Freiberufler (EÜR, no trade tax)', gewerbe: 'Gewerbetreibender / Einzelunternehmen', gmbh: 'UG / GmbH' }[f.company_type];
-  return `<div class="head"><div><h1>Money & Taxes</h1><div class="muted">${esc(typeName)}${f.kleinunternehmer ? ' · Kleinunternehmer' : ''} · ${s.accounting === 'accrual' ? 'by invoice date' : 'by payment date (EÜR)'}</div></div>
+  return `<div class="head"><div><h1>Money & Taxes</h1><div class="muted">${esc(typeName)}${f.kleinunternehmer ? ' · Kleinunternehmer' : ''} · ${s.accounting === 'accrual' ? 'by invoice date' : 'by payment date (EÜR)'}</div>${f.approximate ? '<div class="small muted" id="approximate-note">approximate until accounting is set up</div>' : ''}</div>
     <div class="row tight" style="flex:none;align-items:center"><button data-a="goto" data-to="money/${year - 1}" ${year <= 2000 ? 'disabled' : ''}>←</button><b>${year}</b><button data-a="goto" data-to="money/${year + 1}" ${year >= 2100 ? 'disabled' : ''}>→</button></div></div>
   ${f.warnings.map(w => `<div class="banner">⚠ ${esc(w)}</div>`).join('')}
   ${!red && year === new Date().getFullYear() && !f.extrapolated ? '<div class="banner" id="not-extrapolated">Not yet extrapolated. The full-year estimate starts after 60 days of the year; until then the figures cover only the profit booked so far.</div>' : ''}
   ${cur ? (red ? `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div></div></div>` : `<div class="card" style="border-color:var(--accent)"><h2>Set aside for ${MN[m]} (so far)</h2><div class="grid g4"><div><div class="muted small">Profit this month</div><div style="font-size:22px;font-weight:700">${eur(cur.profit)}</div></div><div><div class="muted small">Tax reserve (${num(f.effective_rate * 100, 1)} %)</div><div style="font-size:22px;font-weight:700">${eur(cur.tax_set_aside)}</div></div><div><div class="muted small">VAT to pay</div><div style="font-size:22px;font-weight:700">${eur(cur.vat_set_aside)}</div></div><div><div class="muted small">Social insurance</div><div style="font-size:22px;font-weight:700">${eur(cur.social)}</div></div></div>
-    <div style="margin-top:10px">→ You can take home about <b class="${cur.take_home != null && cur.take_home >= 0 ? 'free-good' : 'free-bad'}" style="font-size:20px">${th(cur.take_home)}</b> this month.</div></div>`) : ''}
-  <div class="grid g4"><div class="card kpi"><div class="l">Revenue (net)</div><div class="v">${eur(T.revenue)}</div></div><div class="card kpi"><div class="l">Expenses (net)</div><div class="v">${eur(T.expenses)}</div></div><div class="card kpi ${T.profit < 0 ? 'bad' : 'good'}"><div class="l">Profit</div><div class="v">${eur(T.profit)}</div></div><div class="card kpi ${f.open_receivables ? 'warn' : ''}"><div class="l">Open receivables</div><div class="v">${eur(f.open_receivables)}</div></div></div>
+    <div style="margin-top:10px">→ You can take home about <b class="${cur.take_home != null && !mNeg(cur.take_home) ? 'free-good' : 'free-bad'}" style="font-size:20px">${th(cur.take_home)}</b> this month.</div></div>`) : ''}
+  <div class="grid g4"><div class="card kpi"><div class="l">Revenue (net)</div><div class="v">${eur(T.revenue)}</div></div><div class="card kpi"><div class="l">Expenses (net)</div><div class="v">${eur(T.expenses)}</div></div><div class="card kpi ${mNeg(T.profit) ? 'bad' : 'good'}"><div class="l">Profit</div><div class="v">${eur(T.profit)}</div></div><div class="card kpi ${f.open_receivables ? 'warn' : ''}"><div class="l">Open receivables</div><div class="v">${eur(f.open_receivables)}</div></div></div>
   <div class="grid g2">${red ? `<div class="card"><h2>Business taxes ${year}</h2><table>
     ${f.company_type === 'gmbh' ? `<tr><td>Körperschaftsteuer (15 %)</td><td class="num">${eur(ta.kst)}</td></tr><tr><td>Solidaritätszuschlag on Körperschaftsteuer</td><td class="num">${eur(ta.kst_soli)}</td></tr>` : ''}
     ${f.company_type !== 'freiberufler' ? `<tr><td>Gewerbesteuer (Hebesatz ${s.hebesatz || 400} %)</td><td class="num">${eur(ta.gewst)}</td></tr>` : '<tr><td>No business taxes (Freiberufler)</td><td class="num">–</td></tr>'}
-    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer ? '–' : eur(T.vat_due)}</td></tr></table>
+    <tr><td>Umsatzsteuer (VAT) payable</td><td class="num">${f.kleinunternehmer && mZero(T.vat_due) ? '–' : eur(T.vat_due)}</td></tr></table>
     <p class="small muted">Income tax, social insurance and take-home are shown to the owner only.</p>
     <p class="small muted">Based on profit to date. Projected full-year profit: ${eur(f.projected_profit)}. Estimate only – not tax advice.</p></div>` : taxBurdenCards(f, year, cur, s)}
   <div class="card"><h2>Expenses by category</h2>${Object.keys(f.categories).length ? `<table>${Object.entries(f.categories).map(([k, v]) => `<tr><td>${esc(k)}</td><td class="num">${eur(v)}</td></tr>`).join('')}</table>` : '<div class="empty">No expenses this year.</div>'}</div></div>
   <div class="card"><h2>Month by month</h2>${chart}<div class="small muted"><span class="dot" style="background:var(--accent)"></span>revenue <span class="dot" style="background:var(--warn);margin-left:10px"></span>expenses</div>
-  <table style="margin-top:12px"><tr><th>Month</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">VAT due</th>${red ? '' : '<th class="num">Tax reserve</th><th class="num">Social</th><th class="num">Take-home</th>'}</tr>${f.months.map((x, i) => `<tr><td>${MN[i]}</td><td class="num">${eur(x.revenue)}</td><td class="num">${eur(x.expenses)}</td><td class="num ${x.profit < 0 ? 'free-bad' : ''}">${eur(x.profit)}</td><td class="num">${eur(x.vat_due)}</td>${red ? '' : `<td class="num"${cur && i === m ? ' title="' + CURMONTH + '"' : ''}>${eur(x.tax_set_aside)}</td><td class="num">${eur(x.social)}</td><td class="num"><b>${th(x.take_home)}</b></td>`}</tr>`).join('')}</table>${cur && !red ? `<p class="small muted" id="month-footnote">${CURMONTH}</p>` : ''}</div>`;
+  <table style="margin-top:12px"><tr><th>Month</th><th class="num">Revenue</th><th class="num">Expenses</th><th class="num">Profit</th><th class="num">VAT due</th>${red ? '' : '<th class="num">Tax reserve</th><th class="num">Social</th><th class="num">Take-home</th>'}</tr>${f.months.map((x, i) => `<tr><td>${MN[i]}</td><td class="num">${eur(x.revenue)}</td><td class="num">${eur(x.expenses)}</td><td class="num ${mNeg(x.profit) ? 'free-bad' : ''}">${eur(x.profit)}</td><td class="num">${eur(x.vat_due)}</td>${red ? '' : `<td class="num"${cur && i === m ? ' title="' + CURMONTH + '"' : ''}>${eur(x.tax_set_aside)}</td><td class="num">${eur(x.social)}</td><td class="num"><b>${th(x.take_home)}</b></td>`}</tr>`).join('')}</table>${cur && !red ? `<p class="small muted" id="month-footnote">${CURMONTH}</p>` : ''}</div>`;
 };
 
 /* ================= TEAM ================= */
@@ -822,7 +1036,7 @@ A.editUser = el => {
       { k: 'weekly_hours', l: 'Weekly hours', t: 'number', row: 2 }, { k: 'tracking_start', l: 'Tracking since', t: 'date', row: 2, h: 'Starts the flex-time balance' },
       { k: 'work_start', l: 'Working day from', t: 'time', row: 4, h: 'Calendar busy time counts only inside this window' }, { k: 'work_end', l: 'Working day until', t: 'time', row: 4 },
       { k: 'timezone', l: 'Time zone of the working day', ph: 'Europe/Berlin', h: 'IANA name, empty = Europe/Berlin' },
-      { k: 'default_rate', l: 'Billing rate €/h', t: 'number', row: 3, h: 'Fallback when project/customer have none' }, { k: 'cost_rate', l: 'Cost €/h', t: 'number', row: 3, h: 'For project margins' },
+      { k: 'default_rate', l: 'Billing rate €/h', t: 'number', m: true, row: 3, h: 'Fallback when project/customer have none' }, { k: 'cost_rate', l: 'Cost €/h', t: 'number', m: true, row: 3, h: 'For project margins' },
       { k: 'username', l: 'Username', h: 'Used to sign in (letters, digits, . - _)' }, { k: 'password', l: u.id ? 'New password (leave empty to keep)' : 'Password (min. 8 characters)', t: 'password', h: 'At least 8 characters' }, { k: 'active', l: 'Active', t: 'check' }],
     extra: `<div class="field"><label>Working days</label>${WD.map((d, i) => `<label style="display:inline-block;margin-right:12px"><input type="checkbox" class="wd" value="${i}" ${(u.workdays || [0, 1, 2, 3, 4]).includes(i) ? 'checked' : ''}> ${d}</label>`).join('')}</div>`,
     save: async v => { if (!v.name) throw new Error('Name required'); if (!v.username) throw new Error('Username required'); if (!u.id && (!v.password || v.password.length < 8)) throw new Error('A password with at least 8 characters is required'); if (v.password && v.password.length < 8) throw new Error('The password must be at least 8 characters long'); v.workdays = [...document.querySelectorAll('.wd:checked')].map(x => +x.value); if (!v.workdays.length) throw new Error('Pick at least one working day'); if (!v.password) delete v.password; delete v.has_password; await save('users', v); if (u.id === S.me.id) await bootstrap(); render(); },
@@ -909,7 +1123,7 @@ PAGES.settings = async () => {
     <div class="row">${fieldHTML({ k: 'vat_rate', l: 'Default VAT %', t: 'select', o: [19, 7, 0] }, s)}<div id="hebesatz_wrap" ${hebesatz ? '' : 'hidden'}>${f('hebesatz', 'Gewerbesteuer Hebesatz %', 'number')}</div></div>
     ${fieldHTML({ k: 'accounting', l: 'Revenue counted…', t: 'select', o: [['eur', 'when paid (EÜR / Ist-Versteuerung)'], ['accrual', 'when invoiced (Soll)']] }, s)}
     <p class="small muted">Tax figures are planning estimates (Einkommensteuer tariff §32a, Soli, Gewerbesteuer incl. §35 credit). Always confirm with your Steuerberater.</p></div>
-  <div class="card" id="card-defaults"><h2>Documents and defaults</h2><div class="row">${f('default_rate', 'Default hourly rate €', 'number')}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div>
+  <div class="card" id="card-defaults"><h2>Documents and defaults</h2><div class="row">${fieldHTML({ k: 'default_rate', l: 'Default hourly rate €', t: 'number', m: true }, s)}${f('payment_days', 'Payment term (days)', 'number')}${f('offer_valid_days', 'Offers valid (days)', 'number')}${fieldHTML({ k: 'default_template', l: 'Default template', t: 'select', o: S.templates.map(t => [t.id, t.name]) }, s)}</div>
     <h3 style="margin-top:12px">Document templates</h3><div class="row" style="align-items:center"><div class="right auto"><button data-a="editTemplate">+ New template</button></div></div><table>${S.templates.map(t => `<tr><td><b>${esc(t.name)}</b> <span class="muted small">${esc(t.layout)} · ${esc(t.language)}</span></td><td><span class="dot" style="background:${esc(t.accent)}"></span></td><td class="right"><button class="sm" data-a="editTemplate" data-id="${t.id}">${tpls.find(x => x.id === t.id) ? 'Edit' : 'Copy & customise'}</button></td></tr>`).join('')}</table></div>
   ${numberingCard}
   ${teamVisibilityCard()}
@@ -947,9 +1161,11 @@ A.settingsCompanyType = el => { const w = $('#hebesatz_wrap'); if (w) w.hidden =
 A.saveSettings = async () => {
   const s = { ...S.settings };
   const txt = ['company_name', 'owner_name', 'street', 'zip', 'city', 'email', 'phone', 'website', 'tax_number', 'vat_id', 'bank_name', 'iban', 'bic', 'company_type', 'state', 'accounting', 'default_template'];
-  const nums = ['hebesatz', 'default_rate', 'payment_days', 'offer_valid_days', 'vat_rate'];
+  const nums = ['hebesatz', 'payment_days', 'offer_valid_days', 'vat_rate'];   // plain numbers; the money field default_rate is read below
   txt.forEach(k => { const e = $('#f_' + k); if (e) s[k] = e.value; });
   nums.forEach(k => { const e = $('#f_' + k); if (e) s[k] = e.value === '' ? 0 : parseFloat(e.value); });
+  const dr = $('#f_default_rate');
+  if (dr) { const r = Money.parseInput(dr.value); if (!r.ok) throw new Error(`Default hourly rate: ${r.error}`); s.default_rate = r.value ?? '0'; }
   s.kleinunternehmer = $('#f_kleinunternehmer').checked;
   delete s.personal_tax;
   if ($('#f_tl_employee')) s.team_timeline_visibility = { employee: $('#f_tl_employee').value, accountant: $('#f_tl_accountant').value };

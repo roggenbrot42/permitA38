@@ -13,8 +13,10 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from . import tax
+from .doc_totals import _MONEY_KEYS, doc_totals, empty_months, open_receivables_of_documents, snapshot_totals  # noqa: F401
 from .holidays import holidays as de_holidays
-from .money import ZERO, dec, line_amount, q2, split_gross, to_float, vat_amount
+from .money import ZERO, dec, q2, split_gross, to_float
+from .service import finance_journal  # figures from the journal once accounting is initialised
 from .service.personal_tax import NOT_SAVED_WARNING, PersonalTaxService
 from .tax_rules import rules_for
 from .values import d, fnum  # noqa: F401  (re-exported: callers use calc.d and calc.fnum)
@@ -66,39 +68,17 @@ def context(store):
 
 
 # -- offers / invoices -------------------------------------------------------
-def doc_totals(doc, settings):
-    """Net, VAT per rate and gross of an offer/invoice, in exact cents (rule: see :mod:`permita38.core.money`).
-
-    Also fills ``amount`` on every line. Returned amounts are floats with at most 2 decimals; ``vat`` and
-    ``by_rate`` are keyed by the VAT rate.
-    """
-    klein = bool(settings.get("kleinunternehmer"))
-    if klein:
-        default_vat = ZERO
-    else:
-        raw = doc.get("vat_rate")
-        default_vat = dec(raw if raw not in (None, "") else settings.get("vat_rate", 19))
-    net = ZERO
-    by_rate: dict[Decimal, Decimal] = defaultdict(lambda: ZERO)
-    lines = doc.get("lines")
-    for ln in lines if isinstance(lines, list) else []:
-        if not isinstance(ln, dict):
-            continue
-        amt = line_amount(ln.get("qty"), ln.get("price"))
-        ln["amount"] = to_float(amt)
-        net += amt
-        raw_vat = ln.get("vat")
-        rate = ZERO if klein else (dec(raw_vat) if raw_vat not in (None, "") else default_vat)
-        by_rate[rate] += amt
-    vat = {r: vat_amount(a, r) for r, a in by_rate.items()}
-    vat_total = sum(vat.values(), ZERO)
-    return dict(
-        net=to_float(net),
-        vat={float(r): to_float(v) for r, v in vat.items()},
-        vat_total=to_float(vat_total),
-        gross=to_float(net + vat_total),
-        by_rate={float(r): to_float(a) for r, a in by_rate.items()},
-    )
+def with_year_regime(store, doc):
+    """A copy of a draft or offer for a preview (PDF): when the fiscal year of its date is a small-business year, it
+    carries the treatment ``small_business`` so ``doc_totals`` prints no VAT, as the snapshot will when it is issued.
+    An issued document (it has its snapshot) and a document of another regime come back unchanged."""
+    if isinstance(doc.get("issued"), dict):
+        return doc
+    day = str(doc.get("date") or "")[:4]
+    rows = store.find("fiscal_years", year=int(day)) if day.isdigit() else []
+    if rows and rows[0].get("small_business") and doc.get("tax_treatment") in (None, "", "standard"):
+        return {**doc, "tax_treatment": "small_business"}
+    return doc
 
 
 # -- capacity ----------------------------------------------------------------
@@ -213,9 +193,6 @@ def invoice_amounts(inv, settings):
     return t
 
 
-_MONEY_KEYS = ("revenue", "vat_out", "expenses", "vat_in")
-
-
 def _line_view(net, vat, deductible, vat_deductible) -> dict[str, Decimal | None]:
     """One effective expense line with exact values; percentages are Decimal percents (70 means 70 %)."""
     pct = dec(deductible if deductible is not None else 0)
@@ -317,6 +294,7 @@ _PUBLIC_TOP = (
     "totals",
     "categories",
     "open_receivables",
+    "approximate",
     "kleinunternehmer",
     "company_type",
     "projected_profit",
@@ -351,27 +329,47 @@ def redact_tax(result: dict) -> dict:
     return out
 
 
-def finance(store, year, today=None):
-    today = today or date.today()
-    s = raw = store.settings()
-    klein = bool(s.get("kleinunternehmer"))
-    accrual = s.get("accounting", "eur") == "accrual"
-    months: list[dict[str, Any]] = [dict(month=m, **{k: ZERO for k in _MONEY_KEYS}) for m in range(1, 13)]
+def _legacy_figures(store, year, s, klein, accrual):
+    """The old per-document computation (known differences: accounting.md section 14, last paragraph)."""
+    months = empty_months()
     open_receivables = ZERO
-    for inv in store.list("invoices"):
-        if inv.get("status") in ("draft", "cancelled"):
+    from permita38.core.service import invoice_state  # derived status/paid date of an issued invoice (spec 2.3)
+
+    pay_rows = invoice_state.group_by(store.list("payments"), "document_id")
+    invoices = store.list("invoices")
+    notes = invoice_state.group_by(invoice_state.credit_notes_of(invoices), "corrects_id")
+    revenue_ids: set[str] = set()  # invoices that count as revenue; the credit notes of the others are not netted again
+    for inv in invoices:
+        if inv.get("status") == "draft" or inv.get("kind") == "credit_note":
             continue
         t = doc_totals(dict(inv), s)
-        when = d(inv.get("date")) if accrual else d(inv.get("paid_date"))
-        if inv.get("status") != "paid" and not accrual:
-            open_receivables += dec(t["gross"])
+        st = invoice_state.derive(
+            inv, int(dec(t["gross"]) * 100), pay_rows.get(inv["id"], []), notes.get(inv["id"], [])
+        )
+        if st.status == "cancelled" or inv.get("status") == "cancelled":
             continue
-        if inv.get("status") != "paid":
-            open_receivables += dec(t["gross"])
+        revenue_ids.add(inv["id"])
+        paid = st.status == "paid"
+        when = d(inv.get("date")) if accrual else d(st.paid_date)
+        if not paid:
+            credited = sum((Decimal(invoice_state.credit_note_gross(n)) for n in notes.get(inv["id"], [])), ZERO)
+            open_receivables += dec(t["gross"]) - credited / 100  # a partial credit note lowers what is still owed
+            if not accrual:
+                continue
         if when and when.year == year:
             m = months[when.month - 1]
             m["revenue"] += dec(t["net"])
             m["vat_out"] += dec(t["vat_total"])
+    # credit notes net revenue and output VAT on their own date, in both bases (kind = credit_note; drafts do not exist)
+    for note in invoices:
+        if note.get("kind") != "credit_note" or note.get("corrects_id") not in revenue_ids:
+            continue
+        when = d(note.get("date"))
+        if when and when.year == year:
+            t = doc_totals(dict(note), s)
+            m = months[when.month - 1]
+            m["revenue"] -= dec(t["net"])
+            m["vat_out"] -= dec(t["vat_total"])
     cats: dict[str, Decimal] = defaultdict(lambda: ZERO)
     for x in store.list("expenses"):
         # docs/specs/receipt-scan.md: the cost counts on the paid date under `eur` (null/damaged = the bill date) and on
@@ -403,9 +401,23 @@ def finance(store, year, today=None):
             amount = dec(item["amount"])
             months[when.month - 1]["expenses"] += amount  # deductible 100 %, no VAT (also in Kleinunternehmer mode)
             cats[item["category"]] += amount
+    return months, cats, open_receivables
+
+
+def finance(store, year, today=None):
+    today = today or date.today()
+    s = raw = store.settings()
+    klein = bool(s.get("kleinunternehmer"))
+    accrual = s.get("accounting", "eur") == "accrual"
+    journal = finance_journal.figures(store, year)
+    if journal is not None:
+        months, cats, open_receivables = journal
+    else:
+        months, cats, open_receivables = _legacy_figures(store, year, s, klein, accrual)
     for m in months:
         m["profit"] = m["revenue"] - m["expenses"]
-        m["vat_due"] = ZERO if klein else m["vat_out"] - m["vat_in"]
+        # a small business owes no VAT on its sales, but § 13b tax it self-assesses stays (journal: only RC lines exist)
+        m["vat_due"] = ZERO if klein and journal is None else m["vat_out"] - m["vat_in"]
 
     keys = (*_MONEY_KEYS, "profit", "vat_due")
     tot = {k: sum((m[k] for m in months), ZERO) for k in keys}
@@ -507,6 +519,7 @@ def finance(store, year, today=None):
         warnings=warnings,
         kleinunternehmer=klein,
         company_type=s.get("company_type", "freiberufler"),
+        approximate=journal is None,  # accounting.md 14: the old computation until the year is initialised
     )
 
 

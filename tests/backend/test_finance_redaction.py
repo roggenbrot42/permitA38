@@ -5,6 +5,7 @@ profile anywhere in a non-boss response. ``TODAY`` is pinned; every year is deri
 import json
 import re
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -45,15 +46,25 @@ def _has(text, number):
     return re.search(rf"(?<![\d.]){re.escape(number)}(?![\d])", text) is not None
 
 
+def _money_token(v):
+    """The decimal string of a money value (a float or a money string such as "4243.17"), else None."""
+    if isinstance(v, float):
+        return json.dumps(v)
+    if isinstance(v, str) and re.fullmatch(r"-?\d+\.\d{2}", v):
+        return v
+    return None
+
+
 def personal_values(boss):
     """Strings of the boss-only derived figures (zve, income tax, social, ...) that no business figure shares."""
     pub = calc.redact_tax(boss)
-    business = {json.dumps(v) for v in (pub["tax_actual"].values()) if isinstance(v, float)}
+    business = {_money_token(v) for v in pub["tax_actual"].values() if _money_token(v)}
     out = set()
     for k in DERIVED_KEYS:
         v = boss["tax_actual"][k]
-        if isinstance(v, float) and abs(v) >= 1000 and json.dumps(v) not in business:
-            out.add(json.dumps(v))
+        token = _money_token(v)
+        if token and abs(Decimal(token)) >= 1000 and token not in business:
+            out.add(token)
     return sorted(out)
 
 
@@ -73,7 +84,7 @@ def assert_nothing_personal(boss, serialised):
 BOSS_TOP = {
     "year", "months", "totals", "tax_actual", "tax_projected", "tax_owed", "reserve", "projected_profit",
     "extrapolated", "effective_rate", "social_year", "take_home", "categories", "open_receivables", "warnings",
-    "kleinunternehmer", "company_type",
+    "kleinunternehmer", "company_type", "approximate",
 }  # fmt: skip
 BOSS_MONTH = {
     "month", "revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due", "tax_set_aside", "social",
@@ -88,7 +99,7 @@ BOSS_TAX = {
 }  # fmt: skip
 
 RED_TOP = {
-    "year", "months", "totals", "categories", "open_receivables", "kleinunternehmer", "company_type",
+    "year", "months", "totals", "categories", "open_receivables", "kleinunternehmer", "company_type", "approximate",
     "projected_profit", "extrapolated", "warnings", "tax_actual", "tax_projected", "tax_owed", "reserve", "redacted",
 }  # fmt: skip
 RED_MONTH = {"month", "revenue", "vat_out", "expenses", "vat_in", "profit", "vat_due", "vat_set_aside"}

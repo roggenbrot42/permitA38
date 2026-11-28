@@ -6,6 +6,7 @@ without the backend. The UI never computes capacity, gaps or money: every number
 import copy
 import json
 from datetime import date, timedelta
+from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -166,7 +167,7 @@ class FakeApi:
         sup = bool(body.get("supplier_id"))
         out = {"kind": "external" if sup else "employee", "planned_hours": 100.0}
         if sup:
-            out.update(supplier_name="Example Freelance Studio (Demo)", planned_net=100.0 * body["rate"])
+            out.update(supplier_name="Example Freelance Studio (Demo)", planned_net=str(Decimal(body["rate"]) * 100))
         return out
 
     def calls(self, method, path):
@@ -554,7 +555,7 @@ def test_new_subcontractor_form_sends_capacity_fields(browser):
     dlg.get_by_role("button", name="Save").click()
     pg.wait_for_selector("#modal-root .modal", state="detached")
     body = api.calls("POST", "suppliers")[0][3]
-    assert body["kind"] == "person-capacity" and body["weekly_hours"] == 24 and body["rate"] == 80
+    assert body["kind"] == "person-capacity" and body["weekly_hours"] == 24 and body["rate"] == "80"
     assert body["workdays"] == [0, 1, 2, 3]
     assert body["unavailable"] == [{"from": "2026-03-09", "to": "2026-03-11", "note": None}]
     assert body["tags"] == ["backend", "Demo"] and body["vat_mode"] is None and body["country"] == "DE"
@@ -737,7 +738,7 @@ def test_expense_dialog_links_supplier_allocation_and_reverse_charge(browser):
     pg.wait_for_selector("#modal-root .modal", state="detached")
     body = api.calls("POST", "expenses")[1][3]
     assert body["reverse_charge"] is True and body["allocation_id"] is None
-    assert body["net"] == 3091.88 and body["vat"] == 587.46 and body["vat_rate"] == 0
+    assert body["net"] == "3091.88" and body["vat"] == "587.46" and body["vat_rate"] == 19
     assert problems == []
     ctx.close()
 
@@ -1178,7 +1179,7 @@ def test_record_offer_posts_lines_and_plan(browser):
     dlg.get_by_role("button", name="Save").click()
     pg.wait_for_selector("#modal-root .modal", state="detached")
     body = api.calls("POST", "incoming-offers")[0][3]
-    assert body["lines"] == [{"description": "Frontend development", "quantity": 80, "unit": "h", "unit_price": 80}]
+    assert body["lines"] == [{"description": "Frontend development", "quantity": 80, "unit": "h", "unit_price": "80"}]
     assert body["plan"] == {"start": "2026-03-02", "end": "2026-03-27"}
     assert body["project_id"] == "a1b2c3d4" and body["vat_mode"] is None and body["vat_rate"] is None
     assert not any(k in body for k in ("net_total", "vat", "gross_total", "status"))
@@ -1373,7 +1374,7 @@ def test_allocations_dialog_creates_a_subcontractor_row_with_total_hours_and_rat
         "end": "2026-03-27",
         "supplier_id": "5d1c0aa2",
         "total_hours": 100.0,
-        "rate": 75.5,
+        "rate": "75.5",
     }
     row = dlg.locator("tr", has_text="100 h in total")
     expect(row).to_contain_text("7.550,00")  # planned net from the server
@@ -1395,7 +1396,7 @@ def test_allocations_dialog_edits_a_subcontractor_row_and_shows_save_warnings(br
     pg.fill("#al_rate", "90")
     dlg.locator("[data-a=alSave]").click()
     call = api.calls("PUT", "allocations/c04d77e1")[0][3]
-    assert call["total_hours"] == 60.0 and "hours_per_week" not in call and call["rate"] == 90.0
+    assert call["total_hours"] == 60.0 and "hours_per_week" not in call and call["rate"] == "90"
     assert call["supplier_id"] == "5d1c0aa2" and "user_id" not in call
     expect(dlg.locator("tr", has_text="Example Freelance Studio")).to_contain_text("60 h in total")
     assert problems == []

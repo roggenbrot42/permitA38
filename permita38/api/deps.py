@@ -12,16 +12,25 @@ from permita38.core import rights
 from permita38.core.config import Config
 from permita38.core.netsafe import SafeFetcher
 from permita38.core.repository import Repository, auto_backup, create_repository
+from permita38.core.service.accounting_init import AccountingInitService
+from permita38.core.service.accounting_reports import AccountingReportService
+from permita38.core.service.accounting_status import AccountingStatusService
 from permita38.core.service.allocations import AllocationService
 from permita38.core.service.audit import AuditService
 from permita38.core.service.auth import AuthService
 from permita38.core.service.busy import BusyTimeProvider
 from permita38.core.service.calendar.busy_provider import CalendarBusyProvider
 from permita38.core.service.calendar.service import CalendarService, ResourceFetcher
+from permita38.core.service.credit_notes import CreditNoteService
+from permita38.core.service.datev_export import DatevExportService
 from permita38.core.service.document_scans import DocumentScanService
+from permita38.core.service.fiscal_years import FiscalYearService
 from permita38.core.service.importer import ImportService
 from permita38.core.service.impressum import ImpressumService
 from permita38.core.service.integrity import Ctx, rule_numbering_duplicates
+from permita38.core.service.journal import JournalService
+from permita38.core.service.locks import LockService
+from permita38.core.service.manual_entries import ManualEntryService
 from permita38.core.service.personal_tax import PersonalTaxService
 from permita38.core.service.planner.service import PlannerService
 from permita38.core.service.procurement import ProcurementService
@@ -30,7 +39,9 @@ from permita38.core.service.records import RecordService
 from permita38.core.service.sales import SalesService
 from permita38.core.service.sanity import SanityService
 from permita38.core.service.settings import SettingsService
+from permita38.core.service.special_prepayment import SpecialPrepaymentService
 from permita38.core.service.suppliers import SupplierService
+from permita38.core.service.tax_bookings import TaxBookingService
 from permita38.core.service.team_timeline import TeamTimelineService
 from permita38.core.service.time import TimeService
 from permita38.core.service.timesheet import TimesheetService
@@ -39,6 +50,9 @@ from permita38.core.service.tokens import TokenService
 from permita38.core.service.totp import TotpService
 from permita38.core.service.transfer.service import TransferService, clean_stale_tmp
 from permita38.core.service.trips import TripService
+from permita38.core.service.vat_returns import VatReturnService
+from permita38.core.service.year_closing import YearClosingService
+from permita38.core.service.zm_reports import ZmReportService
 from permita38.core.settings import effective_settings
 
 COOKIE_NAME = "authorization"
@@ -72,17 +86,36 @@ class Services:
     transfer: TransferService
     tokens: TokenService
     audit: AuditService
+    fiscal_years: FiscalYearService
+    accounting_reports: AccountingReportService
+    accounting_init: AccountingInitService
+    journal: JournalService
+    credit_notes: CreditNoteService
+    locks: LockService
+    manual_entries: ManualEntryService
+    tax_bookings: TaxBookingService
+    vat_returns: VatReturnService
+    special_prepayment: SpecialPrepaymentService
+    zm_reports: ZmReportService
+    year_closing: YearClosingService
+    accounting_status: AccountingStatusService
+    datev_export: DatevExportService
 
     @classmethod
     def create(cls, config: Config, *, calendar_fetcher: ResourceFetcher | None = None) -> "Services":
         """``calendar_fetcher`` exists for tests (a local fake server); production always uses the SSRF-safe fetcher."""
         store = create_repository(config)
+        locks = LockService(store)
+        fiscal_years = FiscalYearService(store)
         records = RecordService(store)
         auth = AuthService(store, config.secret_key, config.token_ttl_hours)
         user_agent = f"permitA38/{__version__} (+https://github.com/roggenbrot42/permitA38)"
         calendar = CalendarService(store, calendar_fetcher or SafeFetcher(user_agent))
         busy = CalendarBusyProvider(store, on_request=calendar.schedule_stale_refresh)
         sanity = SanityService(store)
+        sales = SalesService(store, records)
+        journal = sales.postings.journal
+        tax_bookings = TaxBookingService(store, journal)
         return cls(
             busy=busy,
             planner=PlannerService(store, busy),
@@ -98,7 +131,8 @@ class Services:
             records=records,
             receipts=ReceiptService(store, records, config, sanity),
             document_scans=DocumentScanService(store, config),
-            sales=SalesService(store, records),
+            sales=sales,
+            credit_notes=CreditNoteService(store, sales.postings.journal, sales.payments),
             imports=ImportService(store, numbering=None),
             time=TimeService(store),
             timesheet=TimesheetService(store),
@@ -108,6 +142,19 @@ class Services:
             transfer=TransferService(store, config.data_dir / "tmp"),
             tokens=TokenService(store),
             audit=AuditService(store),
+            fiscal_years=fiscal_years,
+            accounting_reports=AccountingReportService(store),
+            accounting_init=AccountingInitService(store, journal, fiscal_years, tax_bookings),
+            journal=journal,
+            locks=locks,
+            manual_entries=ManualEntryService(store, journal),
+            tax_bookings=tax_bookings,
+            year_closing=YearClosingService(store, journal, locks, tax_bookings),
+            vat_returns=VatReturnService(store, locks, bookings=tax_bookings),
+            special_prepayment=SpecialPrepaymentService(store, tax_bookings),
+            zm_reports=ZmReportService(store),
+            accounting_status=AccountingStatusService(store),
+            datev_export=DatevExportService(store, locks, fiscal_years),
             impressum=ImpressumService(
                 SafeFetcher(user_agent),
                 enabled=config.features.impressum_lookup,

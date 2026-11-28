@@ -2,6 +2,7 @@
 through upload, the worker process, the rules and the booking (demo data only)."""
 
 from datetime import date, timedelta
+from decimal import Decimal as D
 
 import httpx
 import pytest
@@ -75,7 +76,7 @@ def test_upload_booked_flagged_edit_save_and_duplicate(browser, srv):
     h = {"Authorization": "Bearer " + srv.token}
     expenses = httpx.get(srv.base + "/api/expenses", headers=h).json()
     assert sorted(e["vendor"] for e in expenses) == ["Beispiel Papier GmbH (geprüft)", "Beispiel Werkstatt GmbH"]
-    assert sorted((e["gross"] if "gross" in e else round(e["net"] + e["vat"], 2)) for e in expenses) == [11.9, 12.9]
+    assert sorted((D(e["gross"]) if "gross" in e else D(e["net"]) + D(e["vat"])) for e in expenses) == [D("11.90"), D("12.90")]
     scans = httpx.get(srv.base + "/api/receipts?status=flagged", headers=h).json()["items"]
     assert scans == []
     assert problems == []

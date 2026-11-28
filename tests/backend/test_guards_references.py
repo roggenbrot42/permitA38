@@ -16,7 +16,7 @@ from permita38.core.service import integrity
 
 from .test_migrations import CHAIN, DIALECT_NAMES, HEAD, real_chain_copy, use_chain
 
-REF_GUARDS = [g for g in GUARDS if g.kind == "reference"]
+ALL_REF_GUARDS = [g for g in GUARDS if g.kind == "reference"]
 
 # (table, column, target) of every guarded reference, in declaration order
 EXPECTED = [
@@ -32,6 +32,19 @@ EXPECTED = [
     ("incoming_offers", "project_id", "projects"),
     ("trips", "project_id", "projects"),
     ("timers", "project_id", "projects"),
+]
+# migration 0017 (db-guards-v2.md section 3) holds exactly these; reference guards of later migrations are listed apart
+REF_GUARDS = [g for g in ALL_REF_GUARDS if (g.table, g.columns[0], g.target) in set(EXPECTED)]
+LATER_REF_GUARDS = [
+    ("journal_entries", "reverses_id", "journal_entries"),
+    ("journal_lines", "entry_id", "journal_entries"),
+    ("payments", "document_id", "invoices"),
+    ("payments", "reverses_id", "payments"),
+    ("invoices", "corrects_id", "invoices"),
+    ("vat_returns", "amends_id", "vat_returns"),
+    ("vat_returns", "replaced_by", "vat_returns"),
+    ("zm_reports", "amends_id", "zm_reports"),
+    ("zm_reports", "replaced_by", "zm_reports"),
 ]
 CASES = [pytest.param(t, c, tgt, id=f"{t}.{c}") for t, c, tgt in EXPECTED]
 
@@ -113,6 +126,12 @@ def build(repo, table, col, value):
 
 
 # ------------------------------------------------------------------ (a) declarations
+def test_reference_guards_of_later_migrations_are_the_accounting_ones():
+    later = [(g.table, g.columns[0], g.target) for g in ALL_REF_GUARDS if g not in REF_GUARDS]
+    assert later == LATER_REF_GUARDS
+    assert [g for g in ALL_REF_GUARDS if g in REF_GUARDS] == REF_GUARDS
+
+
 def test_the_guarded_references_are_exactly_the_specified_ones():
     assert [(g.table, g.columns[0], g.target) for g in REF_GUARDS] == EXPECTED
     assert {g.code for g in REF_GUARDS} == {"ref.dangling"}
@@ -288,9 +307,11 @@ def test_a_direct_sql_update_to_a_missing_target_is_refused(repo, table, col, ta
 def old_db(tmp_path, monkeypatch):
     """A database at the previous head (the reference migration removed) holding rows that point at nothing."""
     root = real_chain_copy(tmp_path)
+    # cut the chain at the reference migration: every later migration requires it and goes with it
+    cut = next(i for i, m in enumerate(CHAIN) if m.name == "reference_guards")
     for d in DIALECT_NAMES:
-        (root / d / "0017-reference_guards.sql").unlink()
-        (root / d / "0018-project_planning.sql").unlink()  # requires 0017: removed with it
+        for m in CHAIN[cut:]:
+            (root / d / m.file_name).unlink()
     data = tmp_path / "data"
     planted = {}
     with monkeypatch.context() as m:
