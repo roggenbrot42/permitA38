@@ -377,6 +377,9 @@ class ApiMachine(RuleBasedStateMachine):
         self.m: dict[str, dict] = {c: {} for c in (*CRUD, "offers", "invoices", "users")}
         self.bodies: dict[str, dict] = {}  # last submitted body per document id
         self.settings = {"kleinunternehmer": False, "accounting": "eur"}
+        # invoice id -> totals frozen at finalize (the `issued` snapshot, accounting.md 9.1): a later change of the
+        # Kleinunternehmer flag does not reprice an issued invoice, so finance figures read these, not the live flag
+        self.frozen: dict[str, dict] = {}
         self.personal_tax: dict | None = None  # the stored profile (PUT /settings/personal-tax), boss session only
         self.graveyard: list[str] = []
         self.pw_of_boss = "boss-password-1"
@@ -1410,6 +1413,7 @@ class ApiMachine(RuleBasedStateMachine):
         if new["status"] == "draft":
             new["status"] = "sent"
         if coll == "invoices":
+            self.frozen.setdefault(rid, oracle.doc_totals(new, self.settings["kleinunternehmer"]))
             new.setdefault("paid_date", None)  # the key is always present on an issued invoice
             new.setdefault("due_date", (base + timedelta(days=14)).isoformat())
         else:
@@ -2497,7 +2501,7 @@ class ApiMachine(RuleBasedStateMachine):
             for inv in self.m["invoices"].values():
                 if inv["status"] in ("draft", "cancelled"):
                     continue
-                t = oracle.doc_totals(inv, klein)
+                t = self.frozen.get(inv["id"]) or oracle.doc_totals(inv, klein)
                 if inv["status"] != "paid":
                     recv += t["gross"]
                     if not accrual:

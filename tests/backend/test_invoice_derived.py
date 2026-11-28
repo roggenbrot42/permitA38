@@ -224,6 +224,17 @@ def test_finance_counts_an_invoice_by_its_derived_payment_state(boss_client, cus
     assert legacy["id"]
 
 
+def test_issued_invoice_keeps_its_gross_when_kleinunternehmer_is_switched_on_later(boss_client, cust, store):  # noqa: F811
+    """accounting.md 9.1: the ``issued`` snapshot is frozen, so a later settings change does not reprice what is owed."""
+    from datetime import date
+
+    from permita38.core import calc
+
+    issue(boss_client, cust)
+    assert boss_client.put("/api/settings", json={"kleinunternehmer": True}).status_code == 200
+    assert calc.finance(store, 2026, date(2026, 6, 1))["open_receivables"] == 1190.0  # not 1000.0
+
+
 @pytest.mark.parametrize("bad", ["status", "paid_date"])
 def test_response_only_derived_fields_sent_back_are_ignored(boss_client, cust, bad):  # noqa: F811
     a = issue(boss_client, cust)
