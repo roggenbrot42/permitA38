@@ -43,7 +43,8 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng
       - run: pip install -e ".[dev]"
-      - run: python -m pytest tests/backend -q
+      # tests run SQLite without fsync (conftest `_fast_sqlite`), 4 workers
+      - run: python -m pytest tests/backend -q -n 4 --dist worksteal
       - name: Download the OCR package and read a fake PNG with it (59 MB, once)
         if: runner.os == 'Windows' && matrix.python == '3.13'
         env:

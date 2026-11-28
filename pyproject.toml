@@ -82,5 +82,6 @@ markers = [
     "randomized: model-based and fuzz tests driven by random input (tests/backend/randomized)",
     "e2e_random: seeded random user simulations over HTTP and in the browser (tests/web/e2e_random)",
     "monkey_walk: unbounded random UI walk, nightly only in CI (tests/web/e2e_random/test_monkey.py)",
+    "durable_sqlite: keep SQLite's production fsync (synchronous = FULL); the backend tests otherwise run with it off",
     "web: tests that drive the web UI in a real browser (tests/web)",
 ]

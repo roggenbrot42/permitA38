@@ -192,3 +192,23 @@ def unguarded():
         return saved
 
     return plant
+
+
+@pytest.fixture(autouse=True)
+def _fast_sqlite(request, monkeypatch):
+    """Run SQLite without fsync in tests (every test migrates a fresh database; fsync is very slow on Windows CI).
+
+    Opt out with ``@pytest.mark.durable_sqlite`` for tests that assert the production pragmas.
+    """
+    if request.node.get_closest_marker("durable_sqlite"):
+        return
+    from permita38.core.repository import sqlite as sqlite_repo
+
+    orig_open = sqlite_repo.SQLiteRepository._open
+
+    def _open_nosync(self):
+        orig_open(self)
+        if self._conn is not None:
+            self._conn.execute("PRAGMA synchronous = OFF")
+
+    monkeypatch.setattr(sqlite_repo.SQLiteRepository, "_open", _open_nosync)
