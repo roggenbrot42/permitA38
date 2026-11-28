@@ -46,6 +46,7 @@ def test_single_file_and_no_json_records(tmp_path):
     assert not list((tmp_path / "data").rglob("*.json"))
 
 
+@pytest.mark.durable_sqlite
 def test_pragmas_are_sync_friendly(tmp_path):
     repo = make(tmp_path)
     repo.startup()
@@ -56,6 +57,14 @@ def test_pragmas_are_sync_friendly(tmp_path):
     repo.close()
 
 
+def test_backend_tests_run_without_fsync(tmp_path):
+    repo = make(tmp_path)
+    repo.startup()
+    assert repo.conn.execute("PRAGMA synchronous").fetchone()[0] == 0  # OFF, see conftest _fast_sqlite
+    repo.close()
+
+
+@pytest.mark.durable_sqlite
 def test_wal_is_opt_in_and_checkpointed_on_close(tmp_path):
     repo = make(tmp_path, wal=True)
     repo.save("customers", {"name": "A"})

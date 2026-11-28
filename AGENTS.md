@@ -25,6 +25,7 @@
 - `make run` – start the server without opening a browser. `make check-openapi` – verify the contract is current.
 
 ## Running tests economically
+- The backend tests run SQLite with `synchronous = OFF` (opt out with `@pytest.mark.durable_sqlite`); CI runs them on 4 workers.
 - While iterating run only the affected files (`pytest tests/backend/test_x.py -q`). **CI is the heavy runner**
   (`.github/workflows/ci.yaml`: lint, OpenAPI contract, backend on Linux Python 3.12-3.14 plus Windows 3.13 on pull
   requests (full Windows matrix on `main`), and the browser suite without the boss monkey, on every push to `main` and

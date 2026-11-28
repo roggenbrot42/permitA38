@@ -194,15 +194,21 @@ def unguarded():
     return plant
 
 
-# TEMPORARY CI experiment (ci/backend-xdist): measure the cost of fsync on Windows runners
-if os.environ.get("PERMITA38_TEST_NOSYNC") == "1":
-    from permita38.core.repository import sqlite as _sqlite_repo
+@pytest.fixture(autouse=True)
+def _fast_sqlite(request, monkeypatch):
+    """Run SQLite without fsync in tests (every test migrates a fresh database; fsync is very slow on Windows CI).
 
-    _orig_open = _sqlite_repo.SQLiteRepository._open
+    Opt out with ``@pytest.mark.durable_sqlite`` for tests that assert the production pragmas.
+    """
+    if request.node.get_closest_marker("durable_sqlite"):
+        return
+    from permita38.core.repository import sqlite as sqlite_repo
+
+    orig_open = sqlite_repo.SQLiteRepository._open
 
     def _open_nosync(self):
-        _orig_open(self)
-        self._conn.execute("PRAGMA synchronous = OFF")
-        self._conn.execute("PRAGMA journal_mode = MEMORY")
+        orig_open(self)
+        if self._conn is not None:
+            self._conn.execute("PRAGMA synchronous = OFF")
 
-    _sqlite_repo.SQLiteRepository._open = _open_nosync
+    monkeypatch.setattr(sqlite_repo.SQLiteRepository, "_open", _open_nosync)

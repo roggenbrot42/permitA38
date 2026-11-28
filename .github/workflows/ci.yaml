@@ -43,34 +43,13 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng
       - run: pip install -e ".[dev]"
-      # 4 workers: every test migrates a fresh SQLite database, which is slow on Windows (serial: ~42 min there,
-      # ~10 min on Linux); the runners have 4 vCPUs
+      # tests run SQLite without fsync (conftest `_fast_sqlite`), 4 workers
       - run: python -m pytest tests/backend -q -n 4 --dist worksteal
       - name: Download the OCR package and read a fake PNG with it (59 MB, once)
         if: runner.os == 'Windows' && matrix.python == '3.13'
         env:
           PERMITA38_OCR_DOWNLOAD: "1"
         run: python -m pytest tests/backend/test_receipt_ocr_download.py -q
-
-  win-exp:
-    # TEMPORARY experiment: which change speeds up the Windows backend run?
-    strategy:
-      fail-fast: false
-      matrix:
-        exp: [defender-off, nosync]
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-      - name: Defender real-time scanning off
-        if: matrix.exp == 'defender-off'
-        run: Set-MpPreference -DisableRealtimeMonitoring $true; Get-MpPreference | Select-Object DisableRealtimeMonitoring
-      - run: pip install -e ".[dev]"
-      - run: python -m pytest tests/backend -q -n 4 --dist worksteal
-        env:
-          PERMITA38_TEST_NOSYNC: ${{ matrix.exp == 'nosync' && '1' || '0' }}
 
   random:
     # randomized API tests (hypothesis state machine + schema fuzzer), deterministic "ci" profile
