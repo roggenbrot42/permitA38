@@ -25,8 +25,9 @@ commit forces several disk flushes, and the flushes to the runner's single disk 
    changed.
 2. **Opt-out marker `durable_sqlite`**, registered in `pyproject.toml` `[tool.pytest.ini_options].markers`. The fixture
    does not patch a test that carries the marker (`request.node.get_closest_marker("durable_sqlite")`).
-   `tests/backend/test_store_sqlite.py` sets `pytestmark = pytest.mark.durable_sqlite`, because it asserts the
-   production pragmas.
+   In `tests/backend/test_store_sqlite.py` the tests that assert the production pragmas
+   (`test_pragmas_are_sync_friendly`, `test_wal_is_opt_in_and_checkpointed_on_close`) carry the marker. The unmarked
+   `test_backend_tests_run_without_fsync` checks that the fixture applies.
 3. **Timing guard uses CPU time.** `tests/backend/test_planner_suggest.py::test_suggestions_are_fast_on_a_realistic_world`
    measures with `time.process_time()` instead of `time.perf_counter()`. The bound stays at 3.0 s. Wall-clock time on a
    shared runner with 4 workers measured 3.26 s.
